@@ -73,6 +73,8 @@ func stepApprovalStatusError(err error) error {
 		return status.Error(codes.Unimplemented, "office approval stages are decided by their participants")
 	case errors.Is(err, taskservice.ErrStepNotAwaitingApproval):
 		return status.Error(codes.FailedPrecondition, "step is not awaiting approval")
+	case errors.Is(err, taskservice.ErrStepApprovalChanged):
+		return status.Error(codes.Aborted, "step approval changed")
 	case errors.Is(err, repoerrors.ErrTaskNotFound), errors.Is(err, sql.ErrNoRows), errors.Is(err, taskservice.ErrForbidden):
 		return status.Error(codes.NotFound, "session not found")
 	default:

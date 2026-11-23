@@ -61,6 +61,7 @@ func (m exactExecutionManager) ApproveStep(ctx context.Context, in pluginsdk.Exa
 	}
 	approved, err := controller.ApproveStep(actingCtx, m.host.installationID, in)
 	if err != nil {
+		m.host.releaseLinkedResponseClaim(ctx, in.HumanResponseReceiptID, receipt)
 		return m.host.completeHumanInteractionResult(ctx, admission, stepApprovalErrorResult(err), in.SessionID, in.ExpectedResourceVersion), pluginsdk.StepApprovalResult{}, nil
 	}
 	m.host.markLinkedResponseConsumed(ctx, in.HumanResponseReceiptID, receipt)

@@ -34,7 +34,8 @@ type exactExecutionOrchestrator interface {
 	EnsureSession(context.Context, string, ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error)
 	RecoverSession(context.Context, string, string, string, ...string) (*orchestrator.LaunchSessionResponse, error)
 	StopExecution(context.Context, string, string, bool) error
-	CancelAgent(context.Context, string) error
+	ObserveCancelTarget(context.Context, string) (orchestrator.CancelTarget, error)
+	CancelAgentIfTarget(context.Context, string, orchestrator.CancelTarget) error
 }
 
 type pluginsExactExecutionController struct {
@@ -112,7 +113,19 @@ func (a pluginsExactExecutionController) cancelTurn(ctx context.Context, in plug
 	if session.State != taskmodels.TaskSessionStateRunning && session.State != taskmodels.TaskSessionStateStarting {
 		return false, nil
 	}
-	if err := a.orchestrator.CancelAgent(ctx, in.SessionID); err != nil {
+	target, err := a.orchestrator.ObserveCancelTarget(ctx, in.SessionID)
+	if err != nil {
+		return false, normalizeExecutionControlError(err)
+	}
+	if target.ExecutionID != in.ExpectedExecutionID {
+		return false, status.Error(codes.Aborted, "execution generation changed")
+	}
+	// The orchestrator compares the same target again under its cancel guard,
+	// so a turn that ended and was replaced after this observation survives.
+	if err := a.orchestrator.CancelAgentIfTarget(ctx, in.SessionID, target); err != nil {
+		if errors.Is(err, orchestrator.ErrCancelTargetChanged) {
+			return false, status.Error(codes.Aborted, "turn changed")
+		}
 		return false, normalizeExecutionControlError(err)
 	}
 	return true, nil

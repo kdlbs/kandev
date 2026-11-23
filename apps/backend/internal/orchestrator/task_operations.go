@@ -11550,6 +11550,10 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 	}
 	defer guard.release()
 
+	if err := s.verifyCancelTarget(ctx, sessionID); err != nil {
+		return err
+	}
+
 	// Cancellation can arrive just after the backend settled the turn, while
 	// the control is still visible. A fully idle target has nothing to
 	// interrupt, so succeed without creating a turn or a status message.

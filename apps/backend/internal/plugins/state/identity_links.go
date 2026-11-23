@@ -46,12 +46,15 @@ type DelegatedResponse struct {
 	IssuedAt        string `db:"issued_at"`
 	ExpiresAt       string `db:"expires_at"`
 	ConsumedAt      string `db:"consumed_at"`
+	// ClaimedAt is written before the response is delivered, so a receipt whose
+	// consumed marker was lost after delivery is still identifiable.
+	ClaimedAt string `db:"claimed_at"`
 }
 
 const identityLinkColumns = `link_id, installation_id, provider, subject, display_name, user_id, created_at`
 
 const delegatedResponseColumns = `receipt_id, installation_id, workspace_id, link_id, user_id, user_display_name,
-	provider, subject, kind, target_id, target_version, payload_digest, issued_at, expires_at, consumed_at`
+	provider, subject, kind, target_id, target_version, payload_digest, issued_at, expires_at, consumed_at, claimed_at`
 
 func (s *CommandStore) initIdentityLinkSchema() error {
 	if _, err := s.db.Exec(`
@@ -85,7 +88,8 @@ func (s *CommandStore) initIdentityLinkSchema() error {
 			payload_digest TEXT NOT NULL,
 			issued_at TEXT NOT NULL,
 			expires_at TEXT NOT NULL,
-			consumed_at TEXT NOT NULL DEFAULT ''
+			consumed_at TEXT NOT NULL DEFAULT '',
+			claimed_at TEXT NOT NULL DEFAULT ''
 		);
 	`)
 	if err != nil {
@@ -204,11 +208,54 @@ func (s *CommandStore) RecordDelegatedResponse(ctx context.Context, record Deleg
 	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO plugin_delegated_human_responses (`+delegatedResponseColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '')
 	`), record.ReceiptID, record.InstallationID, record.WorkspaceID, record.LinkID, record.UserID, record.UserDisplayName,
 		record.Provider, record.Subject, record.Kind, record.TargetID, record.TargetVersion, record.PayloadDigest,
 		record.IssuedAt, record.ExpiresAt)
 	return err
+}
+
+// ClaimDelegatedResponse durably records that a receipt is about to be
+// delivered. It runs before the native response so the receipt stays
+// identifiable if the consumed marker cannot be written afterwards.
+func (s *CommandStore) ClaimDelegatedResponse(ctx context.Context, receiptID string) error {
+	return s.updateDelegatedResponse(ctx, receiptID,
+		`UPDATE plugin_delegated_human_responses SET claimed_at = ? WHERE receipt_id = ? AND claimed_at = '' AND consumed_at = ''`,
+		time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+// ReleaseDelegatedResponseClaim withdraws a claim whose delivery failed.
+func (s *CommandStore) ReleaseDelegatedResponseClaim(ctx context.Context, receiptID string) error {
+	return s.updateDelegatedResponse(ctx, receiptID,
+		`UPDATE plugin_delegated_human_responses SET claimed_at = ? WHERE receipt_id = ? AND consumed_at = '' AND claimed_at <> ''`, "")
+}
+
+func (s *CommandStore) updateDelegatedResponse(ctx context.Context, receiptID, query string, value string) error {
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(query), value, receiptID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrDelegatedResponseNotFound
+	}
+	return nil
+}
+
+// ClaimedDelegatedResponse returns the newest receipt claimed for a target
+// whose consumed marker is missing, if any.
+func (s *CommandStore) ClaimedDelegatedResponse(ctx context.Context, targetID string) (DelegatedResponse, error) {
+	var record DelegatedResponse
+	err := s.ro.GetContext(ctx, &record, s.ro.Rebind(`SELECT `+delegatedResponseColumns+`
+		FROM plugin_delegated_human_responses WHERE target_id = ? AND consumed_at = '' AND claimed_at <> ''
+		ORDER BY claimed_at DESC LIMIT 1`), targetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DelegatedResponse{}, ErrDelegatedResponseNotFound
+	}
+	return record, err
 }
 
 // MarkDelegatedResponseConsumed records when a receipt resolved its target.

@@ -46,6 +46,7 @@ func (m exactInteractionManager) RespondPermission(ctx context.Context, in plugi
 	}
 	err = responder.RespondToPermission(actingCtx, PluginPermissionResponse{TaskID: interaction.TaskID, SessionID: interaction.SessionID, RequestID: interaction.RequestID, PendingID: interaction.ID, OptionID: optionID, Cancelled: in.Cancelled, LinkedUser: receipt.Delegation != nil})
 	if err != nil {
+		m.host.releaseLinkedResponseClaim(ctx, in.HumanResponseReceiptID, receipt)
 		return m.host.completeHumanInteractionError(ctx, admission, err, interaction.ID, in.ExpectedResourceVersion), nil, nil
 	}
 	m.host.markLinkedResponseConsumed(ctx, in.HumanResponseReceiptID, receipt)
@@ -97,6 +98,7 @@ func (m exactInteractionManager) AnswerClarification(ctx context.Context, in plu
 		return m.host.completeHumanInteractionResult(ctx, admission, result, in.InteractionID, in.ExpectedResourceVersion), nil, nil
 	}
 	if err := responder.AnswerClarification(actingCtx, interaction.ID, answers); err != nil {
+		m.host.releaseLinkedResponseClaim(ctx, in.HumanResponseReceiptID, receipt)
 		return m.host.completeHumanInteractionError(ctx, admission, err, interaction.ID, in.ExpectedResourceVersion), nil, nil
 	}
 	m.host.markLinkedResponseConsumed(ctx, in.HumanResponseReceiptID, receipt)
@@ -122,6 +124,9 @@ func (h *pluginHost) consumeHumanResponse(
 	}
 	actingCtx, result := h.linkedResponseContext(ctx, receipt, approvalRevision, manifestDigest)
 	if result != nil {
+		return nil, humanInteractionResponseReceipt{}, result
+	}
+	if result := h.claimLinkedResponse(ctx, receiptID, receipt); result != nil {
 		return nil, humanInteractionResponseReceipt{}, result
 	}
 	return actingCtx, receipt, nil

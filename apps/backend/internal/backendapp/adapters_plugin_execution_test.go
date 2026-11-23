@@ -47,6 +47,10 @@ type exactExecutionOrchestratorFake struct {
 	ensureCalls  int
 	stopCalls    []string
 	cancelCalls  []string
+	// observedExecutionID is what ObserveCancelTarget reports; empty means the
+	// execution the commands in these tests observe.
+	observedExecutionID string
+	cancelErr           error
 }
 
 func (f *exactExecutionOrchestratorFake) EnsureSession(_ context.Context, taskID string, _ ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
@@ -64,9 +68,17 @@ func (f *exactExecutionOrchestratorFake) StopExecution(_ context.Context, execut
 	return nil
 }
 
-func (f *exactExecutionOrchestratorFake) CancelAgent(_ context.Context, sessionID string) error {
+func (f *exactExecutionOrchestratorFake) ObserveCancelTarget(context.Context, string) (orchestrator.CancelTarget, error) {
+	executionID := f.observedExecutionID
+	if executionID == "" {
+		executionID = "exec-current"
+	}
+	return orchestrator.CancelTarget{ExecutionID: executionID, TurnID: "turn-1"}, nil
+}
+
+func (f *exactExecutionOrchestratorFake) CancelAgentIfTarget(_ context.Context, sessionID string, _ orchestrator.CancelTarget) error {
 	f.cancelCalls = append(f.cancelCalls, sessionID)
-	return nil
+	return f.cancelErr
 }
 
 type exactExecutionLifecycleFake struct {

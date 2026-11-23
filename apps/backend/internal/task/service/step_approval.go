@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -16,6 +18,13 @@ var (
 	ErrOfficeApprovalStage = errors.New("office approval stages are not approved through the session")
 	// ErrStepNotAwaitingApproval marks a session with nothing to approve.
 	ErrStepNotAwaitingApproval = errors.New("step is not awaiting approval")
+	// ErrStepApprovalChanged marks an approval whose observed step no longer
+	// holds at write time.
+	ErrStepApprovalChanged = errors.New("step approval changed")
+	// ErrReviewStatusNotRecorded marks an approval whose task move committed
+	// but whose review-status write failed. The move is the authoritative
+	// effect and must not be repeated.
+	ErrReviewStatusNotRecorded = errors.New("approval applied but review status not recorded")
 )
 
 // StepApprovalStatus is the approval state of a session's current workflow
@@ -167,7 +176,17 @@ func (s *Service) ApproveAwaitingStep(ctx context.Context, sessionID string, gua
 	if !status.Awaiting {
 		return status, nil, ErrStepNotAwaitingApproval
 	}
-	result, err := s.ApproveSession(ctx, sessionID)
+	result, err := s.approveSession(ctx, sessionID, status.Task.WorkflowStepID)
+	if errors.Is(err, ErrReviewStatusNotRecorded) {
+		// The move committed. Retry the status write once and report the
+		// approval as applied either way, so a replayed idempotency key never
+		// stores a failure for a move that already happened.
+		if retryErr := s.sessions.UpdateSessionReviewStatus(ctx, sessionID, "approved"); retryErr != nil {
+			s.logger.Error("approval moved the task but the review status was not recorded",
+				zap.String("session_id", sessionID), zap.Error(retryErr))
+		}
+		return status, result, nil
+	}
 	if err != nil {
 		return status, nil, err
 	}

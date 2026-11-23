@@ -42,6 +42,7 @@ type linkedResponseFixture struct {
 	version      string
 	delegation   pluginsdk.HumanResponseDelegationManager
 	interactions pluginsdk.ExactInteractionCommandManager
+	connection   *sqlx.DB
 }
 
 func newLinkedResponseFixture(t *testing.T, grants []string) *linkedResponseFixture {
@@ -81,7 +82,7 @@ func newLinkedResponseFixture(t *testing.T, grants []string) *linkedResponseFixt
 	t.Cleanup(func() { _ = svc.Close() })
 
 	f := &linkedResponseFixture{
-		svc: svc, data: data, store: commandStore, interaction: interaction,
+		svc: svc, data: data, store: commandStore, interaction: interaction, connection: connection,
 		activeUsers: map[string]bool{"alice": true, "bob": true},
 		sessionCtrl: map[string]map[string]bool{"alice": {linkedWorkspace: true}},
 		version:     digestPublicValue(interactionModelToDTO(interaction)),
@@ -200,9 +201,12 @@ func TestLinkedHumanResponseDenials(t *testing.T) {
 		reason string
 	}{
 		{
-			name: "no grant", grants: []string{"host.v2.write:interactions"},
+			name: "grant narrowed to exclude human responses", grants: allLinkedGrants(),
 			setup: func(t *testing.T, f *linkedResponseFixture) (*pluginsdk.CommandResult, *pluginsdk.CommandResult) {
 				f.link(t, "alice", "d-1")
+				if _, err := f.svc.approvalGrant(linkedInstall, linkedWorkspace, 2, f.digest, []string{"host.v2.write:interactions"}, "human", "narrow", "narrow-linked"); err != nil {
+					t.Fatalf("narrow grant: %v", err)
+				}
 				result, _, _ := f.delegation.RequestHumanResponseReceipt(context.Background(), f.receiptRequest("d-1", "allow"))
 				return result, nil
 			},

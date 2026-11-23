@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -278,6 +279,9 @@ func (m humanResponseDelegationManager) LinkExternalIdentity(ctx context.Context
 	if commandStore == nil {
 		return exactUnavailableResult(exactReasonCommandStoreUnavailable), pluginsdk.ExternalIdentityLink{}, nil
 	}
+	if denied := h.service.requireHumanResponsesGrant(h.installationID); denied != nil {
+		return denied, pluginsdk.ExternalIdentityLink{}, nil
+	}
 	userID, ok := h.service.identityLinkCodes.redeem(in.Code, h.installationID)
 	if !ok {
 		return &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: "link_code_invalid_or_used"}, pluginsdk.ExternalIdentityLink{}, nil
@@ -381,6 +385,30 @@ func (m humanResponseDelegationManager) RequestHumanResponseReceipt(ctx context.
 	}, nil
 }
 
+// requireHumanResponsesGrant refuses a link unless some workspace currently
+// grants the installation host.v2.write:human_responses. A link belongs to an
+// installation and a user, so it needs the grant in at least one workspace; the
+// per-workspace grant is checked again whenever a receipt is requested or
+// consumed. A denied attempt leaves the link code unspent.
+func (s *Service) requireHumanResponsesGrant(installationID string) *pluginsdk.CommandResult {
+	approvals, err := s.approvalListByInstallation(installationID)
+	if err != nil {
+		return exactUnavailableResult("authorization_unavailable")
+	}
+	for _, approval := range approvals {
+		if approval.State != ApprovalStateActive || approval.TombstonedAt != nil {
+			continue
+		}
+		if _, ok := s.manifestIntersectionDenyReason(installationID, humanResponsesCapability, approval); !ok {
+			continue
+		}
+		if slices.Contains(approval.CapabilityIDs, humanResponsesCapability) {
+			return nil
+		}
+	}
+	return &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: string(ApprovalDenyMissingApproval)}
+}
+
 // authorizeHumanResponses checks the installation's manifest digest and its
 // workspace grant for host.v2.write:human_responses.
 func (h *pluginHost) authorizeHumanResponses(workspaceID string, revision uint64, manifestDigest, payloadDigest string) *pluginsdk.CommandResult {
@@ -477,6 +505,40 @@ func (h *pluginHost) linkedResponseContext(ctx context.Context, receipt humanInt
 	return authn.WithIdentity(ctx, human.Identity), nil
 }
 
+// claimLinkedResponse durably records a delegated receipt before its response
+// is delivered. Without that record the response must not be delivered: a
+// delivery with no audit trail could not be attributed afterwards.
+func (h *pluginHost) claimLinkedResponse(ctx context.Context, receiptID string, receipt humanInteractionResponseReceipt) *pluginsdk.CommandResult {
+	if receipt.Delegation == nil {
+		return nil
+	}
+	commandStore := h.service.exactCommandStoreDep()
+	if commandStore == nil {
+		return exactUnavailableResult("human_response_audit_unavailable")
+	}
+	if err := commandStore.ClaimDelegatedResponse(ctx, receiptID); err != nil {
+		return exactUnavailableResult("human_response_audit_unavailable")
+	}
+	return nil
+}
+
+// releaseLinkedResponseClaim withdraws the claim of a response that was not
+// delivered. A failed release leaves an in-doubt claim that attribution only
+// honors for an interaction resolved inside the receipt's lifetime.
+func (h *pluginHost) releaseLinkedResponseClaim(ctx context.Context, receiptID string, receipt humanInteractionResponseReceipt) {
+	if receipt.Delegation == nil {
+		return
+	}
+	commandStore := h.service.exactCommandStoreDep()
+	if commandStore == nil {
+		return
+	}
+	if err := commandStore.ReleaseDelegatedResponseClaim(ctx, receiptID); err != nil && h.log != nil {
+		h.log.Warn("plugin delegated human response claim was not released",
+			zap.String("installation_id", h.installationID), zap.String("receipt_id", receiptID), zap.Error(err))
+	}
+}
+
 // markLinkedResponseConsumed records that a delegated receipt resolved its
 // target. The response was already delivered, so a failed audit write is
 // logged and does not turn the delivered response into a failure.
@@ -506,7 +568,31 @@ func (h *pluginHost) attributeInteraction(ctx context.Context, dto *pluginsdk.In
 	}
 	record, err := commandStore.ConsumedDelegatedResponse(ctx, dto.ID)
 	if err != nil {
-		return
+		record, err = h.claimedResolution(ctx, commandStore, dto)
+		if err != nil {
+			return
+		}
 	}
 	dto.ResolvedBy = &pluginsdk.InteractionActor{UserID: record.UserID, DisplayName: record.UserDisplayName, Via: record.Provider}
+}
+
+// claimedResolution recovers attribution when the consumed marker was lost
+// after delivery. The write-ahead claim identifies the receipt, and it only
+// applies to an interaction that resolved while that receipt was valid. The
+// consumed marker is repaired as a side effect; the native response is never
+// repeated.
+func (h *pluginHost) claimedResolution(ctx context.Context, commandStore *state.CommandStore, dto *pluginsdk.Interaction) (state.DelegatedResponse, error) {
+	record, err := commandStore.ClaimedDelegatedResponse(ctx, dto.ID)
+	if err != nil {
+		return state.DelegatedResponse{}, err
+	}
+	resolvedAt, resolvedErr := time.Parse(time.RFC3339Nano, dto.UpdatedAt)
+	claimedAt, claimedErr := time.Parse(time.RFC3339Nano, record.ClaimedAt)
+	expiresAt, expiresErr := time.Parse(time.RFC3339Nano, record.ExpiresAt)
+	if resolvedErr != nil || claimedErr != nil || expiresErr != nil ||
+		resolvedAt.Before(claimedAt) || resolvedAt.After(expiresAt) {
+		return state.DelegatedResponse{}, state.ErrDelegatedResponseNotFound
+	}
+	_ = commandStore.MarkDelegatedResponseConsumed(ctx, record.ReceiptID)
+	return record, nil
 }
