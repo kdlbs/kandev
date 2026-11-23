@@ -20,6 +20,60 @@ type blockingStartupEventBus struct {
 	release chan struct{}
 }
 
+func TestSessionModelsPublishOnlySettledStartupState(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.Status = v1.AgentStatusReady
+	execution.beginStartupAttempt()
+	execution.beginDeliveryStartupAttempt(t.Context())
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	publishModel := func(model, source string) {
+		mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+			Type:           streams.EventTypeSessionModels,
+			CurrentModelID: model,
+			Data: map[string]any{
+				"config_options_source":    source,
+				"config_options_config_id": "model",
+			},
+		})
+	}
+	publishModel("mock-fast", "")
+	if got := execution.GetModelState(); got == nil || got.CurrentModelID != "mock-fast" {
+		t.Fatalf("startup model was not available to configuration setup: %+v", got)
+	}
+	if got := eventBus.getStreamEvents(); len(got) != 0 {
+		t.Fatalf("provisional startup model was published: %+v", got)
+	}
+
+	execution.SettleConfigOptions("model", execution.GetModelState())
+	publishModel("mock-smart", "provider_response")
+	got := eventBus.getStreamEvents()
+	if len(got) != 1 || got[0].Data.CurrentModelID != "mock-smart" {
+		t.Fatalf("settled startup model was not published: %+v", got)
+	}
+
+	execution.setSessionInitialized(true)
+	publishModel("mock-fast", "provider_update")
+	got = eventBus.getStreamEvents()
+	if len(got) != 2 || got[1].Data.CurrentModelID != "mock-fast" {
+		t.Fatalf("live model change was not published: %+v", got)
+	}
+
+	execution.setSessionInitialized(false)
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:                  streams.EventTypeSessionModels,
+		CurrentModelID:        "mock-smart",
+		SessionSettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+	})
+	got = eventBus.getStreamEvents()
+	if len(got) != 3 || got[2].Data.CurrentModelID != "mock-smart" {
+		t.Fatalf("provider-restored startup model was not published: %+v", got)
+	}
+}
+
 func (b *blockingStartupEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
 	if strings.HasPrefix(subject, events.AgentStream+".") || subject == events.AgentctlError {
 		select {

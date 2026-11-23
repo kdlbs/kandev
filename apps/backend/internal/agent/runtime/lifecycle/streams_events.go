@@ -104,7 +104,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	if err != nil {
 		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check for %q: %w", event.Type, err)
 	}
-	if event.DeliverySubmissionID != "" && !staleSubmission {
+	if event.DeliverySubmissionID != "" && !staleSubmission && !isCodexMCPStartupToolCall(execution, event) {
 		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
 	}
 	if !process {
@@ -124,7 +124,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 }
 
 func preparedLegacyAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) preparedAgentEvent {
-	if event.DeliverySubmissionID != "" {
+	if event.DeliverySubmissionID != "" && !isCodexMCPStartupToolCall(execution, event) {
 		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
 	}
 	return preparedAgentEvent{event: event}

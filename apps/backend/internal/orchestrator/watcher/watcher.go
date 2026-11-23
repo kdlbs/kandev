@@ -100,6 +100,8 @@ type AgentEventData struct {
 	// under someone who just asked the retries to stop would defeat the
 	// purpose of the cancel button.
 	UserInitiated bool `json:"user_initiated,omitempty"`
+
+	ConfigurationCommandResult *streams.ConfigurationCommandResult `json:"configuration_result,omitempty"`
 }
 
 // ACPSessionEventData contains data from ACP session events

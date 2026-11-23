@@ -50,6 +50,10 @@ type userStateCleanupStore interface {
 //     (e.g. proxies checking a plugin's manifest/capabilities without
 //     going through Service's error-wrapping Get).
 type Service struct {
+	filePreviewWorkspaceAuthorizer        func(context.Context, string) error
+	filePreviewPolicies                   *filePreviewPolicies
+	filePreviewBackend                    func(context.Context, string, string, string) (*FilePreviewSource, error)
+	filePreviewGrants                     *filePreviewGrants
 	notificationProviders                 NotificationProviderAccess
 	hostCallContextEnabled                bool
 	hostCallContextValidator              func(context.Context, bool) error
@@ -85,6 +89,8 @@ type Service struct {
 	// holding a lifecycleLocks entry while calling into PluginRuntime
 	// cannot deadlock against it.
 	lifecycleLocks *keyedMutex
+	// Status cleanup stays ordered per plugin without retaining global commit guards.
+	statusCompletionLocks *keyedMutex
 	// dispatchLocks keep lifecycle replacement/disable boundaries from racing
 	// authenticated actions and reference RPCs. Dispatch holds a read lease for
 	// the full RPC; lifecycle mutation holds the write side.
@@ -107,28 +113,29 @@ type Service struct {
 	// directory belongs to an install still waiting for it.
 	extractingPaths map[string]int
 
-	pluginsDir                 string
-	store                      store.Store
-	approvals                  *approvalLedger
-	registry                   *Registry
-	state                      *state.Store
-	exactCommandStore          *state.CommandStore
-	userState                  *state.UserStore
-	instances                  *instances.Store
-	instanceState              *state.InstanceStore
-	webArtifacts               *webapp.ArtifactStore
-	webRuntime                 *webapp.Runtime
-	eventHub                   *webapp.EventHub
-	eventSubscription          bus.Subscription
-	userStateCleanup           userStateCleanupStore
-	agentConvs                 AgentConversationService
-	managedConvs               ManagedAgentConversationService
-	managedAutomationSchedules ManagedConversationScheduleService
-	automationHistoryData      AutomationHistoryDataSource
-	eventBus                   bus.EventBus
-	conversationTokens         *conversationTokenManager
-	conversationEpoch          string
-	log                        *logger.Logger
+	pluginsDir                        string
+	store                             store.Store
+	approvals                         *approvalLedger
+	registry                          *Registry
+	state                             *state.Store
+	exactCommandStore                 *state.CommandStore
+	userState                         *state.UserStore
+	instances                         *instances.Store
+	instanceState                     *state.InstanceStore
+	webArtifacts                      *webapp.ArtifactStore
+	webRuntime                        *webapp.Runtime
+	eventHub                          *webapp.EventHub
+	eventSubscription                 bus.Subscription
+	userStateCleanup                  userStateCleanupStore
+	agentConvs                        AgentConversationService
+	managedConvs                      ManagedAgentConversationService
+	managedAutomationSchedules        ManagedConversationScheduleService
+	automationHistoryData             AutomationHistoryDataSource
+	eventBus                          bus.EventBus
+	sidebarGroupingCatalogGenerations map[string]uint64
+	conversationTokens                *conversationTokenManager
+	conversationEpoch                 string
+	log                               *logger.Logger
 
 	deliverer                       Deliverer
 	agentToolCatalogListener        AgentToolCatalogListener
@@ -240,6 +247,7 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		log:                             log,
 		httpClient:                      &http.Client{},
 		lifecycleLocks:                  newKeyedMutex(),
+		statusCompletionLocks:           newKeyedMutex(),
 		dispatchLocks:                   newKeyedContextRWMutex(),
 		agentToolGeneration:             uuid.NewString(),
 		eventHub:                        webapp.NewEventHub(),
@@ -799,6 +807,7 @@ func (s *Service) Runtime() PluginRuntime {
 // backendapp's startPluginsSubsystems) register this with addCleanup for
 // graceful backend shutdown.
 func (s *Service) Shutdown() {
+	s.filePreviewGrantStore().close()
 	if s.runtime != nil {
 		s.runtime.StopAll()
 	}
@@ -903,6 +912,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		installationID:             rec.InstallationID,
 		commandStore:               s.exactCommandStoreDep(),
 		capabilities:               rec.Capabilities,
+		hasSidebarGroupings:        len(rec.SidebarGroupings) > 0,
 		repositoryProviders:        rec.RepositoryProviders,
 		configSchema:               rec.ConfigSchema,
 		state:                      s.state,
@@ -957,6 +967,7 @@ func (s *Service) notifyDeliverer() {
 	if d != nil {
 		d.Refresh()
 	}
+	s.notifySidebarGroupingCatalog("")
 }
 
 // List returns every installed plugin, sorted by id.

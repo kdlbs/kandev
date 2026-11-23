@@ -3,11 +3,14 @@ import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { replacePromptEditor } from "../../helpers/settings-prompt-editor";
 import {
+  CONFIG_PATH,
+  blockNextPromptSyncWithQuota,
   cleanUpPromptSync,
   configureThroughDialog,
   promptRow,
   saveVersions,
   seedPromptFiles,
+  SYNC_PATH,
   syncNow,
 } from "../../helpers/prompt-sync";
 
@@ -207,5 +210,110 @@ test.describe("Prompt Sync", () => {
     await expect(hookSwitch).toHaveAttribute("aria-checked", "true");
     await expect(principlesSwitch).toHaveAttribute("aria-checked", "false");
     await expect(testPage.getByTestId("prompt-unsaved-badge")).toHaveCount(0);
+  });
+
+  test("reports a GitHub quota block and retries on Sync now", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedPromptFiles(
+      apiClient,
+      seedData.workspaceId,
+      { "quota-rule.md": "Quota retry." },
+      { first: true },
+    );
+    await testPage.goto("/settings/prompts");
+    await configureThroughDialog(testPage, false);
+    await blockNextPromptSyncWithQuota(testPage, apiClient);
+
+    const blocked = waitForHttp(testPage, "POST", SYNC_PATH);
+    await testPage.getByTestId("prompt-sync-now").click();
+    expect((await blocked).ok()).toBe(true);
+    const status = testPage.getByTestId("prompt-sync-status");
+    await expect(status).toHaveAttribute("data-state", "failed");
+    await expect(status).toContainText(
+      "GitHub quota is unavailable. Try again after quota resets.",
+    );
+
+    const retried = waitForHttp(testPage, "POST", SYNC_PATH);
+    await testPage.getByTestId("prompt-sync-now").click();
+    expect((await retried).ok()).toBe(true);
+    await expect(status).toHaveAttribute("data-state", "ok");
+    await expect(status).not.toContainText("GitHub quota");
+  });
+
+  test("restores an override file after removal", async ({ testPage, apiClient, seedData }) => {
+    await seedPromptFiles(
+      apiClient,
+      seedData.workspaceId,
+      { "recovery-rule.md": "Repository version one." },
+      { first: true },
+    );
+    await testPage.goto("/settings/prompts");
+    await configureThroughDialog(testPage, false);
+    const row = promptRow(testPage, "recovery-rule");
+    const versionSwitch = repositorySwitch(row, "recovery-rule");
+    await versionSwitch.click();
+    await row.getByTestId("prompt-edit-button").click();
+    await replacePromptEditor(
+      testPage,
+      row.getByTestId("prompt-content-input"),
+      "My local override.",
+    );
+    await saveVersions(testPage);
+    await expect(row.getByTestId("prompt-override-badge")).toBeVisible();
+
+    await seedPromptFiles(apiClient, seedData.workspaceId, {});
+    await syncNow(testPage);
+    await expect(row.getByTestId("prompt-repository-removed")).toHaveText(
+      "Removed from repository",
+    );
+    await expect(versionSwitch).toHaveCount(0);
+    await testPage.reload();
+    await expect(row.getByTestId("prompt-repository-removed")).toHaveText(
+      "Removed from repository",
+    );
+    await expect(row.getByTestId("prompt-override-badge")).toBeVisible();
+    await expect(versionSwitch).toHaveCount(0);
+    let savedPrompts = await apiClient.listPrompts();
+    expect(
+      savedPrompts.prompts.find((prompt) => prompt.name === "recovery-rule")?.source_path,
+    ).toBe("");
+    await expect(row).toContainText("My local override.");
+    await row.getByTestId("prompt-edit-button").click();
+    await replacePromptEditor(
+      testPage,
+      row.getByTestId("prompt-content-input"),
+      "My local override after removal.",
+    );
+    await saveVersions(testPage);
+
+    const recoveredDirectory = ".kandev/recovered-prompts";
+    await seedPromptFiles(
+      apiClient,
+      seedData.workspaceId,
+      { "recovery-rule.md": "Repository version two." },
+      { path: recoveredDirectory },
+    );
+    await testPage.getByTestId("prompt-sync-open").click();
+    const dialog = testPage.getByTestId("prompt-sync-dialog");
+    await dialog.getByTestId("prompt-sync-directory-input").fill(recoveredDirectory);
+    const configSaved = waitForHttp(testPage, "POST", CONFIG_PATH);
+    await dialog.getByTestId("prompt-sync-save").click();
+    expect((await configSaved).ok()).toBe(true);
+    await expect(dialog).toHaveCount(0);
+    await testPage.reload();
+    savedPrompts = await apiClient.listPrompts();
+    expect(
+      savedPrompts.prompts.find((prompt) => prompt.name === "recovery-rule")?.source_path,
+    ).toBe(`${recoveredDirectory}/recovery-rule.md`);
+    await expect(versionSwitch).toHaveAttribute("aria-checked", "false");
+    await expect(row.getByTestId("prompt-override-badge")).toBeVisible();
+    await expect(row).toContainText("My local override after removal.");
+    await versionSwitch.click();
+    await saveVersions(testPage);
+    await row.getByTestId("prompt-view-button").click();
+    await expect(row.getByTestId("prompt-view-content")).toContainText("Repository version two.");
   });
 });

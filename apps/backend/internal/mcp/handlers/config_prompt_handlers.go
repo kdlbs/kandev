@@ -100,7 +100,7 @@ func sharedPromptResult(prompt *models.Prompt) sharedPromptRead {
 		Name: prompt.Name, Content: prompt.Content, Builtin: prompt.Builtin,
 		AllowAgentEdits: promptdto.AgentEditable(prompt),
 		Source:          promptdto.Source(prompt),
-		SourcePath:      prompt.SourcePath,
+		SourcePath:      promptdto.RepositoryPath(prompt),
 		Conflict:        prompt.Conflict,
 		EditGuidance:    promptdto.EditGuidance(prompt),
 		ContentBytes:    len(prompt.Content),

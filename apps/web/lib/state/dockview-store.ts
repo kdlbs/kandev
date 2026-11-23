@@ -173,6 +173,8 @@ export {
 export { applyLayoutFixups } from "./dockview-layout-builders";
 
 export type FileEditorState = {
+  /** No editor body was loaded; use the host preview admission flow. */
+  previewOnly?: boolean;
   /** Transient buffer lifetime, preserved by edits and never persisted. */
   instanceId?: symbol;
   path: string;

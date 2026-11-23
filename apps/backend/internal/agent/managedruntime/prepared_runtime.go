@@ -113,7 +113,7 @@ func allocateOwnedRuntime(
 		Args: []string{
 			"--prefix", prepared.project,
 			"--cache", prepared.cache,
-			"exec", "--yes", "--prefer-online", "--package=" + packageSpec,
+			"exec", managedNPMYesFlag, managedNPMOnlinePreference, "--package=" + packageSpec,
 			"--", "node", "-e", "",
 		},
 		Dir:         prepared.project,
@@ -218,7 +218,7 @@ func (p *PreparedRuntime) PackageSpec() string {
 // RewriteNpxCommand redirects only the trusted managed command's project and
 // cache arguments to this prepared runtime.
 func (p *PreparedRuntime) RewriteNpxCommand(command []string) ([]string, error) {
-	if p == nil || len(command) < 2 || command[0] != "npx" {
+	if p == nil || len(command) < 2 || command[0] != managedNPMCommandName {
 		return nil, errors.New("managed runtime command is not a trusted npx command")
 	}
 	if err := ValidateExactPackageSpec(p.packageSpec); err != nil {

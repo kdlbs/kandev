@@ -1,3 +1,4 @@
+import { waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
@@ -9,9 +10,10 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
 beforeEach(() => vi.clearAllMocks());
 const sidebarSaveFailedMessage = "A save failed";
 
-it("captures workspace identity for every saved-view mutation", () => {
+it("captures workspace identity for every saved-view mutation", async () => {
   const store = createAppStore({ workspaces: { items: [], activeId: "a" } });
   store.getState().createSidebarView();
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
   expect(updateUserSettings).toHaveBeenCalledWith(
     expect.objectContaining({
       sidebar_view_state: expect.objectContaining({ workspace_id: "a" }),
@@ -19,11 +21,16 @@ it("captures workspace identity for every saved-view mutation", () => {
   );
   store.getState().setActiveWorkspace("b");
   store.getState().createSidebarView();
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(2));
   expect(updateUserSettings).toHaveBeenLastCalledWith(
     expect.objectContaining({
       sidebar_view_state: expect.objectContaining({ workspace_id: "b" }),
     }),
   );
+  await Promise.all([
+    store.getState().waitForSidebarViewSync("a"),
+    store.getState().waitForSidebarViewSync("b"),
+  ]);
 });
 
 it("does not mutate sidebar views without an active workspace", () => {
@@ -74,6 +81,7 @@ it("keeps pending workspace edits when a different workspace broadcasts settings
   );
   const store = createAppStore({ workspaces: { items: [], activeId: "a" } });
   const created = store.getState().createSidebarView();
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
   const handlers = registerUsersHandlers(store);
   handlers["user.settings.updated"]!({
     type: "user.settings.updated",
@@ -99,6 +107,7 @@ it("keeps pending workspace edits when a different workspace broadcasts settings
   } as never);
   expect(store.getState().sidebarViewsByWorkspace.a.activeViewId).toBe(created);
   resolve({ settings: {} } as Awaited<ReturnType<typeof updateUserSettings>>);
+  await store.getState().waitForSidebarViewSync("a");
 });
 
 it("projects workspace views loaded through the HTTP settings setter", () => {
@@ -137,8 +146,10 @@ it("rolls a delayed failure back only in its originating workspace", async () =>
   );
   const store = createAppStore({ workspaces: { items: [], activeId: "a" } });
   store.getState().createSidebarView();
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
   store.getState().setActiveWorkspace("b");
   const b = store.getState().createSidebarView();
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(2));
   reject(new ApiError(sidebarSaveFailedMessage, 500, {}));
   await waitFor(() =>
     expect(store.getState().sidebarViewsByWorkspace.a.syncError).toBe(sidebarSaveFailedMessage),
@@ -164,8 +175,10 @@ it("rolls a queued failure back after returning to its originating workspace", a
 
   const store = createAppStore({ workspaces: { items: [], activeId: "a" } });
   store.getState().createSidebarView();
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
   store.getState().setActiveWorkspace("b");
   store.getState().createSidebarView();
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(2));
   store.getState().setActiveWorkspace("a");
   rejectA(new ApiError(sidebarSaveFailedMessage, 500, {}));
 
@@ -190,8 +203,10 @@ it("applies a queued success after returning to its originating workspace", asyn
 
   const store = createAppStore({ workspaces: { items: [], activeId: "a" } });
   const aView = store.getState().createSidebarView();
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
   store.getState().setActiveWorkspace("b");
   const bView = store.getState().createSidebarView();
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(2));
   store.getState().setActiveWorkspace("a");
   resolveA({ settings: {} } as never);
 
