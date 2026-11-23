@@ -85,6 +85,7 @@ the Failed bucket requires task state FAILED.
 From `apps/`:
 
 ```sh
+pnpm install --frozen-lockfile
 pnpm --filter @kandev/web test inbox-open-task-link needs-you-inbox-row failed-inbox-row inbox-history-row needs-you-inbox-page-client failed-inbox-tab-panel inbox-history-list
 ```
 
