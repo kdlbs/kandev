@@ -1575,16 +1575,17 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 
 // TaskPlanCommentDTO is pending feedback attached to a task's current plan.
 type TaskPlanCommentDTO struct {
-	ID           string    `json:"id"`
-	TaskID       string    `json:"task_id"`
-	PlanID       string    `json:"plan_id"`
-	Body         string    `json:"body"`
-	SelectedText string    `json:"selected_text"`
-	AnchorFrom   int       `json:"anchor_from"`
-	AnchorTo     int       `json:"anchor_to"`
-	Version      int64     `json:"version"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Attachments  []v1.MessageAttachment `json:"attachments,omitempty"`
+	ID           string                 `json:"id"`
+	TaskID       string                 `json:"task_id"`
+	PlanID       string                 `json:"plan_id"`
+	Body         string                 `json:"body"`
+	SelectedText string                 `json:"selected_text"`
+	AnchorFrom   int                    `json:"anchor_from"`
+	AnchorTo     int                    `json:"anchor_to"`
+	Version      int64                  `json:"version"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
 }
 
 // TaskPlanCommentSnapshotDTO is a complete, versioned replacement snapshot.
@@ -1606,7 +1607,8 @@ func TaskPlanCommentSnapshotFromModel(snapshot *models.TaskPlanCommentSnapshot) 
 	}
 	for _, comment := range snapshot.Comments {
 		out.Comments = append(out.Comments, &TaskPlanCommentDTO{
-			ID: comment.ID, TaskID: comment.TaskID, PlanID: comment.PlanID,
+			Attachments: comment.Attachments,
+			ID:          comment.ID, TaskID: comment.TaskID, PlanID: comment.PlanID,
 			Body: comment.Body, SelectedText: comment.SelectedText,
 			AnchorFrom: comment.AnchorFrom, AnchorTo: comment.AnchorTo, Version: comment.Version,
 			CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt,

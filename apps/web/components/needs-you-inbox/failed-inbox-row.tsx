@@ -2,23 +2,16 @@
 
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
-import Link from "@/components/routing/app-link";
+import { InboxOpenTaskLink } from "./inbox-open-task-link";
 import { formatRelativeTime } from "@/lib/i18n/formats";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import { FAILED_TASK_STATUS } from "@/lib/threads/thread-session-status";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
-import { linkToTask } from "@/lib/links";
 import {
   failedInboxOriginMarkerKey,
   hasResolvableFailedInboxReason,
 } from "@/lib/failed-inbox/row-presentation";
 import type { FailedInboxRow as FailedInboxRowData } from "@/lib/types/failed-inbox";
-
-// The row addresses a task, never a session (design-01#Session-resolution):
-// the open-task control needs only the task id.
-function taskHrefForRow(row: FailedInboxRowData): string {
-  return linkToTask(row.task_id);
-}
 
 export function FailedInboxRow({ row }: { row: FailedInboxRowData }) {
   const { t } = useTranslation();
@@ -88,9 +81,9 @@ export function FailedInboxRow({ row }: { row: FailedInboxRowData }) {
         size="sm"
         className="shrink-0 cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
       >
-        <Link href={taskHrefForRow(row)} data-testid="failed-inbox-open-task">
+        <InboxOpenTaskLink taskId={row.task_id} data-testid="failed-inbox-open-task">
           {t("failedInbox:openTask")}
-        </Link>
+        </InboxOpenTaskLink>
       </Button>
     </div>
   );

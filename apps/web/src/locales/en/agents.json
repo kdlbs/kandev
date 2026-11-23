@@ -650,5 +650,9 @@
   "runtimeUpdatePreviewRequestError": "Couldn't check this update: {{error}}",
   "runtimeUpdatePreviewUnavailable": "This update couldn't be verified for bulk updating. Use Manage versions.",
   "runtimeUpdatePreviewChanged": "The runtime or target version changed. Check for updates again.",
-  "runtimeUpdatePreviewIndividual": "This runtime needs to be updated individually. Use Manage versions."
+  "runtimeUpdatePreviewIndividual": "This runtime needs to be updated individually. Use Manage versions.",
+  "thinkingLevel": "Thinking level",
+  "useProviderDefault": "Use provider default",
+  "thinkingLevelUnavailable": "{{value}} (unavailable)",
+  "editProfile": "Edit profile"
 }

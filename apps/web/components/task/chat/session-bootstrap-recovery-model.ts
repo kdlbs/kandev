@@ -19,6 +19,10 @@ import type {
 } from "@/lib/types/task-status-summary";
 
 const selectionCauseCodes = new Set([
+  "thinking_level_unavailable",
+  "thinking_level_failed",
+  "thinking_level_mismatch",
+  "thinking_level_unconfirmed",
   "model_unavailable",
   "model_selection_failed",
   "permission_mode_failed",
@@ -153,6 +157,8 @@ type RecoveryTranslationOptions = {
   model?: string;
   mode?: string;
   effectiveMode?: string;
+  level?: string;
+  effectiveLevel?: string;
 };
 
 function recoveryTitleKey(isReadOnly: boolean, hasRecoveryFailure: boolean): string {
@@ -162,6 +168,7 @@ function recoveryTitleKey(isReadOnly: boolean, hasRecoveryFailure: boolean): str
 }
 
 function selectionTitleKey(cause: AgentErrorCause): string | null {
+  if (cause.code?.startsWith("thinking_level_")) return "task:sessionBootstrapThinkingFailedTitle";
   switch (cause.code) {
     case "model_unavailable":
       return "task:sessionBootstrapModelUnavailableTitle";
@@ -236,6 +243,17 @@ function modeSelectionSummaryKey(cause: AgentErrorCause): string | null {
 }
 
 function selectionSummaryKey(cause: AgentErrorCause): string | null {
+  if (cause.code?.startsWith("thinking_level_")) {
+    if (!cause.requested_setting) return "task:sessionBootstrapThinkingUnknownBody";
+    if (cause.code === "thinking_level_unavailable")
+      return "task:sessionBootstrapThinkingUnavailableBody";
+    if (cause.code === "thinking_level_mismatch" && cause.effective_setting)
+      return "task:sessionBootstrapThinkingMismatchBody";
+    if (cause.code === "thinking_level_unconfirmed")
+      return "task:sessionBootstrapThinkingUnconfirmedBody";
+    return "task:sessionBootstrapThinkingFailedBody";
+  }
+
   return modelSelectionSummaryKey(cause) ?? modeSelectionSummaryKey(cause);
 }
 
@@ -255,6 +273,8 @@ function selectorSummaryOptions(
       : cause.requested_model;
   return {
     agent: safeAgent,
+    ...(cause.requested_setting ? { level: cause.requested_setting } : {}),
+    ...(cause.effective_setting ? { effectiveLevel: cause.effective_setting } : {}),
     ...(model ? { model } : {}),
     ...(cause.requested_mode ? { mode: cause.requested_mode } : {}),
     ...(cause.effective_mode ? { effectiveMode: cause.effective_mode } : {}),
@@ -335,6 +355,7 @@ function recoveryDetailFields(
     if (cause.reason)
       appendDetailField(fields, translate("task:sessionErrorDetailReason"), cause.reason);
     appendProcessExitDetail(fields, cause, translate);
+    appendThinkingDetails(fields, cause, translate);
     appendSelectorDetail(
       fields,
       "task:sessionErrorDetailRequestedModel",
@@ -586,4 +607,23 @@ function recoveryCardTitleKey(
   }
   if (primaryCause?.code === "process_exited") return processExitTitleKey(primaryCause);
   return recoveryTitleKey(status.isReadOnly, status.hasRecoveryFailure);
+}
+
+function appendThinkingDetails(
+  fields: SessionErrorDetailsField[],
+  cause: AgentErrorCause,
+  translate: TFunction,
+) {
+  appendSelectorDetail(
+    fields,
+    "task:sessionErrorDetailThinkingLevel",
+    cause.requested_setting,
+    translate,
+  );
+  appendSelectorDetail(
+    fields,
+    "task:sessionErrorDetailEffectiveThinkingLevel",
+    cause.effective_setting,
+    translate,
+  );
 }

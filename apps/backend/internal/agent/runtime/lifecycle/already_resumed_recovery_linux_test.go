@@ -24,7 +24,7 @@ func TestRestartRecoveryRetiresOnlyProvenDeadLoadedConversation(t *testing.T) {
 	for _, condition := range []string{"dead owner", "live owner", "missing proof", "different native", "active replacement", "legacy dead owner", "legacy live owner", "legacy missing proof"} {
 		t.Run(condition, func(t *testing.T) {
 			ctx := context.Background()
-			child := exec.Command("/bin/sleep", "60")
+			child := exec.Command("sleep", "60")
 			child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 			require.NoError(t, child.Start())
 			t.Cleanup(func() { _ = child.Process.Kill(); _ = child.Wait() })

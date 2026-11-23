@@ -1032,6 +1032,10 @@ type Message struct {
 	Content    string
 	Type       string // "message" default; see the MessageType vocabulary
 	CreatedAt  string // RFC3339
+	// Source is the persisted metadata.source provenance, for example
+	// "plugin:<id>" on a message a plugin sent; empty when absent. No other
+	// message metadata is exposed.
+	Source string
 }
 
 func (m Message) toProto() *pluginv1.Message {
@@ -1044,6 +1048,7 @@ func (m Message) toProto() *pluginv1.Message {
 		Content:    m.Content,
 		Type:       m.Type,
 		CreatedAt:  m.CreatedAt,
+		Source:     m.Source,
 	}
 }
 
@@ -1060,6 +1065,7 @@ func messageFromProto(p *pluginv1.Message) Message {
 		Content:    p.GetContent(),
 		Type:       p.GetType(),
 		CreatedAt:  p.GetCreatedAt(),
+		Source:     p.GetSource(),
 	}
 }
 

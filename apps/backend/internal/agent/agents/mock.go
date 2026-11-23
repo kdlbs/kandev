@@ -197,11 +197,15 @@ func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
 }
 
 func (a *MockAgent) Runtime() *RuntimeConfig {
+	env := map[string]string{}
+	if a.ID() == "pi-acp" {
+		env["KANDEV_MOCK_PI_THINKING"] = "true"
+	}
 	canRecover := true
 	return &RuntimeConfig{
 		Cmd:             Cmd(mockAgentDefaultID).Build(),
 		WorkingDir:      "{workspace}",
-		Env:             map[string]string{},
+		Env:             env,
 		ResourceLimits:  ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
 		Protocol:        agent.ProtocolACP,
 		ProjectSkillDir: DefaultProjectSkillDir,

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { usableConfigOptions } from "@/components/model-config-selector";
 import { ModelSelector } from "@/components/task/model-selector";
 import { ModeSelector } from "@/components/task/mode-selector";
 
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => {
               type: "select",
               id: "reasoning_effort",
               name: "Reasoning Effort",
+              category: "thought_level",
               currentValue: "low",
               options: [{ value: "low", name: "Low" }],
             },
@@ -78,6 +80,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+const FULL_ACCESS_MODE = "full-access";
 const SESSION_ID = mocks.sessionId;
 const MODE_SELECTOR_TEST_ID = "session-mode-selector";
 
@@ -120,7 +123,7 @@ afterEach(() => {
   mocks.storeSelections.length = 0;
   mocks.appState.responsive.isMobile = false;
   mocks.appState.responsive.isFinePointer = true;
-  mocks.appState.sessionMode.bySessionId[SESSION_ID].currentModeId = "full-access";
+  mocks.appState.sessionMode.bySessionId[SESSION_ID].currentModeId = FULL_ACCESS_MODE;
   mocks.appState.sessionMode.bySessionId[SESSION_ID].requestedModeId = undefined;
   mocks.setSessionMode.mockClear();
 });
@@ -266,4 +269,83 @@ describe("mobile mode selector", () => {
     fireEvent.click(trigger);
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
+});
+
+it("suppresses the duplicate Pi legacy mode selector", () => {
+  mocks.appState.taskSessions.items[SESSION_ID].agent_profile_snapshot = { agent_name: "pi-acp" };
+  try {
+    render(
+      <TooltipProvider>
+        <ModeSelector sessionId={SESSION_ID} />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByTestId(MODE_SELECTOR_TEST_ID)).toBeNull();
+  } finally {
+    mocks.appState.taskSessions.items[SESSION_ID].agent_profile_snapshot = {};
+  }
+});
+
+it("keeps a thinking selector for a legacy-only Pi session", () => {
+  mocks.appState.taskSessions.items[SESSION_ID].agent_profile_snapshot = { agent_name: "pi-acp" };
+  const options = mocks.appState.sessionModels.bySessionId[SESSION_ID].configOptions;
+  mocks.appState.sessionModels.bySessionId[SESSION_ID].configOptions = [];
+  try {
+    render(
+      <TooltipProvider>
+        <ModeSelector sessionId={SESSION_ID} />
+      </TooltipProvider>,
+    );
+    fireEvent.pointerDown(screen.getByTestId(MODE_SELECTOR_TEST_ID), { button: 0, ctrlKey: false });
+    expect(screen.getByText("Thinking level")).toBeTruthy();
+  } finally {
+    mocks.appState.taskSessions.items[SESSION_ID].agent_profile_snapshot = {};
+    mocks.appState.sessionModels.bySessionId[SESSION_ID].configOptions = options;
+  }
+});
+
+it("does not offer a stale Pi mode after an empty live snapshot", () => {
+  const session = mocks.appState.taskSessions.items[SESSION_ID];
+  const data = mocks.appState.sessionModels.bySessionId[SESSION_ID];
+  const mode = mocks.appState.sessionMode.bySessionId[SESSION_ID];
+  const originalOptions = data.configOptions;
+  const originalModes = mode.availableModes;
+  session.agent_profile_snapshot = { agent_name: "pi-acp", mode: "medium" };
+  data.configOptions = [];
+  mode.availableModes = [];
+  mode.currentModeId = "";
+  try {
+    render(
+      <TooltipProvider>
+        <ModeSelector sessionId={SESSION_ID} />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByTestId(MODE_SELECTOR_TEST_ID)).toBeNull();
+  } finally {
+    session.agent_profile_snapshot = {};
+    data.configOptions = originalOptions;
+    mode.availableModes = originalModes;
+    mode.currentModeId = FULL_ACCESS_MODE;
+  }
+});
+
+it("keeps an explicitly categorized thinking option whose ID is mode", () => {
+  const options = [
+    {
+      type: "select",
+      id: "mode",
+      name: "Thinking level",
+      category: "thought_level",
+      currentValue: "medium",
+      options: [{ value: "medium", name: "Medium" }],
+    },
+    {
+      type: "select",
+      id: "approval",
+      name: "Permissions",
+      category: "mode",
+      currentValue: "safe",
+      options: [{ value: "safe", name: "Safe" }],
+    },
+  ];
+  expect(usableConfigOptions(options)).toEqual([options[0]]);
 });

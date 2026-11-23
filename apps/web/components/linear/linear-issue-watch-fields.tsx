@@ -1,6 +1,6 @@
 "use client";
 
-import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useId, useRef, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -413,6 +413,7 @@ export function MaxInflightTasksField({ form, setForm }: { form: FormState; setF
 // the trailing "Settings" block of the watcher dialog.
 export function SettingsFields({ form, setForm }: { form: FormState; setForm: FormSetter }) {
   const { t } = useTranslation();
+  const enabledId = useId();
   return (
     <>
       <div className="space-y-1.5">
@@ -430,10 +431,11 @@ export function SettingsFields({ form, setForm }: { form: FormState; setForm: Fo
       <SortByField form={form} setForm={setForm} />
       <div className="flex items-center justify-between">
         <div>
-          <Label>{t("linear:enabled")}</Label>
+          <Label htmlFor={enabledId}>{t("linear:enabled")}</Label>
           <p className="text-xs text-muted-foreground">{t("linear:enabledHelp")}</p>
         </div>
         <Switch
+          id={enabledId}
           checked={form.enabled}
           onCheckedChange={(v) => setForm((p) => ({ ...p, enabled: v }))}
           className="cursor-pointer"

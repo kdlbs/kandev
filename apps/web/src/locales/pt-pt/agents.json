@@ -650,5 +650,9 @@
   "runtimeUpdatePreviewRequestError": "Não foi possível verificar esta atualização: {{error}}",
   "runtimeUpdatePreviewUnavailable": "Não foi possível verificar esta atualização para atualização em bloco. Utilize Gerir versões.",
   "runtimeUpdatePreviewChanged": "O runtime ou a versão de destino mudou. Verifique novamente as atualizações.",
-  "runtimeUpdatePreviewIndividual": "Este runtime precisa de ser atualizado individualmente. Utilize Gerir versões."
+  "runtimeUpdatePreviewIndividual": "Este runtime precisa de ser atualizado individualmente. Utilize Gerir versões.",
+  "thinkingLevel": "Nível de raciocínio",
+  "useProviderDefault": "Usar predefinição do fornecedor",
+  "thinkingLevelUnavailable": "{{value}} (indisponível)",
+  "editProfile": "Editar perfil"
 }

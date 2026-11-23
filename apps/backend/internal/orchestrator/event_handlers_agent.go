@@ -2698,8 +2698,8 @@ func queuedMessageAttachmentsToV1(attachments []messagequeue.MessageAttachment) 
 	converted := make([]v1.MessageAttachment, len(attachments))
 	for index, attachment := range attachments {
 		converted[index] = v1.MessageAttachment{
-			Type:         attachment.Type,
-			AttachmentID: attachment.AttachmentID,
+			Type:      attachment.Type,
+			CommentID: attachment.CommentID, AttachmentID: attachment.AttachmentID,
 			Data:         attachment.Data,
 			MimeType:     attachment.MimeType,
 			Name:         attachment.Name,

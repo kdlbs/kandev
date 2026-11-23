@@ -42,7 +42,7 @@ export function previewFileState(path: string, repo?: string) {
   };
 }
 
-export function canOfferViewerAfterReadFailure(path: string): boolean {
+export function canFindViewerForFileType(path: string): boolean {
   return (
     !!fileViewerExtension(path) &&
     !SOURCE_EXTENSIONS.has(fileViewerExtension(path)) &&

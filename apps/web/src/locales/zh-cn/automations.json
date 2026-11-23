@@ -389,5 +389,8 @@
   "mcpUnavailable": "{{name}}（不可用）",
   "mcpOptionsFailed": "无法加载 MCP 选项。已保存的选择保持不变。",
   "passthroughOutputNotCapturedTitle": "此运行的记录中不会捕获 CLI passthrough 的输出。",
-  "passthroughOutputFutureSessionsDescription": "如需在未来的会话中记录输出，请在自动化的智能体配置中停用 CLI passthrough。此处无法恢复之前的终端输出。"
+  "passthroughOutputFutureSessionsDescription": "如需在未来的会话中记录输出，请在自动化的智能体配置中停用 CLI passthrough。此处无法恢复之前的终端输出。",
+  "enableScheduleFailed": "无法开启计划，请重试。",
+  "enablingSchedule": "正在开启计划...",
+  "turnOnSchedule": "开启计划"
 }

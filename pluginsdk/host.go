@@ -889,12 +889,14 @@ func registerHostServer(s grpc.ServiceRegistrar, impl Host) {
 	sourceIssueWritebackCommands, _ := impl.(ExactSourceIssueWritebackHost)
 	executionCommands, _ := impl.(ExactExecutionCommandHost)
 	interactionCommands, _ := impl.(ExactInteractionCommandHost)
+	humanResponses, _ := impl.(HumanResponseDelegationHost)
 	pluginv1.RegisterHostServer(s, &grpcHostServer{
 		impl: impl, exact: exact, exactQueries: exactQueries, automationHistory: automationHistory,
 		taskCommands: taskCommands, claimCommands: claimCommands, completionGateCommands: completionGateCommands,
 		workspaceAdminCommands:       workspaceAdminCommands,
 		sourceIssueWritebackCommands: sourceIssueWritebackCommands,
 		executionCommands:            executionCommands, interactionCommands: interactionCommands,
+		humanResponses: humanResponses,
 	})
 }
 
@@ -911,6 +913,7 @@ type grpcHostServer struct {
 	sourceIssueWritebackCommands ExactSourceIssueWritebackHost
 	executionCommands            ExactExecutionCommandHost
 	interactionCommands          ExactInteractionCommandHost
+	humanResponses               HumanResponseDelegationHost
 }
 
 //nolint:dupl // Keep each generated request and response mapping explicit at the gRPC boundary.

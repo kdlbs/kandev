@@ -42,6 +42,14 @@ func (m grpcExactExecutionCommandManager) StopTaskRun(ctx context.Context, in Ex
 	return commandResultFromProto(resp.GetResult()), resp.GetStopped(), nil
 }
 
+func (m grpcExactExecutionCommandManager) CancelTurn(ctx context.Context, in ExactTaskExecutionCommand) (*CommandResult, bool, error) {
+	resp, err := m.client.CancelTurnExact(ctx, &pluginv1.CancelTurnExactRequest{RequestId: in.RequestID, WorkspaceId: in.WorkspaceID, TaskId: in.TaskID, SessionId: in.SessionID, ExpectedSessionResourceVersion: in.ExpectedSessionResourceVersion, ExpectedExecutionId: in.ExpectedExecutionID, IdempotencyKey: in.IdempotencyKey, ManagementInstanceKey: in.ManagementInstanceKey, ExpectedClaimGeneration: in.ExpectedClaimGeneration, ApprovalRevision: in.ApprovalRevision, ManifestDigest: in.ManifestDigest})
+	if err != nil {
+		return nil, false, err
+	}
+	return commandResultFromProto(resp.GetResult()), resp.GetCancelled(), nil
+}
+
 func (m grpcExactExecutionCommandManager) RecoverSession(ctx context.Context, in ExactSessionRecoveryCommand) (*CommandResult, ExactTaskRunResult, error) {
 	resp, err := m.client.RecoverSessionExact(ctx, &pluginv1.RecoverSessionExactRequest{
 		RequestId: in.RequestID, WorkspaceId: in.WorkspaceID, TaskId: in.TaskID, SessionId: in.SessionID,
@@ -157,6 +165,18 @@ func (s *grpcHostServer) StopTaskRunExact(ctx context.Context, req *pluginv1.Sto
 		return nil, err
 	}
 	return &pluginv1.StopTaskRunExactResponse{Result: commandResultToProto(result), Stopped: stopped}, nil
+}
+
+func (s *grpcHostServer) CancelTurnExact(ctx context.Context, req *pluginv1.CancelTurnExactRequest) (*pluginv1.CancelTurnExactResponse, error) {
+	m, err := s.executionManager()
+	if err != nil {
+		return nil, err
+	}
+	result, cancelled, err := m.CancelTurn(ctx, ExactTaskExecutionCommand{RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(), SessionID: req.GetSessionId(), ExpectedSessionResourceVersion: req.GetExpectedSessionResourceVersion(), ExpectedExecutionID: req.GetExpectedExecutionId(), IdempotencyKey: req.GetIdempotencyKey(), ManagementInstanceKey: req.GetManagementInstanceKey(), ExpectedClaimGeneration: req.GetExpectedClaimGeneration(), ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest()})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.CancelTurnExactResponse{Result: commandResultToProto(result), Cancelled: cancelled}, nil
 }
 
 func (s *grpcHostServer) RecoverSessionExact(ctx context.Context, req *pluginv1.RecoverSessionExactRequest) (*pluginv1.RecoverSessionExactResponse, error) {

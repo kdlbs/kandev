@@ -1431,7 +1431,7 @@ func startGatewayAndServe(
 		if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
 			services.Plugins.SetPendingTaskTransitionSource(pluginsPendingTaskTransitionAdapter{queue: queue})
 			services.Plugins.SetExactExecutionController(pluginsExactExecutionController{
-				tasks: services.Task, orchestrator: orchestratorSvc, lifecycle: lifecycleMgr, queue: queue,
+				tasks: services.Task, orchestrator: orchestratorSvc, lifecycle: lifecycleMgr, queue: queue, steps: services.Task,
 			})
 		}
 	}

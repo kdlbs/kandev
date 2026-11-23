@@ -52,6 +52,7 @@ export async function fileViewerFlow({
     fs.writeFileSync(path.join(repo, "workspace-model.stl"), model);
     fs.symlinkSync(external, path.join(repo, "external-model.stl"));
     fs.writeFileSync(path.join(repo, "unsupported.pdf"), Buffer.from([0, 255, 0]));
+    fs.writeFileSync(path.join(repo, "notes.txt"), "Readable workspace notes");
     git.stageAll();
     git.commit("add external model selection");
     const profile = await createStandardProfile(apiClient, "File viewer test");
@@ -183,6 +184,10 @@ async function assertExternalPolicies(page: Page, api: ApiClient, workspace: str
 }
 
 async function assertDiscoveryReturn(page: Page, session: SessionPage, mobile: boolean) {
+  if (mobile) await page.getByRole("button", { name: "Close", exact: true }).click();
+  await (await session.fileTree.waitForFileTreeNode("notes.txt")).click();
+  await expect(page.getByText("Readable workspace notes", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Find viewer plugin", exact: true })).toHaveCount(0);
   if (mobile) await page.getByRole("button", { name: "Close", exact: true }).click();
   await (await session.fileTree.waitForFileTreeNode("unsupported.pdf")).click();
   const preview = page.getByTestId("plugin-file-preview");
