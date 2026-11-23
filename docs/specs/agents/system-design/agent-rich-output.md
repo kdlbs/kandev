@@ -281,17 +281,18 @@ legend filtering, formatting helpers, deferred plot mounting, and motion
 preferences. Library tree composition must not insert wrappers inside the
 Recharts plot's discovery boundary.
 
-Within the FilePreview registry adapter, key the native FilePreview component by
-the serialized `(sessionId, repo, path)` tuple. Its element identity separates
-two cards referencing the same target. A tuple change unmounts only that card;
-`useWorkspaceFilePreview` invalidates the old request's settlement. Stable
-identity/target preserves disclosure, success caching, and explicit failed-read
-retry through title changes, unrelated rerenders, and viewport changes.
+Key `FilePreview` by view, session, repository, and path within its registry
+element. Each element owns its preview state. A target change unmounts that
+card and invalidates its read. Rerenders preserve disclosure and preview state.
 
-Do not key the whole presentation or registry by viewport/session/file target.
-That would reset unrelated chart/filter/file state. Native controls keep their
-existing translated accessible names and callbacks; json-render event wiring is
-not needed for these local controls.
+Start one native non-image read before publishing explicit expansion. The idle
+effect loads cards that mount expanded. The generation in
+`useWorkspaceFilePreview` accepts only the latest settlement. Image cards reuse
+successful reads and retry errors on reopening. Plugin cards use the
+permission-aware viewer.
+
+Keep the presentation and registry stable across file targets and viewport
+changes. Native controls use localized names and host callbacks.
 
 ## Provider identity
 
