@@ -65,8 +65,8 @@ installations see no change.
 ## Verification results
 
 Task 01 is complete. Both lifecycle tests failed before the change and passed
-after it. The lifecycle package failures before and after the change are the
-same set.
+after it. The full lifecycle package reports no failure after the change that
+it does not also report before it.
 
 ## Risks
 

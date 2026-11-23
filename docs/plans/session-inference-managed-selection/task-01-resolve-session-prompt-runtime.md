@@ -45,8 +45,12 @@ these prompts as it does to task launches.
 
 ## Verification
 
-- `go test -tags fts5 -run TestSessionInference ./internal/agent/runtime/lifecycle/`
+Run these commands from `apps/backend`.
+
+- `go test -trimpath -tags fts5 -run TestSessionInference ./internal/agent/runtime/lifecycle/`
   fails before the change and passes after it.
-- `go test -tags fts5 ./internal/agent/runtime/lifecycle/` reports the same
-  failures before and after the change.
-- `gofmt -l` and `go vet -tags fts5` report nothing for the lifecycle package.
+- `go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle/` reports
+  no failure after the change that it does not also report before it.
+- `gofmt -l ./internal/agent/runtime/lifecycle/` and
+  `go vet -trimpath -tags fts5 ./internal/agent/runtime/lifecycle/` report
+  nothing.
