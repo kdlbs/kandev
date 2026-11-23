@@ -763,6 +763,7 @@ func (m *Manager) buildAgentCommandWithContext(
 		SessionID:             sessionID,
 		AutoApprove:           autoApprove,
 		PermissionValues:      permissionValues,
+		ConfigOptions:         m.resolveLaunchConfigOptions(ctx, req.TaskID, req.SessionID, profileInfo, nil),
 		CLIFlagTokens:         cliFlagTokens,
 		Runtime:               runtime,
 		PreferNativeBinary:    preferNative,

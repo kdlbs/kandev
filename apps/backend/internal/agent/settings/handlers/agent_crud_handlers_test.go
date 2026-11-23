@@ -427,6 +427,25 @@ func TestPreviewAgentCommandEndpoint(t *testing.T) {
 		response := doSettingsRequest(router, http.MethodPost, "/api/v1/agent-command-preview/nope", `{"model":"m"}`)
 		requireErrorBody(t, response, http.StatusInternalServerError, `agent type "nope" not found in registry`)
 	})
+
+	t.Run("forwards config_options for copilot-acp context_tier", func(t *testing.T) {
+		router, _, reg := newSettingsHarness(t, newFakeSettingsRepo(), nil)
+		if err := reg.Register(agents.NewCopilotACP()); err != nil {
+			t.Fatalf("Register(copilot-acp) error = %v", err)
+		}
+
+		response := doSettingsRequest(router, http.MethodPost, "/api/v1/agent-command-preview/copilot-acp",
+			`{"model":"gpt-5.4","config_options":{"context_tier":"long_context"}}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+		}
+		var got dto.CommandPreviewResponse
+		decodeSettingsJSON(t, response, &got)
+		wantSuffix := []string{"--acp", "--context", "long_context"}
+		if len(got.Command) < len(wantSuffix) || !reflect.DeepEqual(got.Command[len(got.Command)-len(wantSuffix):], wantSuffix) {
+			t.Fatalf("preview command = %#v, want suffix %#v", got.Command, wantSuffix)
+		}
+	})
 }
 
 // TestInstallJobEndpoints covers the job list/lookup pair and each distinct

@@ -584,8 +584,8 @@ func (a *Adapter) convertACPSessionNotification(n acp.SessionNotification) (*Age
 		}, true
 
 	case u.ConfigOptionUpdate != nil:
-		configOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
-		if len(configOptions) > 0 {
+		rawOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
+		if len(rawOptions) > 0 {
 			// Refresh the cached config options so emitSetModelEvent
 			// (called from SetModel) doesn't reuse the stale snapshot from
 			// session/new. Include the cached available models so the event
@@ -595,7 +595,13 @@ func (a *Adapter) convertACPSessionNotification(n acp.SessionNotification) (*Age
 				a.mu.Unlock()
 				return nil, true
 			}
-			cachedModels := a.availableModels
+			cachedModels := append([]modelInfo(nil), a.availableModels...)
+			configOptions := a.dialect.sessionConfigOptions(
+				nil,
+				u.ConfigOptionUpdate.ConfigOptions,
+				cachedModels,
+				currentModelFromConfig(rawOptions),
+			)
 			a.availableConfigOptions = configOptions
 			if modes, found := sessionModesFromConfig(configOptions); found {
 				a.availableModes = modes

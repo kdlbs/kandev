@@ -4,17 +4,35 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
-const copilotAgentID = "copilot-acp"
+const copilotAgentID = acpcompat.CopilotAgentID
 
 var copilotBackgroundAgentID = regexp.MustCompile(
 	`(?i)agent started in background with agent_id:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`,
 )
 
-func newCopilotACPDialect() acpDialect {
+func newCopilotACPDialect(launchArgs ...string) acpDialect {
+	activeContextTier, _ := acpcompat.ParseCopilotContextTierFromArgs(launchArgs)
 	return acpDialect{
+		normalizeSessionConfig: func(
+			base []streams.ConfigOption,
+			_ []modelInfo,
+			_ string,
+		) []streams.ConfigOption {
+			normalized, _ := acpcompat.NormalizeCopilotConfigOptions(base, activeContextTier)
+			return normalized
+		},
+		configAfterModelChange: func(
+			config []streams.ConfigOption,
+			_ []modelInfo,
+			_ string,
+		) []streams.ConfigOption {
+			normalized, _ := acpcompat.NormalizeCopilotConfigOptions(config, activeContextTier)
+			return normalized
+		},
 		subagentFrame:        parseCopilotSubagentFrame,
 		subagentResult:       copilotSubagentResult,
 		subagentControl:      copilotSubagentControl,

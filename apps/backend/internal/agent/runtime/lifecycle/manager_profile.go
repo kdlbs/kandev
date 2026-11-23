@@ -384,6 +384,50 @@ func (m *Manager) effectiveSessionRuntimeConfigWithPresence(
 	return model, mode, configOptions, configOptionsSet
 }
 
+func (m *Manager) resolveLaunchConfigOptions(
+	ctx context.Context,
+	taskID, sessionID string,
+	profileInfo *AgentProfileInfo,
+	runtimeConfigOverride *models.SessionRuntimeConfig,
+) map[string]string {
+	merged := make(map[string]string)
+	if profileInfo != nil {
+		for k, v := range profileInfo.ConfigOptions {
+			merged[k] = v
+		}
+	}
+	if m.workspaceInfoProvider != nil && sessionID != "" {
+		if info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, taskID, sessionID); err == nil && info != nil && info.RuntimeConfigOptionsSet {
+			for k, v := range info.RuntimeConfigOptions {
+				merged[k] = v
+			}
+		}
+	}
+	if runtimeConfigOverride != nil {
+		for k, v := range runtimeConfigOverride.ConfigOptions {
+			merged[k] = v
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
+func (m *Manager) resolveExecutionConfigOptions(
+	ctx context.Context,
+	execution *AgentExecution,
+	profileInfo *AgentProfileInfo,
+	runtimeConfigOverride *models.SessionRuntimeConfig,
+) map[string]string {
+	var taskID, sessionID string
+	if execution != nil {
+		taskID = execution.TaskID
+		sessionID = execution.SessionID
+	}
+	return m.resolveLaunchConfigOptions(ctx, taskID, sessionID, profileInfo, runtimeConfigOverride)
+}
+
 // effectiveSessionMode prefers a session-level permission mode persisted in the
 // session metadata (session_mode — declared via the set_session_mode workflow
 // action or a user toggle) over the agent profile's default mode. This makes a

@@ -732,6 +732,9 @@ func (m *Manager) applySessionConfigOption(
 	includeResult bool,
 	expectedModelID string,
 ) (SessionConfigurationResult, error) {
+	if isSynthesizedCopilotContextOptionForExecution(ctx, m.profileResolver, execution, configID) {
+		return m.applySynthesizedCopilotContextTier(ctx, execution, configID, value, expectedModelID)
+	}
 	execution.sessionConfigurationMu.Lock()
 	defer execution.sessionConfigurationMu.Unlock()
 	unknown := SessionConfigurationResult{ConfigID: configID, Requested: value, ExecutionID: execution.ID}
@@ -1225,6 +1228,12 @@ func (m *Manager) restoreSessionRuntimeConfigWithClient(ctx context.Context, exe
 	sort.Strings(optionIDs)
 	for _, id := range optionIDs {
 		value := options[id]
+		if isSynthesizedCopilotContextOptionForExecution(ctx, m.profileResolver, execution, id) {
+			if err := validateSynthesizedCopilotContextTierReplay(execution, value); err != nil {
+				return fmt.Errorf("restore session runtime option %q: %w", id, err)
+			}
+			continue
+		}
 		err := client.SetConfigOption(ctx, id, value)
 		if err != nil {
 			return fmt.Errorf("restore session runtime option %q: %w", id, err)
@@ -2045,7 +2054,7 @@ func (m *Manager) prepareAgentRestart(
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to get agent config for restart: %w", err)
 	}
-	commands, err := m.buildFreshAgentCommandWithProfile(ctx, execution, agentConfig, profileInfo)
+	commands, err := m.buildFreshAgentCommandWithProfileAndOverride(ctx, execution, agentConfig, profileInfo, runtimeConfigOverride)
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to rebuild agent command for restart: %w", err)
 	}
@@ -3643,6 +3652,16 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 	agentConfig agents.Agent,
 	profileInfo *AgentProfileInfo,
 ) (agentCommands, error) {
+	return m.buildFreshAgentCommandWithProfileAndOverride(ctx, execution, agentConfig, profileInfo, nil)
+}
+
+func (m *Manager) buildFreshAgentCommandWithProfileAndOverride(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	profileInfo *AgentProfileInfo,
+	runtimeConfigOverride *models.SessionRuntimeConfig,
+) (agentCommands, error) {
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)
@@ -3655,6 +3674,9 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 	}
 	if override := execution.metadataString(MetadataKeyModelOverride); override != "" {
 		model = override
+	}
+	if runtimeConfigOverride != nil && runtimeConfigOverride.Model != "" {
+		model = runtimeConfigOverride.Model
 	}
 
 	// Preserve the profile's cli_flags and command_prefix across restarts. A
@@ -3674,6 +3696,7 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 		SessionID:        "", // Fresh start — no resume flags
 		AutoApprove:      autoApprove,
 		PermissionValues: permissionValues,
+		ConfigOptions:    m.resolveExecutionConfigOptions(ctx, execution, profileInfo, runtimeConfigOverride),
 		CLIFlagTokens:    cliFlagTokens,
 		// Runtime is "standalone" / "docker" / "sprites" — MockAgent
 		// reads this to pick a bare name (container PATH lookup) vs.

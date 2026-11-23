@@ -83,6 +83,10 @@ Grok exposes some model, config, and usage surfaces through implementation-speci
 
 Grok ACP currently exposes neither per-turn cost nor subscription quota/reset values. Do not estimate them or treat the optional subscription tier label as usage data.
 
+### Copilot ACP dialect (`dialect_copilot.go`)
+
+GitHub Copilot CLI (`@github/copilot`) accepts context-window tier selection via startup `--context <default|long_context>`, omits `context_tier` from ACP `configOptions`, and rejects `session/set_config_option("context_tier", ...)` with `-32602`. `acpcompat.NormalizeCopilotConfigOptions` synthesizes a `context_tier` select (`category: "context_window"`, values `default` / `long_context`) seeded from the subprocess launch argv (`ParseCopilotContextTierFromArgs`) unless Copilot advertises a native context option. `dialect_copilot.go` re-applies that active value across `NewSession`, `LoadSession`, `ResumeSession`, authoritative post-mutation snapshots, and `ConfigOptionUpdate` notifications so model switches do not drop `context_tier`. Live `context_tier` changes on synthesized options are handled in `internal/agent/runtime/lifecycle/copilot_context_tier.go` by reloading an idle child subprocess via `agentctl` and restoring conversation history with `session/load` (falling back to `session/new` only on 0-turn session-not-found, and rejecting while a turn is active).
+
 ## ACP Protocol
 
 JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `initialize`, `session/new`, `session/load`, `session/resume`, `session/prompt`, `session/cancel`, `session/close`. Notifications: `session/update` with types `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,12 +18,158 @@ const (
 	copilotNativeTypeCompactionStart    = "session.compaction_start"
 	copilotNativeTypeCompactionComplete = "session.compaction_complete"
 	copilotNativeTypeUsage              = "session.usage_info"
+	copilotContextTierOptionID          = "context_tier"
+	copilotContextTierDefault           = "default"
+	copilotContextTierLong              = "long_context"
 )
+
+type copilotNativePersistedSession struct {
+	CreatedByPID int      `json:"created_by_pid"`
+	LoadCount    int      `json:"load_count"`
+	Prompts      []string `json:"prompts,omitempty"`
+}
 
 // copilotNativeFixtureEnabled reports whether this mock process should emit the
 // exact Copilot vendor notification method for the raw-wire E2E fixture.
 func copilotNativeFixtureEnabled() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("KANDEV_MOCK_COPILOT_NATIVE")), "true")
+}
+
+func parseContextTierFlag(args []string) (string, error) {
+	tier := copilotContextTierDefault
+	for index := 1; index < len(args); index++ {
+		arg := strings.TrimSpace(args[index])
+		var value string
+		var matched bool
+		if parsed, ok := strings.CutPrefix(arg, "--context="); ok {
+			value = strings.TrimSpace(parsed)
+			matched = true
+		} else if arg == "--context" {
+			if index+1 >= len(args) {
+				return "", fmt.Errorf("--context requires a value")
+			}
+			index++
+			value = strings.TrimSpace(args[index])
+			matched = true
+		}
+		if !matched {
+			continue
+		}
+		if value != copilotContextTierDefault && value != copilotContextTierLong {
+			return "", fmt.Errorf("invalid --context value %q (must be default or long_context)", value)
+		}
+		tier = value
+	}
+	return tier, nil
+}
+
+func (a *mockAgent) effectiveContextTier() string {
+	if a.contextTier == copilotContextTierLong {
+		return copilotContextTierLong
+	}
+	return copilotContextTierDefault
+}
+
+func copilotNativeSessionPath(sid acp.SessionId) string {
+	var safe strings.Builder
+	for _, r := range string(sid) {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			safe.WriteRune(r)
+		} else {
+			safe.WriteRune('_')
+		}
+	}
+	return filepath.Join(os.TempDir(), "kandev-mock-copilot-session-"+safe.String()+".json")
+}
+
+func loadCopilotNativeSessionState(sid acp.SessionId) (copilotNativePersistedSession, bool) {
+	raw, err := os.ReadFile(copilotNativeSessionPath(sid))
+	if err != nil {
+		return copilotNativePersistedSession{}, false
+	}
+	var state copilotNativePersistedSession
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return copilotNativePersistedSession{}, false
+	}
+	return state, true
+}
+
+func saveCopilotNativeSessionState(sid acp.SessionId, state copilotNativePersistedSession) {
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(copilotNativeSessionPath(sid), encoded, 0o600)
+}
+
+func recordCopilotNativeNewSession(sid acp.SessionId) {
+	if !copilotNativeFixtureEnabled() {
+		return
+	}
+	saveCopilotNativeSessionState(sid, copilotNativePersistedSession{
+		CreatedByPID: os.Getpid(),
+	})
+}
+
+func validateAndRecordCopilotNativeLoadSession(sid acp.SessionId) error {
+	if !copilotNativeFixtureEnabled() {
+		return nil
+	}
+	state, ok := loadCopilotNativeSessionState(sid)
+	if !ok || len(state.Prompts) == 0 {
+		return &acp.RequestError{
+			Code:    -32602,
+			Message: "Invalid params",
+			Data:    map[string]any{"details": fmt.Sprintf("Session not found: %s", sid)},
+		}
+	}
+	state.LoadCount++
+	saveCopilotNativeSessionState(sid, state)
+	return nil
+}
+
+func recordCopilotNativePrompt(sid acp.SessionId, prompt string) {
+	if !copilotNativeFixtureEnabled() {
+		return
+	}
+	state, ok := loadCopilotNativeSessionState(sid)
+	if !ok {
+		state = copilotNativePersistedSession{CreatedByPID: os.Getpid()}
+	}
+	state.Prompts = append(state.Prompts, prompt)
+	saveCopilotNativeSessionState(sid, state)
+}
+
+func clearCopilotNativeSessionState(sid acp.SessionId) {
+	_ = os.Remove(copilotNativeSessionPath(sid))
+}
+
+func (a *mockAgent) handleCopilotContextInfo(
+	ctx context.Context,
+	sid acp.SessionId,
+	prompt string,
+) (acp.PromptResponse, error, bool) {
+	if !copilotNativeFixtureEnabled() || !strings.Contains(prompt, "/e2e:copilot-context-info") {
+		return acp.PromptResponse{}, nil, false
+	}
+	state, _ := loadCopilotNativeSessionState(sid)
+	priorTurns := len(state.Prompts)
+	recordCopilotNativePrompt(sid, prompt)
+	summary := fmt.Sprintf(
+		"Copilot runtime context_tier=%s pid=%d session=%s loads=%d prior_turns=%d",
+		a.effectiveContextTier(),
+		os.Getpid(),
+		sid,
+		state.LoadCount,
+		priorTurns,
+	)
+	if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
+		SessionId: sid,
+		Update:    acp.UpdateAgentMessageText(summary),
+	}); err != nil {
+		return acp.PromptResponse{}, err, true
+	}
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
 }
 
 type copilotNativeFixtureData struct {

@@ -16,12 +16,16 @@ import (
 	"unsafe"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -341,6 +345,77 @@ func TestSessionConfigurationRetryRejectsWhenExpectedModelCannotBeVerified(t *te
 	overrides, _ := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
 	if overrides.ConfigOptions["thinking"] == "high" {
 		t.Fatal("saved option after refusing to verify the expected model")
+	}
+}
+
+// @covers AC-AGENTS-COPILOT-CONTEXT-TIER-003.3
+func TestCopilotContextTierActiveTurnRejectionReturnsRejectedWithoutPersisting(t *testing.T) {
+	setterCalls := make(chan struct{}, 1)
+	client := startConfigurationAgentctlStream(t, func(request ws.Message, connection *websocket.Conn) {
+		select {
+		case setterCalls <- struct{}{}:
+		default:
+		}
+		response, _ := ws.NewResponse(request.ID, request.Action, map[string]any{
+			"requested": "long_context", "effective": "long_context", "confirmed": true,
+		})
+		_ = connection.WriteJSON(response)
+	})
+
+	log := processConfigurationTestLogger(t)
+	session := &models.TaskSession{
+		ID:     "session-copilot-busy",
+		TaskID: "task-1",
+		State:  models.TaskSessionStateRunning,
+	}
+	repo := &mockRepository{sessions: map[string]*models.TaskSession{session.ID: session}}
+	svc := processConfigurationService(repo, repo, log)
+	mgr := newLifecycleManager(t, log)
+	execution := (&lifecycle.ExecutorInstance{InstanceID: "exec-copilot-busy", Client: client}).ToAgentExecution(
+		&lifecycle.ExecutorCreateRequest{SessionID: session.ID, TaskID: session.TaskID},
+	)
+	execution.AgentID = agents.CopilotACPAgentID
+	execution.ACPSessionID = "acp-copilot-busy"
+	execution.AgentArgs = []string{"copilot", "--acp", "--stdio", "--context", "default"}
+	execution.Status = v1.AgentStatusRunning
+	opts, _ := acpcompat.NormalizeCopilotConfigOptions(nil, "default")
+	execution.SetModelState(&lifecycle.CachedModelState{
+		CurrentModelID:       "gpt-5.4",
+		Models:               []streams.SessionModelInfo{{ModelID: "gpt-5.4"}},
+		ConfigOptions:        opts,
+		ConfigOptionsSettled: true,
+	})
+	setHandlerExecutionInitialized(t, execution)
+	addExecution(t, mgr, execution)
+
+	router := newProcessStopRouter(t, svc, mgr, log)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/task-sessions/session-copilot-busy/set-config-option",
+		strings.NewReader(`{"config_id":"context_tier","value":"long_context"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", recorder.Code, recorder.Body.String())
+	}
+	var response sessionConfigurationHTTPResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.ConfigurationResult.Status != "rejected" || response.ConfigurationResult.Confirmed {
+		t.Fatalf("configuration_result = %+v, want rejected without confirmation", response.ConfigurationResult)
+	}
+	overrides, _ := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
+	if overrides.ConfigOptions["context_tier"] == "long_context" {
+		t.Fatal("persisted rejected context_tier while turn was active")
+	}
+	select {
+	case <-setterCalls:
+		t.Fatal("sent unsupported ACP SetConfigOption(context_tier) to agentctl")
+	default:
 	}
 }
 

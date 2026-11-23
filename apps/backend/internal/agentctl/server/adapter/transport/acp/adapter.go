@@ -591,7 +591,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		copilotNativeSessionEvents:        cfg.CopilotNativeSessionEvents && cfg.AgentID == copilotAgentID,
 		backgroundWorkEnabled:             cfg.AgentBackgroundWorkEnabled,
 		normalizer:                        NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
-		dialect:                           newACPDialect(cfg.AgentID),
+		dialect:                           newACPDialectWithArgs(cfg.AgentID, cfg.LaunchArgs),
 		updatesCh:                         make(chan AgentEvent, 100),
 		notifQueue:                        make(chan notifWork, notifQueueCapacity),
 		activeToolCalls:                   make(map[string]*streams.NormalizedPayload),

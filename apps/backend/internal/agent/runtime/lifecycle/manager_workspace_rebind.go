@@ -298,6 +298,12 @@ func (m *Manager) reapplyReboundSessionConfig(
 				strings.EqualFold(option.Category, "mode") {
 				continue
 			}
+			if isSynthesizedCopilotContextOptionForExecution(ctx, m.profileResolver, execution, option.ID) {
+				if err := validateSynthesizedCopilotContextTierReplay(execution, option.CurrentValue); err != nil {
+					return fmt.Errorf("failed to re-apply config option %q: %w", option.ID, err)
+				}
+				continue
+			}
 			client, releaseClient := execution.AcquireAgentCtlClient()
 			if client == nil {
 				return fmt.Errorf("agentctl client is unavailable")

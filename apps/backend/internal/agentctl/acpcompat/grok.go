@@ -48,6 +48,10 @@ func NormalizeSessionConfig(
 	models []Model,
 	currentModelID string,
 ) []streams.ConfigOption {
+	if agentID == CopilotAgentID {
+		normalized, _ := NormalizeCopilotConfigOptions(base, CopilotContextTierDefault)
+		return normalized
+	}
 	if agentID != GrokAgentID {
 		return base
 	}
@@ -167,7 +171,7 @@ func buildModelOption(models []Model, currentModelID string) *streams.ConfigOpti
 		return nil
 	}
 	return &streams.ConfigOption{
-		Type:         "select",
+		Type:         configOptionTypeSelect,
 		ID:           modelOptionID,
 		Category:     modelOptionID,
 		Name:         "Model",
@@ -187,7 +191,7 @@ func buildReasoningOption(models []Model, modelID, selected string) *streams.Con
 	}
 	current := resolveEffort(selected, options, defaultEffort, model.Meta)
 	return &streams.ConfigOption{
-		Type:         "select",
+		Type:         configOptionTypeSelect,
 		ID:           GrokReasoningEffortOptionID,
 		Category:     grokReasoningCategory,
 		Name:         grokReasoningName,

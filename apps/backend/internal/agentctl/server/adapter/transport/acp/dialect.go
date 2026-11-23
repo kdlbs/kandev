@@ -62,6 +62,10 @@ type contextWindowSample struct {
 }
 
 func newACPDialect(agentID string) acpDialect {
+	return newACPDialectWithArgs(agentID, nil)
+}
+
+func newACPDialectWithArgs(agentID string, launchArgs []string) acpDialect {
 	switch agentID {
 	case grokAgentID:
 		return newGrokACPDialect()
@@ -72,7 +76,7 @@ func newACPDialect(agentID string) acpDialect {
 	case claudeAgentID:
 		return newClaudeACPDialect()
 	case copilotAgentID:
-		return newCopilotACPDialect()
+		return newCopilotACPDialect(launchArgs...)
 	case openCodeAgentID:
 		return newOpenCodeACPDialect()
 	case mockAgentID:

@@ -15,6 +15,7 @@ type CommandPreviewCardProps = {
   agentName: string;
   model: string;
   permissionSettings: Record<string, boolean>;
+  configOptions?: Record<string, string>;
   cliPassthrough: boolean;
   cliFlags: CLIFlag[];
   commandPrefix?: string;
@@ -155,20 +156,26 @@ function CommandPreviewContent({ preview, cliPassthrough, envPrefix }: CommandPr
   );
 }
 
-export function CommandPreviewCard({
+function canonicalConfigOptions(
+  configOptions?: Record<string, string>,
+): Record<string, string> | undefined {
+  if (!configOptions) return undefined;
+  return Object.fromEntries(
+    Object.entries(configOptions).sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+function useCommandPreview({
   agentName,
   model,
   permissionSettings,
+  configOptions,
   cliPassthrough,
   cliFlags,
   commandPrefix,
-  envVars,
-  secrets,
   copilotSelectedPlugins,
-  discoveryTargetId,
-}: CommandPreviewCardProps) {
+}: Omit<CommandPreviewCardProps, "envVars" | "secrets" | "discoveryTargetId">) {
   const { t } = useTranslation();
-  const envPrefix = useMemo(() => buildEnvPrefix(envVars, secrets), [envVars, secrets]);
   const [preview, setPreview] = useState<CommandPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -183,12 +190,21 @@ export function CommandPreviewCard({
       JSON.stringify({
         model,
         permissionSettings,
+        configOptions: canonicalConfigOptions(configOptions),
         cliPassthrough,
         cliFlags,
         commandPrefix,
         copilotSelectedPlugins,
       }),
-    [model, permissionSettings, cliPassthrough, cliFlags, commandPrefix, copilotSelectedPlugins],
+    [
+      model,
+      permissionSettings,
+      configOptions,
+      cliPassthrough,
+      cliFlags,
+      commandPrefix,
+      copilotSelectedPlugins,
+    ],
   );
 
   useEffect(() => {
@@ -201,6 +217,7 @@ export function CommandPreviewCard({
         const response = await previewAgentCommandAction(agentName, {
           model,
           permission_settings: permissionSettings,
+          config_options: configOptions,
           cli_passthrough: cliPassthrough,
           cli_flags: cliFlags,
           command_prefix: commandPrefix,
@@ -219,8 +236,37 @@ export function CommandPreviewCard({
     }, 300);
 
     return () => clearTimeout(timeoutId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- settingsKey already includes model, permissionSettings, cliPassthrough, cliFlags, commandPrefix
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- settingsKey already tracks all preview inputs
   }, [agentName, settingsKey]);
+
+  return { preview, loading, error };
+}
+
+export function CommandPreviewCard({
+  agentName,
+  model,
+  permissionSettings,
+  configOptions,
+  cliPassthrough,
+  cliFlags,
+  commandPrefix,
+  envVars,
+  secrets,
+  copilotSelectedPlugins,
+  discoveryTargetId,
+}: CommandPreviewCardProps) {
+  const { t } = useTranslation();
+  const envPrefix = useMemo(() => buildEnvPrefix(envVars, secrets), [envVars, secrets]);
+  const { preview, loading, error } = useCommandPreview({
+    agentName,
+    model,
+    permissionSettings,
+    configOptions,
+    cliPassthrough,
+    cliFlags,
+    commandPrefix,
+    copilotSelectedPlugins,
+  });
 
   return (
     <SettingsCard discoveryTargetId={discoveryTargetId}>

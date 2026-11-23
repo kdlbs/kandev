@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // These sanitized fixtures retain the parent/child identities and result shapes
@@ -191,4 +193,95 @@ func findCopilotEvent(events []AgentEvent, toolCallID string) *AgentEvent {
 		}
 	}
 	return nil
+}
+
+// @covers AC-AGENTS-COPILOT-CONTEXT-TIER-001.1, AC-AGENTS-COPILOT-CONTEXT-TIER-001.3, AC-AGENTS-COPILOT-CONTEXT-TIER-002.1
+func TestCopilotAdapterPreservesContextTierAcrossUpdates(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stderr"})
+	a := NewAdapter(&shared.Config{
+		AgentID:    "copilot-acp",
+		WorkDir:    t.TempDir(),
+		LaunchArgs: []string{"npx", "@github/copilot", "--acp", "--context", "long_context"},
+	}, log)
+	t.Cleanup(func() { _ = a.Close() })
+
+	modeCat := acpsdk.SessionConfigOptionCategoryMode
+	modelCat := acpsdk.SessionConfigOptionCategoryModel
+	thoughtCat := acpsdk.SessionConfigOptionCategoryThoughtLevel
+	modeOpts := acpsdk.SessionConfigSelectOptionsUngrouped{{Value: "agent", Name: "Agent"}}
+	modelOpts := acpsdk.SessionConfigSelectOptionsUngrouped{{Value: "gpt-5.4", Name: "GPT-5.4"}}
+	thoughtOpts := acpsdk.SessionConfigSelectOptionsUngrouped{{Value: "medium", Name: "Medium"}, {Value: "high", Name: "High"}}
+	wireOpts := []acpsdk.SessionConfigOption{
+		{Select: &acpsdk.SessionConfigOptionSelect{
+			Id: "mode", Name: "Session Mode", Type: "select", Category: &modeCat, CurrentValue: "agent",
+			Options: acpsdk.SessionConfigSelectOptions{Ungrouped: &modeOpts},
+		}},
+		{Select: &acpsdk.SessionConfigOptionSelect{
+			Id: "model", Name: "Model", Type: "select", Category: &modelCat, CurrentValue: "gpt-5.4",
+			Options: acpsdk.SessionConfigSelectOptions{Ungrouped: &modelOpts},
+		}},
+		{Select: &acpsdk.SessionConfigOptionSelect{
+			Id: "reasoning_effort", Name: "Reasoning Effort", Type: "select", Category: &thoughtCat, CurrentValue: "medium",
+			Options: acpsdk.SessionConfigSelectOptions{Ungrouped: &thoughtOpts},
+		}},
+	}
+
+	// 1. Initial session config state reflects --context long_context.
+	_, initialOpts := a.initialSessionConfigState(nil, wireOpts, nil)
+	assertContextTierCurrentValue(t, initialOpts, "long_context")
+
+	a.mu.Lock()
+	a.sessionID = "sess-copilot"
+	a.availableConfigOptions = initialOpts
+	a.mu.Unlock()
+
+	// 2. Authoritative config response (e.g. after SetModel or SetConfigOption) retains context_tier.
+	a.emitAuthoritativeConfigOptions("sess-copilot", "reasoning_effort", wireOpts, nil, false)
+	events := drainEvents(a)
+	var modelsEvent *AgentEvent
+	for i := range events {
+		if events[i].Type == streams.EventTypeSessionModels {
+			modelsEvent = &events[i]
+			break
+		}
+	}
+	if modelsEvent == nil {
+		t.Fatalf("expected EventTypeSessionModels in authoritative config events, got %+v", events)
+	}
+	assertContextTierCurrentValue(t, modelsEvent.ConfigOptions, "long_context")
+
+	// 3. Unsolicited ConfigOptionUpdate notification retains context_tier.
+	a.handleACPUpdate(acpsdk.SessionNotification{
+		SessionId: "sess-copilot",
+		Update: acpsdk.SessionUpdate{
+			ConfigOptionUpdate: &acpsdk.SessionConfigOptionUpdate{
+				ConfigOptions: wireOpts,
+			},
+		},
+	}, 0)
+	updateEvents := drainEvents(a)
+	var updateModelsEvent *AgentEvent
+	for i := range updateEvents {
+		if updateEvents[i].Type == streams.EventTypeSessionModels {
+			updateModelsEvent = &updateEvents[i]
+			break
+		}
+	}
+	if updateModelsEvent == nil {
+		t.Fatalf("expected EventTypeSessionModels in ConfigOptionUpdate events, got %+v", updateEvents)
+	}
+	assertContextTierCurrentValue(t, updateModelsEvent.ConfigOptions, "long_context")
+}
+
+func assertContextTierCurrentValue(t *testing.T, opts []streams.ConfigOption, want string) {
+	t.Helper()
+	for _, opt := range opts {
+		if opt.ID == "context_tier" {
+			if opt.CurrentValue != want {
+				t.Fatalf("context_tier CurrentValue = %q, want %q", opt.CurrentValue, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing context_tier in options: %+v", opts)
 }

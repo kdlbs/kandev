@@ -62,6 +62,7 @@ type restartMockAgentctlServer struct {
 	failSessionNew                    bool
 	initializeError                   string
 	sessionNewError                   string
+	sessionLoadError                  string
 	configureError                    string
 	startError                        string
 	failSessionReset                  bool
@@ -89,6 +90,7 @@ type restartMockAgentctlServer struct {
 	preparationDirectives             []agentctltypes.ManagedRuntimePreparationDirective
 	loadedSessionIDs                  []string
 	promptCalls                       int
+	emitPromptComplete                bool
 	onReset                           func()
 	onSessionNew                      func()
 	onCacheRepair                     func()
@@ -385,12 +387,25 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				}
 				_ = json.Unmarshal(msg.Payload, &request)
 				m.mu.Lock()
+				sessionLoadError := m.sessionLoadError
 				m.loadedSessionIDs = append(m.loadedSessionIDs, request.SessionID)
+				loadModelState := m.newModelState
+				if loadModelState == nil {
+					loadModelState = m.modelState
+				}
 				m.mu.Unlock()
-				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				if sessionLoadError != "" {
+					resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, sessionLoadError, nil)
+					break
+				}
+				payload := map[string]interface{}{
 					"success":    true,
 					"session_id": request.SessionID,
-				})
+				}
+				if loadModelState != nil {
+					payload["model_state"] = loadModelState
+				}
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, payload)
 			case "agent.session.reset":
 				if m.onReset != nil {
 					m.onReset()
@@ -461,12 +476,42 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					})
 				}
 			case "agent.prompt":
+				var promptReq struct {
+					PromptGeneration uint64 `json:"prompt_generation"`
+				}
+				_ = json.Unmarshal(msg.Payload, &promptReq)
 				m.mu.Lock()
 				m.promptCalls++
+				emitComplete := m.emitPromptComplete
 				m.mu.Unlock()
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"success": true,
 				})
+				data, _ := json.Marshal(resp)
+				if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+					return
+				}
+				if emitComplete {
+					chunkData, _ := json.Marshal(agentctl.AgentEvent{
+						Type:             streams.EventTypeMessageChunk,
+						SessionID:        "copilot-acp-session-1",
+						PromptGeneration: promptReq.PromptGeneration,
+						Text:             "reloaded turn reply",
+					})
+					if err := conn.WriteMessage(websocket.TextMessage, chunkData); err != nil {
+						return
+					}
+					completeData, _ := json.Marshal(agentctl.AgentEvent{
+						Type:             streams.EventTypeComplete,
+						SessionID:        "copilot-acp-session-1",
+						PromptGeneration: promptReq.PromptGeneration,
+						Data:             map[string]any{"stop_reason": "end_turn"},
+					})
+					if err := conn.WriteMessage(websocket.TextMessage, completeData); err != nil {
+						return
+					}
+				}
+				continue
 			case "agent.stderr":
 				m.mu.Lock()
 				stderrLines := append([]string(nil), m.stderrLines...)

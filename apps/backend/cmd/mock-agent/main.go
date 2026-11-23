@@ -53,6 +53,7 @@ type mockAgent struct {
 	conn                           sessionUpdater
 	rawOut                         *serializedACPWriter
 	model                          string
+	contextTier                    string
 	copilotNativeSubscribed        bool
 	clientSupportsCompaction       bool
 	sessions                       map[acp.SessionId]bool
@@ -88,6 +89,11 @@ func main() {
 		return
 	}
 	model := parseModelFlag()
+	contextTier, err := parseContextTierFlag(os.Args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 
 	// TUI mode: simple terminal UI for passthrough/PTY testing
 	if parseTUIFlag() {
@@ -111,6 +117,7 @@ func main() {
 
 	ag := &mockAgent{
 		model:                          model,
+		contextTier:                    contextTier,
 		sessions:                       make(map[acp.SessionId]bool),
 		promptCancels:                  make(map[acp.SessionId]context.CancelFunc),
 		promptCancelHolds:              make(map[acp.SessionId]chan struct{}),
@@ -222,6 +229,7 @@ func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (
 	}
 	a.sessionMCPServers[sid] = cloneMCPServerDefs(sessionMCPServers)
 	a.mu.Unlock()
+	recordCopilotNativeNewSession(sid)
 	a.recordPromptSuggestionRequest(sid, req.Meta)
 
 	primeKandevMCPToolCatalog(ctx)
@@ -426,6 +434,9 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 			return acp.LoadSessionResponse{}, ctx.Err()
 		}
 	}
+	if err := validateAndRecordCopilotNativeLoadSession(req.SessionId); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
 	sessionMCPServers := registerACPMcpServers(req.McpServers)
 	a.recordPromptSuggestionRequest(req.SessionId, req.Meta)
 	a.mu.Lock()
@@ -503,7 +514,11 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 		a.mu.Unlock()
 	}()
 
+	if resp, err, handled := a.handleCopilotContextInfo(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	if resp, err, handled := a.handleCopilotNativeFixture(promptCtx, req.SessionId, prompt); handled {
+		recordCopilotNativePrompt(req.SessionId, prompt)
 		return resp, err
 	}
 	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)
@@ -576,6 +591,7 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
+	recordCopilotNativePrompt(req.SessionId, prompt)
 	go a.emitPromptSuggestionAfterResponse(req.SessionId, prompt)
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn, Usage: mockPromptUsage(prompt)}, nil
 }
@@ -714,6 +730,16 @@ func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSession
 	if req.ValueId == nil {
 		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("mock agent supports select config options only")
 	}
+	if copilotNativeFixtureEnabled() && req.ValueId.ConfigId == copilotContextTierOptionID {
+		return acp.SetSessionConfigOptionResponse{}, &acp.RequestError{
+			Code:    -32602,
+			Message: "Invalid params",
+			Data: map[string]any{
+				"configId": copilotContextTierOptionID,
+				"reason":   "Unsupported config option: context_tier",
+			},
+		}
+	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -804,6 +830,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
 	_ = os.Remove(promptErrorCounterPath(req.SessionId))
 	_ = os.Remove(mockContinuationPath(req.SessionId))
+	clearCopilotNativeSessionState(req.SessionId)
 	if dynamicFallbackCounterID == "" {
 		_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(req.SessionId))
 	}

@@ -104,6 +104,11 @@ func (a *MockAgent) BuildPassthroughCommand(opts PassthroughOptions) Command {
 	if opts.Runtime == agentruntime.RuntimeSSH && opts.BaseCommand.IsEmpty() {
 		opts.BaseCommand = NewCommand(mockAgentDefaultID, "--tui")
 	}
+	if a.ID() == CopilotACPAgentID {
+		if tier, ok := resolveCopilotContextTierCLIFlag(opts.ConfigOptions, opts.CLIFlagTokens); ok {
+			opts.CLIFlagTokens = append([]string{"--context", tier}, opts.CLIFlagTokens...)
+		}
+	}
 	return a.StandardPassthrough.BuildPassthroughCommand(opts)
 }
 
@@ -187,13 +192,21 @@ func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
 	// doesn't include apps/backend/bin). Fall back to the bare name when
 	// no path is set: e2e fixtures prepend the kandev bin dir to PATH.
 	if opts.Runtime.IsContainerized() || opts.Runtime == agentruntime.RuntimeSSH {
-		return Cmd(mockAgentDefaultID).Build()
+		cmd := Cmd(mockAgentDefaultID).Build()
+		if a.ID() == CopilotACPAgentID {
+			return appendCopilotContextTierFlag(cmd, opts.ConfigOptions, opts.CLIFlagTokens)
+		}
+		return cmd
 	}
 	binary := mockAgentDefaultID
 	if a.binaryPath != "" {
 		binary = a.binaryPath
 	}
-	return Cmd(binary).Build()
+	cmd := Cmd(binary).Build()
+	if a.ID() == CopilotACPAgentID {
+		return appendCopilotContextTierFlag(cmd, opts.ConfigOptions, opts.CLIFlagTokens)
+	}
+	return cmd
 }
 
 func (a *MockAgent) Runtime() *RuntimeConfig {

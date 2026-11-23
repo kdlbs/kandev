@@ -1037,6 +1037,9 @@ func setStartupSessionConfigOption(
 	client *agentctl.Client,
 	configID, value string,
 ) error {
+	if isSynthesizedCopilotContextOptionForExecution(ctx, nil, execution, configID) {
+		return validateSynthesizedCopilotContextTierReplay(execution, value)
+	}
 	if execution != nil && execution.sessionSettingsStartupPolicy() == SessionSettingsPolicyProviderRestored {
 		return client.SetConfigOptionWithPolicy(ctx, configID, value, streams.SessionSettingsPolicyProviderRestored)
 	}

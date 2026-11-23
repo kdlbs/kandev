@@ -200,3 +200,61 @@ describe("CommandPreviewCard deferred Copilot mounts", () => {
     );
   });
 });
+
+describe("CommandPreviewCard configOptions", () => {
+  // @covers AC-AGENTS-COPILOT-CONTEXT-TIER-002.3
+  it("forwards config_options and refreshes preview when context_tier changes", async () => {
+    previewAgentCommandActionMock
+      .mockImplementationOnce(async () =>
+        response("npx --yes @github/copilot@1.0.114 --acp --context default"),
+      )
+      .mockImplementationOnce(async () =>
+        response("npx --yes @github/copilot@1.0.114 --acp --context long_context"),
+      );
+
+    const { rerender } = render(
+      <CommandPreviewCard
+        agentName="copilot-acp"
+        model="gpt-5.4"
+        permissionSettings={{}}
+        configOptions={{ context_tier: "default" }}
+        cliPassthrough={false}
+        cliFlags={[]}
+        commandPrefix=""
+      />,
+    );
+
+    await waitFor(() =>
+      expect(previewAgentCommandActionMock).toHaveBeenCalledWith(
+        "copilot-acp",
+        expect.objectContaining({
+          config_options: { context_tier: "default" },
+        }),
+      ),
+    );
+
+    rerender(
+      <CommandPreviewCard
+        agentName="copilot-acp"
+        model="gpt-5.4"
+        permissionSettings={{}}
+        configOptions={{ context_tier: "long_context" }}
+        cliPassthrough={false}
+        cliFlags={[]}
+        commandPrefix=""
+      />,
+    );
+
+    await waitFor(() =>
+      expect(previewAgentCommandActionMock).toHaveBeenLastCalledWith(
+        "copilot-acp",
+        expect.objectContaining({
+          config_options: { context_tier: "long_context" },
+        }),
+      ),
+    );
+    expect(
+      await screen.findByText("npx --yes @github/copilot@1.0.114 --acp --context long_context"),
+    ).toBeTruthy();
+  });
+});

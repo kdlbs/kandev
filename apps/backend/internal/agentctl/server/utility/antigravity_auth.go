@@ -25,13 +25,14 @@ type authSessionArgs struct {
 	policy        *acpcompat.AuthPolicy
 	consent       <-chan string
 	onInitialized func()
+	launchArgs    []string
 }
 
-func authSessionOptions(args []authSessionArgs) (*acpcompat.AuthPolicy, <-chan string, func()) {
+func authSessionOptions(args []authSessionArgs) (*acpcompat.AuthPolicy, <-chan string, func(), []string) {
 	if len(args) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
-	return args[0].policy, args[0].consent, args[0].onInitialized
+	return args[0].policy, args[0].consent, args[0].onInitialized, args[0].launchArgs
 }
 
 func prepareAntigravityUtilityEnv(

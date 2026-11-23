@@ -2624,6 +2624,7 @@ func (m *Manager) buildAdapterConfig() error {
 		AuthPolicy:                 m.cfg.AuthPolicy,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
 		CopilotNativeSessionEvents: m.cfg.CopilotNativeSessionEvents,
+		LaunchArgs:                 append([]string(nil), m.cfg.AgentArgs...),
 	}
 
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {

@@ -199,6 +199,7 @@ func resolvePermissionDefaults(permSettings map[string]agents.PermissionSetting)
 type CommandPreviewRequest struct {
 	Model                  string
 	PermissionSettings     map[string]bool
+	ConfigOptions          map[string]string
 	CLIPassthrough         bool
 	CLIFlags               []dto.CLIFlagDTO
 	CommandPrefix          string
@@ -246,6 +247,7 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		cmd = ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 			Model:            req.Model,
 			PermissionValues: req.PermissionSettings,
+			ConfigOptions:    req.ConfigOptions,
 			CLIFlagTokens:    cliFlagTokens,
 			BaseCommand:      copilotBase,
 		})
@@ -265,6 +267,7 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		cmd = agentConfig.BuildCommand(agents.CommandOptions{
 			Model:                 req.Model,
 			PermissionValues:      req.PermissionSettings,
+			ConfigOptions:         req.ConfigOptions,
 			CLIFlagTokens:         cliFlagTokens,
 			PreferNativeBinary:    len(copilotPlugins) == 0 && previewPrefersNativeBinary(agentConfig),
 			ManagedRuntimeVersion: managedRuntimeVersion,

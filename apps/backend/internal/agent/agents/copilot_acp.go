@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -94,7 +95,34 @@ func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) 
 func (a *CopilotACP) NativeBinaryName() string { return copilotNativeBinary }
 
 func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
+	cmd := a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
+	return appendCopilotContextTierFlag(cmd, opts.ConfigOptions, opts.CLIFlagTokens)
+}
+
+func (a *CopilotACP) BuildPassthroughCommand(opts PassthroughOptions) Command {
+	if tier, ok := resolveCopilotContextTierCLIFlag(opts.ConfigOptions, opts.CLIFlagTokens); ok {
+		opts.CLIFlagTokens = append([]string{"--context", tier}, opts.CLIFlagTokens...)
+	}
+	return a.StandardPassthrough.BuildPassthroughCommand(opts)
+}
+
+func appendCopilotContextTierFlag(cmd Command, configOptions map[string]string, cliFlagTokens []string) Command {
+	tier, ok := resolveCopilotContextTierCLIFlag(configOptions, cliFlagTokens)
+	if !ok {
+		return cmd
+	}
+	return cmd.With().Flag("--context", tier).Build()
+}
+
+func resolveCopilotContextTierCLIFlag(configOptions map[string]string, cliFlagTokens []string) (string, bool) {
+	if len(configOptions) == 0 || acpcompat.HasCopilotContextCLIFlag(cliFlagTokens) {
+		return "", false
+	}
+	tier := configOptions[acpcompat.CopilotContextTierOptionID]
+	if !acpcompat.IsValidCopilotContextTier(tier) {
+		return "", false
+	}
+	return tier, true
 }
 
 func (a *CopilotACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {

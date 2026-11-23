@@ -154,6 +154,7 @@ export async function getAgentProfileMcpConfig(
 export type CommandPreviewRequest = {
   model: string;
   permission_settings: Record<string, boolean>;
+  config_options?: Record<string, string>;
   cli_passthrough: boolean;
 };
 

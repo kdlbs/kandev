@@ -244,7 +244,8 @@ type CommandOptions struct {
 	AutoApprove         bool
 	PermissionPolicy    string          // "autonomous", "supervised", "plan"
 	PermissionValues    map[string]bool // e.g. {"allow_indexing": true}
-	AgentType           string          // for --agent flag (e.g. "task" for subagent)
+	ConfigOptions       map[string]string
+	AgentType           string // for --agent flag (e.g. "task" for subagent)
 	// CLIFlagTokens are user-configured CLI flag argv tokens derived from
 	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
 	// verbatim by lifecycle.CommandBuilder after the agent builds its command.
@@ -283,6 +284,7 @@ type PassthroughOptions struct {
 	Prompt           string          // initial prompt for new sessions
 	Resume           bool            // generic "continue last session" (e.g. -c, --resume latest)
 	PermissionValues map[string]bool // e.g. {"auto_approve": true}
+	ConfigOptions    map[string]string
 	WorkDir          string
 	// MCPArgs are extra argv tokens produced by the agent's MCP passthrough
 	// strategy (e.g. claude's "--mcp-config <path>", codex's repeated "-c
