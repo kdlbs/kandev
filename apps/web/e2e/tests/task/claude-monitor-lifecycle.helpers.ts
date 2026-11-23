@@ -7,6 +7,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 const MONITOR_IDS = ["monitor-task-first", "monitor-task-second"] as const;
+const MONITOR_PROMPT = "/claude-monitor-lifecycle";
 const DRAFT = "keep this draft while both Monitors finish";
 
 async function createClaudeMonitorProfile(
@@ -77,15 +78,10 @@ async function expandMonitorCards(session: SessionPage): Promise<void> {
   for (let groupIndex = groupCount - 1; groupIndex >= 0; groupIndex--) {
     const group = groups.nth(groupIndex);
     await expect(group).toBeVisible({ timeout: 30_000 });
-    for (let attempt = 0; attempt < 2; attempt++) {
+    if ((await group.getAttribute("aria-expanded")) !== "true") {
       await group.click();
-      try {
-        await expect(cards).toHaveCount(2, { timeout: 1_500 });
-        return;
-      } catch {
-        // Reopen a group if it was auto-expanded while its owning turn was active.
-      }
     }
+    if ((await cards.count()) === 2) return;
   }
   await expect(cards).toHaveCount(2, { timeout: 30_000 });
 }
@@ -166,7 +162,7 @@ export async function expectClaudeMonitorLifecycle(
   await session.waitForLoad();
   const sessionId = task.session_id ?? (await firstSessionId(apiClient, task.id));
 
-  await session.sendMessageViaButton("/claude-monitor-lifecycle");
+  await session.sendMessageViaButton(MONITOR_PROMPT);
   await session.expectChatResponseVisible("Two Claude Monitors are watching.");
   await session.waitForChatIdle({ timeout: 30_000 });
   await expect
@@ -175,6 +171,14 @@ export async function expectClaudeMonitorLifecycle(
       timeout: 30_000,
     })
     .toBe(2);
+  // Wait for the transcript to settle the turn before opening its auto-expanded tool group.
+  const monitorPrompt = session
+    .activeChat()
+    .locator('[id^="msg-"]')
+    .filter({
+      has: page.getByTestId("user-message-bubble").getByText(MONITOR_PROMPT, { exact: true }),
+    });
+  await expect(monitorPrompt.getByTestId("message-turn-duration")).toHaveCount(1);
   await expandMonitorCards(session);
   const monitorCards = session.activeChat().locator('[data-testid="monitor-card"]:visible');
   await expectMonitorCardStatus(session, 0, "watching");

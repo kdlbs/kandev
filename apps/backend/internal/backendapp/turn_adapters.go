@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
@@ -56,6 +57,14 @@ func (a *turnServiceAdapter) ReconcileUnpublishedPromptTurns(ctx context.Context
 
 func (a *turnServiceAdapter) CompleteTurn(ctx context.Context, turnID string) error {
 	return a.svc.CompleteTurn(ctx, turnID)
+}
+
+func (a *turnServiceAdapter) CompleteTurnWithConfigurationResult(
+	ctx context.Context,
+	turnID string,
+	result *streams.ConfigurationCommandResult,
+) error {
+	return a.svc.CompleteTurnWithConfigurationResult(ctx, turnID, result)
 }
 
 func (a *turnServiceAdapter) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {

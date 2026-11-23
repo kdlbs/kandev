@@ -1,5 +1,7 @@
 "use client";
 
+import { FileViewerOptions } from "./file-viewer-options";
+import { PluginFilePreview } from "./plugin-file-preview";
 import { TabsContent } from "@kandev/ui/tabs";
 import { FileEditorContent } from "./file-editor-content";
 import { FileImageViewer } from "./file-image-viewer";
@@ -55,7 +57,10 @@ export function FileTabContent({
 
   return (
     <TabsContent value={`file:${getFileTabKey(tab)}`} className="flex-1 min-h-0">
-      {category === "image" && (
+      {tab.previewOnly && activeSessionId && (
+        <PluginFilePreview path={tab.path} repo={tab.repo} sessionId={activeSessionId} />
+      )}
+      {!tab.previewOnly && category === "image" && (
         <FileImageViewer
           isSymlink={!!tab.resolvedPath}
           path={tab.path}
@@ -64,7 +69,7 @@ export function FileTabContent({
           headerActions={externalLink}
         />
       )}
-      {category === "binary" && (
+      {!tab.previewOnly && category === "binary" && (
         <FileBinaryViewer
           isSymlink={!!tab.resolvedPath}
           path={tab.path}
@@ -72,27 +77,29 @@ export function FileTabContent({
           headerActions={externalLink}
         />
       )}
-      {category === "text" && (
-        <FileEditorContent
-          isSymlink={!!tab.resolvedPath}
-          path={tab.path}
-          content={tab.content}
-          originalContent={tab.originalContent}
-          isDirty={tab.isDirty}
-          isSaving={isSaving}
-          sessionId={activeSessionId || undefined}
-          taskId={taskId}
-          repositoryId={activeSession?.repository_id ?? undefined}
-          worktreePath={workspacePath}
-          repo={tab.repo}
-          enableComments={!!activeSessionId}
-          previewKind={previewKind}
-          renderedPreview={previewKind === "markdown" && !!tab.renderedPreview}
-          onTogglePreview={previewKind === "markdown" ? onTogglePreview : undefined}
-          onChange={(newContent) => onFileChange(tab.path, newContent, tab.repo)}
-          onSave={() => onFileSave(tab.path, tab.repo)}
-          onDelete={() => onFileDelete(tab.path, tab.repo)}
-        />
+      {!tab.previewOnly && category === "text" && (
+        <FileViewerOptions path={tab.path} repo={tab.repo} sessionId={activeSessionId}>
+          <FileEditorContent
+            isSymlink={!!tab.resolvedPath}
+            path={tab.path}
+            content={tab.content}
+            originalContent={tab.originalContent}
+            isDirty={tab.isDirty}
+            isSaving={isSaving}
+            sessionId={activeSessionId || undefined}
+            taskId={taskId}
+            repositoryId={activeSession?.repository_id ?? undefined}
+            worktreePath={workspacePath}
+            repo={tab.repo}
+            enableComments={!!activeSessionId}
+            previewKind={previewKind}
+            renderedPreview={previewKind === "markdown" && !!tab.renderedPreview}
+            onTogglePreview={previewKind === "markdown" ? onTogglePreview : undefined}
+            onChange={(newContent) => onFileChange(tab.path, newContent, tab.repo)}
+            onSave={() => onFileSave(tab.path, tab.repo)}
+            onDelete={() => onFileDelete(tab.path, tab.repo)}
+          />
+        </FileViewerOptions>
       )}
     </TabsContent>
   );

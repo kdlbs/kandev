@@ -1065,3 +1065,9 @@ function priorRecord(id, repo, version) {
     updated_at: "2026-01-01T00:00:00Z",
   };
 }
+
+test("file extensions come from the verified package",async()=>{
+ stubGitHub({release:{tag_name:"v1.2.0",assets:[{name:"foo-1.2.0.tar.gz",browser_download_url:"https://dl/foo-1.2.0.tar.gz"}]},manifestText:"description: Supports obj\ncategories: [3D]",repoMeta:{owner:{login:"acme"}}});
+ const {record,error}=await buildEntry({id:"foo",repo:"acme/foo"},{verifyPackage:async()=>verifiedPackage({file_extensions:["stl"]})});
+ assert.equal(error,undefined);assert.deepEqual(record.file_extensions,["stl"]);assert.ok(record.categories.includes("File viewers"));
+});

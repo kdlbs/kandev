@@ -8,6 +8,7 @@ import {
   savePromptVersions,
   setPromptSyncConfig,
 } from "./prompt-sync-api";
+import { PROMPT_SYNC_RATE_LIMIT_ERROR_CODE } from "@/lib/types/prompt-sync";
 
 const originalFetch = global.fetch;
 
@@ -74,6 +75,28 @@ describe("prompt-sync-api", () => {
     expect(calls[1]![1].method).toBe("DELETE");
     expect(calls[2]![0]).toContain("/api/v1/prompt-sync/sync");
     expect(run.result?.created).toEqual(["a"]);
+  });
+
+  it("localizes quota errors from configuration save and Sync now", async () => {
+    const quotaBlock = {
+      config: { ...config, last_ok: false, last_error_class: PROMPT_SYNC_RATE_LIMIT_ERROR_CODE },
+      error: "GitHub quota is temporarily unavailable",
+      error_code: PROMPT_SYNC_RATE_LIMIT_ERROR_CODE,
+    };
+    fetchSpy
+      .mockResolvedValueOnce(mockResponse(quotaBlock))
+      .mockResolvedValueOnce(mockResponse(quotaBlock));
+
+    const saved = await setPromptSyncConfig({
+      workspace_id: "ws-1",
+      provider: "github",
+      repo_owner: "acme",
+      repo_name: "prompts",
+    });
+    const synced = await runPromptSync();
+
+    expect(saved.error).toBe("GitHub quota is unavailable. Try again after quota resets.");
+    expect(synced.error).toBe("GitHub quota is unavailable. Try again after quota resets.");
   });
 });
 

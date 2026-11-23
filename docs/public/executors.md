@@ -689,13 +689,26 @@ For Claude, the card offers two independent stored-secret choices: `CLAUDE_CODE_
 
 Kandev checks the selected binding when it previews or applies a guarded workflow change, using the current user's Global secret visibility. A missing, deleted, workspace-scoped, unreadable, or empty binding blocks the change before the task moves. An agent-profile `ANTHROPIC_API_KEY` binding satisfies this check without a duplicate executor binding. This check validates configuration only. It does not contact Anthropic and does not prove that the provider accepts the credential.
 
-OpenCode credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and reports the credential-copy error.
+OpenCode V1 credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and reports the credential-copy error.
+
+For managed OpenCode V2, **Copy auth files** bootstraps an empty session credential store through the CLI before ACP starts. This method requires managed V2 2.1.2 or newer and an agentctl worker advertising the credential-bootstrap capability. Native/custom V2 launchers are unsupported for this method. These requirements do not raise the minimum version for launches without credential provisioning.
+
+Sign in with V2 under the Kandev controller's OS account and its configured `HOME`/XDG environment before the first bootstrap. The controller captures that environment at startup. The destination uses the session's effective environment, including its credential-store overrides. Existing accounts, refreshed tokens, and active-account selections belong to the destination: restarting an already provisioned session does not export controller credentials, and changing the controller's active account does not switch existing sessions. A saved account is not proof that the provider still accepts it.
+
+An interrupted import leaves a secret-free pending marker beside the CLI's credential database. Retry the launch with controller credentials available to complete the merge; partial imports cannot count as completed bootstrap. Unknown status, unreadable state, incompatible workers, and import errors stop launch. Do not remove the marker to bypass recovery. Retaining a workspace alone does not retain provider history or recover a lost Kubernetes bootstrap environment.
+
+To reauthenticate or switch accounts in an existing session:
+
+1. Stop the agent and open an executor shell using that session's effective `HOME`, XDG variables, and any `OPENCODE_DB` override.
+2. Use the same pinned managed OpenCode V2 version as the session. Run `auth login --standalone` to authenticate, or `auth switch <integration> <credential> --standalone` to select an existing credential by ID or label. These are subcommands of that pinned CLI, not a different system-installed OpenCode.
+3. If a revoked account must be removed, explicitly choose it with `auth logout <integration> <credential> --standalone`, then log in again. Preserve unrelated accounts and session history.
+4. Restart the session. If a pending bootstrap still exists, first retry its import successfully; account recovery does not bypass that state.
+
+Legacy file transfers write sensitive material under the remote user's home and are best-effort; selected V2 provisioning must succeed before launch. Verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
 Pi credential copies merge `~/.pi/agent/auth.json` the same way, by provider. Pi can also take an API key for Anthropic, OpenAI, Gemini or OpenRouter from a stored secret; a credential in the remote `auth.json` takes precedence over it. The **Copy Pi settings and models** bundle copies `settings.json` and `models.json` from `~/.pi/agent`; `models.json` can hold inline API keys, which the copy carries. Kandev reads the default agent directory and ignores `PI_CODING_AGENT_DIR`.
 
 Kandev copies selected bundle files during fresh provisioning or environment reset. A warm resume keeps remote edits to these files.
-
-These transfers write sensitive material under the remote user's home and are best-effort. Verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
 </details>
 

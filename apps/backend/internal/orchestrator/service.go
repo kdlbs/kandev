@@ -3112,7 +3112,17 @@ func (s *Service) completeExpectedTurn(ctx context.Context, sessionID, expectedT
 	if turn.ID != expectedTurnID {
 		return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, turn.ID)
 	}
-	if err := s.turnService.CompleteTurn(ctx, expectedTurnID); err != nil {
+	var completeErr error
+	if result := configurationCommandResultFromContext(ctx); result != nil {
+		completer, ok := s.turnService.(configurationCommandTurnCompleter)
+		if !ok {
+			return fmt.Errorf("turn service cannot publish configuration command result")
+		}
+		completeErr = completer.CompleteTurnWithConfigurationResult(ctx, expectedTurnID, result)
+	} else {
+		completeErr = s.turnService.CompleteTurn(ctx, expectedTurnID)
+	}
+	if err := completeErr; err != nil {
 		return fmt.Errorf("complete captured turn %s: %w", expectedTurnID, err)
 	}
 	s.activeTurns.CompareAndDelete(sessionID, expectedTurnID)

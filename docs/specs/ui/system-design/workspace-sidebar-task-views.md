@@ -36,15 +36,23 @@ using existing view/draft models. Identity is `(user_id, workspace_id, view_id)`
 legacy IDs may be identical in independent workspaces. Keep the map inside the
 existing users.settings JSON and revision CAS mechanism; no separate view table.
 
-Add a single-workspace `sidebar_view_state` PATCH object containing a required
-`workspace_id` and optional `views`, `active_view_id`, and nullable `draft`.
-Omitted fields stay unchanged; explicit null clears only draft; an empty view
-array normalizes through `DefaultSidebarViews`. Validate active/draft references
-against that entry and enforce the existing 50-view bound per entry. Each CAS
-retry re-reads settings, replaces only the target map entry, and preserves other
-entries and unrelated settings. Clone maps and nested data rather than mutating
-references: the existing shallow-before/DeepEqual change detector depends on it.
-Do not expose replacement of the entire map through PATCH.
+The single-workspace `sidebar_view_state` PATCH requires `workspace_id`.
+Normal collection mutations use insert-only `views_create` for creation,
+`views_update` for existing-view edits, and `view_ids_delete`, alongside
+`active_view_id` and nullable `draft`. Explicit full replacement remains a
+separate operation. Updates to absent IDs are ignored rather than recreating a
+remotely deleted view. Natural order preserves surviving IDs and appends new
+ones; send a complete `view_order` only for an explicit reorder.
+Only changed views cross the wire, so ordinary copies and edits of valid
+1,000-group disclosures remain below the existing 2 MiB request cap throughout
+the 50-view collection. Explicit `views` replacement remains available but
+cannot be mixed with delta fields. Omitted fields stay unchanged; null clears
+only draft; an empty replacement normalizes through `DefaultSidebarViews`.
+Validate active/draft references, duplicate/conflicting mutations, complete
+ordering and the existing 50-view bound atomically in the existing revision CAS.
+Each retry merges only the target entry and preserves other entries/unrelated
+settings. Clone maps and nested data rather than mutating references; the
+shallow-before/DeepEqual detector depends on it. Do not PATCH the entire map.
 
 Wire a narrow workspace-access dependency into `internal/user/service` from
 `internal/backendapp/services.go`, backed by the existing authorized workspace
@@ -98,6 +106,18 @@ payloads, queues, journals and rollback. Use per-workspace journals and queued
 writes. A view ID alone cannot identify an asynchronous operation. Bind open
 editor/confirmation state to its originating workspace and close on context
 change; stale callbacks must no-op after that binding changes.
+Capture each mutation's field/disclosure/order intent relative to its own
+optimistic predecessor, then rebase that intent onto the latest admitted
+authoritative snapshot at dispatch. Admission is monotonic across PATCH replies
+and scoped deferred WebSocket snapshots, not only response projection. A stale
+after-image must not delete a remotely added view or resurrect a remotely
+deleted one. Retain unacknowledged predecessor intent while queued successors
+can still persist it. Draft edits merge changed fields and disclosure separately
+for the same base/group; an unrelated presentation edit cannot replay keys
+discarded by acknowledged compaction. Local selection/draft writes retain their
+intent-aware rollback. Queue settlement includes response projection and
+rollback; scoped disclosure recovery awaits that completion without binding to
+a successor active workspace.
 
 ## Failure handling
 

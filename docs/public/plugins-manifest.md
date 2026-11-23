@@ -324,6 +324,11 @@ preview, cancellation, and whole-pair fallback rules.
 | `actions[].scope`                  | yes\*                                | `workspace` \| `task` \| `repository` \| `notification_provider` | Resource selector the host authorizes. Notification provider actions require an owning formatter declaration and the exact management context above. A task-scoped invocation may additionally name one repository attached to that verified task. Use the canonical field name `scope`; `resource_scope` is only a legacy read-compatibility spelling and must not be authored. |
 | `actions[].access`                 | no                                   | `authenticated` \| `admin`            | Defaults to `authenticated`. `admin` is enforced before the action envelope is read and requires `min_kandev_version: "0.91.1"` or later so older hosts cannot silently treat it as authenticated.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `actions[].max_body_bytes`         | yes\*                                | int                                   | Maximum size of the decoded untrusted `body`, from 1 through 1,048,576 bytes. The whole HTTP envelope has a slightly larger hard cap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `sidebar_groupings[]` | no | object[] | Complete saved-sidebar providers, independent of `ui.bundle`. At most 16; requires `min_kandev_version` at least `0.103.0` (unreleased). |
+| `sidebar_groupings[].id` | yes\* | string | Unique plugin-local ID matching the manifest ID grammar, at most 128 bytes. The plugin ID must also be at most 128 bytes when declaring a grouping. Saved identity is `plugin:<plugin-id>:<id>`. |
+| `sidebar_groupings[].label` | yes\* | string | Nonblank UTF-8 selector label, at most 256 bytes. |
+| `sidebar_groupings[].label_key` | no | string | Optional translation key, at most 256 bytes; `label` is the fallback. |
+| `sidebar_groupings[].action` | yes\* | string | Names a declared workspace-scoped action with authenticated access, not an admin action or public webhook. See [complete saved-sidebar groupings](plugins-authoring.md#complete-saved-sidebar-groupings) for the bounded snapshot contract. |
 | `repository_providers`             | no                                   | string[]                              | Provider IDs this plugin owns while active. An active provider can register native repository discovery/URL inspection and may supply transient Git credentials. Native first-use task creation requires a workspace-scoped `repositories.inspect` action; Kandev invokes the active owner on the server and validates its descriptor before persistence. Plugin-originated task creation must use the authenticated plugin task-create path so the plugin reauthorizes the descriptor before Host Tasks.Create. Duplicate ownership is rejected.                                                                                                                                |
 | `executor_providers[]`             | no                                   | object[]                              | Declares a remote executor provider implemented by the complete optional Go SDK interface. Requires `capabilities.executor_provider: true` and `runtime.type: binary`. See "Remote executor providers" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `executor_providers[].key`         | yes\*                                | string                                | Unique lowercase provider key, matching `^[a-z][a-z0-9_-]{0,63}$`. Kandev forms the provider identity as `plugin:<plugin-id>:<key>`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -395,6 +400,12 @@ in release 0.99.0. A manifest that declares either surface must set
 Workspace-scoped agent tools first appear in release 0.100.0. A manifest that
 declares `agent_tools[].invocation_scope: workspace` must set
 `min_kandev_version: "0.100.0"` or later.
+
+Complete saved-sidebar grouping declarations require
+`min_kandev_version: "0.103.0"` or later. This is an unreleased compatibility
+floor: Stable 0.102.0 does not support the contract. Coordinate publication with
+a supporting Host release. Matching development hosts still validate the declared
+minimum even when their own version comparison is exempt.
 
 ### Static web app network origins
 
@@ -852,3 +863,14 @@ admitted but unclaimed runs before removing receipts.
 The displayed webhook URL uses the configured backend origin. For live Bitbucket
 delivery, expose that endpoint through an address reachable from your Bitbucket
 installation; a local development address alone is not externally reachable.
+
+### File viewer declarations
+
+`ui.file_viewers` declares up to 16 native viewers. Each entry has a unique local
+`id`, a `title`, and 1 to 32 unique `extensions`. Extension values use lowercase
+ASCII without a leading period: `[a-z0-9][a-z0-9_-]{0,31}`. Wildcards, paths, MIME
+guesses, and duplicate values are rejected. A UI bundle is required.
+
+Runtime `registerFileViewer({ id, Component })` must match a declaration. The host
+owns selection, byte delivery, external-file consent, and lifecycle cleanup.
+See [File viewer plugins](plugins-authoring.md#file-viewer-plugins).

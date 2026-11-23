@@ -5,6 +5,7 @@ import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import type {
   FilterClause,
   GroupKey,
+  SidebarDisclosureContext,
   SidebarSliceState,
   SidebarTaskRowPresentation,
   SidebarView,
@@ -488,6 +489,10 @@ export type UISliceActions = {
   clearBottomTerminalCommand: () => void;
   setSidebarActiveView: (viewId: string) => void;
   createSidebarView: () => string | null;
+  selectSidebarPluginGrouping: (grouping: {
+    reference: `plugin:${string}:${string}`;
+    label: string;
+  }) => Promise<boolean>;
   updateSidebarDraft: (
     patch: Partial<{
       filters: FilterClause[];
@@ -497,7 +502,10 @@ export type UISliceActions = {
       taskRow: SidebarTaskRowPresentation;
     }>,
   ) => void;
-  saveSidebarDraftAs: (name: string) => void;
+  saveSidebarDraftAs: (
+    name: string,
+    owner: Pick<SidebarViewDraft, "baseViewId" | "group">,
+  ) => Promise<boolean>;
   saveSidebarDraftOverwrite: () => void;
   discardSidebarDraft: () => void;
   deleteSidebarView: (viewId: string) => void;
@@ -505,6 +513,14 @@ export type UISliceActions = {
   duplicateSidebarView: (viewId: string, name: string) => void;
   reorderSidebarViews: (activeViewId: string, overViewId: string) => void;
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
+  waitForSidebarViewSync: (workspaceId: string) => Promise<void>;
+  reconcileSidebarGroupDisclosure: (
+    viewId: string,
+    reference: string,
+    expected: string[],
+    valid: string[],
+    context?: SidebarDisclosureContext,
+  ) => Promise<boolean>;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: (workspaceId?: string) => void;
   setThreadActiveView: (viewId: string) => void;

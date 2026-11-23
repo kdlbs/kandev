@@ -1147,6 +1147,9 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	s.recordTurnStatusNotice(ctx, data)
 	completionCtx := withWorkflowEffect(ctx, workflowEffectForCompletion(data, turnAtEventFire))
 	if turnAtEventFire != "" {
+		completionCtx = withConfigurationCommandResult(completionCtx, data.ConfigurationCommandResult)
+	}
+	if turnAtEventFire != "" {
 		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, turnAtEventFire)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
 			completionCtx, data.TaskID, data.SessionID, turnAtEventFire,

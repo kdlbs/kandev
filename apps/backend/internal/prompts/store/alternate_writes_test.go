@@ -40,17 +40,23 @@ func TestOverrideRepositoryVersionFollowsTheFile(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, overrideForTest(t, repo, synced.ID))
 
-	changed, err := repo.SetOverrideRepositoryContent(ctx, synced.ID, "Repo v2")
+	changed, err := repo.SetOverrideRepositoryFile(ctx, synced.ID, "p/review-v2.md", "Repo v2")
 	require.NoError(t, err)
 	assert.True(t, changed)
-	changed, err = repo.SetOverrideRepositoryContent(ctx, synced.ID, "Repo v2")
+	changed, err = repo.SetOverrideRepositoryFile(ctx, synced.ID, "p/review-v2.md", "Repo v2")
 	require.NoError(t, err)
 	assert.False(t, changed, "an unchanged file writes nothing")
-	assert.Equal(t, "Repo v2", mustGet(t, repo, synced.ID).AlternateContent)
+	current := mustGet(t, repo, synced.ID)
+	assert.Equal(t, "Repo v2", current.AlternateContent)
+	assert.Equal(t, "p/review-v2.md", current.SourcePath)
+	changed, err = repo.SetOverrideRepositoryFile(ctx, synced.ID, "p/moved/review.md", "Repo v2")
+	require.NoError(t, err)
+	assert.True(t, changed, "a path-only change writes")
+	assert.Equal(t, "p/moved/review.md", mustGet(t, repo, synced.ID).SourcePath)
 
 	manual := &models.Prompt{Name: "manual", Content: "Mine"}
 	require.NoError(t, repo.CreatePrompt(ctx, manual))
-	changed, err = repo.SetOverrideRepositoryContent(ctx, manual.ID, "Repo")
+	changed, err = repo.SetOverrideRepositoryFile(ctx, manual.ID, "p/manual.md", "Repo")
 	require.NoError(t, err)
 	assert.False(t, changed, "only an override takes a repository version")
 }
@@ -71,6 +77,7 @@ func TestDetachOverrideDropsConflictAndRepositoryVersion(t *testing.T) {
 	assert.True(t, detached.IsOverride())
 	assert.False(t, detached.Conflict)
 	assert.Empty(t, detached.AlternateContent)
+	assert.Empty(t, detached.SourcePath)
 	assert.Equal(t, "Mine", detached.Content)
 }
 

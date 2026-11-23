@@ -1,13 +1,68 @@
 package lifecycle
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpcompat"
 	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func TestCodexMCPStartupWarningBypassesTurnActivity(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.AgentID = acpcompat.CodexAgentID
+	_ = mgr.executionStore.Add(execution)
+	execution.firstActivityOnce.Do(func() {})
+	mgr.executionStore.UpdateStatus(execution.ID, v1.AgentStatusReady)
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:                 streams.EventTypeToolCall,
+		ToolCallID:           "mcp_startup.server.550e8400-e29b-41d4-a716-446655440000",
+		ToolName:             "other",
+		ToolTitle:            "mcp__server__startup",
+		ToolStatus:           "failed",
+		PromptGeneration:     42,
+		DeliverySubmissionID: "active-prompt-submission",
+		ToolCallContents: []streams.ToolCallContentItem{{
+			Type:    "content",
+			Content: &streams.ContentBlock{Type: "text", Text: "MCP server failed to start: https://secret.example/?token=sk-proj-secret"},
+		}},
+	})
+
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("execution.Status = %q, want %q", execution.Status, v1.AgentStatusReady)
+	}
+	for _, published := range eventBus.PublishedEvents {
+		if published.Event != nil && published.Event.Type == events.AgentRunning {
+			t.Fatal("Codex MCP startup report published agent.running")
+		}
+	}
+
+	var warning *AgentStreamEventPayload
+	for _, payload := range eventBus.getStreamEvents() {
+		if payload.Data != nil && payload.Data.Type == "mcp_startup_warning" {
+			payloadCopy := payload
+			warning = &payloadCopy
+		}
+	}
+	if warning == nil {
+		t.Fatal("older normalized Codex startup tool call was not published as a warning")
+	}
+	if warning.Data.ToolCallID != "mcp_startup.server.550e8400-e29b-41d4-a716-446655440000" {
+		t.Fatalf("warning report ID = %q", warning.Data.ToolCallID)
+	}
+	if warning.Data.PromptGeneration != 0 {
+		t.Fatalf("warning retained prompt generation %d", warning.Data.PromptGeneration)
+	}
+	if strings.Contains(warning.Data.Text, "secret.example") || strings.Contains(warning.Data.Text, "sk-proj-secret") {
+		t.Fatalf("warning retained provider detail: %q", warning.Data.Text)
+	}
+}
 
 // TestWakeup_StatuslessToolUpdateDoesNotFlipToRunning pins the agentctl
 // finalizer boundary: a tool_update with no status carries metadata only, so

@@ -665,11 +665,12 @@ func baseBranchMetadataKey(spec RepoLaunchSpec) string {
 
 // agentCommands holds both the display strings and structured argv for an agent execution.
 type agentCommands struct {
-	wrapper      launchwrapper.Spec
-	initial      string
-	continue_    string // continue command for one-shot agents (empty if not applicable)
-	args         []string
-	continueArgs []string
+	openCodeRuntime managedruntime.OpenCodeRuntime
+	wrapper         launchwrapper.Spec
+	initial         string
+	continue_       string // continue command for one-shot agents (empty if not applicable)
+	args            []string
+	continueArgs    []string
 }
 
 func newAgentCommands(args, continueArgs []string) agentCommands {
@@ -786,6 +787,9 @@ func (m *Manager) buildAgentCommandWithContext(
 		return agentCommands{}, err
 	}
 	commands := newAgentCommands(args, continueArgs)
+	commands.openCodeRuntime = managedruntime.OpenCodeRuntime{
+		Family: cmdOpts.ManagedRuntimeFamily, Source: cmdOpts.ManagedRuntimeSource, Version: cmdOpts.ManagedRuntimeVersion,
+	}
 	commands.wrapper = launchwrapper.Profile(commandPrefixTokens)
 	return commands, nil
 }
@@ -2108,6 +2112,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		execution.AgentArgs = cmds.args
 		execution.ContinueArgs = cmds.continueArgs
 		execution.LaunchWrapper = cmds.wrapper
+		execution.OpenCodeRuntime = cmds.openCodeRuntime
 		execution.ExecutionProfileID = executionProfileID(req)
 		if profileInfo != nil {
 			execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
@@ -2659,6 +2664,7 @@ func (m *Manager) buildExecutionFromInstance(
 	execution.AgentArgs = cmds.args
 	execution.ContinueArgs = cmds.continueArgs
 	execution.LaunchWrapper = cmds.wrapper
+	execution.OpenCodeRuntime = cmds.openCodeRuntime
 	return execution, nil
 }
 
@@ -3348,8 +3354,12 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 		// provenance, so keep the private/ordinary path.
 		installContext = nil
 	}
-	if err := client.ConfigureAgentWithProjectDeliveryAndInstallContext(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, installContext, execution.LaunchWrapper); err != nil {
+	if err := client.ConfigureAgentRuntimeWithProjectDeliveryAndInstallContext(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, installContext, execution.OpenCodeRuntime, execution.LaunchWrapper); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
+	}
+
+	if err := m.provisionOpenCodeCredentials(ctx, execution, client); err != nil {
+		return "", err
 	}
 
 	var fullCommand string
