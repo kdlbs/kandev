@@ -230,8 +230,7 @@ func windowsRepositoryProvider(metadata map[string]interface{}) scriptengine.Pla
 		if branch == "" {
 			branch = getMetadataString(metadata, "repository_branch")
 		}
-		branch = strings.TrimPrefix(strings.TrimSpace(branch), "refs/heads/")
-		vars["repository.branch"] = powerShellQuote(branch)
+		vars["repository.branch"] = powerShellQuote(scriptengine.RepositoryBranchName(branch))
 		vars["repository.setup_script"] = getMetadataString(metadata, "repository_setup_script")
 		if cloneURL := getMetadataString(metadata, "repository_clone_url"); cloneURL != "" {
 			vars["repository.clone_url"] = powerShellQuote(cloneURL)

@@ -18,6 +18,8 @@ acceptance_criteria:
   - AC-EXECUTORS-SSH-WINDOWS-001.8
   - AC-EXECUTORS-SSH-WINDOWS-001.13
   - AC-EXECUTORS-SSH-WINDOWS-001.14
+  - AC-EXECUTORS-REPOSITORY-BRANCH-001.1
+  - AC-EXECUTORS-REPOSITORY-BRANCH-001.4
   - AC-EXECUTORS-REPOSITORY-BRANCH-002.1
   - AC-EXECUTORS-REPOSITORY-BRANCH-002.2
   - AC-EXECUTORS-REPOSITORY-BRANCH-002.4
@@ -87,7 +89,7 @@ Smaller fixes:
 ```bash
 cd apps/backend
 go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run 'Windows|PowerShell|SelectedCheckout|SSHCredential|SSHSkill'
-go test -trimpath -race ./internal/ssh
+go test -trimpath -race ./internal/ssh ./internal/scriptengine
 GOOS=windows GOARCH=amd64 go vet -tags fts5 ./internal/agent/runtime/lifecycle
 cd ../..
 node --test scripts/release/existing-release.test.mjs scripts/release/remote-helper-assets.test.mjs
@@ -102,7 +104,8 @@ test, as in task 06.
 - `executor_ssh_powershell.go`, `executor_ssh_windows_scripts.go`,
   `executor_ssh_winremote.go`, `executor_ssh_windows_guards.go`,
   `executor_ssh_credentials.go`, `executor_ssh_skills.go`,
-  `internal/ssh/handlers.go`, `scripts/release/existing-release.mjs`.
+  `internal/ssh/handlers.go`, `internal/scriptengine/repository_branch.go`,
+  `scripts/release/existing-release.mjs`.
 - The selected-checkout and contribution scripts are long PowerShell ports.
   Native Windows execution runs only in CI and on the real host, so
   string-level tests alone are not enough.
@@ -135,3 +138,21 @@ Commands:
 The `TestSSHWindowsExec*` tests skip on macOS. They run in the Windows `native`
 CI job, whose filter `^TestSSHWindows` already selects them.
 
+## Test findings (2026-11-23)
+
+Found while testing the product flow on the test host, then fixed.
+
+| Finding | Fix | Tests | Real host |
+| --- | --- | --- | --- |
+| A selected pull request failed preparation when the repository had no setup script. The credential scrub (`Remove-Item ... -ErrorAction SilentlyContinue`) was then the last statement, and for absent variables it left `$?` false, so the loader exited 1 with no message | The scrub clears the variables with one `Set-Item -LiteralPath ... -Value $null`, which leaves `$?` true. `[Environment]::SetEnvironmentVariable(name, $null, 'Process')` was rejected: under `pwsh` 7 the name stays listed in `Env:` | `TestSSHWindowsPullRequestScrubSucceedsForAbsentVariables` failed before the fix. `TestSSHWindowsExecPreparesSelectedPullRequest` gains a case with an empty setup script | Before the fix, the scrub alone exited 1. After it, under `powershell` and `pwsh`: the scrub exits 0 with every variable absent, removes present credentials from the process and its children, and a PR with no setup script prepares at the PR head |
+| The Windows `repository.branch` placeholder stripped only `refs/heads/` | `windowsRepositoryProvider` calls `scriptengine.RepositoryBranchName`, exported from the POSIX provider's helper | `TestSSHWindowsRepositoryProviderNormalizesOriginBranch` failed for the `origin/` and `refs/remotes/origin/` cases before the fix | Before the fix, a base branch of `origin/main` failed preparation. After it, `origin/main` and `refs/remotes/origin/main` clone `main` under both shells |
+
+Commands:
+
+| Command | Result |
+| --- | --- |
+| `go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run 'Windows\|PowerShell\|SelectedCheckout\|SSHCredential\|SSHSkill\|SSHRemoteContribution\|SSHPOSIX\|SSHSFTP\|Orphan\|RepositoryBranch\|SSHPrepare\|SSHScript'` | Passed |
+| `go test -trimpath -race ./internal/ssh ./internal/scriptengine` | Passed |
+| `go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle` | The same 28 macOS failures as the earlier HEAD baseline; none is new |
+| `CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./internal/agent/runtime/lifecycle ./internal/ssh ./internal/scriptengine` | Passed |
+| `bash scripts/lint-go-changed <changed Go files>` | 0 issues |

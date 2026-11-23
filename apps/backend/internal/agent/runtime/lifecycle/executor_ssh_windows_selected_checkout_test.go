@@ -56,6 +56,34 @@ func TestSSHWindowsPrepareMaterializesSelectedPullRequest(t *testing.T) {
 	}
 }
 
+// The scrub can be the last statement of a prepare script when the repository
+// has no setup script. The loader then reads its $? as the script status, and
+// Remove-Item -ErrorAction SilentlyContinue leaves $? false for an absent
+// variable, so the scrub must clear variables with a statement that succeeds.
+// @covers AC-EXECUTORS-REPOSITORY-BRANCH-002.4
+func TestSSHWindowsPullRequestScrubSucceedsForAbsentVariables(t *testing.T) {
+	prepare := resolveWindowsPrepareForTest(t, map[string]interface{}{
+		metadataCheckoutBranch:    "contributor-fix",
+		metadataCheckoutRef:       "refs/pull/7/head",
+		"repository_setup_script": "",
+	})
+	if strings.Contains(prepare, "Remove-Item -LiteralPath 'Env:") {
+		t.Fatalf("the credential scrub must not use Remove-Item, which leaves $? false for an absent variable:\n%s", prepare)
+	}
+	scrub := windowsSelectedCheckoutCredentialScrub(map[string]interface{}{metadataCheckoutRef: "refs/pull/7/head"})
+	if !strings.HasPrefix(scrub, "Set-Item -LiteralPath ") || !strings.HasSuffix(scrub, " -Value $null") {
+		t.Fatalf("scrub = %q, want one Set-Item clearing every variable", scrub)
+	}
+	for _, name := range strings.Fields(strings.TrimPrefix(selectedCheckoutCredentialScrubCommands, "unset ")) {
+		if !strings.Contains(scrub, powerShellQuote("Env:"+name)) {
+			t.Fatalf("scrub does not clear %s: %q", name, scrub)
+		}
+	}
+	if !strings.Contains(prepare, scrub) {
+		t.Fatalf("a selected pull request without a setup script still scrubs credentials:\n%s", prepare)
+	}
+}
+
 // @covers AC-EXECUTORS-REPOSITORY-BRANCH-002.1
 func TestSSHWindowsPrepareMaterializesSelectedBranchStrictly(t *testing.T) {
 	prepare := resolveWindowsPrepareForTest(t, map[string]interface{}{
@@ -96,11 +124,11 @@ func TestSSHWindowsExecPreparesSelectedPullRequest(t *testing.T) {
 
 	r := NewSSHExecutor(nil, nil, nil, newTestLogger())
 	windows := SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"}
-	request := func(shell, ref string) *ExecutorCreateRequest {
+	const recordSetupHead = "Set-Content -LiteralPath (Join-Path (Get-Location) 'setup-head.txt') -Value (& git rev-parse HEAD)"
+	request := func(shell, ref, setup string) *ExecutorCreateRequest {
 		return &ExecutorCreateRequest{Metadata: map[string]interface{}{
 			MetadataKeySSHShell: shell, "repository_clone_url": originURL, MetadataKeyBaseBranch: "main",
-			metadataCheckoutBranch: "pr-7", metadataCheckoutRef: ref,
-			"repository_setup_script": "Set-Content -LiteralPath (Join-Path (Get-Location) 'setup-head.txt') -Value (& git rev-parse HEAD)",
+			metadataCheckoutBranch: "pr-7", metadataCheckoutRef: ref, "repository_setup_script": setup,
 		}}
 	}
 	for _, shell := range windowsTestShells() {
@@ -108,7 +136,7 @@ func TestSSHWindowsExecPreparesSelectedPullRequest(t *testing.T) {
 		if err := os.MkdirAll(taskDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := r.runPrepareScript(context.Background(), client, taskDir, request(shell, "refs/pull/7/head"), windows, ""); err != nil {
+		if err := r.runPrepareScript(context.Background(), client, taskDir, request(shell, "refs/pull/7/head", recordSetupHead), windows, ""); err != nil {
 			t.Fatalf("[%s] prepare selected PR: %v", shell, err)
 		}
 		if branch := runWindowsTestGit(t, "-C", taskDir, "branch", "--show-current"); branch != "pr-7" {
@@ -122,11 +150,22 @@ func TestSSHWindowsExecPreparesSelectedPullRequest(t *testing.T) {
 			t.Fatalf("[%s] repository setup saw HEAD %q (%v), want the selected head", shell, setupHead, err)
 		}
 
+		noSetupDir := filepath.Join(root, "tasks", "task-pr-no-setup-"+shell)
+		if err := os.MkdirAll(noSetupDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.runPrepareScript(context.Background(), client, noSetupDir, request(shell, "refs/pull/7/head", ""), windows, ""); err != nil {
+			t.Fatalf("[%s] prepare selected PR without a setup script: %v", shell, err)
+		}
+		if head := runWindowsTestGit(t, "-C", noSetupDir, "rev-parse", "HEAD"); head != prHead {
+			t.Fatalf("[%s] without a setup script HEAD = %q, want %q", shell, head, prHead)
+		}
+
 		missingDir := filepath.Join(root, "tasks", "task-missing-"+shell)
 		if err := os.MkdirAll(missingDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := r.runPrepareScript(context.Background(), client, missingDir, request(shell, "refs/pull/99/head"), windows, ""); err == nil {
+		if err := r.runPrepareScript(context.Background(), client, missingDir, request(shell, "refs/pull/99/head", recordSetupHead), windows, ""); err == nil {
 			t.Fatalf("[%s] a missing pull request ref must fail preparation", shell)
 		}
 	}

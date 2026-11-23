@@ -12,6 +12,7 @@ requirements:
 
 `internal/scriptengine.RepositoryProvider` owns the repository branch placeholder.
 Sprites, SSH, Docker, Kubernetes, and local setup scripts use this provider.
+SSH preparation on a Windows host uses `windowsRepositoryProvider`, which applies the same branch conversion.
 The existing URL resolver reads `origin`; this correction does not introduce remote discovery.
 
 ## Requirement mapping
@@ -27,7 +28,8 @@ The existing URL resolver reads `origin`; this correction does not introduce rem
 ## Branch conversion
 
 The provider retains its current precedence: nonempty `base_branch`, then `repository_branch`.
-A package-private pure helper converts that value before `shellQuote`.
+The pure helper `RepositoryBranchName` converts that value before `shellQuote`.
+`windowsRepositoryProvider` calls the same helper before `powerShellQuote`, so a Windows host receives the same branch name.
 It removes at most one recognized prefix, in this order:
 
 1. `refs/heads/`
@@ -39,7 +41,7 @@ Thus `refs/heads/origin/topic` becomes `origin/topic`, and `origin/origin/topic`
 Empty values retain existing behavior. Invalid values do not acquire a default branch.
 
 The worktree package has a similar private normalizer. This change does not import that package or broaden its behavior.
-The script helper serves the existing placeholder contract and requires no new public API or architectural boundary.
+The helper is exported only so the Windows SSH placeholder provider shares the conversion; it adds no architectural boundary.
 
 ## Preserved state
 

@@ -229,7 +229,11 @@ strictly before repository setup, as
 fetch into `refs/kandev/selected-checkout`, a branch at that commit, and a
 verified `HEAD`. A failure exits preparation. For a pull request, the provider
 credential is removed from the prepare process before repository setup. The
-Windows placeholder providers quote values with `powerShellQuote`.
+removal clears each variable with `Set-Item -Value $null`, which succeeds when
+the variable is absent; with an empty setup script it is the last statement, so
+its status is the script status. The Windows placeholder providers quote values
+with `powerShellQuote`. `repository.branch` uses the same conversion as the
+POSIX provider (`scriptengine.RepositoryBranchName`).
 `ensureWindowsRemoteTaskDir` rejects a workdir root that does not expand to a
 drive or UNC path.
 

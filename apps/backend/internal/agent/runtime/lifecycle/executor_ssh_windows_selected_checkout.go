@@ -35,7 +35,9 @@ func withWindowsBranchCheckout(req *ExecutorCreateRequest, script string) string
 }
 
 // windowsSelectedCheckoutCredentialScrub removes the provider credential from
-// the prepare process before repository setup runs code from a fork PR.
+// the prepare process before repository setup runs code from a fork PR. It is
+// the last statement when the setup script is empty, so it must leave $? true
+// for an absent variable; Set-Item with a null value does.
 func windowsSelectedCheckoutCredentialScrub(metadata map[string]interface{}) string {
 	if !selectedCheckoutIsPullRequest(metadata) {
 		return ""
@@ -45,7 +47,7 @@ func windowsSelectedCheckoutCredentialScrub(metadata map[string]interface{}) str
 	for i, name := range names {
 		quoted[i] = powerShellQuote("Env:" + name)
 	}
-	return "Remove-Item -LiteralPath " + strings.Join(quoted, ", ") + " -ErrorAction SilentlyContinue"
+	return "Set-Item -LiteralPath " + strings.Join(quoted, ", ") + " -Value $null"
 }
 
 const windowsExistingCheckoutProbe = `$__kExistingCheckout = (Invoke-KandevNative { & git -c ('safe.directory=' + ({{workspace.path}} -replace '\\', '/')) -C {{workspace.path}} rev-parse --verify HEAD 2>$null } | Out-String).Trim()`
