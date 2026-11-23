@@ -852,6 +852,7 @@ func (s *Service) startCreatedSession(
 	if options.ceilingEntryBinding == nil {
 		options.ceilingEntryBinding = ceilingEntryBindingFromContext(ctx)
 	}
+	options = s.gateAsyncQuestionGuidance(options)
 	if options.ceilingEntryBinding != nil {
 		ctx = withCeilingEntryBinding(ctx, options.ceilingEntryBinding)
 	}

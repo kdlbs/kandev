@@ -16,13 +16,15 @@ const DefaultMaxPerSession = 10
 // Sender identities written to QueuedMessage.QueuedBy. The handlers default
 // any empty user-supplied identity to QueuedByUser so the UpdateMessage
 // ownership guard always runs against a non-empty value. Agent, workflow,
-// server, and move-task identities are reserved for backend dispatch paths.
+// server, move-task, and async-question identities are reserved for backend
+// dispatch paths.
 const (
-	QueuedByUser     = "user"
-	QueuedByAgent    = "agent"
-	QueuedByWorkflow = "workflow"
-	QueuedByServer   = "server"
-	QueuedByMoveTask = "mcp-move-task"
+	QueuedByUser          = "user"
+	QueuedByAgent         = "agent"
+	QueuedByWorkflow      = "workflow"
+	QueuedByServer        = "server"
+	QueuedByMoveTask      = "mcp-move-task"
+	QueuedByAsyncQuestion = "async-question"
 )
 
 // IsReservedQueuedBy reports identities owned by backend dispatch paths.
@@ -35,7 +37,7 @@ const (
 // additive prompts from one agent into a single delivery. See ADR 0051.
 func IsReservedQueuedBy(queuedBy string) bool {
 	switch queuedBy {
-	case QueuedByAgent, QueuedByWorkflow, QueuedByServer, QueuedByMoveTask:
+	case QueuedByAgent, QueuedByWorkflow, QueuedByServer, QueuedByMoveTask, QueuedByAsyncQuestion:
 		return true
 	default:
 		return false
@@ -406,6 +408,31 @@ func (m *QueuedMessage) IsDurablePlanComment() bool {
 // MetadataAsyncQuestion identifies a correlated async question continuation.
 // These rows are generated decisions, not editable user drafts.
 const MetadataAsyncQuestion = "async_question_id"
+
+// MetadataAsyncQuestionRetired keeps a reserved generated prompt out of future
+// queue-head selection while its in-flight delivery receipt is reconciled.
+const MetadataAsyncQuestionRetired = "async_question_retired"
+const MetadataAsyncQuestionNotification = "async_question_notification"
+
+// AsyncQuestionAdmissionState distinguishes queue work that can be retired
+// from admissions whose dispatch was accepted or already settled.
+type AsyncQuestionAdmissionState string
+
+const (
+	AsyncQuestionAdmissionMissing   AsyncQuestionAdmissionState = "missing"
+	AsyncQuestionAdmissionQueued    AsyncQuestionAdmissionState = "queued"
+	AsyncQuestionAdmissionUncertain AsyncQuestionAdmissionState = "uncertain"
+	AsyncQuestionAdmissionAccepted  AsyncQuestionAdmissionState = "accepted"
+	AsyncQuestionAdmissionSettled   AsyncQuestionAdmissionState = "settled"
+)
+
+// AsyncQuestionAdmissionCandidate is one generated prompt with a live queue
+// row or an unsettled dispatch claim.
+type AsyncQuestionAdmissionCandidate struct {
+	ClientQueueID string
+	QuestionID    string
+	AdmittedAt    time.Time
+}
 
 // IsAsyncQuestionNotification reports whether this row carries a correlated
 // async question outcome. Such a row is never auto-merged, edited, coalesced,

@@ -161,6 +161,22 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.asyncQuestions",
+			EnvVar:          "KANDEV_FEATURES_ASYNC_QUESTIONS",
+			Kind:            KindFeature,
+			Label:           "Async agent questions",
+			Description:     "Enables agents to ask questions while they continue independent work.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Async questions add a new request, wait, and answer lifecycle. Enable only on an installation that is ready to opt in and restart to apply changes.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AsyncQuestions },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AsyncQuestions = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.auth",
 			EnvVar:      "KANDEV_FEATURES_AUTH",
 			Kind:        KindFeature,

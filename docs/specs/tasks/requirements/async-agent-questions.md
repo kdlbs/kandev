@@ -2,6 +2,7 @@
 status: active
 system: tasks
 created: 2026-10-30
+updated: 2026-11-21
 owners:
   - kandev
 ---
@@ -16,6 +17,8 @@ When no independent work remains, it can explicitly pause.
 Tasks owns the request identity, lifecycle, recipient, and answer delivery.
 The task chat is the primary operator surface on desktop and phone, whatever the Inbox setting.
 The Needs-you Inbox is an additional cross-task view of the same state when it is enabled.
+Async behavior in requirements 001 through 010 applies when the installation enables
+Async agent questions. Blocking behavior applies in both states.
 
 This is the opt-in extension proposed in [issue #4836](https://github.com/kdlbs/kandev/issues/4836).
 It does not change the active blocking clarification contract.
@@ -194,14 +197,29 @@ It does not change the active blocking clarification contract.
 - **AC-TASKS-ASYNC-QUESTIONS-010.3:** Sessions that cannot use async mode shall receive no async guidance.
   Autopilot guidance shall keep its bar of asking only for critical decisions, and tool descriptions shall not state that every call blocks or pauses.
 
+### REQ-TASKS-ASYNC-QUESTIONS-011: Installation release toggle
+
+**Intent:** Ship async questions as an opt-in feature that an administrator can safely turn off.
+
+#### Acceptance criteria
+
+- **AC-TASKS-ASYNC-QUESTIONS-011.1:** Async agent questions shall default to off in production, development, and E2E profiles. An administrator can change the installation override in **Settings > System > Feature Toggles**. The change takes effect after restart. An explicit environment value takes precedence and locks the control.
+- **AC-TASKS-ASYNC-QUESTIONS-011.2:** While off, newly built agent tool lists and instructions shall offer only the existing question behavior. A stale caller's async ask, checkpoint read, withdrawal, forward, explicit wait, or correlated async reply shall fail without creating a blocking question or sending a peer prompt. Omitted or false async mode and authorized blocking parent replies shall still work. Turning the feature on shall restore async support for the existing eligible task profiles only.
+- **AC-TASKS-ASYNC-QUESTIONS-011.3:** While off, async-only HTTP routes and Inbox hide, snooze, and restore actions for async requests shall return not found. Shared Inbox responses and initial counts shall exclude async requests, history, and snoozes. Async events and attention notifications shall not be generated.
+- **AC-TASKS-ASYNC-QUESTIONS-011.4:** Restarting with the feature off shall clear async waits and their needs-input indicators, and retire pending async prompts that have not been submitted to an agent. It shall not wake the agent, complete the paused turn, or advance the workflow on account of that wait. Ordinary prompts and blocking clarifications shall remain available under existing session and delivery controls. Work already submitted shall keep its normal delivery recovery behavior.
+- **AC-TASKS-ASYNC-QUESTIONS-011.5:** Turning the feature off shall preserve questions, recorded answers, forwarding identity, and history, subject to normal deletion. After re-enabling it, authorized readers shall regain access to retained history and still-valid pending requests. Old waits and retired prompts shall not restart, and changed author or parent authority shall still prevent an invalid answer or dispatch.
+- **AC-TASKS-ASYNC-QUESTIONS-011.6:** Desktop and phone shall omit async question controls, request cards, and async data reads while off, including before feature settings are known. With async on and Inbox off, task chat shall offer the existing async flow. With both on, the Inbox shall also offer the existing async flow. With only Inbox on, its blocking rows, counts, and controls shall remain available.
+
 ## Related contracts
 
 - [Blocking clarification lifecycle](clarification-active-lifecycle.md)
 - [Blocking user-question turn boundary](user-question-turn-boundary.md)
 - [Autopilot mode](autopilot-mode.md)
+- [Installation Feature Toggles](../../platform/requirements/feature-toggles.md)
 - [Needs-you Inbox presentation](../../ui/requirements/needs-you-inbox.md)
 - [System design](../system-design/async-agent-questions.md)
 - [Implementation plan](../../../plans/async-agent-questions/plan.md)
+- [Release toggle plan](../../../plans/async-agent-questions-release-toggle/plan.md)
 
 ## Out of scope
 
@@ -209,4 +227,4 @@ It does not change the active blocking clarification contract.
 - Granting Autopilot roots direct operator access or adding multi-hop forwarding.
 - Permission approvals, Office-specific question routing, and external MCP question creation.
 - Automatic workflow movement on a question answer.
-- Changes to runtime feature-toggle defaults or existing blocking-image behavior.
+- Changes to the Inbox default, rollout promotion, and existing blocking-image behavior.

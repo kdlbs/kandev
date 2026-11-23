@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 	internaldb "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
@@ -2371,13 +2372,16 @@ func isQueuedMessageIDViolation(err error) bool {
 
 // ListBySession returns all entries for a session ordered by position ascending.
 func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) ([]QueuedMessage, error) {
+	excludeRetiredAsyncQuestion := dialect.ExcludeTruthyMetadataPredicate(
+		r.ro.DriverName(), "metadata_json", MetadataAsyncQuestionRetired,
+	)
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		WHERE session_id = ?
+		WHERE session_id = ? AND (queued_by <> ? OR `+excludeRetiredAsyncQuestion+`)
 		ORDER BY position ASC, id ASC
-	`), sessionID)
+	`), sessionID, QueuedByAsyncQuestion)
 	if err != nil {
 		return nil, fmt.Errorf("list queued: %w", err)
 	}
@@ -2648,7 +2652,12 @@ func (r *sqliteRepository) CountBySession(ctx context.Context, sessionID string)
 }
 
 func (r *sqliteRepository) CountQueueDepth(ctx context.Context) (int, error) {
-	rows, err := r.ro.QueryxContext(ctx, `SELECT metadata_json FROM queued_messages`)
+	excludeRetiredAsyncQuestion := dialect.ExcludeTruthyMetadataPredicate(
+		r.ro.DriverName(), "metadata_json", MetadataAsyncQuestionRetired,
+	)
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(
+		`SELECT metadata_json FROM queued_messages WHERE queued_by <> ? OR `+excludeRetiredAsyncQuestion,
+	), QueuedByAsyncQuestion)
 	if err != nil {
 		return 0, err
 	}
@@ -2687,13 +2696,16 @@ func (r *sqliteRepository) CountPendingByTaskIDs(ctx context.Context, taskIDs []
 	}
 	// Join task_sessions so rows left on deleted sessions cannot inflate the
 	// sidebar badge. Pre-fix session deletes left orphans keyed only by task_id.
+	excludeRetiredAsyncQuestion := dialect.ExcludeTruthyMetadataPredicate(
+		r.ro.DriverName(), "q.metadata_json", MetadataAsyncQuestionRetired,
+	)
 	query, args, err := sqlx.In(`
 		SELECT q.id, q.session_id, q.task_id, q.position, q.content, q.model, q.plan_mode,
 		       q.attachments_json, q.metadata_json, q.queued_at, q.queued_by
 		FROM queued_messages q
 		INNER JOIN task_sessions s ON s.id = q.session_id
-		WHERE q.task_id IN (?)
-	`, taskIDs)
+		WHERE q.task_id IN (?) AND (q.queued_by <> ? OR `+excludeRetiredAsyncQuestion+`)
+	`, taskIDs, QueuedByAsyncQuestion)
 	if err != nil {
 		return nil, fmt.Errorf("count pending by task ids: %w", err)
 	}
@@ -2758,15 +2770,18 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 	}
 	var msg *QueuedMessage
 	discardedStaleManagerEntry := false
+	excludeRetiredAsyncQuestion := dialect.ExcludeTruthyMetadataPredicate(
+		r.db.DriverName(), "metadata_json", MetadataAsyncQuestionRetired,
+	)
 	for {
 		row := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		WHERE session_id = ?
+		WHERE session_id = ? AND (queued_by <> ? OR `+excludeRetiredAsyncQuestion+`)
 		ORDER BY position ASC, id ASC
 		LIMIT 1
-		`), sessionID)
+		`), sessionID, QueuedByAsyncQuestion)
 		msg, err = scanQueuedRow(row)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -3190,15 +3205,18 @@ func (r *sqliteRepository) reserveHeadTx(
 	retainOrdinary bool,
 ) (*QueuedMessage, bool, error) {
 	discardedStaleReservation := false
+	excludeRetiredAsyncQuestion := dialect.ExcludeTruthyMetadataPredicate(
+		r.db.DriverName(), "metadata_json", MetadataAsyncQuestionRetired,
+	)
 	for {
 		row := tx.QueryRowxContext(ctx, r.db.Rebind(`
 			SELECT id, session_id, task_id, position, content, model, plan_mode,
 			       attachments_json, metadata_json, queued_at, queued_by
 			FROM queued_messages
-			WHERE session_id = ?
+		WHERE session_id = ? AND (queued_by <> ? OR `+excludeRetiredAsyncQuestion+`)
 			ORDER BY position ASC, id ASC
 			LIMIT 1
-		`), sessionID)
+		`), sessionID, QueuedByAsyncQuestion)
 		msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
 		if errors.Is(err, sql.ErrNoRows) {
 			if discardedStaleReservation {
@@ -3880,12 +3898,15 @@ func (r *sqliteRepository) takeByID(
 		}
 	}
 
+	excludeRetiredAsyncQuestion := dialect.ExcludeTruthyMetadataPredicate(
+		r.db.DriverName(), "metadata_json", MetadataAsyncQuestionRetired,
+	)
 	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		WHERE id = ? AND session_id = ?
-	`), entryID, sessionID)
+		WHERE id = ? AND session_id = ? AND (queued_by <> ? OR `+excludeRetiredAsyncQuestion+`)
+	`), entryID, sessionID, QueuedByAsyncQuestion)
 	msg, err := scanQueuedRow(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

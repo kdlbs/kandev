@@ -125,10 +125,29 @@ func TestAskUserQuestionAnswerLabelsSchema(t *testing.T) {
 
 func assertQuestionLabelSchema(t *testing.T, raw json.RawMessage) {
 	t.Helper()
+	blocking := blockingQuestionOutputSchema(t, raw)
+	answer := blocking["additionalProperties"].(map[string]interface{})
+	props := answer["properties"].(map[string]interface{})
+	for _, field := range []string{"selected_option", "selected_label"} {
+		prop, ok := props[field].(map[string]interface{})
+		require.True(t, ok, "missing schema field %s", field)
+		assert.Equal(t, "string", prop["type"])
+		assert.NotEmpty(t, prop["description"])
+		required, _ := answer["required"].([]interface{})
+		assert.NotContains(t, required, field)
+	}
+	assert.Equal(t, false, answer["additionalProperties"])
+}
+
+func blockingQuestionOutputSchema(t *testing.T, raw json.RawMessage) map[string]interface{} {
+	t.Helper()
 	var schema map[string]interface{}
 	require.NoError(t, json.Unmarshal(raw, &schema))
 	branches, ok := schema["oneOf"].([]interface{})
-	require.True(t, ok, "output schema must be a discriminated union")
+	if !ok {
+		require.IsType(t, map[string]interface{}{}, schema["additionalProperties"])
+		return schema
+	}
 	var blocking map[string]interface{}
 	for _, branch := range branches {
 		candidate, ok := branch.(map[string]interface{})
@@ -143,17 +162,7 @@ func assertQuestionLabelSchema(t *testing.T, raw json.RawMessage) {
 		}
 	}
 	require.NotNil(t, blocking, "blocking answer branch is missing")
-	answer := blocking["additionalProperties"].(map[string]interface{})
-	props := answer["properties"].(map[string]interface{})
-	for _, field := range []string{"selected_option", "selected_label"} {
-		prop, ok := props[field].(map[string]interface{})
-		require.True(t, ok, "missing schema field %s", field)
-		assert.Equal(t, "string", prop["type"])
-		assert.NotEmpty(t, prop["description"])
-		required, _ := answer["required"].([]interface{})
-		assert.NotContains(t, required, field)
-	}
-	assert.Equal(t, false, answer["additionalProperties"])
+	return blocking
 }
 
 // @covers AC-TASKS-QUESTION-ANSWER-LABELS-001.1

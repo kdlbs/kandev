@@ -3,9 +3,11 @@ package clarification
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/clarification/protocol"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
@@ -273,6 +275,33 @@ func TestAsyncQuestionsInboxSidecarRoutesAuthorizeAsyncIdentity(t *testing.T) {
 	rec = runInboxSidecarWrite("PUT", "async:missing", `{"state":"dismissed"}`, h.httpUpsertInboxSidecar)
 	if rec.Code != 404 {
 		t.Fatalf("unknown async identity status = %d, want 404", rec.Code)
+	}
+}
+
+func TestAsyncQuestionsDisabledInboxSidecarReturnsNotFoundBeforeWrites(t *testing.T) {
+	h := newAsyncInboxTestHandler(t, asyncInboxQuestion(), false)
+	h.inboxAsync = nil
+	bundles := h.inboxBundles.(*fakeInboxBundleStore)
+
+	for _, test := range []struct {
+		name    string
+		method  string
+		body    string
+		handler func(*gin.Context)
+	}{
+		{name: "hide", method: "PUT", body: `{"state":"dismissed"}`, handler: h.httpUpsertInboxSidecar},
+		{name: "snooze", method: "PUT", body: `{"state":"snoozed","snooze_duration":"4h"}`, handler: h.httpUpsertInboxSidecar},
+		{name: "restore", method: "DELETE", handler: h.httpDeleteInboxSidecar},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rec := runInboxSidecarWrite(test.method, "async:async-q1", test.body, test.handler)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d body = %s, want 404", rec.Code, rec.Body.String())
+			}
+			if len(bundles.upserted) != 0 || len(bundles.deleted) != 0 {
+				t.Fatalf("disabled async sidecar wrote state: upserted=%+v deleted=%+v", bundles.upserted, bundles.deleted)
+			}
+		})
 	}
 }
 

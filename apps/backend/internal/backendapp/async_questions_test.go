@@ -29,6 +29,11 @@ func TestAsyncQuestionNotificationSkipsUnforwardedParent(t *testing.T) {
 	require.Equal(t, "question-1", questionID)
 }
 
+func TestAsyncQuestionNotificationSubscriptionsFollowFlag(t *testing.T) {
+	require.Empty(t, asyncQuestionNotificationSubjects(false))
+	require.Equal(t, []string{"task.question.created", "task.question.forwarded"}, asyncQuestionNotificationSubjects(true))
+}
+
 type asyncQuestionRoutingSessions struct {
 	active *models.TaskSession
 }

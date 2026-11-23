@@ -979,6 +979,10 @@ payload carries `workspace_id`, `task_id`, `parent_task_id`, `session_id`,
 the author's task chat, a forwarding parent's chat, and the bounded Inbox read.
 The notification is an invalidation hint, not answer content. Read the question
 through the task-scoped HTTP route to get its current status and outcome.
+The notification is emitted only when the installation has enabled
+`features.asyncQuestions` and restarted. When the flag is off, clients must not
+expect async question notifications or async question HTTP routes. Blocking
+clarification notifications keep their existing behavior.
 
 These registrations back Kandev's agent/MCP bridge. The subset registered in a process depends on its MCP handler mode and enabled capabilities. They are internal transport shims: raw `/ws` rejects every one of them before handler dispatch. Use the MCP tools exposed to the agent so tool schemas, task/session scoping, and compatibility handling remain intact. In particular, `mcp.stop_task` is the internal action behind task-mode `stop_task_kandev`; External MCP does not register that tool.
 

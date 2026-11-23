@@ -253,6 +253,47 @@ func TestAsyncQuestionsLifecycleCleanup(t *testing.T) {
 	}
 }
 
+func TestAsyncQuestionsDeleteTaskCleansRowsWithoutService(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	question := newAsyncQuestionForTest(t, "q-task-delete", "session-task-delete")
+	created, _ := createAsyncQuestionForTest(t, repo, question)
+	if _, err := repo.CreateAsyncQuestionWait(ctx, &models.AsyncQuestionWait{
+		TaskID: question.TaskID, SessionID: question.SessionID, DependencyIDs: []string{question.ID},
+		Status: models.AsyncQuestionWaitParked,
+	}); err != nil {
+		t.Fatalf("create wait: %v", err)
+	}
+	if err := repo.CreateAsyncQuestionDelivery(ctx, &models.AsyncQuestionDelivery{
+		AdmissionID: "delivery-task-delete", QuestionID: question.ID,
+		Kind: models.AsyncQuestionDeliveryOwner, DestinationTaskID: question.TaskID,
+		DestinationSession: question.SessionID, Content: "question",
+	}); err != nil {
+		t.Fatalf("create delivery: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO task_async_question_forwards (question_id, parent_task_id, parent_session_id, reason, created_at)
+		VALUES (?, ?, ?, ?, ?)`), created.ID, "parent-task", "parent-session", "operator chose parent", time.Now().UTC()); err != nil {
+		t.Fatalf("insert forward: %v", err)
+	}
+
+	if err := repo.DeleteTask(ctx, question.TaskID); err != nil {
+		t.Fatalf("delete task: %v", err)
+	}
+	for _, table := range []string{
+		"task_async_questions", "task_async_question_forwards", "task_async_question_deliveries",
+		"task_async_question_waits", "task_async_question_wait_dependencies",
+	} {
+		var count int
+		if err := repo.db.GetContext(ctx, &count, "SELECT count(*) FROM "+table); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Errorf("%s rows after task deletion = %d, want 0", table, count)
+		}
+	}
+}
+
 func TestAsyncQuestionsWorkspaceCascadeRemovesRows(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

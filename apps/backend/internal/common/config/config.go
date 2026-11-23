@@ -580,6 +580,10 @@ type FeaturesConfig struct {
 	// feature is user-ready.
 	NeedsYouInbox bool `mapstructure:"needs_you_inbox" json:"needsYouInbox"`
 
+	// AsyncQuestions gates async question tools, services, and routes. Blocking
+	// questions remain available when this installation-level opt-in is off.
+	AsyncQuestions bool `mapstructure:"async_questions" json:"asyncQuestions"`
+
 	// AgentSurvival lets a worktree or local-executor agent session survive a
 	// backend restart by adopting its still-running standalone control server
 	// instead of killing it. Off in every embedded profile, and unavailable on

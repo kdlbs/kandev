@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -229,6 +230,13 @@ func (r *Repository) DeleteAsyncQuestionsForTask(ctx context.Context, taskID str
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.purgeTaskAsyncQuestionRowsTx(ctx, tx, taskID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) purgeTaskAsyncQuestionRowsTx(ctx context.Context, tx *sqlx.Tx, taskID string) error {
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM task_async_question_wait_dependencies
 		 WHERE wait_id IN (SELECT id FROM task_async_question_waits WHERE task_id = ?)`), taskID); err != nil {
@@ -250,5 +258,5 @@ func (r *Repository) DeleteAsyncQuestionsForTask(ctx context.Context, taskID str
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_async_questions WHERE task_id = ?`), taskID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }

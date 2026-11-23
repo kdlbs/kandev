@@ -674,14 +674,6 @@ func (s *Service) Forward(ctx context.Context, questionID, parentTaskID, parentS
 	return updated, nil
 }
 
-// DeleteAsyncQuestionsForTask removes task-owned question state on task delete.
-func (s *Service) DeleteAsyncQuestionsForTask(ctx context.Context, taskID string) error {
-	if taskID == "" {
-		return nil
-	}
-	return s.store.DeleteAsyncQuestionsForTask(ctx, taskID)
-}
-
 // MarkSessionStale closes pending requests and active waits for a session
 // that can no longer accept answers.
 func (s *Service) MarkSessionStale(ctx context.Context, sessionID, reason string) (int, error) {

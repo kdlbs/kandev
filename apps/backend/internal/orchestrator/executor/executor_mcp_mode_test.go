@@ -28,7 +28,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			session:            &models.TaskSession{ID: "session", TaskID: "task"},
 			wantSurface:        mcpprofile.SurfaceKanbanTask,
 			wantUserQuestion:   true,
-			wantAsyncQuestions: true,
+			wantAsyncQuestions: false,
 			wantParentQuestion: false,
 		},
 		{
@@ -46,7 +46,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			session:            &models.TaskSession{ID: "session", TaskID: "task"},
 			wantSurface:        mcpprofile.SurfaceKanbanTask,
 			wantUserQuestion:   false,
-			wantAsyncQuestions: true,
+			wantAsyncQuestions: false,
 			wantParentQuestion: false,
 		},
 		{
@@ -56,7 +56,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			wantSurface:        mcpprofile.SurfaceKanbanTask,
 			wantUserQuestion:   false,
 			wantParentQuestion: true,
-			wantAsyncQuestions: true,
+			wantAsyncQuestions: false,
 		},
 		{
 			name:               "autopilot passthrough child",
@@ -101,7 +101,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			allowTitle:         true,
 			wantSurface:        mcpprofile.SurfaceKanbanTask,
 			wantUserQuestion:   true,
-			wantAsyncQuestions: true,
+			wantAsyncQuestions: false,
 			wantParentQuestion: false,
 			wantTaskTitle:      true,
 		},
@@ -121,6 +121,63 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			require.Equal(t, tt.wantParentQuestion, profile.HasCapability(mcpprofile.CapabilityParentQuestion))
 			require.Equal(t, tt.wantAsyncQuestions, profile.HasCapability(mcpprofile.CapabilityAsyncQuestions))
 			require.Equal(t, tt.wantTaskTitle, profile.HasCapability(mcpprofile.CapabilityTaskTitle))
+		})
+	}
+}
+
+func TestResolveTaskSessionMCPProfile_AsyncQuestionsFollowFlag(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		task               *models.Task
+		wantUserQuestion   bool
+		wantParentQuestion bool
+	}{
+		{name: "normal task", task: &models.Task{ID: "task"}, wantUserQuestion: true},
+		{name: "autopilot root", task: &models.Task{ID: "task", Autopilot: true}},
+		{
+			name:               "autopilot child",
+			task:               &models.Task{ID: "task", ParentID: "parent", Autopilot: true},
+			wantParentQuestion: true,
+		},
+	} {
+		for _, enabled := range []bool{false, true} {
+			t.Run(test.name+map[bool]string{false: "/off", true: "/on"}[enabled], func(t *testing.T) {
+				repo := newMockRepository()
+				session := &models.TaskSession{ID: "session", TaskID: test.task.ID}
+				repo.tasks[test.task.ID] = test.task
+				repo.sessions[session.ID] = session
+				exec := newTestExecutor(t, &mockAgentManager{}, repo)
+				exec.SetAsyncQuestionsEnabled(enabled)
+
+				profile, err := exec.ResolveTaskSessionMCPProfile(context.Background(), test.task.ID, session, false)
+				require.NoError(t, err)
+				require.Equal(t, enabled, profile.HasCapability(mcpprofile.CapabilityAsyncQuestions))
+				require.Equal(t, test.wantUserQuestion, profile.HasCapability(mcpprofile.CapabilityUserQuestion))
+				require.Equal(t, test.wantParentQuestion, profile.HasCapability(mcpprofile.CapabilityParentQuestion))
+			})
+		}
+	}
+}
+
+func TestPrepareTaskSessionMCPProfileGatesStalePreparedCapability(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "off", true: "on"}[enabled], func(t *testing.T) {
+			repo := newMockRepository()
+			session := &models.TaskSession{ID: "session", TaskID: "task"}
+			profile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{
+				mcpprofile.CapabilityUserQuestion,
+				mcpprofile.CapabilityAsyncQuestions,
+			}, nil)
+			ctx := context.WithValue(context.Background(), preparedMCPContextKey{}, preparedMCPContext{
+				taskID: "task", sessionID: session.ID, profile: profile,
+			})
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+			exec.SetAsyncQuestionsEnabled(enabled)
+
+			prepared, err := exec.PrepareTaskSessionMCPProfile(ctx, "task", session, true)
+			require.NoError(t, err)
+			require.Equal(t, enabled, prepared.HasCapability(mcpprofile.CapabilityAsyncQuestions))
+			require.True(t, prepared.HasCapability(mcpprofile.CapabilityUserQuestion))
 		})
 	}
 }

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   useFailedInboxController: vi.fn(),
   inboxHistoryRefresh: vi.fn(),
   inboxHistoryLoadMore: vi.fn(),
+  asyncQuestionsEnabled: true,
 }));
 
 const EMPTY_TESTID = "needs-you-inbox-empty";
@@ -84,6 +85,14 @@ vi.mock("@/components/inbox-history/inbox-history-error-state", () => ({
       retry
     </button>
   ),
+}));
+
+vi.mock("@/components/needs-you-inbox/async-question-history", () => ({
+  AsyncQuestionHistory: () => <div data-testid="async-question-history-mounted" />,
+}));
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => mocks.asyncQuestionsEnabled,
 }));
 
 // The shell is the app's own chrome (topbar, nav trigger, scroll container)
@@ -193,6 +202,7 @@ beforeEach(() => {
   mocks.useFailedInboxController.mockReset();
   mocks.inboxHistoryRefresh.mockReset();
   mocks.inboxHistoryLoadMore.mockReset();
+  mocks.asyncQuestionsEnabled = true;
   needsYouState = { status: "idle", bundles: [], hiddenCount: 0, hasMore: false };
   failedState = { rows: [], count: 0, truncated: false, status: "idle" };
   historyState = { status: "idle", bundles: [], total: 0, hasMore: false };
@@ -490,6 +500,31 @@ describe("NeedsYouInboxPageClient — tab strip", () => {
 
     expect(screen.getAllByTestId("stub-async-row")).toHaveLength(1);
     expect(screen.queryByTestId(EMPTY_TESTID)).toBeNull();
+  });
+
+  it("ignores retained async rows when the feature is off", () => {
+    mocks.asyncQuestionsEnabled = false;
+    needsYouState = {
+      status: "ready",
+      bundles: [],
+      asyncQuestions: [asyncQuestion("aq1", CHECKOUT_TITLE)],
+      hiddenCount: 0,
+      hasMore: false,
+      lastAppliedOk: true,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getByTestId(EMPTY_TESTID)).not.toBeNull();
+    expect(screen.queryByTestId("stub-async-row")).toBeNull();
+    expect(screen.queryByTestId("async-question-group")).toBeNull();
+  });
+
+  it("does not mount async history while the feature is off", () => {
+    mocks.asyncQuestionsEnabled = false;
+    render(<NeedsYouInboxPageClient />);
+    fireEvent.mouseDown(screen.getByTestId(HISTORY_TAB_TESTID));
+
+    expect(screen.queryByTestId("async-question-history-mounted")).toBeNull();
   });
 
   it("renders History as the second tab and switches content on selection", () => {

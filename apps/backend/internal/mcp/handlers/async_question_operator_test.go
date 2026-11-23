@@ -115,6 +115,25 @@ func TestAsyncQuestionsOperatorAskKeepsTurnRunning(t *testing.T) {
 	require.Equal(t, float64(2), listPayload["count"])
 }
 
+func TestAsyncQuestionsDisabledDirectAskRejectsBeforeWrites(t *testing.T) {
+	fixture := newAsyncQuestionFixture(t)
+	fixture.handlers.questionSvc = nil
+	ctx := context.Background()
+	task, session := fixture.seedTask(t, ctx, "session-async-disabled", false, "")
+
+	response, err := fixture.handlers.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion,
+		askPayload(session.ID, task.ID, true, "request-disabled")))
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeInternalError)
+
+	page, err := fixture.repo.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{AuthorSessionID: session.ID})
+	require.NoError(t, err)
+	require.Empty(t, page.Questions)
+	current, err := fixture.repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, current.State)
+}
+
 func TestAsyncQuestionsRetryReturnsOriginalRequest(t *testing.T) {
 	fixture := newAsyncQuestionFixture(t)
 	ctx := context.Background()

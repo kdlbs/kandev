@@ -170,6 +170,7 @@ func provideOrchestrator(
 		return startupRecoveryOwnerContext(ctx, authSvc, ownerID, orgID)
 	})
 	orchestratorSvc.SetCanvasesEnabled(cfg != nil && cfg.Features.Canvases)
+	orchestratorSvc.SetAsyncQuestionsEnabled(cfg != nil && cfg.Features.AsyncQuestions)
 	orchestratorSvc.SetWorkspaceCollaborationEnabled(cfg != nil && cfg.Features.WorkspaceCollaboration)
 	orchestratorSvc.SetAgentProfileRecentUseRecorder(userSvc)
 	if gitCredentialBroker != nil {

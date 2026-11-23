@@ -780,10 +780,11 @@ type Service struct {
 	sessionSettingsSnapshotLocks [64]sync.Mutex
 
 	// Components
-	queue     *queue.TaskQueue
-	executor  *executor.Executor
-	scheduler *scheduler.Scheduler
-	watcher   *watcher.Watcher
+	queue                 *queue.TaskQueue
+	executor              *executor.Executor
+	scheduler             *scheduler.Scheduler
+	watcher               *watcher.Watcher
+	asyncQuestionsEnabled bool
 
 	// Message queue service for queueing messages while agent is running
 	messageQueue                   *messagequeue.Service
@@ -2191,6 +2192,15 @@ func (s *Service) SetCanvasesEnabled(enabled bool) {
 	}
 }
 
+// SetAsyncQuestionsEnabled applies the installation release gate to task MCP
+// profiles before agentctl receives them.
+func (s *Service) SetAsyncQuestionsEnabled(enabled bool) {
+	s.asyncQuestionsEnabled = enabled
+	if s.executor != nil {
+		s.executor.SetAsyncQuestionsEnabled(enabled)
+	}
+}
+
 // SetManagedRuntimeSingleUserOwner wires the live single-user repair-owner
 // fallback. The callback must report allowed only for disabled authentication.
 func (s *Service) SetManagedRuntimeSingleUserOwner(owner func() (string, bool)) {
@@ -3481,6 +3491,9 @@ func (s *Service) reconcileDurableQueueStateOnStartup(ctx context.Context) error
 			return ctx.Err()
 		case <-timer.C:
 		}
+	}
+	if err := s.settleAsyncQuestionStateBeforeQueueRecovery(ctx); err != nil {
+		return fmt.Errorf("settle disabled async question state: %w", err)
 	}
 	if err := s.reconcileAgentDeliverySettlements(ctx, ""); err != nil {
 		return fmt.Errorf("reconcile durable delivery terminal settlements: %w", err)

@@ -12,6 +12,7 @@ requirements:
   - REQ-TASKS-ASYNC-QUESTIONS-008
   - REQ-TASKS-ASYNC-QUESTIONS-009
   - REQ-TASKS-ASYNC-QUESTIONS-010
+  - REQ-TASKS-ASYNC-QUESTIONS-011
 ---
 
 # Async agent questions system design
@@ -39,6 +40,7 @@ Sections marked **Remediation** describe the design that work orders 06 to 12 im
 | `REQ-TASKS-ASYNC-QUESTIONS-008` | Compatibility and capability selection |
 | `REQ-TASKS-ASYNC-QUESTIONS-009` | Task chat question surface |
 | `REQ-TASKS-ASYNC-QUESTIONS-010` | Agent mode guidance |
+| `REQ-TASKS-ASYNC-QUESTIONS-011` | [Installation release gate](#installation-release-gate) |
 
 ## Existing integration points
 
@@ -389,7 +391,45 @@ Tests assert the required guidance per capability. They do not claim that a mode
 This is provider-neutral MCP behavior. Do not claim provider-specific mid-turn push support.
 Existing transport discovery and timeout contracts still apply.
 The existing Inbox flag controls only the Inbox. Async tools and the chat surface do not consult it.
-This package changes no flag registry or profile default.
+
+## Installation release gate
+
+`features.asyncQuestions` (`KANDEV_FEATURES_ASYNC_QUESTIONS`) uses the existing
+restart-required flag registry. Resolve environment, saved override, then profile
+default in `applyStartupRuntimeFlags`. All shipped defaults are false.
+
+Use that startup value to grant `CapabilityAsyncQuestions` in the typed executor
+profile, including prepared launch and recovery paths. Legacy profiles grant no
+async capability. Use the resulting capability for MCP schemas, Core tools, and
+prompt guidance, intersecting replayed guidance options with the current value.
+A surviving agent may retain an older catalog until relaunched. The backend
+rejects those calls when off. Correlated parent replies fall through only to
+validated blocking question replies, never to ordinary peer messages.
+
+Only the enabled backend starts the question service, wait and authority hooks,
+outbox, and async notification subscribers. Without that service, async REST
+routes stay absent, the Inbox refuses async sidecar writes, and its list,
+count, hidden, and boot projections use only blocking records.
+The generic boot payload and features endpoint carry the effective value.
+Web mounts async chat, transcript, and Inbox consumers only through
+`useFeature("asyncQuestions")`. Off or missing values suppress async reads and
+event subscriptions. Inbox routes and blocking projections keep their own gate.
+
+Schema and deletion handling apply in both states. Before recovery admits
+prompts on an off boot, cancel active async waits with reason
+`feature_disabled` and refresh affected pending-action and task summaries from
+their remaining sources. Retire unsent generated queue entries and persist prompt
+retirement on the outbox by exact server admission identity. Preserve admission
+receipts. Existing recovery settles accepted or uncertain submissions without
+restoring retired prompts, even on re-enable. Retry incomplete
+cleanup before serving or dispatching. This cleanup publishes no async change,
+wake, completion, or workflow action.
+
+Canonical requests, outcomes, forwards, and history survive disablement.
+Transcript intents can settle on re-enable. Eligible pending requests and their
+answers use normal authority checks on re-enable. Only new resolutions and asks
+can generate new deliveries after retirement. Deletion still purges question
+rows even when the feature service is absent.
 
 ## Observability and validation
 
@@ -406,6 +446,7 @@ Exact tests and commands belong to the [work orders](../../../plans/async-agent-
 ## Related decisions and records
 
 - [Async question lifecycle](../../../decisions/2026-10-30-async-question-lifecycle.md)
+- [Runtime feature flags](../../../decisions/0007-runtime-feature-flags.md)
 - [Current-turn blocking clarification ownership](../../../decisions/2026-08-14-current-turn-clarification-ownership.md)
 - [Late blocking answers as ordinary messages](../../../decisions/2026-09-18-late-clarification-messages.md)
 - [Exclusive question capability](../../../decisions/2026-08-08-autopilot-mcp-question-capabilities.md)
@@ -414,3 +455,4 @@ Exact tests and commands belong to the [work orders](../../../plans/async-agent-
 ## Implementation Plans
 
 - [Async agent questions](../../../plans/async-agent-questions/plan.md)
+- [Async agent questions release toggle](../../../plans/async-agent-questions-release-toggle/plan.md)

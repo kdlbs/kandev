@@ -8,11 +8,24 @@ const mocks = vi.hoisted(() => ({
     status: "ready" as "idle" | "loading" | "ready" | "error",
     refresh: vi.fn(),
   },
+  featureEnabled: true,
+  enabledArguments: [] as boolean[],
   responsive: { isMobile: false, isFinePointer: true },
 }));
 
 vi.mock("@/hooks/domains/session/use-task-async-questions", () => ({
-  useTaskAsyncQuestions: () => mocks.state,
+  useTaskAsyncQuestions: (
+    _workspaceId: string | null,
+    _taskId: string | null,
+    enabled: boolean,
+  ) => {
+    mocks.enabledArguments.push(enabled);
+    return mocks.state;
+  },
+}));
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => mocks.featureEnabled,
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
@@ -22,6 +35,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 import { AsyncQuestionStrip } from "./async-question-strip";
 
 const QUESTION_TOGGLE_TEST_ID = "task-async-question-toggle";
+const STRIP_TEST_ID = "task-async-question-strip";
 
 function question(overrides: Partial<ClarificationInboxAsyncQuestion> = {}) {
   return {
@@ -64,6 +78,8 @@ beforeEach(() => {
   mocks.state.questions = [question(), question({ question_id: "question-b" })];
   mocks.state.status = "ready";
   mocks.state.refresh.mockReset();
+  mocks.featureEnabled = true;
+  mocks.enabledArguments = [];
   mocks.responsive.isMobile = false;
 });
 
@@ -74,7 +90,7 @@ describe("AsyncQuestionStrip", () => {
     mocks.state.questions = [];
     mocks.state.status = "idle";
     const { rerender } = renderStrip();
-    expect(screen.queryByTestId("task-async-question-strip")).toBeNull();
+    expect(screen.queryByTestId(STRIP_TEST_ID)).toBeNull();
     expect(screen.queryByText("Loading questions")).toBeNull();
 
     mocks.state.status = "loading";
@@ -85,14 +101,25 @@ describe("AsyncQuestionStrip", () => {
         hasBlockingClarification={false}
       />,
     );
-    expect(screen.queryByTestId("task-async-question-strip")).toBeNull();
+    expect(screen.queryByTestId(STRIP_TEST_ID)).toBeNull();
     expect(screen.queryByText("Loading questions")).toBeNull();
+  });
+
+  it("hides retained async questions and disables reads while the feature is off", () => {
+    mocks.featureEnabled = false;
+    mocks.state.status = "error";
+
+    renderStrip();
+
+    expect(screen.queryByTestId(STRIP_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("task-async-question-error")).toBeNull();
+    expect(mocks.enabledArguments).toEqual([]);
   });
 
   it("keeps the last good rows visible during refresh and beside a read error", () => {
     mocks.state.status = "loading";
     renderStrip();
-    expect(screen.getByTestId("task-async-question-strip")).toBeTruthy();
+    expect(screen.getByTestId(STRIP_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId("task-async-question-list")).toBeNull();
     fireEvent.click(screen.getByTestId(QUESTION_TOGGLE_TEST_ID));
     expect(screen.getAllByTestId("async-question-row")).toHaveLength(2);

@@ -184,6 +184,25 @@ that Codex provides for an "Other" answer.
 
 ## Async questions
 
+> [!EXPERIMENTAL]
+> Async agent questions are disabled by default in shipped profiles. An
+> administrator can enable **Async agent questions** in **Settings > System >
+> Feature Toggles**, save, and restart Kandev. Or set
+> `KANDEV_FEATURES_ASYNC_QUESTIONS=true` before startup. An explicit environment
+> value locks the UI switch. The separate `features.needsYouInbox` toggle controls
+> whether async requests also appear in the Needs-you Inbox.
+
+When async questions are off, the question tools keep their blocking behavior
+and do not expose async mode. Restarting with the feature off cancels async wait
+gates and retires prompts that were not delivered. Kandev retains the requests,
+outcomes, and transcript history. Already-delivered prompts are not recalled;
+uncertain sends keep the queue's existing recovery behavior. Kandev does not
+wake a session that was parked by an async wait. After the off restart, an
+operator can send that session a normal prompt under the existing session
+controls. To reopen and answer an eligible retained request, enable the feature
+again and restart. Pending requests can be answered only while the feature is
+enabled and their current task and author still have authority.
+
 Use async mode only when the tool exposes the `async` argument. If it is absent,
 use blocking mode. Choose blocking mode when you cannot safely do useful work
 before the answer. Choose async mode when useful independent work remains.

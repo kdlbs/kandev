@@ -125,6 +125,7 @@ func provideGateway(
 	dataDir string,
 	registerCleanup func(func() error),
 	lspContinuityEnabled bool,
+	asyncQuestionsEnabled bool,
 	acquireSessionFence func(string) func(),
 	webhookPrivateNetworksAllowed bool,
 	lspMaxConnections ...int,
@@ -500,7 +501,7 @@ func provideGateway(
 			}
 			return nil
 		}
-		for _, subject := range []string{"task.question.created", "task.question.forwarded"} {
+		for _, subject := range asyncQuestionNotificationSubjects(asyncQuestionsEnabled) {
 			if _, err = eventBus.Subscribe(subject, handleAsyncQuestionNotification); err != nil {
 				log.Error("Failed to subscribe to async question notifications", zap.String("subject", subject), zap.Error(err))
 			}
@@ -531,6 +532,13 @@ func provideGateway(
 	}
 
 	return gateway, notificationSvc, notificationCtrl, terminalSvc, nil
+}
+
+func asyncQuestionNotificationSubjects(enabled bool) []string {
+	if !enabled {
+		return nil
+	}
+	return []string{"task.question.created", "task.question.forwarded"}
 }
 
 func asyncQuestionOperatorNotification(data map[string]interface{}) (taskID, sessionID, questionID string, eligible bool) {

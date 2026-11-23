@@ -3341,11 +3341,6 @@ func (s *Service) deleteTaskWithManagedClaim(
 		return deleted, err
 	}
 	attachmentsLocked = s.cleanupDeletedTaskAttachments(operationCtx, id, attachments, attachmentsLocked)
-	if s.asyncQuestions != nil {
-		if err := s.asyncQuestions.DeleteAsyncQuestionsForTask(context.WithoutCancel(operationCtx), id); err != nil {
-			s.logger.Warn("failed to delete async questions for task", zap.String("task_id", id), zap.Error(err))
-		}
-	}
 	s.completeTaskDeletion(operationCtx, id, task, reason, start, cleanupJob, sessions, worktrees, stopTargets, envCleanup)
 	return true, nil
 }

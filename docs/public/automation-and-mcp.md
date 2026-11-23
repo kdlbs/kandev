@@ -922,12 +922,29 @@ them when enabled. An operator answer resolves the same child request.
 
 ### Async questions
 
+> [!EXPERIMENTAL]
+> Async mode requires the installation flag `features.asyncQuestions`, which is
+> off in shipped profiles. Enable **Async agent questions** in
+> **Settings > System > Feature Toggles** and restart Kandev, or set
+> `KANDEV_FEATURES_ASYNC_QUESTIONS=true` before startup. When the flag is off,
+> the tools retain blocking behavior and omit async mode. The Needs-you Inbox
+> has its own independent feature flag.
+
 Both question tools accept an optional `async` boolean. Omitted or `false`
 keeps the blocking behavior above. With `async: true` the tool returns a
 durable `question_id` immediately, the author's turn keeps running, and the
 request appears in the author's task chat without waiting for the turn to end.
 The Needs-you Inbox also shows it when enabled. An exact retry with the same
 `request_id` returns the original request.
+
+Disabling the feature takes effect after restart. Kandev cancels async wait
+gates and retires prompts that were not delivered, while keeping request,
+outcome, and transcript history. A session parked by an async wait does not
+resume automatically, but an operator can send it a normal prompt after the off
+restart. Pending requests can be answered after the feature is re-enabled and
+Kandev is restarted, if the retained request is still eligible.
+See [Agent Communication](agent-communication.md#async-questions) for the
+recovery behavior.
 
 ```json
 {

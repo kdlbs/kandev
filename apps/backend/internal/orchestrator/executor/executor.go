@@ -1197,6 +1197,7 @@ type Executor struct {
 	gitlabCredentials             GitLabCredentialResolver
 	logger                        *logger.Logger
 	canvasesEnabled               bool
+	asyncQuestionsEnabled         bool
 	workspaceCollaborationEnabled bool
 
 	// coordinators resolves a coordinator conversation task to its
@@ -1536,6 +1537,13 @@ func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
 // before any new agent session is launched.
 func (e *Executor) SetCanvasesEnabled(enabled bool) {
 	e.canvasesEnabled = enabled
+}
+
+// SetAsyncQuestionsEnabled controls whether newly resolved task profiles grant
+// async question tools. The startup setting also strips the capability from
+// any profile prepared before the current launch boundary.
+func (e *Executor) SetAsyncQuestionsEnabled(enabled bool) {
+	e.asyncQuestionsEnabled = enabled
 }
 
 // SetWorkspaceCollaborationEnabled controls whether task MCP profiles expose

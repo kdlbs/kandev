@@ -2113,90 +2113,98 @@ func (s *Server) stepCompleteHandler() server.ToolHandlerFunc {
 	}
 }
 
+const askUserQuestionAsyncReceiptSchema = `{
+  "type": "object",
+  "properties": {
+    "question_id": {"type": "string", "description": "Durable async request identity."},
+    "mode": {"type": "string", "enum": ["async"], "description": "Async creation receipt discriminator."},
+    "status": {"type": "string", "description": "Canonical async request state."},
+    "recipient": {"type": "string", "enum": ["user", "parent"], "description": "Who owns the async answer decision."},
+    "parent_task_id": {"type": "string", "description": "Direct parent task for an async parent request."},
+    "created_at": {"type": "string", "description": "Creation time of the async request."}
+  },
+  "required": ["question_id", "mode"],
+  "additionalProperties": false
+}`
+
+const askUserQuestionBlockingAnswersSchema = `{
+  "type": "object",
+  "properties": {
+    "rejected": {"type": "boolean", "description": "True when the user rejected the question bundle."},
+    "reject_reason": {"type": "string", "description": "Optional reason supplied when the bundle was rejected."}
+  },
+  "additionalProperties": {
+    "type": "object",
+    "description": "Answer keyed by question id.",
+    "properties": {
+      "selected_option": {"type": "string", "description": "ID of the selected option."},
+      "selected_label": {"type": "string", "description": "Exact label of the selected option. Omitted when the ID cannot identify one offered option."},
+      "custom_text": {"type": "string"},
+      "attachments": {
+        "type": "array",
+        "description": "Files the user attached to this answer. Read each path with your file tools; the path is readable in this execution.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "attachment_id": {"type": "string"},
+            "type": {"type": "string"},
+            "name": {"type": "string"},
+            "mime_type": {"type": "string"},
+            "size_bytes": {"type": "integer"},
+            "delivery_mode": {"type": "string"},
+            "path": {"type": "string", "description": "Readable path inside the current execution."}
+          },
+          "required": ["attachment_id", "name", "path"],
+          "additionalProperties": false
+        }
+      },
+      "annotations": {
+        "type": "array",
+        "description": "Regions the user marked on this question's images, each with a comment. Coordinates are image pixels of the image as the user saw it; image_width and image_height give that size.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "image_id": {"type": "string", "description": "ID of the question or choice image the region is on."},
+            "x": {"type": "integer"},
+            "y": {"type": "integer"},
+            "width": {"type": "integer"},
+            "height": {"type": "integer"},
+            "image_width": {"type": "integer"},
+            "image_height": {"type": "integer"},
+            "comment": {"type": "string"}
+          },
+          "required": ["image_id", "x", "y", "width", "height", "image_width", "image_height", "comment"],
+          "additionalProperties": false
+        }
+      },
+      "answered": {"type": "boolean"},
+      "rejected": {"type": "boolean"}
+    },
+    "additionalProperties": false
+  }
+}`
+
 const askUserQuestionOutputSchema = `{
   "type": "object",
   "oneOf": [
-    {
-      "type": "object",
-      "properties": {
-        "question_id": {"type": "string", "description": "Durable async request identity."},
-        "mode": {"type": "string", "enum": ["async"], "description": "Async creation receipt discriminator."},
-        "status": {"type": "string", "description": "Canonical async request state."},
-        "recipient": {"type": "string", "enum": ["user", "parent"], "description": "Who owns the async answer decision."},
-        "parent_task_id": {"type": "string", "description": "Direct parent task for an async parent request."},
-        "created_at": {"type": "string", "description": "Creation time of the async request."}
-      },
-      "required": ["question_id", "mode"],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "rejected": {"type": "boolean", "description": "True when the user rejected the question bundle."},
-        "reject_reason": {"type": "string", "description": "Optional reason supplied when the bundle was rejected."}
-      },
-      "additionalProperties": {
-        "type": "object",
-        "description": "Answer keyed by question id.",
-        "properties": {
-          "selected_option": {"type": "string", "description": "ID of the selected option."},
-          "selected_label": {"type": "string", "description": "Exact label of the selected option. Omitted when the ID cannot identify one offered option."},
-          "custom_text": {"type": "string"},
-          "attachments": {
-            "type": "array",
-            "description": "Files the user attached to this answer. Read each path with your file tools; the path is readable in this execution.",
-            "items": {
-              "type": "object",
-              "properties": {
-                "attachment_id": {"type": "string"},
-                "type": {"type": "string"},
-                "name": {"type": "string"},
-                "mime_type": {"type": "string"},
-                "size_bytes": {"type": "integer"},
-                "delivery_mode": {"type": "string"},
-                "path": {"type": "string", "description": "Readable path inside the current execution."}
-              },
-              "required": ["attachment_id", "name", "path"],
-              "additionalProperties": false
-            }
-          },
-          "annotations": {
-            "type": "array",
-            "description": "Regions the user marked on this question's images, each with a comment. Coordinates are image pixels of the image as the user saw it; image_width and image_height give that size.",
-            "items": {
-              "type": "object",
-              "properties": {
-                "image_id": {"type": "string", "description": "ID of the question or choice image the region is on."},
-                "x": {"type": "integer"},
-                "y": {"type": "integer"},
-                "width": {"type": "integer"},
-                "height": {"type": "integer"},
-                "image_width": {"type": "integer"},
-                "image_height": {"type": "integer"},
-                "comment": {"type": "string"}
-              },
-              "required": ["image_id", "x", "y", "width", "height", "image_width", "image_height", "comment"],
-              "additionalProperties": false
-            }
-          },
-          "answered": {"type": "boolean"},
-          "rejected": {"type": "boolean"}
-        },
-        "additionalProperties": false
-      }
-    }
+` + askUserQuestionAsyncReceiptSchema + `,
+` + askUserQuestionBlockingAnswersSchema + `
   ]
 }`
 
 func (s *Server) registerInteractionTools() {
-	description := `Ask the user 1-4 related questions; this call waits for all answers. Each needs 2-6 labeled, described options. Set allow_custom_text=false to require a choice. Ask only when input is needed. Keep context to 1-3 short sentences or brief bullets, and put full reports outside this call. Returns answers by question ID with selected_option and selected_label. Rejections include rejected and may include reject_reason.`
+	description := `Ask the user 1-4 related questions; wait for all answers. Each needs a prompt and 2-6 labeled, described options. Use a stable id when response keys matter. Set allow_custom_text=false to require an offered option. Ask only when input is needed. Keep context to 1-3 short sentences or brief bullets, about 100 words or fewer. Put full reports, logs, and repeated conversation outside this call, before it; keep questions and options self-contained. Returns answers by question ID with selected_option and selected_label for matches. Rejections include rejected=true and may include reject_reason.`
 	if s.asyncQuestionsSupported() {
 		description = `Block if guessing could be destructive, irreversible, or expensive to redo, or work cannot safely continue. Otherwise async=true; continue independent work, read with list_question_answers_kandev. Wait when all remaining work depends: use wait_for_question_answers_kandev. Withdraw with withdraw_question_kandev. Context: 1-3 short sentences or brief bullets, about 100 words or fewer. Put full reports, logs, and repeated conversation outside this call, before it. Keep questions and options self-contained. Use selected_label for choices. Rejections include rejected and may include reject_reason.`
+	}
+	outputSchema := askUserQuestionBlockingAnswersSchema
+	if s.asyncQuestionsSupported() {
+		outputSchema = askUserQuestionOutputSchema
 	}
 	options := []mcp.ToolOption{
 		mcp.WithDescription(description),
 		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithRawOutputSchema(json.RawMessage(askUserQuestionOutputSchema)),
+		mcp.WithRawOutputSchema(json.RawMessage(outputSchema)),
 		mcp.WithArray(questionsArg, mcp.Required(),
 			mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label), "allow_custom_text" (boolean, defaults to true).`),
 			mcp.MinItems(1),

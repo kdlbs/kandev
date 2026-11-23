@@ -20,6 +20,17 @@ async function createAsyncQuestionTask(
 }
 
 test.describe("Async agent questions", () => {
+  let releaseAsyncQuestions: (() => Promise<void>) | undefined;
+
+  test.beforeAll(async ({ backend }) => {
+    releaseAsyncQuestions = await backend.useEnv({ KANDEV_FEATURES_ASYNC_QUESTIONS: "true" });
+  });
+
+  test.afterAll(async () => {
+    await releaseAsyncQuestions?.();
+    releaseAsyncQuestions = undefined;
+  });
+
   test("asks early, keeps working, and answers from the Inbox", async ({
     testPage,
     apiClient,

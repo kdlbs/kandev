@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -11,15 +12,48 @@ import (
 )
 
 func TestAsyncQuestionsSchemaModes(t *testing.T) {
-	task := newTaskModeServer(t, &testBackend{}, "task-current")
-	taskProps := toolInputProperties(t, task, "ask_user_question_kandev")
-	assert.Contains(t, taskProps, asyncArg)
-	assert.Contains(t, taskProps, requestIDArg)
+	blocking := newTaskModeServer(t, &testBackend{}, "task-current")
+	blockingProps := toolInputProperties(t, blocking, "ask_user_question_kandev")
+	assert.NotContains(t, blockingProps, asyncArg)
+	assert.NotContains(t, blockingProps, requestIDArg)
+	assert.NotContains(t, blocking.mcpServer.ListTools()["ask_user_question_kandev"].Tool.Description, "async=true")
+	blockingSchema := askQuestionOutputSchema(t, blocking)
+	assert.NotContains(t, blockingSchema, "oneOf")
+	blockingProperties := blockingSchema["properties"].(map[string]any)
+	assert.Contains(t, blockingProperties, "rejected")
+	assert.NotContains(t, blockingProperties, "question_id")
+	assert.NotContains(t, blockingProperties, "mode")
+
+	async := NewWithProfile(&testBackend{}, "session", "task-current", 10005, newTestLogger(t), "", false,
+		mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{
+			mcpprofile.CapabilityUserQuestion,
+			mcpprofile.CapabilityAsyncQuestions,
+		}, nil))
+	asyncProps := toolInputProperties(t, async, "ask_user_question_kandev")
+	assert.Contains(t, asyncProps, asyncArg)
+	assert.Contains(t, asyncProps, requestIDArg)
+	assert.Contains(t, async.mcpServer.ListTools()["ask_user_question_kandev"].Tool.Description, "async=true")
+	asyncSchema := askQuestionOutputSchema(t, async)
+	asyncBranches := asyncSchema["oneOf"].([]any)
+	require.Len(t, asyncBranches, 2)
+	asyncProperties := asyncBranches[0].(map[string]any)["properties"].(map[string]any)
+	assert.Contains(t, asyncProperties, "question_id")
+	assert.Contains(t, asyncProperties, "mode")
+	assert.Contains(t, getRegisteredToolNames(async), "list_question_answers_kandev")
 
 	config := newTestServer(t, &testBackend{})
 	configProps := toolInputProperties(t, config, "ask_user_question_kandev")
 	assert.NotContains(t, configProps, asyncArg)
 	assert.NotContains(t, configProps, requestIDArg)
+	assert.NotContains(t, askQuestionOutputSchema(t, config), "oneOf")
+}
+
+func askQuestionOutputSchema(t *testing.T, server *Server) map[string]any {
+	t.Helper()
+	tool := server.mcpServer.ListTools()["ask_user_question_kandev"]
+	var schema map[string]any
+	require.NoError(t, json.Unmarshal(tool.Tool.RawOutputSchema, &schema))
+	return schema
 }
 
 func TestAsyncQuestionToolDescriptionsByCapability(t *testing.T) {

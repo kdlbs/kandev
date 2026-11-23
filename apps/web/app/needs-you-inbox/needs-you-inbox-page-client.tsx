@@ -53,6 +53,7 @@ import { InboxHistoryList } from "@/components/inbox-history/inbox-history-list"
 import { InboxHistoryEmptyState } from "@/components/inbox-history/inbox-history-empty-state";
 import { InboxHistoryErrorState } from "@/components/inbox-history/inbox-history-error-state";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 
 type ViewMode = "error" | "loading" | "empty" | "list";
 
@@ -171,14 +172,17 @@ function NeedsYouInboxRowWithLateAnswer({
 function NeedsYouInboxTabContent({
   retry,
   allocationRef,
+  asyncQuestionsEnabled,
 }: {
   retry: () => void;
   allocationRef: RefObject<HTMLDivElement | null>;
+  asyncQuestionsEnabled: boolean;
 }) {
   const { t } = useTranslation();
   const status = useAppStore(selectNeedsYouInboxStatus);
   const bundles = useAppStore(selectNeedsYouInboxBundles);
-  const asyncQuestions = useAppStore(selectNeedsYouInboxAsyncQuestions) ?? [];
+  const storedAsyncQuestions = useAppStore(selectNeedsYouInboxAsyncQuestions) ?? [];
+  const asyncQuestions = asyncQuestionsEnabled ? storedAsyncQuestions : [];
   const hiddenCount = useAppStore(selectNeedsYouInboxHiddenCount);
   const listRevision = useAppStore(selectNeedsYouInboxRevision);
   const hasMore = useAppStore(selectNeedsYouInboxHasMore);
@@ -239,7 +243,13 @@ function resolveHistoryViewMode(status: string, bundleCount: number, hasMore: bo
 // never the Needs-you slice or its refresh trigger. The controller stays in
 // the parent so its lifecycle is mounted exactly once per page, not once per
 // tab activation.
-function InboxHistoryTabContent({ controller }: { controller: InboxHistoryController }) {
+function InboxHistoryTabContent({
+  controller,
+  asyncQuestionsEnabled,
+}: {
+  controller: InboxHistoryController;
+  asyncQuestionsEnabled: boolean;
+}) {
   const { t } = useTranslation();
   const status = useAppStore(selectInboxHistoryStatus);
   const bundles = useAppStore(selectInboxHistoryBundles);
@@ -276,7 +286,9 @@ function InboxHistoryTabContent({ controller }: { controller: InboxHistoryContro
           onLoadMore={loadNextPage}
         />
       )}
-      <AsyncQuestionHistory workspaceId={workspaceId} refreshTick={listRevision} />
+      {asyncQuestionsEnabled && (
+        <AsyncQuestionHistory workspaceId={workspaceId} refreshTick={listRevision} />
+      )}
     </>
   );
 }
@@ -288,6 +300,7 @@ function InboxHistoryTabContent({ controller }: { controller: InboxHistoryContro
 // carries the phone nav trigger (design-03#D4).
 export function NeedsYouInboxPageClient() {
   const { t } = useTranslation();
+  const asyncQuestionsEnabled = useFeature("asyncQuestions");
   const contentRef = useRef<HTMLDivElement>(null);
   const requestRetry = useAppStore((s) => s.requestNeedsYouInboxRetry);
   const needsYouCount = useAppStore(selectNeedsYouInboxCount);
@@ -330,13 +343,20 @@ export function NeedsYouInboxPageClient() {
         historyCount={historyCount}
       >
         <TabsContent value="needs-you">
-          <NeedsYouInboxTabContent retry={retry} allocationRef={contentRef} />
+          <NeedsYouInboxTabContent
+            retry={retry}
+            allocationRef={contentRef}
+            asyncQuestionsEnabled={asyncQuestionsEnabled}
+          />
         </TabsContent>
         <TabsContent value="failed">
           <FailedInboxTabPanel />
         </TabsContent>
         <TabsContent value="history">
-          <InboxHistoryTabContent controller={historyController} />
+          <InboxHistoryTabContent
+            controller={historyController}
+            asyncQuestionsEnabled={asyncQuestionsEnabled}
+          />
         </TabsContent>
       </InboxTabStrip>
     </PageShell>

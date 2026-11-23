@@ -16,6 +16,7 @@ import type {
 } from "@/lib/types/clarification-inbox";
 import { rowPrimaryText } from "@/lib/needs-you-inbox/row-presentation";
 import { ASYNC_SIDECAR_PREFIX } from "@/lib/needs-you-inbox/async-question-groups";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 
 type HiddenListStatus = "idle" | "loading" | "ready" | "error";
 
@@ -168,6 +169,7 @@ export function NeedsYouInboxHiddenPanel({
 }) {
   const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const asyncQuestionsEnabled = useFeature("asyncQuestions");
   const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
   const [open, setOpen] = useState(false);
   const { status, bundles, asyncQuestions, total, load } = useHiddenList(
@@ -176,6 +178,7 @@ export function NeedsYouInboxHiddenPanel({
     hiddenCount,
     listRevision,
   );
+  const visibleAsyncQuestions = asyncQuestionsEnabled ? asyncQuestions : [];
   const displayCount = total ?? hiddenCount;
 
   const toggle = useCallback(() => {
@@ -223,7 +226,7 @@ export function NeedsYouInboxHiddenPanel({
           {status === "error" && (
             <p className="text-xs text-destructive">{t("needsYouInbox:hiddenLoadFailed")}</p>
           )}
-          {status === "ready" && bundles.length === 0 && asyncQuestions.length === 0 && (
+          {status === "ready" && bundles.length === 0 && visibleAsyncQuestions.length === 0 && (
             <p className="text-xs text-muted-foreground">{t("needsYouInbox:hiddenEmpty")}</p>
           )}
           {status === "ready" &&
@@ -231,7 +234,7 @@ export function NeedsYouInboxHiddenPanel({
               <HiddenRow key={bundle.pending_id} bundle={bundle} onRestore={handleRestore} />
             ))}
           {status === "ready" &&
-            asyncQuestions.map((question) => (
+            visibleAsyncQuestions.map((question) => (
               <HiddenAsyncRow
                 key={question.question_id}
                 question={question}

@@ -119,7 +119,7 @@ func (r *Repository) MarkAsyncQuestionDeliveryAdmitted(ctx context.Context, admi
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_async_question_deliveries
 		   SET state = 'admitted', admitted_at = ?, last_error = ''
-		 WHERE admission_id = ?`), at, admissionID)
+		 WHERE admission_id = ? AND state = 'pending'`), at, admissionID)
 	return err
 }
 

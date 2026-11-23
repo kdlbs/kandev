@@ -229,7 +229,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		surface = mcpprofile.SurfaceOfficeTask
 	}
 	capabilities := make([]mcpprofile.Capability, 0, 3)
-	if surface == mcpprofile.SurfaceKanbanTask && !task.IsEphemeral && !session.IsPassthrough {
+	if e.asyncQuestionsEnabled && surface == mcpprofile.SurfaceKanbanTask && !task.IsEphemeral && !session.IsPassthrough {
 		capabilities = append(capabilities, mcpprofile.CapabilityAsyncQuestions)
 	}
 	if task.Autopilot {
@@ -261,6 +261,9 @@ func (e *Executor) ResolveTaskSessionMCPProfile(
 func (e *Executor) withTaskCapabilities(profile mcpprofile.Context) mcpprofile.Context {
 	if e == nil {
 		return profile
+	}
+	if !e.asyncQuestionsEnabled {
+		profile = profile.WithoutCapability(mcpprofile.CapabilityAsyncQuestions)
 	}
 	if e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
 		profile = profile.WithCapability(mcpprofile.CapabilityCanvas)

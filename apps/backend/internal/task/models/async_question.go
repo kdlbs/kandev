@@ -155,6 +155,13 @@ type AsyncQuestionDelivery struct {
 	AdmittedAt               *time.Time
 }
 
+// AsyncQuestionDeliveryIdentity is the minimal durable identity used by
+// startup retirement without loading historical prompt bodies.
+type AsyncQuestionDeliveryIdentity struct {
+	AdmissionID string
+	QuestionID  string
+}
+
 // AsyncQuestionWaitStatus is the explicit dependency gate phase.
 type AsyncQuestionWaitStatus string
 

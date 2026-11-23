@@ -3950,6 +3950,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 	if err := r.StageTurnHistoryCleanupForTask(ctx, tx, id); err != nil {
 		return "", err
 	}
+	if err := r.purgeTaskAsyncQuestionRowsTx(ctx, tx, id); err != nil {
+		return "", fmt.Errorf("purge task async questions: %w", err)
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
 	if err != nil {
 		return "", err

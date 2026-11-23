@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClarificationInboxHiddenBundle } from "@/lib/types/clarification-inbox";
+import type { ClarificationInboxHiddenAsyncQuestion } from "@/lib/types/clarification-inbox";
 
 const mocks = vi.hoisted(() => ({
   listHidden: vi.fn(),
@@ -8,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   bumpRefreshTick: vi.fn(),
   toastError: vi.fn(),
   activeWorkspaceId: "w1",
+  asyncQuestionsEnabled: true,
 }));
 
 vi.mock("@/lib/api/domains/clarification-inbox-api", () => ({
@@ -28,9 +30,14 @@ vi.mock("@/components/state-provider", () => ({
     }),
 }));
 
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => mocks.asyncQuestionsEnabled,
+}));
+
 import { NeedsYouInboxHiddenPanel } from "./needs-you-inbox-hidden-panel";
 
 const SHOW_HIDDEN = "Show hidden";
+const HIDDEN_EMPTY_TEXT = "Nothing is currently hidden.";
 const WORKSPACE_ONE_CONTEXT = "From workspace one";
 const WORKSPACE_TWO_CONTEXT = "From workspace two";
 
@@ -58,6 +65,7 @@ beforeEach(() => {
   mocks.bumpRefreshTick.mockReset();
   mocks.toastError.mockReset();
   mocks.activeWorkspaceId = "w1";
+  mocks.asyncQuestionsEnabled = true;
 });
 
 afterEach(() => cleanup());
@@ -86,7 +94,7 @@ describe("NeedsYouInboxHiddenPanel", () => {
     render(<NeedsYouInboxHiddenPanel hiddenCount={1} />);
 
     fireEvent.click(screen.getByText(SHOW_HIDDEN));
-    expect(await screen.findByText("Nothing is currently hidden.")).not.toBeNull();
+    expect(await screen.findByText(HIDDEN_EMPTY_TEXT)).not.toBeNull();
   });
 
   it("restores a hidden bundle and re-reads the main list (AC .33)", async () => {
@@ -210,7 +218,7 @@ describe("NeedsYouInboxHiddenPanel staleness guards", () => {
     // an exact call count that isn't this test's concern.
     mocks.listHidden.mockResolvedValue({ bundles: [], count: 0, total: 0 });
     rerender(<NeedsYouInboxHiddenPanel hiddenCount={0} />);
-    await screen.findByText("Nothing is currently hidden.");
+    await screen.findByText(HIDDEN_EMPTY_TEXT);
 
     const callsBeforeRestoreSettles = mocks.listHidden.mock.calls.length;
     await act(async () => {
@@ -221,7 +229,7 @@ describe("NeedsYouInboxHiddenPanel staleness guards", () => {
 
     // The stale w1 continuation must not re-fetch w1 nor reintroduce its row.
     expect(mocks.listHidden.mock.calls.length).toBe(callsBeforeRestoreSettles);
-    expect(screen.getByText("Nothing is currently hidden.")).not.toBeNull();
+    expect(screen.getByText(HIDDEN_EMPTY_TEXT)).not.toBeNull();
     expect(screen.queryByText(WORKSPACE_ONE_CONTEXT)).toBeNull();
   });
 
@@ -281,5 +289,39 @@ describe("NeedsYouInboxHiddenPanel staleness guards", () => {
     expect(await screen.findByText("Second")).not.toBeNull();
     expect(screen.queryByText("First")).toBeNull();
     expect(mocks.listHidden).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("NeedsYouInboxHiddenPanel async feature gate", () => {
+  it("does not render a retained hidden async question while the feature is off", async () => {
+    const hiddenQuestion: ClarificationInboxHiddenAsyncQuestion = {
+      question_id: "aq-hidden",
+      task_id: "t1",
+      session_id: "s1",
+      session_state: "WAITING_FOR_INPUT",
+      task_title: "Task",
+      forwarded: false,
+      waiting: true,
+      status: "pending",
+      context: "",
+      created_at: "2026-09-03T04:54:02Z",
+      questions: [{ id: "q", title: "Retained async question", prompt: "Prompt", options: [] }],
+      state: "dismissed",
+      snooze_until: null,
+    };
+    mocks.asyncQuestionsEnabled = false;
+    mocks.listHidden.mockResolvedValue({
+      bundles: [],
+      async_questions: [hiddenQuestion],
+      count: 1,
+      total: 1,
+    });
+    render(<NeedsYouInboxHiddenPanel hiddenCount={1} />);
+
+    fireEvent.click(screen.getByText(SHOW_HIDDEN));
+
+    expect(await screen.findByText(HIDDEN_EMPTY_TEXT)).not.toBeNull();
+    expect(screen.queryByTestId("needs-you-inbox-hidden-async-row")).toBeNull();
+    expect(screen.queryByText("Retained async question")).toBeNull();
   });
 });

@@ -15,10 +15,10 @@ func TestLegacyTaskTitleProfile(t *testing.T) {
 	}
 }
 
-func TestLegacyTaskProfileSupportsAsyncQuestions(t *testing.T) {
+func TestLegacyTaskProfileOmitsAsyncQuestions(t *testing.T) {
 	ctx := Legacy("task", false, nil)
-	if !ctx.HasCapability(CapabilityAsyncQuestions) {
-		t.Fatalf("task capabilities = %#v, want async questions", ctx.Capabilities)
+	if ctx.HasCapability(CapabilityAsyncQuestions) {
+		t.Fatalf("task capabilities = %#v, want no async questions", ctx.Capabilities)
 	}
 }
 

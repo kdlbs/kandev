@@ -37,7 +37,7 @@ type asyncQuestionQueueAdapter struct {
 	log       *zap.Logger
 }
 
-const asyncQuestionQueueActor = "async-question"
+const asyncQuestionQueueActor = messagequeue.QueuedByAsyncQuestion
 
 func (a *asyncQuestionQueueAdapter) AdmitAsyncQuestionDelivery(ctx context.Context, delivery *models.AsyncQuestionDelivery) error {
 	if delivery == nil {
@@ -69,7 +69,7 @@ func (a *asyncQuestionQueueAdapter) AdmitAsyncQuestionDelivery(ctx context.Conte
 		}
 		return questions.ErrDestinationTerminal
 	}
-	metadata := make(map[string]interface{}, len(delivery.Metadata)+2)
+	metadata := make(map[string]interface{}, len(delivery.Metadata)+1)
 	for key, value := range delivery.Metadata {
 		metadata[key] = value
 	}
@@ -122,7 +122,7 @@ func (a *asyncQuestionQueueAdapter) removeQueueAdmission(
 	identity messagequeue.QueueSessionIdentity,
 	delivery *models.AsyncQuestionDelivery,
 ) error {
-	metadata := make(map[string]interface{}, len(delivery.Metadata)+2)
+	metadata := make(map[string]interface{}, len(delivery.Metadata)+1)
 	for key, value := range delivery.Metadata {
 		metadata[key] = value
 	}

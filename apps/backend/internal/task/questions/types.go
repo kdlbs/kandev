@@ -67,7 +67,6 @@ type Store interface {
 	MarkStaleAsyncQuestionsForSession(ctx context.Context, sessionID, reason string) (int, error)
 	StaleAsyncQuestionsForSession(ctx context.Context, sessionID, reason string, buildWake models.AsyncQuestionWakeBuilder) ([]*models.AsyncQuestion, error)
 	ReconcileAsyncQuestionAuthority(ctx context.Context, limit int, buildWake models.AsyncQuestionWakeBuilder) ([]*models.AsyncQuestion, error)
-	DeleteAsyncQuestionsForTask(ctx context.Context, taskID string) error
 }
 
 // DeliveryQueue admits one immutable continuation intent with its stored

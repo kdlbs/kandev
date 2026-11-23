@@ -1238,30 +1238,7 @@ func registerRoutes(p routeParams) {
 		&clarificationAnswerAttachmentMaterializer{runtime: p.lifecycleMgr},
 	)
 
-	asyncQuestionSvc := taskquestions.NewService(p.taskRepo, nil, p.log.Zap())
-	asyncQuestionSvc.SetDeliveryQueue(&asyncQuestionQueueAdapter{
-		queue: p.orchestratorSvc.GetMessageQueue(), sessions: p.taskRepo,
-		readiness: p.orchestratorSvc, log: p.log.Zap(),
-	})
-	asyncQuestionSvc.SetTranscriptWriter(&asyncQuestionTranscriptWriter{reader: p.taskRepo, creator: p.taskSvc})
-	asyncQuestionSvc.SetNotifier(asyncQuestionNotifier{bus: p.eventBus, pendingActions: p.taskSvc, log: p.log.Zap()})
-	asyncQuestionSvc.SetSessionStateReader(asyncQuestionSessionState{sessions: p.taskRepo})
-	asyncQuestionSvc.SetWakeDestination(func(ctx context.Context, taskID, sessionID string) {
-		p.orchestratorSvc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
-	})
-	p.orchestratorSvc.SetAsyncQuestionGate(asyncQuestionSvc)
-	p.orchestratorSvc.SetAsyncQuestionLifecycle(asyncQuestionSvc)
-	p.taskSvc.SetAsyncQuestionLifecycle(asyncQuestionSvc)
-	p.services.AsyncQuestions = asyncQuestionSvc
-	if p.ctx != nil {
-		asyncQuestionSvc.Start(p.ctx)
-	}
-	if p.addCleanup != nil {
-		p.addCleanup(func() error {
-			asyncQuestionSvc.Stop()
-			return nil
-		})
-	}
+	configureAsyncQuestions(p)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {

@@ -260,9 +260,6 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 	}
 	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation && surface != SurfaceCoordinator {
 		capabilities = append(capabilities, CapabilityUserQuestion)
-		if surface == SurfaceKanbanTask {
-			capabilities = append(capabilities, CapabilityAsyncQuestions)
-		}
 	}
 	return New(surface, capabilities, providers)
 }

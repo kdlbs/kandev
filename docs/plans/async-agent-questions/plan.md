@@ -450,6 +450,9 @@ The root README and screenshot catalog have no additional affected question guid
 
 ## Related delivery records
 
+The [release toggle package](../async-agent-questions-release-toggle/plan.md)
+covers the separate requirement for shipping PR #4980 with async questions off by default.
+
 The implemented `task-autopilot`, `peer-message-live-clarification`, `user-question-turn-boundary`,
 `clarification-active-lifecycle`, and `clarification-response-reliability` packages provide compatibility controls.
 Their completed statuses and historical results remain intact.

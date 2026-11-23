@@ -41,6 +41,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { isDismissedGitPushErrorMessage } from "@/lib/utils/git-push-error-message";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 
 type AdapterContext = {
   isTaskDescription: boolean;
@@ -54,6 +55,11 @@ type AdapterContext = {
   isTurnActive?: boolean;
   isContainingTurnActive?: boolean;
 };
+
+function AgentQuestionMessageAdapter({ comment }: { comment: Message }) {
+  const enabled = useFeature("asyncQuestions");
+  return enabled ? <AgentQuestionMessage comment={comment} /> : null;
+}
 
 /**
  * Decides whether the task-description message renders the Start agent
@@ -464,7 +470,7 @@ const adapters: MessageAdapter[] = [
   },
   {
     matches: (comment) => comment.type === "agent_question_request",
-    render: (comment) => <AgentQuestionMessage comment={comment} />,
+    render: (comment) => <AgentQuestionMessageAdapter comment={comment} />,
   },
   {
     matches: (comment) => comment.type === "agent_plan",

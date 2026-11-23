@@ -28,6 +28,11 @@ import { MessageListFooter } from "./message-list-footer";
 import { findMessageRow, useNativeScrollManagement } from "./message-list-native-scroll";
 import { scheduleAfterPanelRestore, useActivationPending } from "./transcript-auto-scroll";
 import { useTranscriptAutoScrollEnabled } from "./use-transcript-auto-scroll-enabled";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import {
+  filterAsyncQuestionItems,
+  filterAsyncQuestionMessages,
+} from "./message-list-async-question-filter";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
   type MessageListProps,
@@ -982,6 +987,7 @@ export const NativeMessageList = memo(
     ref,
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const asyncQuestionsEnabled = useFeature("asyncQuestions");
     const showTurnChangedFiles = useAppStore((state) =>
       shouldShowTurnChangedFiles(
         state.userSettings.loaded,
@@ -992,18 +998,24 @@ export const NativeMessageList = memo(
 
     const visibleItems = useMemo(
       () =>
-        filterLaunchErrorItems(items, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt),
-      [items, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt],
+        filterAsyncQuestionItems(
+          filterLaunchErrorItems(items, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt),
+          asyncQuestionsEnabled,
+        ),
+      [items, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt, asyncQuestionsEnabled],
     );
     const visibleMessages = useMemo(
       () =>
-        filterLaunchErrorMessages(
-          messages,
-          launchErrorOwned,
-          launchErrorStamp,
-          launchErrorOccurredAt,
+        filterAsyncQuestionMessages(
+          filterLaunchErrorMessages(
+            messages,
+            launchErrorOwned,
+            launchErrorStamp,
+            launchErrorOccurredAt,
+          ),
+          asyncQuestionsEnabled,
         ),
-      [messages, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt],
+      [messages, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt, asyncQuestionsEnabled],
     );
     useEffect(() => {
       const visibleTurnIds = visibleItems.flatMap((item) => {

@@ -5,6 +5,7 @@ import { IconChevronDown, IconChevronUp, IconMessageQuestion } from "@tabler/ico
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { AsyncQuestionRow } from "@/components/needs-you-inbox/async-question-row";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useTaskAsyncQuestions } from "@/hooks/domains/session/use-task-async-questions";
 import type { ClarificationInboxAsyncQuestion } from "@/lib/types/clarification-inbox";
 
@@ -30,17 +31,25 @@ function AsyncQuestionStripError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-export function AsyncQuestionStrip({
-  workspaceId,
-  taskId,
-  hasBlockingClarification,
-  enabled = true,
-}: {
+type AsyncQuestionStripProps = {
   workspaceId: string | null;
   taskId: string | null;
   hasBlockingClarification: boolean;
   enabled?: boolean;
-}) {
+};
+
+export function AsyncQuestionStrip(props: AsyncQuestionStripProps) {
+  const featureEnabled = useFeature("asyncQuestions");
+  if (!featureEnabled) return null;
+  return <EnabledAsyncQuestionStrip {...props} />;
+}
+
+function EnabledAsyncQuestionStrip({
+  workspaceId,
+  taskId,
+  hasBlockingClarification,
+  enabled = true,
+}: AsyncQuestionStripProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const { questions, status, refresh } = useTaskAsyncQuestions(workspaceId, taskId, enabled);
