@@ -32,7 +32,11 @@ func (m *Manager) resolveSessionInferenceCommand(ctx context.Context, ia agents.
 	if execution.RuntimeName != "" && execution.RuntimeName != agentruntime.RuntimeStandalone && ag.ID() == agents.OpenCodeACPAgentID {
 		opts.PreferNativeBinary = false
 	}
-	return ag.BuildCommand(opts), nil
+	command := ag.BuildCommand(opts)
+	if err := cliflags.ValidateCommandArgs(command.Args()); err != nil {
+		return agents.Command{}, fmt.Errorf("validate inference command: %w", err)
+	}
+	return command, nil
 }
 
 // ErrInferenceAgentIDRequired is returned when ExecuteInferencePrompt is called
@@ -55,9 +59,11 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 	if !ok {
 		return nil, fmt.Errorf("agent %q does not support inference", agentID)
 	}
-	if agentConfig, ok := ia.(agents.Agent); !ok || !agentConfig.Enabled() {
+	agentConfig, ok := ia.(agents.Agent)
+	if !ok || !agentConfig.Enabled() {
 		return nil, fmt.Errorf("agent %q is disabled or unavailable", agentID)
 	}
+	defer m.acquireOpenCodeLaunchAdmission(agentConfig.ID())()
 
 	cfg := ia.InferenceConfig()
 	if cfg == nil || !cfg.Supported {
@@ -130,14 +136,15 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	if !ok {
 		return nil, fmt.Errorf("agent %q does not support inference", agentName)
 	}
-	if agentConfig, ok := ia.(agents.Agent); !ok || !agentConfig.Enabled() {
+	agentConfig, ok := ia.(agents.Agent)
+	if !ok || !agentConfig.Enabled() {
 		return nil, fmt.Errorf("agent %q is disabled or unavailable", agentName)
 	}
+	defer m.acquireOpenCodeLaunchAdmission(agentConfig.ID())()
 	cfg := ia.InferenceConfig()
 	if cfg == nil || !cfg.Supported {
 		return nil, fmt.Errorf("agent %q inference not supported", agentName)
 	}
-	agentConfig, _ := ia.(agents.Agent)
 	execution, err := m.GetOrEnsureExecution(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("no execution available for session %s: %w", sessionID, err)

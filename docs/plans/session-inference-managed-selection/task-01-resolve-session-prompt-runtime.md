@@ -32,10 +32,16 @@ these prompts as it does to task launches.
   static inference command for other agents.
 - Use the resolved command in `ExecuteInferencePrompt` and
   `ExecuteInferenceProfilePrompt`.
+- Hold OpenCode migration admission for the actual utility agent until the
+  agentctl request returns, even when the session execution uses another agent.
+- Validate the built command before sending the request to agentctl.
 - Add `TestSessionInferenceUsesSelectedManagedRuntimeVersion` for a Copilot
   version selection.
 - Add `TestSessionInferenceUsesSelectedOpenCodeFamily` for a managed OpenCode
   v2 selection.
+- Cover profile selection, standalone native and remote managed OpenCode
+  commands, command resolution failures, empty commands, and migration
+  admission while agentctl handles an OpenCode utility request.
 
 ## Out of scope
 
@@ -47,10 +53,10 @@ these prompts as it does to task launches.
 
 Run these commands from `apps/backend`.
 
-- `go test -trimpath -tags fts5 -run TestSessionInference ./internal/agent/runtime/lifecycle/`
-  fails before the change and passes after it.
-- `go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle/` reports
-  no failure after the change that it does not also report before it.
-- `gofmt -l ./internal/agent/runtime/lifecycle/` and
-  `go vet -trimpath -tags fts5 ./internal/agent/runtime/lifecycle/` report
-  nothing.
+- `go test -trimpath -tags fts5 -run '^TestSessionInference' ./internal/agent/runtime/lifecycle/` passed.
+- `go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle/` passed.
+- `go test -race -trimpath -tags fts5 -run '^TestSessionInference' ./internal/agent/runtime/lifecycle/` passed.
+- `gofmt -l` on the three changed Go files returned no files.
+- `go vet -trimpath -tags fts5 ./internal/agent/runtime/lifecycle/` passed.
+- `bash scripts/lint-go-changed` on the three changed Go files reported `0 issues`.
+- `git diff --check` passed.
