@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	utilcfg "github.com/kandev/kandev/config/utilityagents"
 	"github.com/kandev/kandev/internal/testutil"
 )
@@ -184,38 +182,65 @@ func TestRefreshBuiltinPromptAfterProfileOnlyUpdate(t *testing.T) {
 	}
 }
 
+// Covers AC-AGENTS-UTILITY-AGENT-PROFILES-002.3.
 func TestRefreshUneditedBuiltinPromptPostgresSchemaReplay(t *testing.T) {
-	dsn := testutil.PostgresDSNFromEnv(t)
-	const customized = enhancePromptV1 + "\nKeep the response short."
-	for _, tc := range []struct {
-		name, stored, want string
+	const customizedPrompt = enhancePromptV1 + "\n\nKeep the response under three sentences."
+	cases := []struct {
+		name         string
+		storedPrompt string
+		wantPrompt   string
 	}{
-		{name: "shipped", stored: enhancePromptV1, want: utilcfg.Get("enhance-prompt")},
-		{name: "customized", stored: customized, want: customized},
-	} {
+		{name: "shipped", storedPrompt: enhancePromptV1, wantPrompt: utilcfg.Get("enhance-prompt")},
+		{name: "customized", storedPrompt: customizedPrompt, wantPrompt: customizedPrompt},
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			db := testutil.OpenIsolatedPostgres(t, dsn)
-			repo, err := newSQLiteRepositoryWithDB(db, db)
-			require.NoError(t, err)
-			ctx := t.Context()
+			database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+			repo, err := newSQLiteRepositoryWithDB(database, database)
+			if err != nil {
+				t.Fatalf("initial schema init: %v", err)
+			}
+
+			ctx := context.Background()
 			agent, err := repo.GetAgentByID(ctx, enhancePromptAgentID)
-			require.NoError(t, err)
-			agent.Prompt = tc.stored
-			agent.AgentProfileID = "test-profile"
+			if err != nil {
+				t.Fatalf("read builtin: %v", err)
+			}
+			agent.Prompt = tc.storedPrompt
+			agent.Name = "Enhanced prompt"
+			agent.Description = "preserved description"
+			agent.Model = "preserved-model"
+			agent.AgentProfileID = "profile-1"
 			agent.ProfileBindingState = "explicit"
-			require.NoError(t, repo.UpdateAgent(ctx, agent))
-			before, err := repo.GetAgentByID(ctx, enhancePromptAgentID)
-			require.NoError(t, err)
-			require.Equal(t, tc.stored, before.Prompt)
-			require.Equal(t, "test-profile", before.AgentProfileID)
-			require.Equal(t, "explicit", before.ProfileBindingState)
-			before.Prompt = tc.want
-			for range 2 {
-				replayed, err := newSQLiteRepositoryWithDB(db, db)
-				require.NoError(t, err)
-				after, err := replayed.GetAgentByID(ctx, enhancePromptAgentID)
-				require.NoError(t, err)
-				require.Equal(t, before, after)
+			agent.Enabled = true
+			if err := repo.UpdateAgent(ctx, agent); err != nil {
+				t.Fatalf("update stored prompt and metadata: %v", err)
+			}
+			updated, err := repo.GetAgentByID(ctx, enhancePromptAgentID)
+			if err != nil {
+				t.Fatalf("read updated builtin: %v", err)
+			}
+
+			for replay := range 2 {
+				replayed, err := newSQLiteRepositoryWithDB(database, database)
+				if err != nil {
+					t.Fatalf("schema replay %d: %v", replay+1, err)
+				}
+				got, err := replayed.GetAgentByID(ctx, enhancePromptAgentID)
+				if err != nil {
+					t.Fatalf("read builtin after replay %d: %v", replay+1, err)
+				}
+				if got.Prompt != tc.wantPrompt {
+					t.Fatalf("prompt after replay %d = %q, want %q", replay+1, got.Prompt, tc.wantPrompt)
+				}
+				if got.Name != updated.Name || got.Description != updated.Description ||
+					got.AgentID != updated.AgentID || got.Model != updated.Model ||
+					got.AgentProfileID != updated.AgentProfileID ||
+					got.ProfileBindingState != updated.ProfileBindingState ||
+					got.Builtin != updated.Builtin || got.Enabled != updated.Enabled ||
+					!got.CreatedAt.Equal(updated.CreatedAt) || !got.UpdatedAt.Equal(updated.UpdatedAt) {
+					t.Fatalf("agent metadata changed after replay %d: got %+v, want unchanged from %+v", replay+1, got, updated)
+				}
 			}
 		})
 	}

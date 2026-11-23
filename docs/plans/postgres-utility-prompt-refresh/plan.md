@@ -25,12 +25,17 @@ failure handling.
 The [utility requirement](../../specs/agents/requirements/utility-agent-profiles.md)
 and [utility design](../../specs/agents/system-design/utility-agent-profiles.md)
 already describe the intended behavior. The [upgrade requirement](../../specs/platform/requirements/release-upgrade-regression.md)
-requires independent results on SQLite and PostgreSQL.
+requires independent results on SQLite and PostgreSQL. The Enhance utility
+refresh is eligible by known prompt hash and conditionally updates the original
+prompt text. Saved-prompt refreshes retain both known-hash and timestamp
+eligibility checks.
 
 1. [Repair and verify the prompt refresh](task-01-repair-prompt-refresh.md).
-2. Confirm the fixed source passes both upgrade engines using the existing
+2. Add the utility store to the fixed PostgreSQL 16 CI cohort and verify that
+   the workflow contract test confirms the package runs with its job-level DSN.
+3. Confirm the fixed source passes both upgrade engines using the existing
    release rehearsal. Keep results separate by engine and viewport.
-3. Track remaining viewer validation separately in the
+4. Track remaining viewer validation separately in the
    [viewer host work order](../file-viewer-plugins/task-02-viewer-api.md) and
    [release validation record](../../reviews/file-viewers-implementation.md).
    The remote runs need a Docker-enabled runner and viewer-specific scenarios
