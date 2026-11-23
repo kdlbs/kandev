@@ -8,7 +8,9 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/profiles"
+	"github.com/kandev/kandev/pkg/agent"
 )
 
 var errACPV2ReconnectRequired = errors.New("ACP v2 is disabled. Reconnect this session to send new prompts over ACP v1")
@@ -29,11 +31,11 @@ func (m *Manager) prefersACPV2(req *LaunchRequest, launch *ExecutorCreateRequest
 func (m *Manager) canLaunchACPV2(req *LaunchRequest, agentConfig agents.Agent, runtime agentruntime.Runtime, version string, preferNative bool) bool {
 	if m.sessionManager == nil || !m.sessionManager.acpV2Enabled || runtime != agentruntime.RuntimeStandalone ||
 		!req.StartAgent || req.IsPassthrough || req.TaskID == "" || req.SessionID == "" ||
-		req.DeliveryStreamID == "" || protocolForAgent(agentConfig) != "acp" {
+		req.DeliveryStreamID == "" || protocolForAgent(agentConfig) != string(agent.ProtocolACP) {
 		return false
 	}
 	switch req.McpMode {
-	case "", "task", "task-title-pending":
+	case "", mcpmode.Task, mcpmode.TaskTitlePending:
 	default:
 		return false
 	}
@@ -65,9 +67,9 @@ func (m *Manager) buildPromotedAgentCommand(
 
 func qualifiedACPV2Version(id, version string) bool {
 	switch id {
-	case "claude-acp":
+	case claudeACPAgentID:
 		return version == "0.109.0" || version == "0.109.1"
-	case "codex-acp":
+	case codexACPAgentID:
 		return version == "2.8.0" || version == "2.9.0"
 	default:
 		return false
