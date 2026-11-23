@@ -1,4 +1,11 @@
 {
+  "pluginGroupingSection": "Agrupamentos de plugins",
+  "pluginGroupingUnavailable": "Este agrupamento de plugin está indisponível ou incompleto. Tente novamente, ative o plugin ou escolha outra vista.",
+  "pluginGroupingUnavailableLabel": "{{name}} (indisponível)",
+  "pluginGroupUntagged": "Sem etiquetas",
+  "pluginGroupDescription": "Agrupar a vista completa de tarefas antes da paginação.",
+  "pluginPageStatus_one": "{{count}} tarefa única. Página {{page}} de {{total}} (ocorrências).",
+  "pluginPageStatus_other": "{{count}} tarefas únicas. Página {{page}} de {{total}} (ocorrências).",
   "taskViews": "Vistas de tarefas",
   "archivedLoadFailed": "Não foi possível carregar as tarefas arquivadas",
   "retry": "Tentar novamente",

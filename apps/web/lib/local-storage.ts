@@ -547,6 +547,8 @@ const ACTIVE_TAB_KEY = "kandev.activeTab";
  * preview tab (restored as preview).
  */
 export interface StoredFileTab {
+  /** Explicit plugin/viewer selection, scoped to this user file tab. */
+  fileViewer?: string;
   path: string;
   name: string;
   /** Multi-repo subpath (repository_name) so a restored tab re-fetches its
@@ -601,7 +603,14 @@ export function setOpenFileTabs(sessionId: string, tabs: StoredFileTab[]): void 
   if (typeof window === "undefined") return;
   try {
     const key = `${OPEN_FILES_KEY}.${sessionId}`;
-    window.sessionStorage.setItem(key, JSON.stringify(tabs.map(normalizeStoredFileTab)));
+    const previous = getOpenFileTabs(sessionId);
+    const withViewers = tabs.map((tab) => ({
+      ...tab,
+      fileViewer:
+        tab.fileViewer ??
+        previous.find((old) => old.path === tab.path && old.repo === tab.repo)?.fileViewer,
+    }));
+    window.sessionStorage.setItem(key, JSON.stringify(withViewers.map(normalizeStoredFileTab)));
   } catch {
     // Ignore write failures
   }

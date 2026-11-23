@@ -48,15 +48,16 @@ export async function seedPromptFiles(
   apiClient: ApiClient,
   workspaceId: string,
   files: Record<string, string>,
-  { first = false }: { first?: boolean } = {},
+  { first = false, path = PROMPTS_DIR }: { first?: boolean; path?: string } = {},
 ) {
   if (first) await apiClient.configureGitLab(workspaceId);
   else await apiClient.mockGitLabReset(workspaceId);
+  if (Object.keys(files).length === 0) return;
   await apiClient.mockGitLabAddRepoFiles(
     workspaceId,
     GITLAB_PROJECT,
     "main",
-    Object.entries(files).map(([name, content]) => ({ path: `${PROMPTS_DIR}/${name}`, content })),
+    Object.entries(files).map(([name, content]) => ({ path: `${path}/${name}`, content })),
   );
 }
 
@@ -64,6 +65,37 @@ export async function syncNow(page: Page) {
   const response = waitForHttp(page, "POST", SYNC_PATH);
   await page.getByTestId("prompt-sync-now").click();
   expect((await response).ok()).toBe(true);
+}
+
+/** Makes the next Sync now response a quota refusal, then lets later requests through. */
+export async function blockNextPromptSyncWithQuota(page: Page, apiClient: ApiClient) {
+  const response = await apiClient.rawRequest("GET", "/api/v1/prompt-sync/config");
+  expect(response.ok).toBe(true);
+  const config = await response.json();
+  let blocked = false;
+  await page.route("**/api/v1/prompt-sync/sync", async (route) => {
+    if (blocked) {
+      await route.continue();
+      return;
+    }
+    blocked = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        config: {
+          ...config,
+          last_synced_at: new Date().toISOString(),
+          last_ok: false,
+          last_error: "GitHub quota is temporarily unavailable",
+          last_error_class: "github_rate_limited",
+          next_attempt_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        },
+        error: "GitHub quota is temporarily unavailable",
+        error_code: "github_rate_limited",
+      }),
+    });
+  });
 }
 
 // fillSyncDialog opens the Prompt Sync dialog and enters a GitLab source.

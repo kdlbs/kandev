@@ -94,7 +94,10 @@ export function isHandledApiError(error: unknown): error is ApiError & { handled
   return error instanceof ApiError && error.handled;
 }
 
-export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Promise<T> {
+export async function fetchResponse(
+  pathOrUrl: string,
+  options?: ApiRequestOptions,
+): Promise<Response> {
   const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
   const url = resolveUrl(pathOrUrl, baseUrl);
   const response = await fetch(url, {
@@ -108,6 +111,11 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
     if (response.status === 401 && isKandevAuthChallenge(response)) onUnauthorized?.();
     await throwFromResponse(response);
   }
+  return response;
+}
+
+export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Promise<T> {
+  const response = await fetchResponse(pathOrUrl, options);
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   if (!text) return undefined as T;

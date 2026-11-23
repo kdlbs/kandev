@@ -78,11 +78,13 @@ export function MarketplaceEntryRow({
             </Trans>
           </span>
         )}
-        {entry.categories.map((cat) => (
-          <Badge key={cat} variant="secondary" className={SETTINGS_TYPOGRAPHY.meta}>
-            {cat}
-          </Badge>
-        ))}
+        {[...entry.categories, ...(entry.file_extensions ?? []).map((ext) => `.${ext}`)].map(
+          (cat) => (
+            <Badge key={cat} variant="secondary" className={SETTINGS_TYPOGRAPHY.meta}>
+              {cat}
+            </Badge>
+          ),
+        )}
         <PluginRepoLink url={entry.repo_url} className="ml-auto" />
       </div>
     </div>

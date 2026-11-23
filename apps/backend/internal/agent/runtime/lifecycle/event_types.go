@@ -14,41 +14,42 @@ import (
 
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
 type AgentEventPayload struct {
-	AgentExecutionID          string                           `json:"agent_execution_id"`
-	AttemptID                 string                           `json:"attempt_id,omitempty"`
-	OwnerKind                 ExecutionOwnerKind               `json:"owner_kind,omitempty"`
-	WorkspaceID               string                           `json:"workspace_id,omitempty"`
-	RunID                     string                           `json:"run_id,omitempty"`
-	RunSessionID              string                           `json:"run_session_id,omitempty"`
-	RunAttempt                int                              `json:"run_attempt,omitempty"`
-	TaskID                    string                           `json:"task_id"`
-	SessionID                 string                           `json:"session_id,omitempty"`
-	TaskEnvironmentID         string                           `json:"task_environment_id,omitempty"`
-	TurnID                    string                           `json:"turn_id,omitempty"`
-	DeliveryStreamID          string                           `json:"delivery_stream_id,omitempty"`
-	DeliveryIncarnationID     string                           `json:"delivery_incarnation_id,omitempty"`
-	DeliveryHarnessGeneration uint64                           `json:"delivery_harness_generation,omitempty"`
-	DeliverySequence          uint64                           `json:"delivery_sequence,omitempty"`
-	DeliverySubmissionID      string                           `json:"delivery_submission_id,omitempty"`
-	DeliveryOutcome           string                           `json:"delivery_outcome,omitempty"`
-	AgentID                   string                           `json:"agent_id,omitempty"`
-	AgentProfileID            string                           `json:"agent_profile_id"`
-	ExecutionProfileID        string                           `json:"execution_profile_id,omitempty"`
-	ResourceCircuitKey        string                           `json:"resource_circuit_key,omitempty"`
-	ContainerID               string                           `json:"container_id,omitempty"`
-	Status                    string                           `json:"status"`
-	StartedAt                 time.Time                        `json:"started_at"`
-	FinishedAt                *time.Time                       `json:"finished_at,omitempty"`
-	ErrorMessage              string                           `json:"error_message,omitempty"`
-	FailureCode               string                           `json:"failure_code,omitempty"`
-	FailureDetails            string                           `json:"failure_details,omitempty"`
-	StartupFailureReason      string                           `json:"startup_reason,omitempty"`
-	StartupFailureAttempts    int                              `json:"startup_attempts,omitempty"`
-	StartupFailureNPMCode     string                           `json:"startup_npm_code,omitempty"`
-	ProviderError             *streams.ProviderError           `json:"provider_error,omitempty"`
-	PromptFailureDisposition  streams.PromptFailureDisposition `json:"prompt_failure_disposition,omitempty"`
-	CausingRunID              string                           `json:"causing_run_id,omitempty"`
-	TerminalCausingRunID      string                           `json:"terminal_causing_run_id,omitempty"`
+	AgentExecutionID           string                              `json:"agent_execution_id"`
+	AttemptID                  string                              `json:"attempt_id,omitempty"`
+	OwnerKind                  ExecutionOwnerKind                  `json:"owner_kind,omitempty"`
+	WorkspaceID                string                              `json:"workspace_id,omitempty"`
+	RunID                      string                              `json:"run_id,omitempty"`
+	RunSessionID               string                              `json:"run_session_id,omitempty"`
+	RunAttempt                 int                                 `json:"run_attempt,omitempty"`
+	TaskID                     string                              `json:"task_id"`
+	SessionID                  string                              `json:"session_id,omitempty"`
+	TaskEnvironmentID          string                              `json:"task_environment_id,omitempty"`
+	TurnID                     string                              `json:"turn_id,omitempty"`
+	ConfigurationCommandResult *streams.ConfigurationCommandResult `json:"configuration_result,omitempty"`
+	DeliveryStreamID           string                              `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID      string                              `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration  uint64                              `json:"delivery_harness_generation,omitempty"`
+	DeliverySequence           uint64                              `json:"delivery_sequence,omitempty"`
+	DeliverySubmissionID       string                              `json:"delivery_submission_id,omitempty"`
+	DeliveryOutcome            string                              `json:"delivery_outcome,omitempty"`
+	AgentID                    string                              `json:"agent_id,omitempty"`
+	AgentProfileID             string                              `json:"agent_profile_id"`
+	ExecutionProfileID         string                              `json:"execution_profile_id,omitempty"`
+	ResourceCircuitKey         string                              `json:"resource_circuit_key,omitempty"`
+	ContainerID                string                              `json:"container_id,omitempty"`
+	Status                     string                              `json:"status"`
+	StartedAt                  time.Time                           `json:"started_at"`
+	FinishedAt                 *time.Time                          `json:"finished_at,omitempty"`
+	ErrorMessage               string                              `json:"error_message,omitempty"`
+	FailureCode                string                              `json:"failure_code,omitempty"`
+	FailureDetails             string                              `json:"failure_details,omitempty"`
+	StartupFailureReason       string                              `json:"startup_reason,omitempty"`
+	StartupFailureAttempts     int                                 `json:"startup_attempts,omitempty"`
+	StartupFailureNPMCode      string                              `json:"startup_npm_code,omitempty"`
+	ProviderError              *streams.ProviderError              `json:"provider_error,omitempty"`
+	PromptFailureDisposition   streams.PromptFailureDisposition    `json:"prompt_failure_disposition,omitempty"`
+	CausingRunID               string                              `json:"causing_run_id,omitempty"`
+	TerminalCausingRunID       string                              `json:"terminal_causing_run_id,omitempty"`
 	// SessionSettingsPolicy is a host-owned snapshot of the policy used by this
 	// execution's startup. It lets delayed lifecycle callbacks retain their
 	// startup provenance after the orchestrator releases the admission attempt.
@@ -237,25 +238,26 @@ type AgentStreamEventData struct {
 	ACPSessionID string `json:"acp_session_id,omitempty"`
 	// OperationID carries a provider operation identity when the protocol
 	// emits one. Native Codex turn IDs use it at turn boundaries.
-	OperationID                 string                           `json:"operation_id,omitempty"`
-	ProtocolMessageID           string                           `json:"protocol_message_id,omitempty"`
-	Text                        string                           `json:"text,omitempty"`
-	ProviderDiagnosticCandidate bool                             `json:"provider_diagnostic_candidate,omitempty"`
-	ToolCallID                  string                           `json:"tool_call_id,omitempty"`
-	ToolName                    string                           `json:"tool_name,omitempty"`
-	ToolTitle                   string                           `json:"tool_title,omitempty"`
-	ToolStatus                  string                           `json:"tool_status,omitempty"`
-	Error                       string                           `json:"error,omitempty"`
-	PromptFailureDisposition    streams.PromptFailureDisposition `json:"prompt_failure_disposition,omitempty"`
-	ProviderError               *streams.ProviderError           `json:"provider_error,omitempty"`
-	SessionStatus               string                           `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
-	SessionSettingsPolicy       streams.SessionSettingsPolicy    `json:"session_settings_policy,omitempty"`
-	SessionSettingsGeneration   uint64                           `json:"session_settings_generation,omitempty"`
-	PromptGeneration            uint64                           `json:"prompt_generation,omitempty"`
-	TurnID                      string                           `json:"turn_id,omitempty"`
-	Data                        interface{}                      `json:"data,omitempty"`
-	CanonicalProjection         bool                             `json:"canonical_projection,omitempty"`
-	ShellOutputHasContent       bool                             `json:"shell_output_has_content,omitempty"`
+	OperationID                 string                              `json:"operation_id,omitempty"`
+	ProtocolMessageID           string                              `json:"protocol_message_id,omitempty"`
+	Text                        string                              `json:"text,omitempty"`
+	ProviderDiagnosticCandidate bool                                `json:"provider_diagnostic_candidate,omitempty"`
+	ToolCallID                  string                              `json:"tool_call_id,omitempty"`
+	ToolName                    string                              `json:"tool_name,omitempty"`
+	ToolTitle                   string                              `json:"tool_title,omitempty"`
+	ToolStatus                  string                              `json:"tool_status,omitempty"`
+	Error                       string                              `json:"error,omitempty"`
+	PromptFailureDisposition    streams.PromptFailureDisposition    `json:"prompt_failure_disposition,omitempty"`
+	ProviderError               *streams.ProviderError              `json:"provider_error,omitempty"`
+	SessionStatus               string                              `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
+	SessionSettingsPolicy       streams.SessionSettingsPolicy       `json:"session_settings_policy,omitempty"`
+	SessionSettingsGeneration   uint64                              `json:"session_settings_generation,omitempty"`
+	PromptGeneration            uint64                              `json:"prompt_generation,omitempty"`
+	TurnID                      string                              `json:"turn_id,omitempty"`
+	ConfigurationCommandResult  *streams.ConfigurationCommandResult `json:"configuration_result,omitempty"`
+	Data                        interface{}                         `json:"data,omitempty"`
+	CanonicalProjection         bool                                `json:"canonical_projection,omitempty"`
+	ShellOutputHasContent       bool                                `json:"shell_output_has_content,omitempty"`
 
 	// ConversationReceipt covers only committed host source mutations.
 	ConversationReceipt *models.ConversationMutationReceipt `json:"conversation_receipt,omitempty"`

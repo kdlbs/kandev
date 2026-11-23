@@ -1,4 +1,11 @@
 {
+  "pluginGroupingSection": "Ƥĺũĝĩń ĝŕōũƥĩńĝś",
+  "pluginGroupingUnavailable": "Ţĥĩś ƥĺũĝĩń ĝŕōũƥĩńĝ ĩś ũńàvàĩĺàƀĺē ōŕ ĩńćōḿƥĺēţē. Ŕēţŕŷ, ēńàƀĺē ţĥē ƥĺũĝĩń, ōŕ ćĥōōśē àńōţĥēŕ vĩēŵ.",
+  "pluginGroupingUnavailableLabel": "{{name}} (ũńàvàĩĺàƀĺē)",
+  "pluginGroupUntagged": "Ũńţàĝĝēď",
+  "pluginGroupDescription": "Ĝŕōũƥ ţĥē ćōḿƥĺēţē ţàśķ vĩēŵ ƀēƒōŕē ƥàĝĩńàţĩōń.",
+  "pluginPageStatus_one": "{{count}} ũńĩqũē ţàśķ. Ƥàĝē {{page}} ōƒ {{total}} (ōććũŕŕēńćēś).",
+  "pluginPageStatus_other": "{{count}} ũńĩqũē ţàśķś. Ƥàĝē {{page}} ōƒ {{total}} (ōććũŕŕēńćēś).",
   "taskViews": "Ţàśķ vĩēŵś",
   "archivedLoadFailed": "Àŕćĥĩvēď ţàśķś ćōũĺď ńōţ ƀē ĺōàďēď",
   "collapseAllBranches": "Ćōĺĺàƥśē àĺĺ",

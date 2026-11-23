@@ -93,6 +93,8 @@ export type FileChangeNotificationPayload = {
 };
 
 export type OpenFileTab = {
+  /** No editor body was loaded; use the host preview admission flow. */
+  previewOnly?: boolean;
   resolvedPath?: string;
   path: string;
   name: string;

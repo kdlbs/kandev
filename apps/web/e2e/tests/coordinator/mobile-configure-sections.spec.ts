@@ -5,6 +5,8 @@ import {
   linkToCoordinatorNeedsYou,
   linkToCoordinatorSettings,
 } from "../../../lib/coordinator/links";
+import { waitForHttp } from "../../helpers/causal-waits";
+import { enterGoalNameDuringInitialLoad } from "./goal-adoption-fixture";
 
 const MIN_TOUCH_TARGET_PX = 44;
 
@@ -69,5 +71,35 @@ test.describe("Coordinator sections on a phone viewport", () => {
       }));
       expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
     }
+  });
+
+  // @covers AC-COORDINATOR-GOALS-001.1, AC-COORDINATOR-GOALS-001.5, AC-COORDINATOR-GOALS-001.9
+  test("keeps goal text entered as the first load finishes", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Mobile Goal Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+    const settingsUrl = `${linkToCoordinatorSettings(seedData.workspaceId, coordinator.id)}?section=goal`;
+    const probe = await enterGoalNameDuringInitialLoad(testPage, settingsUrl, "Ship");
+    expect(probe).toEqual({ name: "Ship", setEnabled: true, afterPaint: true });
+
+    const put = waitForHttp(testPage, "PUT", /\/coordinators\/[^/]+\/goal(\/.*)?$/);
+    await testPage.getByTestId("goal-set").click();
+    const response = await put;
+    expect(response.status()).toBe(200);
+    expect(response.request().postDataJSON()).toEqual({ name: "Ship", due_on: null, criteria: [] });
+    await expect(testPage.getByTestId("goal-name")).toHaveValue("Ship");
+    await expect(testPage.getByTestId("goal-mark-met")).toBeVisible();
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("goal-name")).toHaveValue("Ship");
+    await expect(testPage.getByTestId("goal-mark-met")).toBeVisible();
   });
 });
