@@ -157,6 +157,7 @@ type Adapter struct {
 	// backgroundWorkEnabled is the effective shared background-work feature
 	// value resolved by the backend for this launch.
 	backgroundWorkEnabled bool
+	claudeShellOutput     *claudeShellOutputFollower
 
 	// Normalizer for converting tool data to NormalizedPayload
 	normalizer *Normalizer
@@ -624,6 +625,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		lifetimeCancel:                    cancel,
 		closedCh:                          make(chan struct{}),
 	}
+	a.claudeShellOutput = newClaudeShellOutputFollower(ctx, a.sendUpdate)
 	a.shellSnapshotTimer = time.NewTimer(shellSnapshotInterval)
 	a.shellSnapshotTimer.Stop()
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
@@ -1007,6 +1009,10 @@ func (a *Adapter) Close() error {
 	a.cancelAllAsyncTurnCompletes()
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
+	}
+	if a.claudeShellOutput != nil {
+		a.claudeShellOutput.clear()
+		a.claudeShellOutput.wait()
 	}
 
 	// A successful reset returns before its best-effort session/close request,
