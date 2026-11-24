@@ -151,6 +151,7 @@ type AgentExecution struct {
 	ContinueCommand      string             // Command for follow-up prompts (one-shot agents)
 	LaunchWrapper        launchwrapper.Spec `json:"-"`
 	OpenCodeRuntime      opencode.Runtime
+	preferACPV2          bool
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")

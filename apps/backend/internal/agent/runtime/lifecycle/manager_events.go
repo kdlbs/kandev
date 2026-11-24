@@ -38,10 +38,13 @@ const (
 // generation — so no concurrent generation reset can interleave with a single
 // invocation of this handler in the ordinary dispatch flow.
 func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	if event.Role == "user" || event.Text == "" {
+	if event.Role == "user" || (event.Text == "" && !event.ReplaceMessageContent) {
 		return
 	}
 	m.publishStreamEvidence(execution, event)
+	if m.publishCanonicalMessageSnapshot(execution, event, "message_streaming", event.Text) {
+		return
+	}
 	m.appendAssistantHistoryChunk(execution, event.Text)
 	if event.CanonicalProjection {
 		trackCanonicalResponseAttemptMessage(execution, event.CanonicalMessageID, event.CanonicalMessageAppend)
@@ -109,10 +112,13 @@ func (m *Manager) publishStreamEvidence(execution *AgentExecution, event agentct
 // below resolves its own fresh promptGenerationSnapshot() rather than reusing
 // one value across the call.
 func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	if event.ReasoningText == "" {
+	if event.ReasoningText == "" && !event.ReplaceMessageContent {
 		return
 	}
 	m.publishStreamEvidence(execution, event)
+	if m.publishCanonicalMessageSnapshot(execution, event, thinkingStreamingEventType, event.ReasoningText) {
+		return
+	}
 	if event.CanonicalProjection {
 		trackCanonicalResponseAttemptMessage(execution, event.CanonicalMessageID, event.CanonicalMessageAppend)
 		m.publishCanonicalStreamingContent(
@@ -149,6 +155,22 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 	if strings.TrimSpace(toFlush) != "" {
 		m.publishStreamingThinking(execution, toFlush, execution.promptGenerationSnapshot(), event.AttemptID)
 	}
+}
+
+func (m *Manager) publishCanonicalMessageSnapshot(execution *AgentExecution, event agentctl.AgentEvent, eventType, text string) bool {
+	if !event.CanonicalProjection || !event.ReplaceMessageContent {
+		return false
+	}
+	m.flushStreamCoalescer(execution)
+	trackCanonicalResponseAttemptMessage(execution, event.CanonicalMessageID, event.CanonicalMessageAppend)
+	if event.PromptGeneration == 0 {
+		event.PromptGeneration = execution.promptGenerationSnapshot()
+	}
+	m.publishStreamingContentNowWithProjection(
+		execution, eventType, event.CanonicalMessageID, text, event.CanonicalMessageAppend,
+		event.AttemptID, true, false, event.PromptGeneration, decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
+	)
+	return true
 }
 
 // extractErrorMessage returns the best error message from an agent event.
@@ -1553,16 +1575,24 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 	}
 
 	event = m.handleAgentEventState(execution, event)
-	// Startup can use cached provider defaults while the previous confirmed
-	// model remains visible until the new execution applies its settings.
-	if event.Type == streams.EventTypeSessionModels &&
-		event.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored &&
-		execution.deliveryStartupSnapshot() != nil && !execution.isSessionInitialized() {
-		if settled, _ := event.Data["config_options_settled"].(bool); !settled {
-			return
-		}
+	if shouldDeferStartupSessionModels(execution, event) {
+		return
 	}
 	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
+}
+
+func shouldDeferStartupSessionModels(execution *AgentExecution, event agentctl.AgentEvent) bool {
+	if event.Type != streams.EventTypeSessionModels ||
+		event.SessionSettingsPolicy == streams.SessionSettingsPolicyProviderRestored ||
+		execution.deliveryStartupSnapshot() == nil {
+		return false
+	}
+	if settled, _ := event.Data["config_options_settled"].(bool); settled {
+		return false
+	}
+	// The stream can deliver a setup snapshot after the execution becomes ready.
+	return !execution.isSessionInitialized() ||
+		agentEventDataString(event.Data, streams.ConfigOptionsSourceKey) == streams.ConfigOptionsSourceSessionSetup
 }
 
 func (m *Manager) handleCodexMCPStartupWarningEvent(
@@ -1723,7 +1753,7 @@ func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentct
 			CurrentModelID: event.CurrentModelID,
 			Models:         event.SessionModels,
 			ConfigOptions:  event.ConfigOptions,
-			ConfigSource:   agentEventDataString(event.Data, "config_options_source"),
+			ConfigSource:   agentEventDataString(event.Data, streams.ConfigOptionsSourceKey),
 			ConfigID:       agentEventDataString(event.Data, "config_options_config_id"),
 		})
 		if settled {
