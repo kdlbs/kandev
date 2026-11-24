@@ -12,9 +12,10 @@ import {
 } from "./composer-action-layout-helpers";
 import {
   expectMoveInstructionsDelivered,
+  expectMoveSavedPromptDelivered,
   fillMoveOverrides,
-  MOVE_INSTRUCTIONS,
   seedMoveOverrideFixture,
+  selectMoveSavedPrompt,
   TARGET_STEP_MESSAGE,
   waitForMoveRequest,
 } from "./workflow-step-move-overrides-helpers";
@@ -216,21 +217,27 @@ test("submits mobile move options with an attached keyboard", async ({
     "workflow-move-submit",
     true,
   );
-  await fillMoveOverrides(testPage);
-  const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
-  await testPage.getByTestId("workflow-move-instructions").press("Meta+Enter");
+  await fillMoveOverrides(testPage, { instructions: "" });
+  const savedPrompt = await selectMoveSavedPrompt(testPage, apiClient, "touch");
+  try {
+    const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
+    await testPage.getByTestId("workflow-move-instructions").press("Meta+Enter");
 
-  expect((await moveRequest).postDataJSON()).toEqual({
-    workflow_id: expect.any(String),
-    workflow_step_id: fixture.targetStepId,
-    position: 0,
-    entry_options: {
-      reset_context: true,
-      instructions: MOVE_INSTRUCTIONS,
-    },
-  });
-  await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
-  await expectMoveInstructionsDelivered(fixture.session);
+    expect((await moveRequest).postDataJSON()).toEqual({
+      workflow_id: expect.any(String),
+      workflow_step_id: fixture.targetStepId,
+      position: 0,
+      entry_options: {
+        reset_context: true,
+        instructions: savedPrompt.instructions,
+      },
+    });
+    await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
+    await expectMoveInstructionsDelivered(fixture.session);
+    await expectMoveSavedPromptDelivered(apiClient, fixture.primarySessionId);
+  } finally {
+    await apiClient.deletePrompt(savedPrompt.id);
+  }
 });
 
 test("opens move options from the mobile task-switcher context menu", async ({
@@ -269,26 +276,33 @@ test("opens move options from the mobile task-switcher context menu", async ({
   await moveWithOptions.tap();
 
   await expect(taskSheet).toBeHidden();
-  await expectMoveOptionsDrawer(testPage);
-  await fillMoveOverrides(testPage);
-  const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
-  await testPage.getByTestId("workflow-move-submit").tap();
+  const form = await expectMoveOptionsDrawer(testPage);
+  await expect(form).toHaveCSS("overflow-y", "auto");
+  await fillMoveOverrides(testPage, { instructions: "" });
+  const savedPrompt = await selectMoveSavedPrompt(testPage, apiClient, "touch");
+  try {
+    const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
+    await testPage.getByTestId("workflow-move-submit").tap();
 
-  expect((await moveRequest).postDataJSON()).toEqual({
-    workflow_id: expect.any(String),
-    workflow_step_id: fixture.targetStepId,
-    position: 0,
-    entry_options: {
-      reset_context: true,
-      instructions: MOVE_INSTRUCTIONS,
-    },
-  });
-  await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
-  // Submitting a move from the task-switcher clears the move-options request but
-  // leaves the switcher drawer itself open on top of the chat, so it intercepts
-  // pointer events on the delivered instruction message. Dismiss it before
-  // asserting the chat received the one-shot instructions.
-  await testPage.keyboard.press("Escape");
-  await expect(taskSheet).toBeHidden();
-  await expectMoveInstructionsDelivered(fixture.session);
+    expect((await moveRequest).postDataJSON()).toEqual({
+      workflow_id: expect.any(String),
+      workflow_step_id: fixture.targetStepId,
+      position: 0,
+      entry_options: {
+        reset_context: true,
+        instructions: savedPrompt.instructions,
+      },
+    });
+    await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
+    // Submitting a move from the task-switcher clears the move-options request but
+    // leaves the switcher drawer itself open on top of the chat, so it intercepts
+    // pointer events on the delivered instruction message. Dismiss it before
+    // asserting the chat received the one-shot instructions.
+    await testPage.keyboard.press("Escape");
+    await expect(taskSheet).toBeHidden();
+    await expectMoveInstructionsDelivered(fixture.session);
+    await expectMoveSavedPromptDelivered(apiClient, fixture.primarySessionId);
+  } finally {
+    await apiClient.deletePrompt(savedPrompt.id);
+  }
 });

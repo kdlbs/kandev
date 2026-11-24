@@ -193,8 +193,8 @@
   "hostTerminal": "호스트 터미널",
   "hostTerminalDescription": "kandev 호스트에서 셸을 실행합니다. 에이전트를 수동으로 설치하거나 구성할 때 사용합니다.",
   "install": "설치",
-  "localInstallHint": "이 컴퓨터에 공식 Antigravity ACP 서버와 하네스를 설치합니다. agy CLI는 별도입니다.",
-  "antigravityLoginTitle": "Antigravity에 로그인",
+  "localInstallHint": "이 컴퓨터에 고정 버전의 독립형 Antigravity ACP 서버와 하네스를 설치합니다. CLI와 별도의 로그인 정보를 사용합니다.",
+  "antigravityLoginTitle": "독립형 Antigravity ACP 서버에 로그인",
   "antigravityLoginDescription": "개인 Google AI 구독을 사용합니다.",
   "antigravityLoginSeparateStore": "agy CLI와 ACP 서버는 별도로 로그인합니다.",
   "antigravityLoginSameMachine": "Kandev가 실행 중인 컴퓨터의 브라우저에서 로그인을 완료하세요.",
@@ -654,5 +654,16 @@
   "thinkingLevel": "사고 수준",
   "useProviderDefault": "공급자 기본값 사용",
   "thinkingLevelUnavailable": "{{value}} (사용 불가)",
-  "editProfile": "프로필 편집"
+  "editProfile": "프로필 편집",
+  "antigravityCLILoginDescription": "Kandev 호스트에서 {{command}}을 실행합니다. CLI와 독립형 ACP 서버는 로그인 정보를 따로 저장합니다.",
+  "antigravityCLISetupGuide": "Antigravity CLI 설정 안내",
+  "antigravityCLISignInHint": "Kandev 호스트에서 선택한 Antigravity CLI에 로그인하세요. 완료하면 모델 목록을 새로고침합니다.",
+  "antigravityGoogleSignInRequired": "Google 로그인이 필요합니다",
+  "antigravityInstallStandaloneACP": "독립형 ACP 서버 설치",
+  "antigravityLoginRuntimeChanged": "선택한 Antigravity 런타임이 변경되었습니다. 에이전트 상태를 새로고침한 다음 다시 시도하세요.",
+  "antigravityNotInstalledHint": "호환되는 Antigravity CLI를 설치하거나 아래에서 독립형 ACP 서버를 설치하세요.",
+  "antigravityRuntimeCLI": "Antigravity 명령줄 도구",
+  "antigravityRuntimeStandalone": "독립형 ACP 서버",
+  "antigravityStandaloneSignInHint": "Kandev 호스트에서 독립형 ACP 서버에 로그인하세요. 로그인 정보는 Antigravity CLI와 별도로 저장됩니다.",
+  "signIn": "로그인"
 }

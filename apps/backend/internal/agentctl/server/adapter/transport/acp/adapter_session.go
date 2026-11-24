@@ -2172,7 +2172,10 @@ func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
 	if a.cfg != nil {
 		policy = a.cfg.AuthPolicy
 	}
-	if policy != nil && acpcompat.IsAntigravity(a.agentID) && methodID != policy.MethodID {
+	if policy != nil && acpcompat.IsAntigravity(a.agentID) && policy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI {
+		return acpcompat.ErrTaskAuthenticationDenied
+	}
+	if policy != nil && acpcompat.IsAntigravity(a.agentID) && policy.RuntimeVariant != acpcompat.AntigravityRuntimeCLI && methodID != policy.MethodID {
 		return fmt.Errorf("antigravity authentication method %q is not supported", methodID)
 	}
 	a.mu.RLock()
@@ -2182,7 +2185,7 @@ func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
-	if policy != nil && acpcompat.IsAntigravity(a.agentID) {
+	if policy != nil && acpcompat.IsAntigravity(a.agentID) && policy.RuntimeVariant != acpcompat.AntigravityRuntimeCLI {
 		return a.authenticateAntigravity(ctx, policy)
 	}
 

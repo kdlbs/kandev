@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 )
 
 func initializeV2Params(cfg RunConfig) map[string]any {
 	params := map[string]any{
 		"protocolVersion": 2,
-		"info":            acpdbgClientInfo(cfg.AgentID),
+		"info":            acpdbgClientInfo(cfg.AgentID, acpcompat.AntigravityRuntimeForCommand(cfg.Command)),
 	}
 	if len(cfg.ClientCapabilities) > 0 {
 		params["capabilities"] = cfg.ClientCapabilities

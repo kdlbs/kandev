@@ -185,6 +185,7 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 			AgentType: inst.agentType, Status: status,
 			Error: err.Error(), LastCheckedAt: time.Now(),
 		}
+		stampConfiguredRuntimeVersion(&caps, ia, command)
 		return ProfileCapabilityResult{
 			Capabilities: caps, ContextRevision: revision,
 			ReasonCode: profileCopilotPluginReasonCode(inst.agentType, status, err),

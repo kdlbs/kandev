@@ -410,6 +410,7 @@ func (sm *SessionManager) restoreExistingSession(
 	result, err := (&RestoreCoordinator{}).Restore(ctx, RestoreCoordinatorRequest{
 		Identity:        identity,
 		AgentType:       agentConfig.ID(),
+		AdapterVersion:  identity.AdapterVersion,
 		Action:          RestoreActionNativeResume,
 		TargetWorkspace: workspacePath,
 		Capabilities:    capabilities,
@@ -858,6 +859,7 @@ func (sm *SessionManager) initializeACPConnection(
 		RestoreIdentity{
 			SessionID:            execution.SessionID,
 			NativeSessionID:      execution.ACPSessionID,
+			AdapterVersion:       adapterVersionForExecution(execution),
 			OriginalWorkspace:    execution.OriginalWorkspacePath,
 			TargetWorkspace:      execution.WorkspacePath,
 			NativeStateReference: execution.ACPSessionID,

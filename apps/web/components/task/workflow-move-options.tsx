@@ -18,14 +18,15 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@kandev/ui/drawer";
-import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { TaskPromptReferenceEditor } from "@/components/task-prompt-reference-editor";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 import { useWorkflowMoveSubmit, workflowMoveShortcutLabel } from "./use-workflow-move-submit";
+import { keepMoveOpenForPromptSuggestions } from "./workflow-move-surface";
 import {
   WorkflowMovePreviewFooter,
   type WorkflowMovePreviewTarget,
@@ -145,17 +146,25 @@ export function WorkflowMoveOptionsFields({
           </TooltipContent>
         </Tooltip>
       </div>
-      <label className="grid gap-1.5">
+      <div className="grid min-w-0 gap-1.5">
         <span className="font-medium">{t("task:workflowMoveInstructions")}</span>
-        <Textarea
+        <TaskPromptReferenceEditor
           autoFocus={autoFocusInstructions}
           value={draft.instructions}
-          onChange={(event) => onDraftChange({ instructions: event.target.value })}
+          onChange={(instructions) => onDraftChange({ instructions })}
           placeholder={t("task:workflowMoveInstructionsPlaceholder")}
-          rows={instructionsRows}
-          data-testid="workflow-move-instructions"
+          className={cn(
+            "rounded-md border border-input bg-transparent focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+            instructionsRows === 3 && "min-h-20",
+            isTouchSurface && "max-h-none overflow-visible text-base",
+          )}
+          promptSuggestions={{
+            label: t("task:workflowMoveInstructions"),
+            testId: "workflow-move-instructions",
+            inline: isTouchSurface,
+          }}
         />
-      </label>
+      </div>
     </div>
   );
 }
@@ -253,7 +262,7 @@ export function WorkflowMoveOptionsForm({
     isMoving,
   });
   return (
-    <div className="grid gap-4" onKeyDown={onKeyDown}>
+    <div className="grid gap-4" onKeyDownCapture={onKeyDown}>
       <WorkflowMoveOptionsFields
         draft={draft}
         onDraftChange={patchDraft}
@@ -301,7 +310,11 @@ export function WorkflowMoveDialog({
   const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md" data-testid="workflow-move-options">
+      <DialogContent
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain sm:max-w-md"
+        data-testid="workflow-move-options"
+        onEscapeKeyDown={keepMoveOpenForPromptSuggestions}
+      >
         <DialogHeader>
           <DialogTitle>{t("task:workflowMoveOptionsTitle", { step: targetStepName })}</DialogTitle>
           <DialogDescription>{t("task:workflowMoveOptionsDescription")}</DialogDescription>
@@ -334,13 +347,16 @@ export function WorkflowMoveOptions({
   if (!usesTouchDrawer) return null;
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="!top-0 !bottom-auto !mt-0 !h-dvh !max-h-dvh min-h-0 overflow-hidden pb-[env(safe-area-inset-bottom,0px)]">
+      <DrawerContent
+        className="!top-0 !bottom-auto !mt-0 !h-dvh !max-h-dvh min-h-0 overflow-hidden pb-[env(safe-area-inset-bottom,0px)]"
+        onEscapeKeyDown={keepMoveOpenForPromptSuggestions}
+      >
         <DrawerHeader className="shrink-0 text-left">
           <DrawerTitle>{t("task:workflowMoveOptionsTitle", { step: targetStepName })}</DrawerTitle>
           <DrawerDescription>{t("task:workflowMoveOptionsDescription")}</DrawerDescription>
         </DrawerHeader>
         <div
-          className="min-h-0 flex-1 overflow-y-auto px-4"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4"
           data-vaul-no-drag
           data-testid="workflow-move-options"
         >

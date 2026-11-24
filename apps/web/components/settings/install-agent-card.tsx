@@ -19,6 +19,7 @@ type InstallStatus = InstallJob["status"] | "idle";
 function installButtonContent(
   t: TFunction,
   status: InstallStatus,
+  agentName: string,
 ): {
   icon: "spinner" | "download";
   label: string;
@@ -31,7 +32,13 @@ function installButtonContent(
     case "failed":
       return { icon: "download", label: t("agents:retry") };
     default:
-      return { icon: "download", label: t("agents:install") };
+      return {
+        icon: "download",
+        label:
+          agentName === "antigravity-acp"
+            ? t("agents:antigravityInstallStandaloneACP")
+            : t("agents:install"),
+      };
   }
 }
 
@@ -46,13 +53,13 @@ function InstallButton({
 }) {
   const { t } = useTranslation();
   const isInFlight = status === "queued" || status === "running";
-  const btn = installButtonContent(t, status);
+  const btn = installButtonContent(t, status, agentName);
   return (
     <Button
       size="sm"
       onClick={() => onInstall(agentName)}
       disabled={isInFlight}
-      className="cursor-pointer"
+      className="min-h-11 cursor-pointer sm:min-h-9 [@media(pointer:coarse)]:min-h-11"
       data-testid={`install-button-${agentName}`}
     >
       {btn.icon === "spinner" ? (
