@@ -58,6 +58,8 @@
   "cursorMcpSelectionTitle": "에이전트 MCP 선택",
   "cursorMcpSelectionDescription": "이 프로필이 다음 실행 시 사용할 활성화된 네이티브 MCP 서버를 선택하세요.",
   "refreshMcpDiscovery": "검색 결과 새로 고침",
+  "copilotLongContextFlag": "긴 컨텍스트",
+  "copilotLongContextFlagDescription": "지원되는 모델의 새 세션에서 더 큰 컨텍스트 창을 요청합니다. AI 크레딧을 더 많이 사용할 수 있습니다.",
   "copilotPluginsTitle": "플러그인",
   "copilotPluginsDescription": "이 프로필의 전체 플러그인을 로드합니다. 플러그인은 MCP 서버, 스킬, 에이전트, 명령, 훅 및 기타 실행 가능한 구성 요소를 실행할 수 있습니다. 선택한 플러그인은 Copilot의 네이티브 로딩에 추가되므로 Copilot은 다른 활성화된 플러그인도 계속 로드할 수 있습니다.",
   "copilotPluginsScopeNote": "로컬 및 워크트리 실행기 전용입니다. 선택 사항은 다음 프로세스가 시작될 때 적용됩니다. 실행 중인 프로세스는 원래 플러그인을 유지합니다.",
