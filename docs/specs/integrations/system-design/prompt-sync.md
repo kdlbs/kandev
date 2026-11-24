@@ -292,9 +292,10 @@ caller.
 
 ## Control flow
 
-One service mutex serializes runs, version saves, configuration writes,
-and removal. **Sync now** and removal authorize the loaded configuration
-under that mutex. Sync uses the authorized snapshot for fetch and apply.
+One service mutex serializes manual runs, automatic apply, version saves,
+configuration writes, and removal. **Sync now** and removal authorize the
+loaded configuration under that mutex. Sync uses the authorized snapshot for
+fetch and apply. [Automatic runs](#automatic-runs) fetch outside it.
 
 1. Load the configuration. For automatic sync, check the schedule and
    suspension status.
@@ -307,15 +308,39 @@ under that mutex. Sync uses the authorized snapshot for fetch and apply.
    against connection replacement.
 5. Record status and return the result.
 
-Automatic GitHub runs use non-blocking background admission. A deferred
-run leaves failure status intact and retries on the next tick.
-
 Manual GitHub runs opt in to `WithNonBlockingGitHubAdmission` in
 `syncLocked` (AC-INTEGRATIONS-PROMPT-SYNC-001.6). An opted-in interactive
 request returns `AdmissionWaitError` when quota blocks it. This applies to
 the listing and each download. The error carries the retry boundary and
 distinguishes a quota block from cancellation. An admitted request uses
 its normal transport deadline. The source check fetches outside the lock.
+
+### Automatic runs
+
+An automatic run fetches outside the service mutex
+(AC-INTEGRATIONS-PROMPT-SYNC-005.5). Background pacing is principal-wide,
+so a dropped deferral would recur after the run's own listing every tick.
+
+1. `SyncIfDue` takes the mutex with `TryLock`, refreshes the credential
+   fingerprint, checks suspension and the schedule, and keeps the loaded
+   configuration as the snapshot. It then releases the mutex.
+2. The run checks the credential workspace, binds the GitHub host, and
+   fetches with non-blocking background admission. On
+   `AdmissionDeferredError`, `retryDeferred` calls `Wait` and repeats only
+   that read, so completed reads are kept. GitLab uses the same fetch.
+3. The run takes the mutex again, reloads the configuration, and refreshes
+   the credential fingerprint. It continues only when the row still exists
+   and `UpdatedAt`, `CredentialFingerprint`, and the source fields match the
+   snapshot. Saves and recorded results write `UpdatedAt`; removal deletes
+   the row.
+   A failed guard discards the result and logs `prompt sync automatic
+   result superseded`.
+4. With the guard passed, the run records a fetch error through the normal
+   failure policy, or applies the files inside `CommitWorkspaceGitHubHost`
+   and records success.
+
+`Poller.Stop` cancels the fetch, which then records nothing. The poller
+goroutine owns the run, so no second automatic run starts while one waits.
 
 ### Prompt file parsing
 
@@ -519,8 +544,9 @@ list, the `unchanged` flag, and the stored status match the current output
   `suspended` and `rate_limited` (deferred background run). They carry no
   repository, workspace, or prompt labels.
 - Structured zap logs: `applied prompt sync` (with counts),
-  `prompt sync attempt failed`, `prompt sync polling suspended`, and
-  `prompt sync polling recovered`.
+  `prompt sync attempt failed`, `prompt sync polling suspended`,
+  `prompt sync polling recovered`, and `prompt sync automatic result
+  superseded`.
 
 ## Related decisions
 

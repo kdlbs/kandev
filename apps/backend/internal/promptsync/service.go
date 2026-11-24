@@ -233,32 +233,6 @@ func (s *Service) SyncWithResolutions(ctx context.Context, resolutions map[strin
 	return s.syncLocked(ctx, syncManual, cfg, resolutions)
 }
 
-// SyncIfDue runs an automatic sync when the configuration is due. Failures
-// are recorded on the configuration and logged, never returned.
-func (s *Service) SyncIfDue(ctx context.Context) {
-	if !s.mu.TryLock() {
-		return
-	}
-	defer s.mu.Unlock()
-	cfg, err := s.store.Get(ctx)
-	if err != nil {
-		s.logger.Warn("failed to load prompt sync config", zap.Error(err))
-		return
-	}
-	if cfg == nil {
-		return
-	}
-	s.refreshCredentialFingerprint(ctx, cfg)
-	if cfg.PollSuspended {
-		incPollSkipped("suspended")
-		return
-	}
-	if !cfg.due(s.now().UTC()) {
-		return
-	}
-	_, _ = s.syncLocked(ctx, syncAutomatic, cfg, nil)
-}
-
 // refreshCredentialFingerprint resumes a suspended or backed-off config as
 // soon as its connection credential changes.
 func (s *Service) refreshCredentialFingerprint(ctx context.Context, cfg *Config) {
@@ -291,42 +265,61 @@ func (s *Service) fingerprintProvider(provider string) (CredentialFingerprintPro
 	return p, ok
 }
 
-// syncLocked runs one sync for cfg. The caller holds s.mu and passes the
-// configuration snapshot it loaded (and, for manual runs, authorized).
+// syncLocked runs one manual sync for cfg. The caller holds s.mu and passes
+// the configuration snapshot it loaded and authorized.
 func (s *Service) syncLocked(
 	ctx context.Context, mode syncMode, cfg *Config, resolutions map[string]promptservice.ConflictChoice,
 ) (*SyncResult, error) {
-	var err error
-	if err = s.checkWorkspace(ctx, cfg.WorkspaceID); err != nil {
-		s.recordRunError(ctx, cfg, mode, err)
-		return nil, err
+	run := s.fetchRun(ctx, mode, cfg, false)
+	if run.err != nil {
+		s.recordRunError(ctx, cfg, mode, run.err)
+		return nil, run.err
 	}
-	useGitHub := cfg.Provider != reposync.ProviderGitLab && s.github != nil
-	if useGitHub {
+	return s.applyRun(run, mode, cfg, resolutions)
+}
+
+// fetchedRun is a run's bound provider context and the files it read.
+type fetchedRun struct {
+	ctx       context.Context
+	useGitHub bool
+	files     []fetchedFile
+	err       error
+}
+
+// fetchRun checks the credential workspace, binds the GitHub connection, and
+// reads the prompt files. With waitAdmission, a read that GitHub admission
+// defers waits for admission and runs again.
+func (s *Service) fetchRun(ctx context.Context, mode syncMode, cfg *Config, waitAdmission bool) fetchedRun {
+	run := fetchedRun{ctx: ctx, useGitHub: cfg.Provider != reposync.ProviderGitLab && s.github != nil}
+	if run.err = s.checkWorkspace(ctx, cfg.WorkspaceID); run.err != nil {
+		return run
+	}
+	if run.useGitHub {
 		if mode == syncAutomatic {
-			// The service lock is held for the whole run, so a background run
-			// must not wait for GitHub's quota; a deferred run is retried later.
-			ctx = github.WithNonBlockingGitHubAdmission(github.WithGitHubWorkClass(ctx, github.WorkClassBackground))
-		} else {
-			ctx = github.WithNonBlockingGitHubAdmission(ctx)
+			ctx = github.WithGitHubWorkClass(ctx, github.WorkClassBackground)
 		}
-		if ctx, err = s.github.BindWorkspaceGitHubHost(ctx, cfg.WorkspaceID, cfg.GitHubHost); err != nil {
-			s.recordRunError(ctx, cfg, mode, err)
-			return nil, err
+		ctx = github.WithNonBlockingGitHubAdmission(ctx)
+		if run.ctx, run.err = s.github.BindWorkspaceGitHubHost(ctx, cfg.WorkspaceID, cfg.GitHubHost); run.err != nil {
+			return run
 		}
 	}
-	files, err := s.fetch(ctx, cfg)
-	if err != nil {
-		s.recordRunError(ctx, cfg, mode, err)
-		return nil, err
-	}
+	run.files, run.err = s.fetchWith(run.ctx, cfg, waitAdmission)
+	return run
+}
+
+// applyRun applies fetched files and records the result. The caller holds s.mu.
+func (s *Service) applyRun(
+	run fetchedRun, mode syncMode, cfg *Config, resolutions map[string]promptservice.ConflictChoice,
+) (*SyncResult, error) {
+	ctx := run.ctx
 	var result *SyncResult
 	apply := func(applyCtx context.Context) error {
 		var applyErr error
-		result, applyErr = s.apply(applyCtx, files, resolutions)
+		result, applyErr = s.apply(applyCtx, run.files, resolutions)
 		return applyErr
 	}
-	if useGitHub {
+	var err error
+	if run.useGitHub {
 		err = s.github.CommitWorkspaceGitHubHost(ctx, cfg.WorkspaceID, apply)
 	} else {
 		err = apply(ctx)
@@ -335,7 +328,7 @@ func (s *Service) syncLocked(
 		s.recordRunError(ctx, cfg, mode, err)
 		return nil, err
 	}
-	if err := s.store.RecordSuccess(ctx, result.Warnings, contentHash(files), s.now().UTC()); err != nil {
+	if err := s.store.RecordSuccess(ctx, result.Warnings, contentHash(run.files), s.now().UTC()); err != nil {
 		return nil, err
 	}
 	s.recordSuccess(cfg, result)
@@ -357,14 +350,23 @@ func (s *Service) checkWorkspace(ctx context.Context, workspaceID string) error 
 }
 
 func (s *Service) fetch(ctx context.Context, cfg *Config) ([]fetchedFile, error) {
+	return s.fetchWith(ctx, cfg, false)
+}
+
+func (s *Service) fetchWith(ctx context.Context, cfg *Config, waitAdmission bool) ([]fetchedFile, error) {
 	reader := reposync.Reader{GitHub: s.github, GitLab: s.gitlab}
-	entries, err := reader.List(ctx, cfg.source())
+	entries, err := retryDeferred(ctx, waitAdmission, func() ([]reposync.Entry, error) {
+		return reader.List(ctx, cfg.source())
+	})
 	if err != nil {
 		return nil, err
 	}
-	get, err := reader.Getter(cfg.source())
+	getter, err := reader.Getter(cfg.source())
 	if err != nil {
 		return nil, err
+	}
+	get := func(ctx context.Context, path string) ([]byte, error) {
+		return retryDeferred(ctx, waitAdmission, func() ([]byte, error) { return getter(ctx, path) })
 	}
 	if err := completeListing(cfg.Provider, entries); err != nil {
 		return nil, err
