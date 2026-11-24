@@ -295,6 +295,7 @@ type CreateResponse struct {
 // InstanceInfo contains serializable information about an instance for API responses.
 // It mirrors the exported fields from Instance and is safe for JSON serialization.
 type InstanceInfo struct {
+	ACPProtocolVersion uint16 `json:"acp_protocol_version,omitempty"`
 	// ID is the unique identifier for this instance
 	ID string `json:"id"`
 
@@ -371,10 +372,14 @@ func (i *Instance) Info() *InstanceInfo {
 	var sourceRoots []string
 	var providerSessionID string
 	var copilotNativeSessionEvents bool
+	var acpProtocolVersion uint16
 	if i.manager != nil {
 		sourceRoots = i.manager.WorkspaceSourceRoots()
 		providerSessionID = i.manager.GetSessionID()
 		copilotNativeSessionEvents = i.manager.CopilotNativeSessionEventsActive()
+		if reporter, ok := i.manager.(interface{ ACPProtocolVersion() uint16 }); ok {
+			acpProtocolVersion = reporter.ACPProtocolVersion()
+		}
 	}
 
 	return &InstanceInfo{
@@ -393,6 +398,7 @@ func (i *Instance) Info() *InstanceInfo {
 		WorkspaceSourceRoots:       sourceRoots,
 		ProviderSessionID:          providerSessionID,
 		CopilotNativeSessionEvents: copilotNativeSessionEvents,
+		ACPProtocolVersion:         acpProtocolVersion,
 	}
 }
 

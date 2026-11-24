@@ -881,14 +881,14 @@ func (s *Service) handleStreamingEventKind(
 	appendFn func(context.Context, string, string) error,
 	createFn func(context.Context, string, string, string, string, string) error,
 ) {
-	if payload.Data.Text == "" || payload.SessionID == "" {
+	if payload.SessionID == "" {
 		return
 	}
 	if payload.Data.CanonicalProjection {
 		s.publishCanonicalMessageEvent(ctx, payload)
 		return
 	}
-	if s.messageCreator == nil {
+	if payload.Data.Text == "" || s.messageCreator == nil {
 		return
 	}
 	messageID := payload.Data.MessageID

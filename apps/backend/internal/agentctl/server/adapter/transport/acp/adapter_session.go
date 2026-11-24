@@ -1204,6 +1204,7 @@ func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState,
 		ConfigOptions:             configOptions,
 		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicies...),
 		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
+		Data:                      map[string]any{streams.ConfigOptionsSourceKey: streams.ConfigOptionsSourceSessionSetup},
 	})
 }
 
@@ -1214,6 +1215,7 @@ func (a *Adapter) emitSessionConfigOptionsState(sessionID string, configOptions 
 		ConfigOptions:             cloneConfigOptions(configOptions),
 		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicies...),
 		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
+		Data:                      map[string]any{streams.ConfigOptionsSourceKey: streams.ConfigOptionsSourceSessionSetup},
 	})
 }
 
