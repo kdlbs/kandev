@@ -961,7 +961,7 @@ func (sm *SessionManager) applyProfileSessionLayers(
 	sanitizedOptions := sanitizeProfileConfigOptions(profileConfigOptions, execution.GetModelState())
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
-		if err := setStartupSessionConfigOption(ctx, execution, client, configID, value); err != nil {
+		if err := sm.setStartupSessionConfigOption(ctx, execution, client, acpSessionID, configID, value); err != nil {
 			sm.logger.Warn("failed to set profile config option via ACP",
 				zap.String("execution_id", execution.ID), zap.String("config_id", configID),
 				zap.String("value", value), zap.Error(err))
@@ -1019,7 +1019,7 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 	}
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
-		if err := setStartupSessionConfigOption(ctx, execution, client, configID, value); err != nil {
+		if err := sm.setStartupSessionConfigOption(ctx, execution, client, acpSessionID, configID, value); err != nil {
 			failed = append(failed, configID)
 			sm.logger.Warn("failed to set runtime config option via ACP",
 				zap.String("execution_id", execution.ID), zap.String("config_id", configID),
@@ -1031,13 +1031,16 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 	return finalConfigID, failed
 }
 
-func setStartupSessionConfigOption(
+func (sm *SessionManager) setStartupSessionConfigOption(
 	ctx context.Context,
 	execution *AgentExecution,
 	client *agentctl.Client,
-	configID, value string,
+	acpSessionID, configID, value string,
 ) error {
 	if isSynthesizedCopilotContextOptionForExecution(ctx, nil, execution, configID) {
+		if execution != nil && execution.sessionSettingsStartupPolicy() == SessionSettingsPolicyProviderRestored {
+			return restageSynthesizedCopilotContextTier(execution, acpSessionID, value, sm.eventPublisher)
+		}
 		return validateSynthesizedCopilotContextTierReplay(execution, value)
 	}
 	if execution != nil && execution.sessionSettingsStartupPolicy() == SessionSettingsPolicyProviderRestored {

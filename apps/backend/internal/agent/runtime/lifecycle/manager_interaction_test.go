@@ -343,12 +343,16 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					})
 					break
 				}
+				agentInfo := map[string]interface{}{
+					"name":    "test-agent",
+					"version": "1.0.0",
+				}
+				if supportsSessionLoad {
+					agentInfo["supports_session_load"] = true
+				}
 				payload := map[string]interface{}{
-					"success": true,
-					"agent_info": map[string]string{
-						"name":    "test-agent",
-						"version": "1.0.0",
-					},
+					"success":    true,
+					"agent_info": agentInfo,
 				}
 				if supportsSessionLoad {
 					payload["supports_session_load"] = true

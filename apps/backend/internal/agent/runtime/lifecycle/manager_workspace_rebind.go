@@ -299,7 +299,7 @@ func (m *Manager) reapplyReboundSessionConfig(
 				continue
 			}
 			if isSynthesizedCopilotContextOptionForExecution(ctx, m.profileResolver, execution, option.ID) {
-				if err := validateSynthesizedCopilotContextTierReplay(execution, option.CurrentValue); err != nil {
+				if err := restageSynthesizedCopilotContextTier(execution, sessionID, option.CurrentValue, m.eventPublisher); err != nil {
 					return fmt.Errorf("failed to re-apply config option %q: %w", option.ID, err)
 				}
 				continue

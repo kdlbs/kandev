@@ -202,6 +202,26 @@ func (m *Manager) readExecutionCopilotReloadIdentity(execution *AgentExecution) 
 }
 
 func (m *Manager) stageCopilotContextTierState(execution *AgentExecution, acpSessionID, desiredTier string) {
+	stageCopilotContextTierOnExecution(execution, acpSessionID, desiredTier, m.eventPublisher)
+}
+
+func restageSynthesizedCopilotContextTier(
+	execution *AgentExecution,
+	acpSessionID, requested string,
+	publisher *EventPublisher,
+) error {
+	if !acpcompat.IsValidCopilotContextTier(requested) {
+		return fmt.Errorf("unsupported Copilot context tier %q", requested)
+	}
+	stageCopilotContextTierOnExecution(execution, acpSessionID, requested, publisher)
+	return nil
+}
+
+func stageCopilotContextTierOnExecution(
+	execution *AgentExecution,
+	acpSessionID, desiredTier string,
+	publisher *EventPublisher,
+) {
 	base := execution.GetModelState()
 	var updated *CachedModelState
 	if base != nil {
@@ -215,8 +235,8 @@ func (m *Manager) stageCopilotContextTierState(execution *AgentExecution, acpSes
 	updated.ConfigOptions, _ = acpcompat.NormalizeCopilotConfigOptions(updated.ConfigOptions, desiredTier)
 	_ = setConfigOptionValue(updated.ConfigOptions, acpcompat.CopilotContextTierOptionID, desiredTier)
 	execution.SetModelState(updated)
-	if m.eventPublisher != nil && (updated.CurrentModelID != "" || len(updated.ConfigOptions) > 0) {
-		m.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
+	if publisher != nil && (updated.CurrentModelID != "" || len(updated.ConfigOptions) > 0) {
+		publisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
 			Type:                  streams.EventTypeSessionModels,
 			SessionID:             acpSessionID,
 			SessionSettingsPolicy: providerRestoredSettingsPolicy(execution),

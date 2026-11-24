@@ -1239,7 +1239,7 @@ func (m *Manager) restoreSessionRuntimeConfigWithClient(ctx context.Context, exe
 	for _, id := range optionIDs {
 		value := options[id]
 		if isSynthesizedCopilotContextOptionForExecution(ctx, m.profileResolver, execution, id) {
-			if err := validateSynthesizedCopilotContextTierReplay(execution, value); err != nil {
+			if err := restageSynthesizedCopilotContextTier(execution, sessionID, value, m.eventPublisher); err != nil {
 				return fmt.Errorf("restore session runtime option %q: %w", id, err)
 			}
 			continue
