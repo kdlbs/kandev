@@ -238,7 +238,8 @@ type Adapter struct {
 	// During load, we capture the last Plan so we can re-emit it after load completes.
 	// AvailableCommandsUpdate is NOT suppressed — it may arrive after the replay as a
 	// "ready" signal, and the last one always wins in the frontend.
-	isLoadingSession bool
+	isLoadingSession    bool
+	copilotInterruption copilotInterruptionState
 	// Session creation buffers startup reports until the provider's returned ID is bound.
 	sessionCreationPending        bool
 	pendingSessionStartupWarnings []AgentEvent
@@ -1008,6 +1009,7 @@ func (a *Adapter) Close() error {
 	}
 	a.closed = true
 	clear(a.cursorShellWatches)
+	a.clearCopilotInterruptionLocked()
 	if a.closedCh != nil {
 		close(a.closedCh)
 	}

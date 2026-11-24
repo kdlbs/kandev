@@ -28,8 +28,7 @@ func (r *Repository) UpdateTaskStateIfCurrentEntry(
 	if err != nil || !current {
 		return false, time.Time{}, err
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, observed.ID, observed.State, state,
-		observed.WorkflowID, observed.WorkflowStepID, observed.WorkflowID, observed.WorkflowStepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, observed.ID, observed.State, state, observed.WorkflowID, observed.WorkflowStepID); err != nil {
 		return false, time.Time{}, err
 	}
 	updatedAt := r.nowUTC()
