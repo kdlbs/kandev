@@ -80,6 +80,10 @@ if [[ "${GH_FAIL_APPROVAL_RUNS:-0}" == "1" && "$*" == *"repos/kdlbs/kandev/actio
 fi
 
 if [[ "$1" == "repo" && "$2" == "view" ]]; then
+  if [[ -n "${GH_REPO:-}" && "${3:-}" != "$GH_REPO" ]]; then
+    echo "repository argument required outside a Git checkout" >&2
+    exit 1
+  fi
   printf '{"owner":{"login":"kdlbs"},"name":"kandev","defaultBranchRef":{"name":"main"}}\n'
   exit 0
 fi
@@ -1356,6 +1360,43 @@ test_all_flag_includes_historical_comments_and_reviews() {
   pass "--all includes historical comments and reviews"
 }
 
+test_all_flag_captures_opening_head_for_review_evidence() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  GH_REVIEW_SCENARIO=exact-head PATH="$tmp/bin:$PATH" "$SCRIPT" --summary --all 123 >"$tmp/out.json"
+  assert_jq "all mode preserves exact-head review evidence" \
+    '.since == null and .review_evidence.complete and .review_evidence.opening_head_sha == "abc123" and (.review_evidence.exact_current_head_reviews | length > 0)' \
+    "$(<"$tmp/out.json")"
+
+  GH_HEAD_SEQUENCE=race GH_HEAD_COUNTER_FILE="$tmp/head-calls" GH_REVIEW_SCENARIO=exact-head PATH="$tmp/bin:$PATH" "$SCRIPT" --summary --all 123 >"$tmp/race.json"
+  assert_jq "all mode detects head changes during collection" \
+    '.review_evidence.complete == false and .review_evidence.opening_head_sha == "abc123" and .review_evidence.closing_head_sha == "def456" and .review_evidence.exact_current_head_reviews == []' \
+    "$(<"$tmp/race.json")"
+  pass "--all captures the opening head independently of the history cutoff"
+}
+
+test_explicit_repo_works_outside_checkout() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  (
+    cd "$tmp"
+    export GH_REPO=kdlbs/kandev PATH="$tmp/bin:$PATH"
+    GH_NO_PR_URL=1 "$SCRIPT" --summary 123 >"$tmp/out.json"
+    "$SCRIPT" --comment 111 >"$tmp/comment.json"
+    "$SCRIPT" --job-log 55150000002 >"$tmp/job.log"
+  ) || fail "GH_REPO selects the repository for all modes outside a checkout"
+  assert_jq "GH_REPO enables repository lookups" '.errors == [] and .unresolved_review_thread_count == 2' "$(<"$tmp/out.json")"
+  assert_jq "GH_REPO enables comment lookup" '.comment_id == 111' "$(<"$tmp/comment.json")"
+  if ! grep -q 'Test timeout: expected ready state' "$tmp/job.log"; then
+    fail "GH_REPO enables job log lookup"
+  fi
+  pass "GH_REPO selects the repository for all modes outside a checkout"
+}
+
 test_summary_mode_returns_compact_fixup_state() {
   local tmp
   make_tmp_dir tmp
@@ -1912,6 +1953,8 @@ test_graphql_failure_records_error_but_keeps_other_data
 test_rate_limit_details_are_preserved_in_errors
 test_graphql_pagination_collects_all_threads
 test_all_flag_includes_historical_comments_and_reviews
+test_all_flag_captures_opening_head_for_review_evidence
+test_explicit_repo_works_outside_checkout
 test_summary_mode_returns_compact_fixup_state
 test_summary_keeps_failed_policy_sources_unknown
 test_summary_reports_required_status_contexts_from_rulesets
