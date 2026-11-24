@@ -55,6 +55,7 @@ type sessionAdmission struct {
 	gate       *sessionAdmissionGate
 	refs       int
 	promptRefs int
+	heldSince  time.Time
 }
 
 type sessionAdmissionContextKey struct{}
@@ -388,17 +389,32 @@ func (s *Service) withSessionAdmissionLock(
 	s.admissionMu.Unlock()
 
 	if err := entry.gate.lock(waitCtx); err != nil {
+		admissionErr := admissionWaitError(err, ownBudget)
+		var heldFor time.Duration
 		s.admissionMu.Lock()
+		if errors.Is(admissionErr, ErrSessionAdmissionTimeout) && !entry.heldSince.IsZero() {
+			heldFor = time.Since(entry.heldSince)
+		}
 		entry.refs--
 		if entry.refs == 0 && entry.promptRefs == 0 && s.admissions[sessionID] == entry {
 			delete(s.admissions, sessionID)
 		}
 		s.admissionMu.Unlock()
-		return admissionWaitError(err, ownBudget)
+		if errors.Is(admissionErr, ErrSessionAdmissionTimeout) {
+			s.logger.Warn("queue session admission timed out",
+				zap.String("session_id", sessionID),
+				zap.Duration("held_for", heldFor),
+			)
+		}
+		return admissionErr
 	}
+	s.admissionMu.Lock()
+	entry.heldSince = time.Now()
+	s.admissionMu.Unlock()
 	defer func() {
-		entry.gate.unlock()
 		s.admissionMu.Lock()
+		entry.heldSince = time.Time{}
+		entry.gate.unlock()
 		entry.refs--
 		if entry.refs == 0 && entry.promptRefs == 0 && s.admissions[sessionID] == entry {
 			delete(s.admissions, sessionID)

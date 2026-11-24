@@ -36,6 +36,18 @@ cancel a callback that already acquired admission.
 - **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.4:** A persistently failing attachment
   cleanup shall stop its current retry loop after 60 attempts while retaining
   the durable obligation for the existing recovery pass.
+- **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5:** An opportunistic operation that
+  holds session admission, such as a task-page focus refresh or an idle-runtime
+  revalidation, shall not wait for a busy per-session lifecycle lock. It shall
+  release admission and skip its work, so a long lifecycle-lock holder cannot keep the session's queue,
+  resume, and move operations from acquiring admission.
+- **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.6:** When session admission times out,
+  the backend log shall identify the session and how long the current holder
+  has held admission.
+- **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.7:** When a deferred MCP `move_task`
+  cannot acquire session admission, the agent shall receive a retryable
+  `UNAVAILABLE` result that says a retry can succeed. No pending move shall
+  be recorded.
 
 ## Compatibility and exclusions
 
@@ -49,3 +61,5 @@ background worker, or recurring verification is introduced.
 
 - [System design](../system-design/bounded-session-queue-admission.md)
 - [Delivery package](../../../plans/bounded-session-queue-admission/plan.md)
+- [Held-gate fix package](../../../plans/session-admission-held-gate/plan.md)
+  (criteria .5-.7)
