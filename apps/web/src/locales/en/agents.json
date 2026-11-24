@@ -199,8 +199,8 @@
   "hostTerminal": "Host terminal",
   "hostTerminalDescription": "Runs a shell on the kandev host. Use it to install or configure agents manually.",
   "install": "Install",
-  "localInstallHint": "Installs the official Antigravity ACP server and harness on this machine. The agy CLI is separate.",
-  "antigravityLoginTitle": "Sign in to Antigravity",
+  "localInstallHint": "Installs the pinned standalone Antigravity ACP server and harness on this machine. It uses credentials separate from the Antigravity CLI.",
+  "antigravityLoginTitle": "Sign in to the standalone Antigravity ACP server",
   "antigravityLoginDescription": "Use your personal Google AI subscription.",
   "antigravityLoginSeparateStore": "The agy CLI and the ACP server keep separate logins.",
   "antigravityLoginSameMachine": "Finish sign-in in a browser on the Kandev machine.",
@@ -654,5 +654,16 @@
   "thinkingLevel": "Thinking level",
   "useProviderDefault": "Use provider default",
   "thinkingLevelUnavailable": "{{value}} (unavailable)",
-  "editProfile": "Edit profile"
+  "editProfile": "Edit profile",
+  "antigravityCLILoginDescription": "Kandev runs {{command}} on the Kandev host. The CLI keeps its sign-in separate from the standalone server.",
+  "antigravityCLISetupGuide": "Antigravity CLI setup guide",
+  "antigravityCLISignInHint": "Sign in to the selected Antigravity CLI on the Kandev host. Kandev refreshes its models when you finish.",
+  "antigravityGoogleSignInRequired": "Google sign-in required",
+  "antigravityInstallStandaloneACP": "Install standalone ACP server",
+  "antigravityLoginRuntimeChanged": "The selected Antigravity runtime changed. Refresh agent status and try again.",
+  "antigravityNotInstalledHint": "Install a compatible Antigravity CLI, or install the standalone ACP server below.",
+  "antigravityRuntimeCLI": "Antigravity CLI",
+  "antigravityRuntimeStandalone": "Standalone ACP server",
+  "antigravityStandaloneSignInHint": "Sign in to the standalone ACP server on the Kandev host. Its credentials are separate from the Antigravity CLI.",
+  "signIn": "Sign in"
 }

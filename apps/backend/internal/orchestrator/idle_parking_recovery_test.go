@@ -35,7 +35,7 @@ func TestIdleParkingUnknownRecoveryReceivesOneStableFullInterval(t *testing.T) {
 		require.NoError(t, err)
 		summary := idleParkingScanSummary{observed: make(map[idleParkingCandidateKey]struct{}), skipped: make(map[idleParkingSkipReason]int)}
 		svc.processWorkspaceIdleRow(context.Background(), current, at, agent, &summary)
-		svc.pruneIdleParkingCandidates(summary.observed)
+		svc.pruneIdleParkingCandidates(summary.observed, map[string]struct{}{current.SessionID: {}}, at)
 	}
 	scan(now)
 	require.Empty(t, agent.suspensionCalls())
@@ -135,6 +135,23 @@ func TestIdleParkingRecoveryKeepsActiveLSPLeaseFence(t *testing.T) {
 	svc.lspLeases = nil
 	svc.suspendWorkspaceIdleSessionsOnce(t.Context())
 	require.Len(t, agent.suspensionCalls(), 1, "positive control: releasing the lease permits suspension")
+}
+
+// @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.9
+func TestIdleParkingFocusFloorSurvivesTemporaryIneligibleScan(t *testing.T) {
+	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
+	svc.resetIdleParkingCandidates(row.SessionID)
+	focusedAt := svc.idleParkingFocusAt[row.SessionID]
+	lease := &activeLSPLeaseForTest{sessionID: row.SessionID}
+	svc.SetLSPLeaseLifecycle(lease)
+
+	svc.suspendWorkspaceIdleSessionsOnce(t.Context())
+	require.Equal(t, focusedAt, svc.idleParkingFocusAt[row.SessionID], "an ineligible scan must retain focus for an executor row")
+	require.Empty(t, agent.suspensionCalls())
+
+	svc.SetLSPLeaseLifecycle(nil)
+	svc.suspendWorkspaceIdleSessionsOnce(t.Context())
+	require.Empty(t, agent.suspensionCalls(), "releasing temporary known work must not restart or erase the focus interval")
 }
 
 func TestIdleParkingRecoveryRejectsUntrustedFocusFloors(t *testing.T) {

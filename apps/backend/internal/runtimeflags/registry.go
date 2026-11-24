@@ -37,6 +37,8 @@ type runtimeFlagIdentity struct {
 }
 
 const (
+	keyACPV2                                      = "features.acpV2"
+	envACPV2                                      = "KANDEV_FEATURES_ACP_V2"
 	keyCodexAppServer                             = "features.codexAppServer"
 	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
 	retiredAppStatusBarKey                        = "features.appStatusBar"
@@ -232,6 +234,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicAgentRouting },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicAgentRouting = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keyACPV2,
+			EnvVar:          envACPV2,
+			Kind:            KindFeature,
+			Label:           "ACP v2 preview",
+			Description:     "Use ACP v2 for supported local agents.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "After disabling the preview, reconnect running ACP v2 sessions to send new prompts.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ACPV2 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ACPV2 = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

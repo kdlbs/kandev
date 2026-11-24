@@ -246,8 +246,8 @@
   "hostTerminal": "主機終端",
   "hostTerminalDescription": "在 Kandev 主機上執行 shell。可用於手動安裝或設定代理程式。",
   "install": "安裝",
-  "localInstallHint": "在本機安裝官方 Antigravity ACP 伺服器和 harness。agy CLI 是獨立的。",
-  "antigravityLoginTitle": "登入 Antigravity",
+  "localInstallHint": "在此計算機上安裝固定版本的獨立 Antigravity ACP 伺服器和 harness。它使用與 Antigravity CLI 分開的認證資料。",
+  "antigravityLoginTitle": "登入獨立 Antigravity ACP 伺服器",
   "antigravityLoginDescription": "使用你的個人 Google AI 訂閲。",
   "antigravityLoginSeparateStore": "agy CLI 和 ACP 伺服器使用不同的登入資訊。",
   "antigravityLoginSameMachine": "請在執行 Kandev 的機器上的瀏覽器中完成登入。",
@@ -654,5 +654,16 @@
   "thinkingLevel": "思考級別",
   "useProviderDefault": "使用提供者預設值",
   "thinkingLevelUnavailable": "{{value}}（不可用）",
-  "editProfile": "編輯設定檔"
+  "editProfile": "編輯設定檔",
+  "antigravityCLILoginDescription": "Kandev 會在 Kandev 主機上執行 {{command}}。CLI 與獨立 ACP 伺服器使用不同的登入資訊。",
+  "antigravityCLISetupGuide": "Antigravity CLI 安裝指南",
+  "antigravityCLISignInHint": "請在 Kandev 主機上登入目前選中的 Antigravity CLI。完成後，Kandev 會刷新模型列表。",
+  "antigravityGoogleSignInRequired": "需要登入 Google",
+  "antigravityInstallStandaloneACP": "安裝獨立 ACP 伺服器",
+  "antigravityLoginRuntimeChanged": "所選 Antigravity 執行時已更改。請刷新代理狀態後重試。",
+  "antigravityNotInstalledHint": "請安裝兼容的 Antigravity CLI，或在下方安裝獨立 ACP 伺服器。",
+  "antigravityRuntimeCLI": "Antigravity 命令列工具",
+  "antigravityRuntimeStandalone": "獨立 ACP 伺服器",
+  "antigravityStandaloneSignInHint": "請在 Kandev 主機上登入獨立 ACP 伺服器。它的認證資料與 Antigravity CLI 分開儲存。",
+  "signIn": "登入"
 }

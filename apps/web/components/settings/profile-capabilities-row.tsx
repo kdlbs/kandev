@@ -15,6 +15,7 @@ import {
 import { ModelPicker, ModePicker } from "@/components/settings/profile-model-fields";
 import { ProfileThinkingPicker } from "./profile-thinking-picker";
 import { ModelDiscoveryNote } from "@/components/settings/model-discovery-note";
+import { AntigravityRuntimeLabel } from "@/components/settings/antigravity-runtime-label";
 import type { ProfileDiscoveryStatus } from "@/hooks/domains/settings/use-profile-model-capabilities";
 import type {
   CommandEntry,
@@ -47,6 +48,7 @@ type CapabilitiesRowProps = {
   isLoading: boolean;
   onRefresh: () => Promise<void>;
   error: string | null;
+  runtimeVariant?: ModelConfig["runtime_variant"];
   modelConfig: ModelConfig;
   configOptions: SelectConfigOption[];
   configStatus: ModelConfig["status"];
@@ -82,6 +84,7 @@ function StatusOrAuthMessage({
   error,
   reasonCode,
   discoveryState,
+  runtimeVariant,
 }: {
   agentName: string;
   status: ModelConfig["status"];
@@ -90,6 +93,7 @@ function StatusOrAuthMessage({
   error: string | null;
   reasonCode?: string;
   discoveryState: ProfileDiscoveryStatus;
+  runtimeVariant?: ModelConfig["runtime_variant"];
 }) {
   if (status === "auth_required" || status === "not_installed") {
     return (
@@ -100,6 +104,7 @@ function StatusOrAuthMessage({
         onRefresh={onRefresh}
         error={error}
         rawError={null}
+        runtimeVariant={runtimeVariant}
       />
     );
   }
@@ -284,6 +289,7 @@ function CapabilitiesRowContent({
   isLoading,
   onRefresh,
   error,
+  runtimeVariant,
   modelConfig,
   configOptions,
   configStatus,
@@ -304,6 +310,7 @@ function CapabilitiesRowContent({
 
   return (
     <div className={gapCls}>
+      {agentName === "antigravity-acp" && <AntigravityRuntimeLabel variant={runtimeVariant} />}
       <ModelAndModePickers
         agentName={agentName}
         discovery={discovery}
@@ -347,6 +354,7 @@ function CapabilitiesRowContent({
         error={error}
         reasonCode={reasonCode}
         discoveryState={discoveryState}
+        runtimeVariant={runtimeVariant}
       />
     </div>
   );
@@ -404,6 +412,7 @@ export function ProfileCapabilitiesSection({
       isLoading={capabilities.isLoading}
       onRefresh={refresh}
       error={capabilities.error}
+      runtimeVariant={capabilities.runtimeVariant}
       modelConfig={modelConfig}
       configOptions={configOptions}
       configStatus={configStatus}

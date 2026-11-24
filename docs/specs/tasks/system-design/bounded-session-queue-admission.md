@@ -21,8 +21,12 @@ and replay remain owned by [queue admission](queue-admission.md).
 | .1, .2   | `messagequeue.Service.WithSessionAdmission` and session gate      |
 | .3       | Queued-dispatch error handling, queue handlers, queue API mapping |
 | .4       | Existing handler attachment-cleanup obligation and recovery       |
-| .3 move  | MCP `move_task` deferred-move error mapping                       |
-| .5       | Focus refresh and resume, idle revalidation, fresh-start replay   |
+| .5       | Orchestrator focus refresh and idle-suspension revalidation       |
+| .6       | `messagequeue` admission entry holder record and timeout logging  |
+| .7       | MCP deferred-move handler error mapping                           |
+| .8       | Fresh-start recovery lifecycle and admission release              |
+| .9       | Focus-floor retention                                             |
+| .10      | Workflow parking revalidation                                     |
 
 ## Acquisition and callback lifetime
 
@@ -59,6 +63,12 @@ holds queue admission must never block on the lifecycle lock.
   before resuming. The resume takes the route and lifecycle locks first and
   rechecks suspension provenance under them, so a concurrent resume or stop
   turns the focus into a no-op.
+- A focus request that cannot take the lifecycle lock still resets the
+  in-memory idle interval. The reaper keeps that floor while its executor row
+  exists, including scans that skip the session because of temporary known
+  work. It rechecks the interval while admitted before it accepts a suspension
+  candidate. Passive resume checks workflow parking again after it reacquires
+  the lifecycle locks, as required by .10.
 
 Fresh-start recovery replays the original submission as a dispatch-only prompt.
 The resume continuation, and with it the lifecycle lock, ends at provider
@@ -107,6 +117,31 @@ coordination, and attachment-transfer handling retain their current behavior.
 Waiting for an active edit lease, including a lease discovered after admission,
 does not spend a cleanup attempt. Keep the existing wake path until actual
 cleanup or acknowledgement can run.
+
+## Lock order inside admitted callbacks
+
+Session admission is acquired before the per-session lifecycle lock. An
+admitted callback must not wait for the lifecycle lock without a bound,
+because the admission gate stays held for as long as the callback blocks.
+Opportunistic callbacks use the existing `tryAcquireSessionLifecycleLock`.
+When the lock is busy, the callback returns without side effects: the focus
+refresh writes no persisted focus marker, but it restarts the in-memory idle
+interval. The reaper keeps the candidate for a later scan and rechecks its idle
+deadline under admission before suspension.
+
+## Holder diagnostics
+
+Each admission entry records when its current holder acquired the gate and
+clears that time on release. A timed-out waiter logs one warning with the
+session ID and how long the holder has held the gate. Callback timing and
+errors are unchanged.
+
+## Deferred MCP move
+
+`SetPendingMove` returns `ErrSessionAdmissionTimeout` unchanged. The MCP
+deferred-move handler maps that sentinel to `UNAVAILABLE` with a message
+saying that the session is busy and the move can be retried. Other persistence
+failures remain `INTERNAL_ERROR`.
 
 ## Scope and verification
 

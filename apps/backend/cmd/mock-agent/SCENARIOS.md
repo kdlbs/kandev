@@ -28,6 +28,10 @@ Set `E2E_MOCK_AGENT_ACP_TRACE_FILE` to record opt-in ACP traces. They include pr
 and session IDs and request types. Prompt blocks record lengths and digests, not raw image or audio bytes.
 Set `E2E_MOCK_AGENT_FAIL_INITIALIZE=true` to fail before a native session exists; remove it before recovery.
 
+The ACP v2 fixture accepts `/e2e:acp-v2-hold` to send an answer and hold
+foreground work until cancellation. Other prompts complete with a fixed
+answer. The fixture stores its replay history in the task workspace.
+
 ## Emitter helpers
 
 Use `emitter.go` for text, thoughts, plans, tool calls, permissions, monitor events, and subagent events.

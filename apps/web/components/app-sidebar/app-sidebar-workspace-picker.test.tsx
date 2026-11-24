@@ -249,20 +249,6 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(onActionComplete).toHaveBeenCalledOnce();
   });
 
-  it("does not overwrite the office workspace cookie when selecting a kanban workspace", () => {
-    storeState.features.office = true;
-    storeState.workspaces.activeId = "w2";
-    cookieWrites = ["office-active-workspace_8443=w2; path=/"];
-    render(<AppSidebarWorkspacePicker />);
-
-    fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
-
-    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w1"))).toBe(false);
-    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w2"))).toBe(true);
-    expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
-    expect(navigationMock.push).toHaveBeenCalledWith(KANBAN_WORKSPACE_HOME);
-  });
-
   it("navigates to the office workspace when the office feature is enabled", () => {
     storeState.features.office = true;
     render(<AppSidebarWorkspacePicker />);
@@ -273,7 +259,7 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(navigationMock.push).toHaveBeenCalledWith("/office?workspaceId=w2");
   });
 
-  it("navigates to the kanban board when an office user selects a kanban workspace", () => {
+  it("opens Kanban Home and preserves the Office workspace cookie", () => {
     storeState.features.office = true;
     storeState.workspaces.activeId = "w2";
     // Written when w2 was selected. A workspace is recorded on the way in, not

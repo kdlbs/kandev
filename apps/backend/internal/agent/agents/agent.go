@@ -80,11 +80,27 @@ type LocalInstallAgent interface {
 	LocalInstall(ctx context.Context, progress func(string)) error
 }
 
-// LocalRuntimeAgent resolves a complete local runtime executable and the
-// environment entries that pin its validated helper. It is only consulted for
-// host-local executions.
+// LocalRuntimeSelection contains the command, environment, and trusted
+// identity resolved for one host-local operation.
+type LocalRuntimeSelection struct {
+	Command        Command
+	Env            map[string]string
+	Variant        string
+	Version        string
+	AdapterVersion string
+}
+
+// LocalRuntimeAgent resolves a complete local runtime selection. It is only
+// consulted for host-local executions.
 type LocalRuntimeAgent interface {
-	ResolveLocalRuntime(ctx context.Context) (Command, map[string]string, error)
+	ResolveLocalRuntime(ctx context.Context) (LocalRuntimeSelection, error)
+}
+
+// SavedLocalRuntimeAgent resolves the runtime variant recorded with a native
+// conversation. It is optional so other local agents keep their current
+// runtime selection contract.
+type SavedLocalRuntimeAgent interface {
+	ResolveSavedLocalRuntime(ctx context.Context, adapterVersion string) (LocalRuntimeSelection, error)
 }
 
 // StoredProfilePreserver marks a disabled optional agent whose saved profiles
@@ -180,6 +196,17 @@ type LoginCommand struct {
 type LoginAgent interface {
 	LoginCommand() *LoginCommand
 }
+
+// ContextLoginAgent resolves an interactive login command against the current
+// host runtime. The variant is supplied by the client and must be checked
+// again before the PTY starts.
+type ContextLoginAgent interface {
+	ResolveLoginCommand(ctx context.Context, variant string) (*LoginCommand, error)
+}
+
+// ErrLoginRuntimeChanged means the selected login action no longer matches
+// the host runtime. The caller must refresh agent discovery before retrying.
+var ErrLoginRuntimeChanged = errors.New("login runtime changed")
 
 // IsPassthroughOnly returns true if the agent only supports passthrough mode
 // (a raw CLI under a PTY, no ACP protocol mode). It governs execution mode —

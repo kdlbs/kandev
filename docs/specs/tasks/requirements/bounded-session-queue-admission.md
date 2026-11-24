@@ -30,23 +30,36 @@ cancel a callback that already acquired admission.
 - **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.3:** When a queued dispatch cannot acquire
   admission, its taken message shall be requeued without losing its recorded
   user-message or attachment ownership. Queue mutations, including Clear all,
-  Merge with above, Reorder, edit leases, Auto-run, Auto-merge, and an agent's
-  deferred workflow move, shall report a retryable `UNAVAILABLE` result through
-  existing queue feedback. Desktop and phone controls shall retain pending
-  entries and allow an explicit retry.
+  Merge with above, Reorder, edit leases, Auto-run, and Auto-merge, shall report
+  a retryable `UNAVAILABLE` result through existing queue feedback. Desktop and
+  phone controls shall retain pending entries and allow an explicit retry.
 - **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.4:** A persistently failing attachment
   cleanup shall stop its current retry loop after 60 attempts while retaining
   the durable obligation for the existing recovery pass.
-- **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5:** While an agent turn is in flight,
-  including a turn started by launch recovery, and while focus restores an
-  idle-suspended session, session focus and idle-suspension checks shall not
-  keep session admission occupied. Queue mutations, deferred workflow moves,
-  prompt admissions, and later focus requests for that session shall acquire
-  admission within the AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.1 budget. A focus
-  request received while another lifecycle operation owns the session shall
-  still restart that session's idle-suspension interval. Fresh launch recovery
-  shall finish once the provider accepts the replayed submission; the turn
-  continues without blocking those operations and keeps its inactivity notice.
+- **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5:** An opportunistic operation that
+  holds session admission, such as a task-page focus refresh or an idle-runtime
+  revalidation, shall not wait for a busy per-session lifecycle lock. It shall
+  release admission and skip its work, so a long lifecycle-lock holder cannot
+  keep the session's queue,
+  resume, and move operations from acquiring admission.
+- **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.6:** When session admission times out,
+  the backend log shall identify the session and how long the current holder
+  has held admission.
+- **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.7:** When a deferred MCP `move_task`
+  cannot acquire session admission, the agent shall receive a retryable
+  `UNAVAILABLE` result that says a retry can succeed. No pending move shall
+  be recorded.
+- **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.8:** When fresh-start recovery replays
+  an accepted initial submission, the recovery request shall finish at provider
+  acceptance. The turn shall continue without holding session lifecycle or
+  queue admission for its full duration.
+- **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.9:** When focus reaches an eligible live
+  session while another lifecycle operation owns it, the idle-suspension
+  interval shall restart. Before the reaper accepts a suspension candidate, it
+  shall recheck the idle deadline under admission. An ineligible reaper scan
+  shall retain the interval while the executor row exists.
+- **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.10:** When a session is parked by a
+  workflow profile switch, passive focus shall not resume it.
 
 ## Compatibility and exclusions
 
@@ -60,4 +73,6 @@ background worker, or recurring verification is introduced.
 
 - [System design](../system-design/bounded-session-queue-admission.md)
 - [Delivery package](../../../plans/bounded-session-queue-admission/plan.md)
+- [Held-gate fix package](../../../plans/session-admission-held-gate/plan.md)
+  (criteria .5-.7)
 - [Lifecycle lock-order repair](../../../plans/session-admission-lifecycle-lock/plan.md)

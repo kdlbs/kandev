@@ -83,6 +83,9 @@ func (a *Adapter) captureAntigravityOutcomeBoundary(sessionID string) *antigravi
 	if a == nil || !acpcompat.IsAntigravity(a.agentID) {
 		return nil
 	}
+	if !a.usesStandaloneAntigravityRuntime() {
+		return nil
+	}
 	if !antigravityValidSessionID(sessionID) {
 		return &antigravityOutcomeBoundary{
 			sessionID: sessionID,
@@ -115,7 +118,7 @@ func (a *Adapter) checkAntigravityOutcome(
 	boundary *antigravityOutcomeBoundary,
 	stopReason string,
 ) (*antigravityNativeFailure, string) {
-	if boundary == nil || !a.isActiveSession(boundary.sessionID) {
+	if boundary == nil || !a.usesStandaloneAntigravityRuntime() || !a.isActiveSession(boundary.sessionID) {
 		return nil, ""
 	}
 	if stopReason == antigravityCancelledStopReason {
@@ -150,6 +153,13 @@ func (a *Adapter) checkAntigravityOutcome(
 		a.outcomeContext(), boundary.store.root, boundary.sessionID, &boundary.store.startIndex,
 	)
 	return a.antigravityOutcomeAfter(boundary, after)
+}
+
+func (a *Adapter) usesStandaloneAntigravityRuntime() bool {
+	if a == nil || a.cfg == nil || a.cfg.AuthPolicy == nil {
+		return true
+	}
+	return a.cfg.AuthPolicy.RuntimeVariant != acpcompat.AntigravityRuntimeCLI
 }
 
 func (a *Adapter) antigravityOutcomeAfter(

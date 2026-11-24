@@ -199,8 +199,8 @@
   "hostTerminal": "ホスト端末",
   "hostTerminalDescription": "kandev ホスト上でシェルを実行。エージェントの手動インストールや設定に使う。",
   "install": "インストール",
-  "localInstallHint": "このマシンに公式 Antigravity ACP サーバーとハーネスをインストールします。agy CLI は別です。",
-  "antigravityLoginTitle": "Antigravity にサインイン",
+  "localInstallHint": "このマシンに固定バージョンのスタンドアロン Antigravity ACP サーバーとハーネスをインストールします。CLI とは別のログイン情報を使います。",
+  "antigravityLoginTitle": "スタンドアロン Antigravity ACP サーバーにサインイン",
   "antigravityLoginDescription": "個人の Google AI サブスクリプションを使用します。",
   "antigravityLoginSeparateStore": "agy CLI と ACP サーバーは別々にサインインします。",
   "antigravityLoginSameMachine": "Kandev を実行しているマシンのブラウザでサインインを完了してください。",
@@ -654,5 +654,16 @@
   "thinkingLevel": "思考レベル",
   "useProviderDefault": "プロバイダーの既定値を使用",
   "thinkingLevelUnavailable": "{{value}}（利用不可）",
-  "editProfile": "プロファイルを編集"
+  "editProfile": "プロファイルを編集",
+  "antigravityCLILoginDescription": "Kandev ホスト上で {{command}} を実行します。CLI とスタンドアロン ACP サーバーではログイン情報が別々に保存されます。",
+  "antigravityCLISetupGuide": "Antigravity CLI のセットアップガイド",
+  "antigravityCLISignInHint": "Kandev ホスト上で選択中の Antigravity CLI にサインインしてください。完了するとモデル一覧を更新します。",
+  "antigravityGoogleSignInRequired": "Google へのサインインが必要です",
+  "antigravityInstallStandaloneACP": "スタンドアロン ACP サーバーをインストール",
+  "antigravityLoginRuntimeChanged": "選択中の Antigravity ランタイムが変更されました。エージェントの状態を更新してから、もう一度お試しください。",
+  "antigravityNotInstalledHint": "互換性のある Antigravity CLI をインストールするか、下のスタンドアロン ACP サーバーをインストールしてください。",
+  "antigravityRuntimeCLI": "Antigravity コマンドライン",
+  "antigravityRuntimeStandalone": "スタンドアロン ACP サーバー",
+  "antigravityStandaloneSignInHint": "Kandev ホスト上でスタンドアロン ACP サーバーにサインインしてください。ログイン情報は Antigravity CLI とは別です。",
+  "signIn": "サインイン"
 }
