@@ -1,3 +1,7 @@
+import {
+  readMoveInstructions,
+  setMoveInstructions,
+} from "./workflow-move-instructions-test-helpers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -465,7 +469,7 @@ describe("TaskItemWithContextMenu — single-task move options", () => {
     await openMoveSubmenu();
 
     const instructions = await screen.findByTestId(INSTRUCTIONS_TEST_ID);
-    fireEvent.change(instructions, { target: { value: "  start review with tests  " } });
+    setMoveInstructions(instructions, "  start review with tests  ");
     fireEvent.click(screen.getByTestId("workflow-move-submit"));
 
     await waitFor(() =>
@@ -488,13 +492,11 @@ describe("TaskItemWithContextMenu — single-task move options", () => {
     await openMoveSubmenu();
 
     const instructions = await screen.findByTestId(INSTRUCTIONS_TEST_ID);
-    fireEvent.change(instructions, { target: { value: "  retry review later  " } });
+    setMoveInstructions(instructions, "  retry review later  ");
     fireEvent.click(screen.getByTestId("workflow-move-submit"));
 
     await waitFor(() => expect(workflowMoveMock.move).toHaveBeenCalledOnce());
-    expect((screen.getByTestId(INSTRUCTIONS_TEST_ID) as HTMLTextAreaElement).value).toBe(
-      "  retry review later  ",
-    );
+    expect(readMoveInstructions(instructions)).toBe("  retry review later  ");
   });
 
   it("exposes inline move options under a one-task selection step", async () => {

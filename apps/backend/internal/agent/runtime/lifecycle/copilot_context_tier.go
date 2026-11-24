@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -60,6 +61,9 @@ func launchedExecutionCopilotContextTier(execution *AgentExecution) string {
 	if execution == nil {
 		return acpcompat.CopilotContextTierDefault
 	}
+	if tier := execution.confirmedCopilotContextTier.Load(); tier != nil {
+		return *tier
+	}
 	if len(execution.AgentArgs) > 0 {
 		tier, _ := acpcompat.ParseCopilotContextTierFromArgs(execution.AgentArgs)
 		return tier
@@ -70,6 +74,14 @@ func launchedExecutionCopilotContextTier(execution *AgentExecution) string {
 		}
 	}
 	return acpcompat.CopilotContextTierDefault
+}
+
+func (execution *AgentExecution) setConfirmedCopilotContextTier(tier string) {
+	if execution == nil || !acpcompat.IsValidCopilotContextTier(tier) {
+		return
+	}
+	confirmed := tier
+	execution.confirmedCopilotContextTier.Store(&confirmed)
 }
 
 func stagedSynthesizedCopilotContextTier(state *CachedModelState) (string, bool) {
@@ -140,11 +152,13 @@ func (m *Manager) applySynthesizedCopilotContextTier(
 	execution.sessionConfigurationMu.Lock()
 	defer execution.sessionConfigurationMu.Unlock()
 
-	operationRelease, err := execution.acquireContextResetOperation(ctx)
-	if err != nil {
+	if err := ctx.Err(); err != nil || !execution.contextResetAdmissionMu.TryLock() {
 		return unknown, fmt.Errorf("set config option failed: cannot change Copilot context length while session is busy")
 	}
-	defer operationRelease()
+	defer execution.contextResetAdmissionMu.Unlock()
+	if err := execution.contextResetAdmissionError(); err != nil {
+		return unknown, fmt.Errorf("set config option failed: cannot change Copilot context length while session is busy")
+	}
 
 	if execution.idleSuspensionInProgress.Load() {
 		return unknown, fmt.Errorf("set config option failed: cannot change Copilot context length while session is busy")
@@ -310,6 +324,25 @@ func (m *Manager) reconcileCopilotContextTierBeforePrompt(ctx context.Context, e
 	return m.reloadCopilotSessionForContextTier(ctx, execution, desired, previousPromptGen)
 }
 
+func (m *Manager) acquirePromptContextOperation(ctx context.Context, execution *AgentExecution) (func(), error) {
+	for {
+		if err := m.reconcileCopilotContextTierBeforePrompt(ctx, execution); err != nil {
+			return nil, err
+		}
+		release, err := execution.acquireContextResetOperation(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if _, needed := m.needsCopilotContextTierReload(ctx, execution); !needed {
+			return release, nil
+		}
+		release()
+		if m.hasActivePromptTurnOnExecution(execution) {
+			return nil, errors.New("copilot context tier reload is waiting for the active turn")
+		}
+	}
+}
+
 func validateExpectedSessionModel(execution *AgentExecution, expectedModelID string) error {
 	if expectedModelID == "" {
 		return nil
@@ -369,6 +402,14 @@ func (m *Manager) preflightCopilotContextReload(
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("set config option failed: %w", err)
 	}
+	requestedTier := runtimeConfig.ConfigOptions[acpcompat.CopilotContextTierOptionID]
+	launchedTier, _ := acpcompat.ParseCopilotContextTierFromArgs(preparation.commands.args)
+	if acpcompat.IsValidCopilotContextTier(requestedTier) && launchedTier != requestedTier {
+		return agentRestartPreparation{}, fmt.Errorf(
+			"set config option failed: Copilot profile flags select context tier %q, not requested tier %q",
+			launchedTier, requestedTier,
+		)
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		releaseClient()
@@ -422,8 +463,7 @@ func (m *Manager) reloadCopilotSessionForContextTier(
 			execution.SetModelState(previousModelState)
 		}
 	}
-	canFallbackToNewSession := previousPromptGen == 0 &&
-		(m.sessionManager == nil || m.sessionManager.historyManager == nil || !m.sessionManager.historyManager.HasHistory(execution.SessionID))
+	canFallbackToNewSession := m.canFallbackToNewCopilotSession(ctx, execution, previousPromptGen)
 
 	operation, err := m.restartCopilotSubprocessForContextReload(ctx, execution, preparation)
 	if err != nil {
@@ -476,11 +516,13 @@ func (m *Manager) restartCopilotSubprocessForContextReload(
 		releaseClient()
 		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
+	if err := client.StopAgentProcess(ctx); err != nil {
+		releaseClient()
+		return nil, fmt.Errorf("failed to stop Copilot child process for context reload: %w", err)
+	}
 	client.CloseUpdatesStream()
 	client.CloseWorkspaceStream()
 	releaseClient()
-
-	m.stopAgentProcessForRestart(ctx, execution)
 	m.resetAgentRestartState(execution.ID, preparation)
 
 	client, releaseClient = execution.AcquireAgentCtlClient()
@@ -540,7 +582,7 @@ func (m *Manager) restoreCopilotACPSessionAfterReload(
 	defer execution.releaseDeliveryStartupAttempt(attempt)
 	defer attempt.fail(ErrDurableAdoptionBlocked)
 
-	if err := m.connectReloadStreams(execution); err != nil {
+	if err := m.connectReloadStreams(ctx, execution); err != nil {
 		attempt.fail(err)
 		return err
 	}
@@ -604,7 +646,7 @@ func (m *Manager) restoreCopilotACPSessionAfterReload(
 	return nil
 }
 
-func (m *Manager) connectReloadStreams(execution *AgentExecution) error {
+func (m *Manager) connectReloadStreams(ctx context.Context, execution *AgentExecution) error {
 	if m.streamManager == nil {
 		return nil
 	}
@@ -613,6 +655,8 @@ func (m *Manager) connectReloadStreams(execution *AgentExecution) error {
 	select {
 	case <-updatesReady:
 		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-time.After(10 * time.Second):
 		return fmt.Errorf("timeout waiting for agent stream to connect after reload")
 	}
@@ -636,7 +680,8 @@ func (m *Manager) loadOrCreateCopilotReloadSession(
 	if loadErr == nil {
 		return previousACPSessionID, attemptID, nil
 	}
-	if !canFallbackToNewSession || m.sessionManager == nil || isTransportDeadErr(loadErr) {
+	if !canFallbackToNewSession || !isEmptyCopilotNativeSessionMiss(loadErr, previousACPSessionID) ||
+		m.sessionManager == nil || isTransportDeadErr(loadErr) {
 		return "", "", fmt.Errorf("failed to restore Copilot ACP session %q: %w", previousACPSessionID, loadErr)
 	}
 	created, newErr := m.sessionManager.createNewSession(
@@ -650,6 +695,37 @@ func (m *Manager) loadOrCreateCopilotReloadSession(
 		return "", "", fmt.Errorf("failed to create fresh Copilot ACP session after empty load miss: %w", newErr)
 	}
 	return created.SessionID, created.AttachmentAttemptID, nil
+}
+
+func isEmptyCopilotNativeSessionMiss(err error, expectedSessionID string) bool {
+	var restoreErr *agentctl.SessionRestoreOperationError
+	if expectedSessionID == "" || !errors.As(err, &restoreErr) || restoreErr.Code != "SESSION_RESTORE_REQUIRED" {
+		return false
+	}
+	return restoreErr.Details["reason"] == "native_state_missing" &&
+		restoreErr.Details["session_id"] == expectedSessionID
+}
+
+func (m *Manager) canFallbackToNewCopilotSession(
+	ctx context.Context,
+	execution *AgentExecution,
+	previousPromptGeneration uint64,
+) bool {
+	if previousPromptGeneration != 0 || execution == nil || m.executorProfileReader == nil {
+		return false
+	}
+	if m.sessionManager != nil && m.sessionManager.historyManager != nil &&
+		m.sessionManager.historyManager.HasHistory(execution.SessionID) {
+		return false
+	}
+	promptHistory, ok := m.executorProfileReader.(interface {
+		HasUserPromptHistory(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return false
+	}
+	hasPrompt, err := promptHistory.HasUserPromptHistory(ctx, execution.SessionID)
+	return err == nil && !hasPrompt
 }
 
 func (m *Manager) finalizeCopilotContextReloadState(
@@ -667,11 +743,25 @@ func (m *Manager) finalizeCopilotContextReloadState(
 		}
 	}
 	acpSessionID, _ := m.readExecutionCopilotReloadIdentity(execution)
-	if err := m.restoreSessionRuntimeConfig(ctx, execution, acpSessionID, runtimeConfig); err != nil {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	decision, err := m.restoreSessionRuntimeConfigWithClientAndDecision(
+		ctx, execution, client, acpSessionID, runtimeConfig,
+	)
+	releaseClient()
+	if err != nil {
+		execution.setSessionInitialized(false)
 		m.updateExecutionError(execution.ID, "failed to restore session runtime configuration after reload: "+err.Error())
 		return fmt.Errorf("failed to restore session runtime configuration after reload: %w", err)
 	}
-	m.synchronizeReloadedCopilotModelState(execution, previousModelState, runtimeConfig, targetContextTier)
+	effectiveModel := decision.EffectiveModel
+	if effectiveModel == "" {
+		if modelState := execution.GetModelState(); modelState != nil {
+			effectiveModel = modelState.CurrentModelID
+		}
+	}
+	m.synchronizeReloadedCopilotModelState(
+		execution, previousModelState, runtimeConfig, targetContextTier, effectiveModel,
+	)
 	if err := m.updateStatusAndPersist(ctx, execution.ID, v1.AgentStatusReady); err != nil {
 		m.updateExecutionError(execution.ID, "failed to mark reloaded Copilot agent ready: "+err.Error())
 		return fmt.Errorf("failed to mark reloaded Copilot agent ready: %w", err)
@@ -695,9 +785,6 @@ func cloneModelStateForCopilotReload(
 		modelsList = cloned.Models
 		options = cloned.ConfigOptions
 		settled = cloned.ConfigOptionsSettled
-	}
-	if runtimeConfig.Model != "" {
-		currentModel = runtimeConfig.Model
 	}
 	options, _ = acpcompat.NormalizeCopilotConfigOptions(options, targetContextTier)
 	_ = setConfigOptionValue(options, acpcompat.CopilotContextTierOptionID, targetContextTier)
@@ -723,12 +810,17 @@ func (m *Manager) synchronizeReloadedCopilotModelState(
 	previousModelState *CachedModelState,
 	runtimeConfig models.SessionRuntimeConfig,
 	targetContextTier string,
+	effectiveModel string,
 ) {
 	base := execution.GetModelState()
 	if base == nil {
 		base = previousModelState
 	}
 	updated := cloneModelStateForCopilotReload(base, runtimeConfig, targetContextTier)
+	if effectiveModel != "" {
+		updated.CurrentModelID = effectiveModel
+		_ = setConfigOptionValue(updated.ConfigOptions, modelConfigOptionID, effectiveModel)
+	}
 	execution.SetModelState(updated)
 	if m.eventPublisher != nil && (updated.CurrentModelID != "" || len(updated.ConfigOptions) > 0) {
 		m.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{

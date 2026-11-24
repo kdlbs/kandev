@@ -14,6 +14,7 @@ import type { OpenDiffOptions } from "@/lib/state/diff-target-types";
 import { FileRow, BulkActionTargetBar } from "./changes-panel-file-row";
 import { FileSectionActions } from "./changes-panel-repo-groups";
 import { TreeDirRow } from "./changes-panel-tree";
+import { ChangesPanelGroupHeader } from "./changes-panel-group-header";
 import type { ChangedFile } from "./changes-panel-helpers";
 import {
   buildChangesTimelineRows,
@@ -111,6 +112,7 @@ function ChangesWorkingTreeContext({ props }: { props: ChangesWorkingTreeProps }
             row,
             props,
             activeFilePath,
+            touchMode,
             t,
             ...selection,
             ...disclosure,
@@ -332,6 +334,7 @@ type ChangesTimelineRowRenderArgs = {
   row: ChangesTimelineRow;
   props: ChangesWorkingTreeProps;
   activeFilePath: string | null;
+  touchMode: boolean;
   t: ReturnType<typeof useTranslation>["t"];
   unstagedSelection: WorkingTreeSelectionState["unstagedSelection"];
   stagedSelection: WorkingTreeSelectionState["stagedSelection"];
@@ -350,7 +353,7 @@ function renderChangesTimelineRow(args: ChangesTimelineRowRenderArgs) {
     case "repository":
       return renderRepositoryTimelineRow(row, args);
     case "directory":
-      return renderDirectoryTimelineRow(row, args.toggleDirectory);
+      return renderDirectoryTimelineRow(row, args.toggleDirectory, args.touchMode);
     case "file":
       return renderFileTimelineRow(row, args);
     case "selection":
@@ -420,6 +423,7 @@ function renderRepositoryTimelineRow(
       onPrimaryAction={isUnstaged ? props.onRepoStageAll : props.onRepoCommit}
       onSecondaryAction={isStaged ? props.onRepoUnstageAll : undefined}
       disabled={props.isLoading}
+      touchMode={args.touchMode}
       onToggle={() =>
         args.toggleRepository(changesRepositoryExpansionKey(row.variant, row.repositoryName))
       }
@@ -430,11 +434,13 @@ function renderRepositoryTimelineRow(
 function renderDirectoryTimelineRow(
   row: Extract<ChangesTimelineRow, { kind: "directory" }>,
   toggleDirectory: ChangesTimelineRowRenderArgs["toggleDirectory"],
+  touchMode: boolean,
 ) {
   return (
     <TreeDirRow
       row={row.row}
       baseIndentPx={row.nested ? 12 : 0}
+      touchMode={touchMode}
       onToggle={() =>
         toggleDirectory(changesDirectoryExpansionKey(row.variant, row.repositoryName, row.row.path))
       }
@@ -497,6 +503,7 @@ function ChangesRepositoryTimelineRow({
   onSecondaryAction,
   disabled,
   onToggle,
+  touchMode,
 }: {
   row: Extract<ChangesTimelineRow, { kind: "repository" }>;
   displayName: string;
@@ -506,34 +513,24 @@ function ChangesRepositoryTimelineRow({
   onSecondaryAction?: (repositoryName: string) => void;
   disabled: boolean;
   onToggle: () => void;
+  touchMode: boolean;
 }) {
   const stop = (event: React.MouseEvent) => event.stopPropagation();
   const roots = useActiveTaskRepositoryRoots();
   const root = roots.byTrackerName.get(row.repositoryName);
   const headerLabel = root?.displayLabel ?? displayName;
-  const headerButton = (
-    <button
-      type="button"
-      className="flex min-h-6 min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 cursor-pointer hover:text-foreground/80 [@media(pointer:coarse)]:min-h-11"
-      data-testid="changes-repo-header"
-      data-changes-row-focus
-      aria-expanded={!row.collapsed}
-      onClick={onToggle}
-    >
-      {row.collapsed ? (
-        <IconChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-      ) : (
-        <IconChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-      )}
-      <span className="truncate">{headerLabel}</span>
-      <span className="text-muted-foreground/50 normal-case tracking-normal">{row.count}</span>
-    </button>
-  );
   return (
     <div className={row.treeMode ? "-ml-2" : ""}>
       <div className="flex items-center justify-between gap-2 px-1 py-0.5">
         <RootContextMenuIfAvailable root={root} surface="changes">
-          {headerButton}
+          <ChangesPanelGroupHeader
+            label={headerLabel}
+            count={row.count}
+            collapsed={row.collapsed}
+            onToggle={onToggle}
+            testId="changes-repo-header"
+            touchMode={touchMode}
+          />
         </RootContextMenuIfAvailable>
         {(onPrimaryAction || onSecondaryAction) && (
           <div className="flex items-center gap-1" onClick={stop}>

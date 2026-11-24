@@ -98,7 +98,7 @@ func BuildCatalogForHost(enabledAgents []agents.Agent, currentOS, homeDir string
 					SourceFiles:        files,
 					TargetRelDir:       strings.Trim(method.TargetRelDir, "/"),
 					Label:              method.Label,
-					HasLocalFiles:      anyFileExists(homeDir, files),
+					HasLocalFiles:      method.ProvisionAtLaunch || anyFileExists(homeDir, files),
 					FileConflictPolicy: method.FileConflictPolicy,
 				}
 				spec.Methods = append(spec.Methods, entry)

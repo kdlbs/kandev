@@ -1,5 +1,6 @@
 "use client";
 
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { useEffect, useRef } from "react";
 import type { editor as monacoEditor } from "monaco-editor";
 import { createRoot, type Root } from "react-dom/client";
@@ -7,15 +8,19 @@ import type { DiffComment } from "@/lib/diff/types";
 import { CommentForm } from "@/components/diff/comment-form";
 import { CommentDisplay } from "@/components/diff/comment-display";
 import { createElement } from "react";
+import { observeCommentViewZone } from "@/hooks/observe-comment-view-zone";
 
 type ViewZoneEntry = {
   id: string;
   root: Root;
+  stopObserving: () => void;
   editorSide: "modified" | "original";
   renderWithSubmitDisabled?: (disabled: boolean) => void;
 };
 
 interface UseViewZonesParams {
+  commentScope?: string;
+  attachmentTaskId?: string | null;
   modifiedEditor: monacoEditor.ICodeEditor | null;
   originalEditor: monacoEditor.ICodeEditor | null;
   comments: DiffComment[];
@@ -24,10 +29,16 @@ interface UseViewZonesParams {
   selectedLineRange: { start: number; end: number; side: string } | null;
   editingCommentId: string | null;
   setEditingComment: (id: string | null) => void;
-  handleCommentSubmitRef: React.RefObject<(content: string) => void>;
-  handleCommentSubmitAndRunRef?: React.RefObject<((content: string) => void) | undefined>;
+  handleCommentSubmitRef: React.RefObject<
+    (content: string, attachments?: MessageAttachment[]) => void
+  >;
+  handleCommentSubmitAndRunRef?: React.RefObject<
+    ((content: string, attachments?: MessageAttachment[]) => void) | undefined
+  >;
   handleCommentDeleteRef: React.RefObject<(commentId: string) => void>;
-  handleCommentUpdateRef: React.RefObject<(commentId: string, content: string) => void>;
+  handleCommentUpdateRef: React.RefObject<
+    (commentId: string, content: string, attachments?: MessageAttachment[]) => void
+  >;
   handleCommentRunRef?: React.RefObject<((comment: DiffComment) => void) | undefined>;
   clearModifiedGutter: () => void;
   clearOriginalGutter: () => void;
@@ -56,15 +67,19 @@ function addZone({
 }: AddZoneParams) {
   const domNode = document.createElement("div");
   domNode.style.zIndex = "10";
-  const root = createRoot(domNode);
+  const zoneContent = document.createElement("div");
+  domNode.append(zoneContent);
+  const root = createRoot(zoneContent);
   root.render(content);
   let zoneId = "";
+  const zone = { afterLineNumber: afterLine, heightInPx: heightPx, domNode };
   targetEditor.changeViewZones((accessor) => {
-    zoneId = accessor.addZone({ afterLineNumber: afterLine, heightInPx: heightPx, domNode });
+    zoneId = accessor.addZone(zone);
   });
   zones.push({
     id: zoneId,
     root,
+    stopObserving: observeCommentViewZone(targetEditor, zone, zoneId, zoneContent),
     editorSide: side,
     renderWithSubmitDisabled: renderWithSubmitDisabled
       ? (disabled) => root.render(renderWithSubmitDisabled(disabled))
@@ -77,6 +92,7 @@ function removeZones(
   modifiedEditor: monacoEditor.ICodeEditor,
   originalEditor: monacoEditor.ICodeEditor,
 ) {
+  for (const zone of zones) zone.stopObserving();
   modifiedEditor.changeViewZones((accessor) => {
     for (const z of zones) {
       if (z.editorSide === "modified") accessor.removeZone(z.id);
@@ -92,6 +108,7 @@ function removeZones(
 }
 
 type CreateZonesParams = {
+  attachmentTaskId?: string | null;
   modifiedEditor: monacoEditor.ICodeEditor;
   originalEditor: monacoEditor.ICodeEditor;
   comments: DiffComment[];
@@ -100,10 +117,16 @@ type CreateZonesParams = {
   selectedLineRange: { start: number; end: number; side: string } | null;
   editingCommentId: string | null;
   setEditingComment: (id: string | null) => void;
-  handleCommentSubmitRef: React.RefObject<(content: string) => void>;
-  handleCommentSubmitAndRunRef?: React.RefObject<((content: string) => void) | undefined>;
+  handleCommentSubmitRef: React.RefObject<
+    (content: string, attachments?: MessageAttachment[]) => void
+  >;
+  handleCommentSubmitAndRunRef?: React.RefObject<
+    ((content: string, attachments?: MessageAttachment[]) => void) | undefined
+  >;
   handleCommentDeleteRef: React.RefObject<(commentId: string) => void>;
-  handleCommentUpdateRef: React.RefObject<(commentId: string, content: string) => void>;
+  handleCommentUpdateRef: React.RefObject<
+    (commentId: string, content: string, attachments?: MessageAttachment[]) => void
+  >;
   handleCommentRunRef?: React.RefObject<((comment: DiffComment) => void) | undefined>;
   clearModifiedGutter: () => void;
   clearOriginalGutter: () => void;
@@ -115,6 +138,7 @@ function createCommentNode(
   comment: DiffComment,
   params: Pick<
     CreateZonesParams,
+    | "attachmentTaskId"
     | "setEditingComment"
     | "handleCommentUpdateRef"
     | "handleCommentDeleteRef"
@@ -128,7 +152,11 @@ function createCommentNode(
       { className: "px-2 py-0.5" },
       createElement(CommentForm, {
         initialContent: comment.text,
-        onSubmit: (c: string) => params.handleCommentUpdateRef.current?.(comment.id, c),
+        attachmentOptions: params.attachmentTaskId
+          ? { taskId: params.attachmentTaskId, initial: comment.attachments }
+          : undefined,
+        onSubmit: (c, attachments) =>
+          params.handleCommentUpdateRef.current?.(comment.id, c, attachments),
         onCancel: () => params.setEditingComment(null),
         isEditing: true,
       }),
@@ -155,6 +183,7 @@ function createZones(params: CreateZonesParams): ViewZoneEntry[] {
     modifiedEditor,
     originalEditor,
     comments,
+    attachmentTaskId,
     showCommentForm,
     submitDisabled,
     selectedLineRange,
@@ -191,9 +220,12 @@ function createZones(params: CreateZonesParams): ViewZoneEntry[] {
         "div",
         { className: "px-2 py-1" },
         createElement(CommentForm, {
-          onSubmit: (c: string) => handleCommentSubmitRef.current?.(c),
+          attachmentOptions: attachmentTaskId ? { taskId: attachmentTaskId } : undefined,
+          onSubmit: (c, attachments) =>
+            handleCommentSubmitRef.current?.(c, ...(attachments ? [attachments] : [])),
           onSubmitAndRun: handleCommentSubmitAndRunRef?.current
-            ? (c: string) => handleCommentSubmitAndRunRef.current?.(c)
+            ? (c, attachments) =>
+                handleCommentSubmitAndRunRef.current?.(c, ...(attachments ? [attachments] : []))
             : undefined,
           submitDisabled: disabled,
           onCancel: () => {
@@ -220,6 +252,8 @@ function createZones(params: CreateZonesParams): ViewZoneEntry[] {
 
 /** Manages inline ViewZones for comments and comment forms */
 export function useViewZones({
+  attachmentTaskId,
+  commentScope,
   modifiedEditor,
   originalEditor,
   comments,
@@ -250,6 +284,7 @@ export function useViewZones({
     }
 
     const newZones = createZones({
+      attachmentTaskId,
       modifiedEditor,
       originalEditor,
       comments,
@@ -281,6 +316,8 @@ export function useViewZones({
     // Submit readiness is updated in place below so open comment drafts survive refreshes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    attachmentTaskId,
+    commentScope,
     modifiedEditor,
     originalEditor,
     comments,

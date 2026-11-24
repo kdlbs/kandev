@@ -13,7 +13,9 @@ import {
   profileModelIsDirty,
 } from "@/components/settings/profile-capability-helpers";
 import { ModelPicker, ModePicker } from "@/components/settings/profile-model-fields";
+import { ProfileThinkingPicker } from "./profile-thinking-picker";
 import { ModelDiscoveryNote } from "@/components/settings/model-discovery-note";
+import { AntigravityRuntimeLabel } from "@/components/settings/antigravity-runtime-label";
 import type { ProfileDiscoveryStatus } from "@/hooks/domains/settings/use-profile-model-capabilities";
 import type {
   CommandEntry,
@@ -46,6 +48,7 @@ type CapabilitiesRowProps = {
   isLoading: boolean;
   onRefresh: () => Promise<void>;
   error: string | null;
+  runtimeVariant?: ModelConfig["runtime_variant"];
   modelConfig: ModelConfig;
   configOptions: SelectConfigOption[];
   configStatus: ModelConfig["status"];
@@ -81,6 +84,7 @@ function StatusOrAuthMessage({
   error,
   reasonCode,
   discoveryState,
+  runtimeVariant,
 }: {
   agentName: string;
   status: ModelConfig["status"];
@@ -89,6 +93,7 @@ function StatusOrAuthMessage({
   error: string | null;
   reasonCode?: string;
   discoveryState: ProfileDiscoveryStatus;
+  runtimeVariant?: ModelConfig["runtime_variant"];
 }) {
   if (status === "auth_required" || status === "not_installed") {
     return (
@@ -99,6 +104,7 @@ function StatusOrAuthMessage({
         onRefresh={onRefresh}
         error={error}
         rawError={null}
+        runtimeVariant={runtimeVariant}
       />
     );
   }
@@ -106,6 +112,7 @@ function StatusOrAuthMessage({
 }
 
 type ModelAndModePickersProps = {
+  agentName: string;
   discovery?: ModelDiscovery;
   profile: ProfileFormData;
   baselineProfile?: ProfileFormData;
@@ -128,7 +135,47 @@ type ModelAndModePickersProps = {
   onConfigurationApply?: ModelConfigApply;
 };
 
+function ProfileModeControl({
+  agentName,
+  profile,
+  configOptions,
+  modes,
+  currentModeId,
+  onChange,
+  disableUnverifiedModels,
+  configIsLoading,
+}: Pick<
+  ModelAndModePickersProps,
+  | "agentName"
+  | "profile"
+  | "configOptions"
+  | "modes"
+  | "currentModeId"
+  | "onChange"
+  | "disableUnverifiedModels"
+  | "configIsLoading"
+>) {
+  return agentName === "pi-acp" ? (
+    <ProfileThinkingPicker
+      profile={profile}
+      options={configOptions}
+      modes={modes}
+      onChange={onChange}
+      disabled={disableUnverifiedModels || configIsLoading}
+    />
+  ) : (
+    <ModePicker
+      profile={profile}
+      modes={modes}
+      currentModeId={currentModeId}
+      onChange={onChange}
+      disabled={disableUnverifiedModels}
+    />
+  );
+}
+
 function ModelAndModePickers({
+  agentName,
   discovery,
   profile,
   baselineProfile,
@@ -151,7 +198,8 @@ function ModelAndModePickers({
   onConfigurationApply,
 }: ModelAndModePickersProps) {
   const { t } = useTranslation();
-  const hasModes = modes.length > 0;
+  const isPi = agentName === "pi-acp";
+  const hasModes = isPi || modes.length > 0;
   const showModePicker =
     hasModes || Boolean(profile.mode) || Boolean(currentModeId) || !disableUnverifiedModels;
 
@@ -176,7 +224,11 @@ function ModelAndModePickers({
             profile={profile}
             models={models}
             currentModelId={currentModelId}
-            configOptions={configOptions}
+            configOptions={
+              isPi
+                ? configOptions.filter((option) => option.category !== "thought_level")
+                : configOptions
+            }
             onChange={onChange}
             ariaLabel={t("settings:startModelAria")}
             goneModelLabel={t("settings:startModelUnavailable")}
@@ -195,13 +247,18 @@ function ModelAndModePickers({
           data-settings-dirty={profileModeIsDirty(profile, baselineProfile)}
           data-settings-dirty-level="container"
         >
-          <SettingsFieldLabel className={labelCls}>{t("agents:startMode")}</SettingsFieldLabel>
-          <ModePicker
+          <SettingsFieldLabel className={labelCls}>
+            {t(isPi ? "agents:thinkingLevel" : "agents:startMode")}
+          </SettingsFieldLabel>
+          <ProfileModeControl
+            agentName={agentName}
             profile={profile}
+            configOptions={configOptions}
             modes={modes}
             currentModeId={currentModeId}
             onChange={onChange}
-            disabled={disableUnverifiedModels}
+            disableUnverifiedModels={disableUnverifiedModels}
+            configIsLoading={configIsLoading}
           />
         </div>
       )}
@@ -232,6 +289,7 @@ function CapabilitiesRowContent({
   isLoading,
   onRefresh,
   error,
+  runtimeVariant,
   modelConfig,
   configOptions,
   configStatus,
@@ -252,7 +310,9 @@ function CapabilitiesRowContent({
 
   return (
     <div className={gapCls}>
+      {agentName === "antigravity-acp" && <AntigravityRuntimeLabel variant={runtimeVariant} />}
       <ModelAndModePickers
+        agentName={agentName}
         discovery={discovery}
         profile={profile}
         baselineProfile={baselineProfile}
@@ -282,7 +342,7 @@ function CapabilitiesRowContent({
         isLoading={configIsLoading}
         onRetry={onRetryConfig}
       />
-      {activeMode?.description && (
+      {agentName !== "pi-acp" && activeMode?.description && (
         <SettingsFieldDescription>{activeMode.description}</SettingsFieldDescription>
       )}
       {commands.length > 0 && <CommandsButton commands={commands} />}
@@ -294,6 +354,7 @@ function CapabilitiesRowContent({
         error={error}
         reasonCode={reasonCode}
         discoveryState={discoveryState}
+        runtimeVariant={runtimeVariant}
       />
     </div>
   );
@@ -351,6 +412,7 @@ export function ProfileCapabilitiesSection({
       isLoading={capabilities.isLoading}
       onRefresh={refresh}
       error={capabilities.error}
+      runtimeVariant={capabilities.runtimeVariant}
       modelConfig={modelConfig}
       configOptions={configOptions}
       configStatus={configStatus}

@@ -6,6 +6,19 @@
  * see lib/api/client.ts fetchJson).
  */
 
+import type { BackendMessage } from "./backend-message";
+
+export type PluginBackendMessageMap = {
+  "plugin.sidebar-grouping.updated": BackendMessage<
+    "plugin.sidebar-grouping.updated",
+    {
+      catalog?: boolean;
+      plugin_id?: string;
+      workspace_id?: string;
+    }
+  >;
+};
+
 export type PluginStatus = "registered" | "active" | "error" | "disabled" | "uninstalled";
 
 export interface PluginCapabilities {
@@ -25,6 +38,13 @@ export interface PluginWebhook {
    * values override either default. See docs/public/plugins-manifest.md. */
   access?: "public" | "authenticated";
   max_body_bytes?: number;
+}
+
+export interface PluginSidebarGrouping {
+  id: string;
+  label: string;
+  label_key?: string;
+  action: string;
 }
 
 export interface PluginUIPage {
@@ -95,6 +115,7 @@ export interface PluginRecord {
   /** Manifest-owned repository providers, serialized by the plugin API. */
   repository_providers?: string[];
   webhooks?: PluginWebhook[];
+  sidebar_groupings?: PluginSidebarGrouping[];
   config_schema?: Record<string, unknown>;
   ui?: PluginUISection;
   status: PluginStatus;
@@ -187,6 +208,24 @@ export interface RevokePluginCapabilityApprovalInput {
   expected_revision: number;
   reason: string;
   audit_id: string;
+}
+
+/** One external account linked to a Kandev user through a plugin
+ * installation (backend plugins.IdentityLinkDTO). */
+export interface PluginIdentityLink {
+  id: string;
+  provider: string;
+  subject: string;
+  display_name: string;
+  user_id: string;
+  user_display_name: string;
+  created_at: string;
+}
+
+/** A single-use link code the external surface redeems within ten minutes. */
+export interface PluginIdentityLinkCode {
+  code: string;
+  expires_at: string;
 }
 
 /**

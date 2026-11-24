@@ -100,7 +100,7 @@ UI-02: Copilot profile command preview card
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/backend && go test ./internal/agentctl/acpcompat/... ./internal/agentctl/server/adapter/transport/acp/... ./internal/agent/agents/... ./internal/agent/utility/... ./internal/agent/settings/controller/...)
+(cd apps/backend && go test -trimpath ./internal/agentctl/acpcompat/... ./internal/agentctl/server/adapter/transport/acp/... ./internal/agentctl/server/utility/... ./internal/agent/agents/... ./internal/agent/settings/controller/...)
 bash scripts/lint-go-changed \
   apps/backend/internal/agentctl/acpcompat/copilot.go \
   apps/backend/internal/agentctl/acpcompat/acpcompat.go \
@@ -110,7 +110,7 @@ bash scripts/lint-go-changed \
   apps/backend/internal/agent/agents/agent.go \
   apps/backend/internal/agent/agents/copilot_acp.go \
   apps/backend/internal/agent/agents/mock.go \
-  apps/backend/internal/agent/utility/acp_executor.go \
+  apps/backend/internal/agentctl/server/utility/acp_executor.go \
   apps/backend/internal/agent/settings/controller/agent_config.go
 (cd apps/web && pnpm exec vitest run "app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card.test.tsx" components/settings/agent-profile-save-catalogue.test.tsx)
 (cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check)

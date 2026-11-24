@@ -47,3 +47,17 @@ func TestHTTPQuerySidebarTasksStructuredValidation(t *testing.T) {
 		})
 	}
 }
+
+// @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.5
+func TestHTTPQuerySidebarGroupingUnavailableIsRecoverable(t *testing.T) {
+	repo := &httpTaskRepo{}
+	c, rec := taskRequestAs(t, "", http.MethodPost, "/api/v1/workspaces/ws-b/sidebar/query", "ws-b")
+	c.Request.Body = io.NopCloser(strings.NewReader(`{"group":"plugin:acme:labels"}`))
+	newHTTPTaskHandlers(t, repo).httpQuerySidebarTasks(c)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, "sidebar_grouping_unavailable", body["error_code"])
+	require.NotContains(t, body, "entries")
+	require.Empty(t, repo.sidebarWorkspace)
+}

@@ -239,7 +239,8 @@ func sessionLoadParams(sessionID, workdir string) map[string]any {
 // --- JSON-RPC helpers ---
 
 func sendInitialize(ctx context.Context, r *Runner) (Frame, error) {
-	req, _ := r.Framer().NewRequest("initialize", initializeParamsForAgent(r.cfg.AgentID, r.cfg.ClientCapabilities, r.cfg.AIRCapabilities))
+	variant := acpcompat.AntigravityRuntimeForCommand(r.cfg.Command)
+	req, _ := r.Framer().NewRequest("initialize", initializeParamsForRuntime(r.cfg.AgentID, r.cfg.ClientCapabilities, r.cfg.AIRCapabilities, variant))
 	resp, err := r.Request(ctx, req)
 	if err != nil {
 		return nil, err
@@ -255,6 +256,9 @@ func sendInitialize(ctx context.Context, r *Runner) (Frame, error) {
 // run. Raw --exec runs keep their existing diagnostic behavior.
 func sendAntigravityAuthIfNeeded(ctx context.Context, r *Runner, initResp Frame) error {
 	if r.cfg.AgentID != acpcompat.AntigravityAgentID {
+		return nil
+	}
+	if acpcompat.AntigravityRuntimeForCommand(r.cfg.Command) == acpcompat.AntigravityRuntimeCLI {
 		return nil
 	}
 	if !antigravityAuthMethodAdvertised(initResp) {
@@ -294,6 +298,10 @@ func initializeParams(clientCapabilities map[string]any, airCapabilities []strin
 // initializeParamsForAgent keeps the registered Antigravity debugger on the
 // same wire identity as a live product session.
 func initializeParamsForAgent(agentID string, clientCapabilities map[string]any, airCapabilities []string) map[string]any {
+	return initializeParamsForRuntime(agentID, clientCapabilities, airCapabilities, acpcompat.AntigravityRuntimeStandalone)
+}
+
+func initializeParamsForRuntime(agentID string, clientCapabilities map[string]any, airCapabilities []string, variant string) map[string]any {
 	capabilities := map[string]any{
 		"fs":       map[string]any{"readTextFile": false, "writeTextFile": false},
 		"terminal": false,
@@ -313,13 +321,14 @@ func initializeParamsForAgent(agentID string, clientCapabilities map[string]any,
 	}
 	return map[string]any{
 		"protocolVersion":    1,
-		"clientInfo":         acpdbgClientInfo(agentID),
+		"clientInfo":         acpdbgClientInfo(agentID, variant),
 		"clientCapabilities": capabilities,
 	}
 }
 
-func acpdbgClientInfo(agentID string) map[string]any {
-	if name, version := acpcompat.ClientInfoForAgent(agentID); name != "" {
+func acpdbgClientInfo(agentID, variant string) map[string]any {
+	policy := acpcompat.AntigravityAuthPolicyForRuntime(variant, "", false)
+	if name, version := acpcompat.ClientInfoForLaunch(agentID, policy); name != "" {
 		return map[string]any{"name": name, "version": version}
 	}
 	return map[string]any{"name": "acpdbg", "version": "0.1.0"}

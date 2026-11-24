@@ -15,6 +15,7 @@ import {
 import { useShallow } from "zustand/react/shallow";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useCommentsStore } from "@/lib/state/slices/comments";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import {
@@ -251,6 +252,7 @@ function useExistingCommentHandlers(
         position,
         editingCommentId: comment.id,
         editingText: comment.text,
+        attachments: comment.attachments,
       });
       setComposerOpen(true);
       window.getSelection()?.removeAllRanges();
@@ -266,7 +268,6 @@ function useMessageCommentActions({
   sessionId,
   target,
   rootRef,
-  close,
   authorName,
 }: {
   authorName?: string;
@@ -274,7 +275,6 @@ function useMessageCommentActions({
   sessionId: string | null | undefined;
   target: CommentTarget | null;
   rootRef: RefObject<HTMLDivElement | null>;
-  close: () => void;
 }) {
   const { t } = useTranslation();
   const addComment = useCommentsStore((state) => state.addComment);
@@ -286,11 +286,14 @@ function useMessageCommentActions({
   useEffect(() => setSaveError(null), [target]);
 
   const saveComment = useCallback(
-    (feedback: string): AgentMessageComment | true | null => {
+    (feedback: string, attachments?: MessageAttachment[]): AgentMessageComment | true | null => {
       if (!target || !sessionId || !feedback.trim()) return null;
       if (target.editingCommentId) {
         setSaveError(null);
-        updateComment(target.editingCommentId, { text: feedback.trim() });
+        updateComment(target.editingCommentId, {
+          text: feedback.trim(),
+          ...(attachments && { attachments }),
+        });
         return true;
       }
       const renderedText = rootRef.current?.textContent ?? "";
@@ -303,6 +306,7 @@ function useMessageCommentActions({
         return null;
       }
       setSaveError(null);
+      if (attachments?.length) comment.attachments = attachments;
       addComment(comment);
       return comment;
     },
@@ -310,16 +314,16 @@ function useMessageCommentActions({
   );
 
   const handleAdd = useCallback(
-    (feedback: string) => {
-      if (!saveComment(feedback)) return false;
+    (feedback: string, attachments?: MessageAttachment[]) => {
+      if (!saveComment(feedback, attachments)) return false;
       return true;
     },
     [saveComment],
   );
 
   const handleRun = useCallback(
-    (feedback: string) => {
-      const comment = saveComment(feedback);
+    (feedback: string, attachments?: MessageAttachment[]) => {
+      const comment = saveComment(feedback, attachments);
       if (!comment) return false;
       if (comment !== true) {
         void runComment(comment).catch((error) =>
@@ -334,8 +338,7 @@ function useMessageCommentActions({
   const deleteComment = useCallback(() => {
     if (!target?.editingCommentId) return;
     removeComment(target.editingCommentId);
-    close();
-  }, [close, removeComment, target?.editingCommentId]);
+  }, [removeComment, target?.editingCommentId]);
   const handleDelete = target?.editingCommentId ? deleteComment : undefined;
 
   return { handleAdd, handleRun, handleDelete, saveError };
@@ -378,7 +381,6 @@ export function MessageCommentSurface({
     sessionId,
     target,
     rootRef,
-    close,
     authorName,
   });
   const handleRun = allowRun ? actions.handleRun : undefined;
@@ -415,6 +417,8 @@ export function MessageCommentSurface({
         <MessageCustomHighlightStyle highlightName={highlightName} />
       ) : null}
       <MessageCommentControls
+        taskId={allowRun ? message.task_id : null}
+        key={`${sessionId}:${message.id}`}
         target={target}
         composerOpen={composerOpen}
         useDrawer={useDrawer}

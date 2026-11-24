@@ -33,6 +33,10 @@ documents the delivered behavior and remains the authority for its boundaries.
 
 ## Verified baseline and failure path
 
+[Session setting semantics](session-setting-semantics.md) adds proposed thinking-specific
+causes for qualified Pi sessions. Existing historical permission causes retain
+their stored meaning; the extension does not weaken permission confirmation.
+
 The planning checkout starts at `ff917a370ac9127fee6f8d7cee80b6b7b9b6175b`.
 `git merge-base --is-ancestor fa729f2d7653f4480c107c6a6d50a5452eb3dd0e HEAD`
 succeeds. PR #4065's explicit Auggie settings recovery is present.

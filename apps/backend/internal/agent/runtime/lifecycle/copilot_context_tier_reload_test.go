@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -12,12 +13,81 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type copilotTierPromptHistory struct {
+	ExecutorProfileReader
+	hasPrompt bool
+	err       error
+}
+
+func (r copilotTierPromptHistory) HasUserPromptHistory(context.Context, string) (bool, error) {
+	return r.hasPrompt, r.err
+}
+
+func useMissingNativeSessionError(mock *restartMockAgentctlServer, sessionID string) {
+	mock.sessionLoadError = "native session state is missing"
+	mock.sessionLoadErrorCode = "SESSION_RESTORE_REQUIRED"
+	mock.sessionLoadErrorDetails = map[string]interface{}{
+		"reason":     "native_state_missing",
+		"session_id": sessionID,
+	}
+}
+
+func TestIsEmptyCopilotNativeSessionMissRequiresMatchingTypedEvidence(t *testing.T) {
+	want := "copilot-acp-session-1"
+	for _, test := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "matching native miss",
+			err: &agentctl.SessionRestoreOperationError{
+				Code: "SESSION_RESTORE_REQUIRED",
+				Details: map[string]interface{}{
+					"reason": "native_state_missing", "session_id": want,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "generic provider error",
+			err:  errors.New("session not found"),
+			want: false,
+		},
+		{
+			name: "different native session",
+			err: &agentctl.SessionRestoreOperationError{
+				Code: "SESSION_RESTORE_REQUIRED",
+				Details: map[string]interface{}{
+					"reason": "native_state_missing", "session_id": "other-session",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "blocked restore",
+			err: &agentctl.SessionRestoreOperationError{
+				Code: "SESSION_RESTORE_BLOCKED",
+				Details: map[string]interface{}{
+					"reason": "native_state_missing", "session_id": want,
+				},
+			},
+			want: false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, isEmptyCopilotNativeSessionMiss(test.err, want))
+		})
+	}
+}
 
 func newCopilotLiveReloadFixture(
 	t *testing.T,
@@ -132,6 +202,20 @@ func newCopilotLiveReloadFixture(
 // @covers AC-AGENTS-COPILOT-CONTEXT-TIER-003.4
 // @covers AC-AGENTS-COPILOT-CONTEXT-TIER-003.5
 func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
+	t.Run("profile-pinned context flag rejects a conflicting staged tier", func(t *testing.T) {
+		mgr, mock, exec, _ := newCopilotLiveReloadFixture(t, v1.AgentStatusReady, "default", "")
+		resolver := mgr.profileResolver.(*restartProfileResolver)
+		resolver.profile.CLIFlags = []settingsmodels.CLIFlag{{Flag: "--context default", Enabled: true}}
+
+		result, err := mgr.SetSessionConfigOptionBySessionIDWithResult(
+			context.Background(), exec.SessionID, acpcompat.CopilotContextTierOptionID, "long_context",
+		)
+		require.ErrorContains(t, err, "profile flags select context tier")
+		require.False(t, result.Confirmed)
+		require.Equal(t, "default", currentContextTierFromModelState(exec.GetModelState()))
+		require.Empty(t, mock.getHTTPActions())
+	})
+
 	t.Run("idle session stages context_tier without restarting and reloads once before next prompt", func(t *testing.T) {
 		mgr, mock, exec, provider := newCopilotLiveReloadFixture(t, v1.AgentStatusReady, "default", "")
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -190,7 +274,7 @@ func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
 		_, err = mgr.PromptAgent(promptCtx, exec.ID, "second-turn after lazy reload", nil, false)
 		require.NoError(t, err, "follow-up prompt must reload once and settle")
 
-		require.Equal(t, []string{"stop", "configure", "start"}, mock.getHTTPActions())
+		require.Equal(t, []string{"stop-agent", "configure", "start"}, mock.getHTTPActions())
 		_, configuredArgs, _ := mock.getConfiguredProcess()
 		assertContainsFlagPair(t, configuredArgs, "--context", "long_context")
 		require.False(t, slices.Contains(configuredArgs, "default"), "configuredArgs=%v", configuredArgs)
@@ -226,7 +310,7 @@ func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
 
 		_, err = mgr.PromptAgent(promptCtx, exec.ID, "third-turn already converged", nil, false)
 		require.NoError(t, err)
-		require.Equal(t, []string{"stop", "configure", "start"}, mock.getHTTPActions())
+		require.Equal(t, []string{"stop-agent", "configure", "start"}, mock.getHTTPActions())
 	})
 
 	t.Run("toggling context_tier away and back before prompt performs zero restarts", func(t *testing.T) {
@@ -259,7 +343,8 @@ func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
 
 	t.Run("zero-turn session falls back to session/new on pre-prompt reload when session/load misses", func(t *testing.T) {
 		mgr, mock, exec, _ := newCopilotLiveReloadFixture(t, v1.AgentStatusReady, "default", "")
-		mock.sessionLoadError = "session not found"
+		useMissingNativeSessionError(mock, exec.ACPSessionID)
+		mgr.executorProfileReader = copilotTierPromptHistory{}
 		mock.mu.Lock()
 		mock.emitPromptComplete = true
 		mock.mu.Unlock()
@@ -285,7 +370,8 @@ func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
 
 	t.Run("multi-turn session refuses session/new fallback when session/load fails and retries cleanly", func(t *testing.T) {
 		mgr, mock, exec, _ := newCopilotLiveReloadFixture(t, v1.AgentStatusReady, "default", "")
-		mock.sessionLoadError = "session not found"
+		useMissingNativeSessionError(mock, exec.ACPSessionID)
+		mgr.executorProfileReader = copilotTierPromptHistory{hasPrompt: true}
 		exec.promptGeneration = 1
 
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -300,6 +386,7 @@ func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
 
 		_, err = mgr.PromptAgent(ctx, exec.ID, "blocked turn when load fails", nil, false)
 		require.Error(t, err)
+		require.ErrorIs(t, err, ErrPromptNotDispatched)
 		wsActions := mock.getWSActions()
 		require.Contains(t, wsActions, "agent.session.load")
 		require.NotContains(t, wsActions, "agent.session.new")
@@ -311,6 +398,53 @@ func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
 		mock.mu.Unlock()
 		_, err = mgr.PromptAgent(ctx, exec.ID, "recovered turn", nil, false)
 		require.NoError(t, err)
+		require.Contains(t, mock.getWSActions(), "agent.prompt")
+	})
+
+	t.Run("retained agentctl without child-scoped stop fails before touching workspace services or dispatching", func(t *testing.T) {
+		mgr, mock, exec, _ := newCopilotLiveReloadFixture(t, v1.AgentStatusReady, "default", "")
+		mock.failAgentProcessStop = true
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		_, err := mgr.SetSessionConfigOptionBySessionIDWithResult(
+			ctx, exec.SessionID, acpcompat.CopilotContextTierOptionID, "long_context",
+		)
+		require.NoError(t, err)
+
+		_, err = mgr.PromptAgent(ctx, exec.ID, "must remain queued", nil, false)
+		require.ErrorIs(t, err, ErrPromptNotDispatched)
+		require.Equal(t, []string{"stop-agent"}, mock.getHTTPActions())
+		require.NotContains(t, mock.getWSActions(), "agent.prompt")
+		require.Equal(t, "copilot-acp-session-1", exec.ACPSessionID)
+		require.True(t, mgr.WasSessionInitialized(exec.ID))
+	})
+
+	t.Run("failed settings replay stays pending and retries the complete reload before dispatch", func(t *testing.T) {
+		mgr, mock, exec, _ := newCopilotLiveReloadFixture(t, v1.AgentStatusReady, "default", "")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_, err := mgr.SetSessionConfigOptionBySessionIDWithResult(
+			ctx, exec.SessionID, acpcompat.CopilotContextTierOptionID, "long_context",
+		)
+		require.NoError(t, err)
+		mock.failConfigOptionID = "reasoning_effort"
+
+		_, err = mgr.PromptAgent(ctx, exec.ID, "first attempt remains queued", nil, false)
+		require.ErrorIs(t, err, ErrPromptNotDispatched)
+		require.False(t, mgr.WasSessionInitialized(exec.ID))
+		require.NotContains(t, mock.getWSActions(), "agent.prompt")
+
+		mock.mu.Lock()
+		mock.failConfigOptionID = ""
+		mock.emitPromptComplete = true
+		mock.mu.Unlock()
+		_, err = mgr.PromptAgent(ctx, exec.ID, "retry after settings recovery", nil, false)
+		require.NoError(t, err)
+		require.True(t, mgr.WasSessionInitialized(exec.ID))
+		require.Equal(t, []string{
+			"stop-agent", "configure", "start", "stop-agent", "configure", "start",
+		}, mock.getHTTPActions())
 		require.Contains(t, mock.getWSActions(), "agent.prompt")
 	})
 
@@ -364,7 +498,8 @@ func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
 
 	t.Run("durable admission prompt reconciles staged context_tier before invoking admission callback", func(t *testing.T) {
 		mgr, mock, exec, _ := newCopilotLiveReloadFixture(t, v1.AgentStatusReady, "default", "")
-		mock.sessionLoadError = "session not found"
+		useMissingNativeSessionError(mock, exec.ACPSessionID)
+		mgr.executorProfileReader = copilotTierPromptHistory{hasPrompt: true}
 		exec.promptGeneration = 1
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -385,6 +520,7 @@ func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
 			"sub-1",
 		)
 		require.Error(t, err)
+		require.ErrorIs(t, err, ErrPromptNotDispatched)
 		require.False(t, admitted, "admission callback must not run when pre-prompt reload fails")
 
 		mock.mu.Lock()
@@ -409,7 +545,7 @@ func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
 	})
 
 	t.Run("ResetAgentContext with staged context_tier restarts subprocess with new --context flag", func(t *testing.T) {
-		mgr, mock, exec, provider := newCopilotLiveReloadFixture(t, v1.AgentStatusReady, "default", "")
+		mgr, mock, exec, _ := newCopilotLiveReloadFixture(t, v1.AgentStatusReady, "default", "")
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 
@@ -417,7 +553,6 @@ func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
 			ctx, exec.SessionID, acpcompat.CopilotContextTierOptionID, "long_context",
 		)
 		require.NoError(t, err)
-		provider.infos[exec.SessionID].RuntimeConfigOptions[acpcompat.CopilotContextTierOptionID] = "long_context"
 		require.Empty(t, mock.getHTTPActions())
 
 		require.NoError(t, mgr.ResetAgentContext(ctx, exec.ID))
@@ -497,7 +632,7 @@ func TestCopilotIdleLiveSessionContextTierReload(t *testing.T) {
 
 		_, err = mgr.PromptAgent(ctx, exec.ID, "turn after mcp update", nil, false)
 		require.NoError(t, err)
-		require.Equal(t, []string{"stop", "configure", "start"}, mock.getHTTPActions())
+		require.Equal(t, []string{"stop-agent", "configure", "start"}, mock.getHTTPActions())
 		_, configuredArgs, _ := mock.getConfiguredProcess()
 		assertContainsFlagPair(t, configuredArgs, "--context", "long_context")
 	})

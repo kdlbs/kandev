@@ -5,7 +5,10 @@ import { useCallback, type RefObject } from "react";
 import { useToast } from "@/components/toast-provider";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
-import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
+import {
+  commentAttachmentsForDelivery,
+  formatReviewCommentsAsMarkdown,
+} from "@/lib/state/slices/comments/format";
 import { buildSubmitMessage } from "./chat/chat-input-area";
 import {
   ChatInputContainer,
@@ -130,6 +133,7 @@ export function PassthroughComposerPanel({
 type PassthroughFinalMessage = {
   content: string;
   commentsToSend: Array<ReviewComment | AgentMessageComment>;
+  commentAttachments: MessageAttachment[];
   contextFilesMeta?: Array<{ path: string; name: string }>;
   planCommentRefs: TaskPlanCommentRef[];
 };
@@ -245,6 +249,10 @@ export async function buildPassthroughFinalMessage({
   return {
     content: visibleContent + contextFilesContext + planContext + taskMentionsContext,
     commentsToSend,
+    commentAttachments: commentAttachmentsForDelivery([
+      ...commentsToSend,
+      ...panelState.walkthroughComments,
+    ]),
     contextFilesMeta: buildContextFilesMeta(allContextFiles),
     planCommentRefs: toTaskPlanCommentRefs(panelState.planComments),
   };
@@ -275,7 +283,9 @@ async function requestPassthroughMessage({
     finalMessage: message.content,
     modelToSend: undefined,
     planMode: false,
-    attachments,
+    attachments: message.commentAttachments.length
+      ? [...(attachments ?? []), ...message.commentAttachments]
+      : attachments,
     contextFilesMeta: message.contextFilesMeta,
     planCommentRefs: message.planCommentRefs,
   });

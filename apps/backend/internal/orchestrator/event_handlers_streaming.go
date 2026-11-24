@@ -92,7 +92,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		eventExecutionID,
 		payload.Data.PromptGeneration,
 	) {
-		s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
+		if eventType != streams.EventTypeMCPStartupWarning {
+			s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
+		}
 		s.logger.Debug("ignoring stream event for execution outside cancellation identity",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
@@ -134,6 +136,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		if eventType != streams.EventTypeUsageObservation {
 			return
 		}
+	}
+	if eventType == streams.EventTypeMCPStartupWarning {
+		s.handleCodexMCPStartupWarning(ctx, payload, eventExecutionID)
+		return
 	}
 	switch eventType {
 	case streams.EventTypeMessageChunk:
@@ -614,7 +620,9 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	if sessionID != "" && payload.Data.ACPSessionID != "" {
-		s.storeResumeTokenFromAgentEvent(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
+		s.storeResumeTokenFromStreamEvent(
+			ctx, taskID, sessionID, payload.ExecutionID, payload.AgentType, payload.Data.ACPSessionID, "", payload.AttemptID,
+		)
 	}
 	if sessionID == "" || s.messageCreator == nil {
 		return
@@ -3586,7 +3594,10 @@ func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *li
 			lastMsgUUID = uuid
 		}
 	}
-	s.storeResumeTokenFromAgentEvent(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
+	s.storeResumeTokenFromStreamEvent(
+		ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.AgentType,
+		payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID,
+	)
 }
 
 func (s *Service) resolveCompleteEventTurnID(

@@ -80,8 +80,11 @@ test.describe("Copilot context window selection", () => {
       });
       await expect(session.chat).toContainText("Copilot runtime context_tier=long_context");
     } finally {
-      if (profile) await profile.dispose();
-      await release();
+      try {
+        if (profile) await profile.dispose();
+      } finally {
+        await release();
+      }
     }
   });
 
@@ -193,8 +196,11 @@ test.describe("Copilot context window selection", () => {
       await expect(session.chat).toContainText("Copilot runtime context_tier=default");
       await expect(session.chat).toContainText("Copilot runtime context_tier=long_context");
     } finally {
-      if (profile) await profile.dispose();
-      await release();
+      try {
+        if (profile) await profile.dispose();
+      } finally {
+        await release();
+      }
     }
   });
 
@@ -313,8 +319,11 @@ test.describe("Copilot context window selection", () => {
       });
     } finally {
       await gate.release().catch(() => undefined);
-      if (profile) await profile.dispose();
-      await release();
+      try {
+        if (profile) await profile.dispose();
+      } finally {
+        await release();
+      }
     }
   });
 });

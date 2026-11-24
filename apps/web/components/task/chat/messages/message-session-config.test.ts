@@ -75,6 +75,24 @@ describe("formatMessageSessionConfig", () => {
     );
   });
 
+  it("keeps a provider value label that already includes the option name", () => {
+    const metadata = turnMetadata({
+      model: "sandbox-echo/thinking-echo",
+      config_options: [
+        {
+          id: "thought_level",
+          name: "Thinking",
+          value: "minimal",
+          value_name: "Thinking: minimal",
+        },
+      ],
+    });
+
+    expect(formatMessageSessionConfig(undefined, metadata)).toBe(
+      "sandbox-echo/thinking-echo · Thinking: minimal",
+    );
+  });
+
   it("prefers provider-refined turn model over cached message and captured models", () => {
     expect(
       formatMessageSessionConfig(

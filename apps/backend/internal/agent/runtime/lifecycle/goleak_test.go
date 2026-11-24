@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"os"
 	"testing"
 
 	"go.uber.org/goleak"
@@ -24,6 +25,10 @@ import (
 // (sshKeepaliveTuningValid); tests that exercise it set millisecond values
 // of their own and must not run with t.Parallel().
 func TestMain(m *testing.M) {
+	if os.Getenv("KANDEV_TEST_OPENCODE_EXPORT") == "1" {
+		runOpenCodeExportFixture()
+		return
+	}
 	sshKeepaliveInterval = 0
 	sshKeepaliveDeadline = 0
 	goleak.VerifyTestMain(m)

@@ -1,3 +1,4 @@
+import { usesSavedSidebarDisclosure } from "@/lib/sidebar/sidebar-disclosure-query";
 import type { BuiltinMCPInitialPreferences } from "@/lib/types/builtin-mcp";
 import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import { fetchJson, type ApiRequestOptions } from "../client";
@@ -633,7 +634,11 @@ export async function querySidebarTasks(
     ...options,
     init: {
       method: "POST",
-      body: JSON.stringify(query),
+      body: JSON.stringify(
+        usesSavedSidebarDisclosure(query)
+          ? { ...query, collapsed_group_keys: [] }
+          : { ...query, disclosure_view_id: undefined },
+      ),
       ...(options?.init ?? {}),
     },
   });

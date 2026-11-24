@@ -12,6 +12,7 @@
  * methods) — this is what `host.ts` passes into a plugin's `initialize()`.
  */
 import { useSyncExternalStore } from "react";
+import type { SidebarGroupingProvider } from "@kdlbs/plugin-sdk";
 import { i18n } from "@/lib/i18n";
 import type {
   FileViewerRegistration,
@@ -128,6 +129,42 @@ function removeByPlugin<T>(list: Owned<T>[], pluginId: string): Owned<T>[] {
 }
 
 class PluginRegistryStore {
+  private sidebarGroupings: readonly SidebarGroupingProvider[] = [];
+  private sidebarGroupingEpoch = 0;
+  private sidebarGroupingRevisions = new Map<string, number>();
+
+  getSidebarGroupings(): readonly SidebarGroupingProvider[] {
+    return this.sidebarGroupings;
+  }
+
+  setSidebarGroupings(providers: readonly SidebarGroupingProvider[]): void {
+    if (JSON.stringify(providers) === JSON.stringify(this.sidebarGroupings)) return;
+    this.sidebarGroupings = providers.map((provider) => ({ ...provider }));
+    this.notify();
+  }
+
+  invalidateSidebarGroupings(pluginId?: string, workspaceId?: string): void {
+    if (!pluginId) {
+      this.sidebarGroupingEpoch++;
+      this.sidebarGroupingRevisions.clear();
+    } else {
+      const key = JSON.stringify([pluginId, workspaceId ?? null]);
+      this.sidebarGroupingRevisions.set(key, (this.sidebarGroupingRevisions.get(key) ?? 0) + 1);
+    }
+    this.notify();
+  }
+
+  sidebarGroupingIdentity(reference: string, workspaceId: string | null): string {
+    if (!reference.startsWith("plugin:")) return "";
+    const pluginId = reference.split(":")[1];
+    const provider = this.sidebarGroupings.find((provider) => provider.reference === reference);
+    return JSON.stringify([
+      provider?.generation ?? null,
+      this.sidebarGroupingEpoch,
+      this.sidebarGroupingRevisions.get(JSON.stringify([pluginId, null])) ?? 0,
+      this.sidebarGroupingRevisions.get(JSON.stringify([pluginId, workspaceId])) ?? 0,
+    ]);
+  }
   private routes: Owned<RouteRegistration>[] = [];
   private settingsRoutes: Owned<RouteRegistration>[] = [];
   private integrationSettings = new Map<string, Owned<IntegrationSettingsRegistration>>();

@@ -47,8 +47,11 @@ NOTHING`, so an existing install keeps the old diff-based template.
 `refreshUneditedBuiltinPrompts` (`internal/utility/store/builtins.go`) runs
 after the placeholder migration and replaces a stored built-in prompt only when
 its trimmed text hashes to a known shipped revision. The update is conditional
-on the stored prompt text, so a concurrent prompt edit wins. It changes only
-the prompt field, so profile bindings and other agent settings remain intact.
+on the stored prompt text, so a concurrent prompt edit wins. A profile-only or
+other agent-field update does not disqualify a known shipped prompt revision.
+The exact content hash is the refresh eligibility check; text outside the known
+hashes remains untouched. The update changes only the prompt field, so profile
+bindings and other agent settings remain intact.
 
 **Call records and settlement.** `CreateCallWithExecutionProfile`
 (`internal/utility/service`) creates the pending row with both logical and

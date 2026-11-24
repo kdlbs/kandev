@@ -1,3 +1,4 @@
+import { attachCommentFile } from "../../helpers/comment-attachment";
 import { assertCommentSurvivesForeground } from "./plan-comment-foreground-helpers";
 // Filename starts with "mobile-" so this runs under the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
@@ -218,6 +219,7 @@ test.describe("mobile: task-owned plan comments", () => {
     await expect(drawer).toBeVisible({ timeout: 5_000 });
     const runComment = "Run this mobile feedback in primary";
     await drawer.locator("textarea").fill(runComment);
+    const attachmentId = await attachCommentFile(testPage, drawer, "mobile-plan.txt");
     const actionButtons = drawer.getByRole("button");
     const sizes = await actionButtons.evaluateAll((buttons) =>
       buttons.map((button) => button.getBoundingClientRect().height),
@@ -233,7 +235,11 @@ test.describe("mobile: task-owned plan comments", () => {
       .poll(
         async () =>
           (await apiClient.listSessionMessages(primary.id)).messages.some(
-            (message) => message.author_type === "user" && message.content.includes(runComment),
+            (message) =>
+              message.author_type === "user" &&
+              message.content.includes(runComment) &&
+              Array.isArray(message.metadata?.attachments) &&
+              message.metadata.attachments.some((file) => file.attachment_id === attachmentId),
           ),
         { timeout: 30_000 },
       )

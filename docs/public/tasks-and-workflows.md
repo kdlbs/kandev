@@ -626,7 +626,7 @@ provider session. See [Executors](executors.md#workspace-sources) and [Coordinat
 
 The task prompt supports image, audio, and resource attachments. Kandev accepts at most 10 files per submission, with a 100 MiB raw limit per file and a 100 MiB raw aggregate limit. Files are uploaded over authenticated HTTP before the task or message is submitted, so the task-create JSON and WebSocket frames carry attachment descriptors rather than base64 file contents. An upload that is still in progress or has failed must finish or be retried before the prompt can be sent. Removing a staged attachment discards its private upload; unclaimed uploads expire automatically after 24 hours. This prompt-attachment limit does not change the separate 10 MB task-document upload contract.
 
-Task-session chat uploads files to the task's workspace. It also works when you open a task from Office before a Kanban board loads. If Kandev cannot find the workspace, the draft keeps the files and text. Kandev blocks message and plan implementation actions while an attachment has no upload descriptor. You can retry the workspace lookup. You can still send plain text. A restored attachment is uploaded before use when its bytes can be recovered; remove and reattach it if they cannot. Office comments use a separate API. This change does not add file attachments to comments. Office run transcripts remain read-only.
+Task-session chat uploads files to the task's workspace. It also works when you open a task from Office before a Kanban board loads. If Kandev cannot find the workspace, the draft keeps the files and text. Kandev blocks message and plan implementation actions while an attachment has no upload descriptor. You can retry the workspace lookup. You can still send plain text. A restored attachment is uploaded before use when its bytes can be recovered; remove and reattach it if they cannot. Office thread comments use a separate API for text feedback. Office run transcripts remain read-only.
 
 During workspace preparation, the initial message shows your uploaded screenshots and file labels. You can open image previews before the agent starts. The preview survives a page reload and remains visible if preparation fails. It does not indicate successful delivery to the agent.
 
@@ -1133,6 +1133,31 @@ Expand **Task row** in sidebar filters to choose the details shown below each ti
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 
+An active plugin can add **Plugin groupings** to the saved-view selector. On a
+phone, open the navigation menu's **Tasks** section and tap **Plugin groupings**;
+the same chooser is available in the task switcher. Selecting a grouping creates
+a normal saved view or reuses its unchanged generated view. Save or discard an
+existing draft before selecting one. Renamed/custom views are not overwritten.
+
+Plugin grouping covers all authorized matching roots before pagination, not just
+the currently loaded page. A root with multiple values appears in each matching
+colored group, with its subtasks beneath each occurrence. **Untagged** contains
+roots without a value. The footer reports unique tasks separately from pages of
+display occurrences; repeated rows still navigate, select, and act on the same
+task. Group collapse belongs to the saved workspace view, while subtask collapse
+applies to the canonical task.
+
+Changing a draft's grouping starts its groups expanded. Collapse choices made
+in that preview belong to the draft: **Discard** leaves the saved view unchanged,
+while **Save** and **Save as** retain the preview's choices. A copied view's
+collapse choices remain independent of its source.
+
+If the plugin is disabled, unavailable, or returns an incomplete classification,
+the saved view remains selected with its original grouping. Enable the plugin,
+use **Retry**, or choose another view. Recovery restores the grouping without
+rewriting your settings. This is separate from plugin Sort/Group choices in the
+main **List** view, which still apply only to its loaded page.
+
 Views already covered by the current homepage data appear immediately, without
 another sidebar request. Larger covered views also page through the data already
 loaded. Archived views and incomplete data use bounded server pages.
@@ -1270,6 +1295,8 @@ If you add a composer instruction when starting implementation, Kandev clears
 that draft only after acceptance and while its text and attachments still match.
 Edits made while implementation starts remain available when you return to that
 session. Starting from the Plan panel leaves an unsent composer draft intact.
+
+To attach evidence, open the paperclip in the plan comment and choose **Add files**. Wait for the upload to finish before saving. The files stay with the saved comment when you switch sessions. When you send or run the comment, the receiving agent gets a readable path for each file.
 
 Each plan comment supports up to 64 KiB of feedback and 256 KiB of selected
 text. A plan supports up to 100 pending comments and 1 MiB of combined feedback

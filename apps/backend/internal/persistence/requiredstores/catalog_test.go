@@ -13,7 +13,7 @@ func TestCatalog(t *testing.T) {
 		"canvas": {}, "coordinator": {}, "delivery": {}, "editor": {},
 		"github": {}, "gitlab": {}, "jira": {}, "linear": {}, "message-queue": {},
 		"notification": {}, "office": {}, "office-config-sync": {}, "organization-units": {},
-		"organizations": {}, "plugin-instance-state": {}, "plugin-instances": {},
+		"organizations": {}, "plugin-command-receipts": {}, "plugin-instance-state": {}, "plugin-instances": {},
 		"plugin-marketplace": {}, "plugin-settings": {}, "plugin-state": {},
 		"plugin-user-state": {}, "prompts": {}, "quick-terminal": {}, "runtime-flags": {},
 		"schema-meta": {}, "secrets": {}, "sentry": {}, "storage": {}, "system-settings": {},

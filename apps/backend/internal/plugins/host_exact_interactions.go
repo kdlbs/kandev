@@ -30,7 +30,7 @@ func (m exactInteractionManager) RespondPermission(ctx context.Context, in plugi
 		if err != nil {
 			return replay, nil, err
 		}
-		return replay, ptrInteraction(interactionModelToDTO(interaction)), nil
+		return replay, m.host.attributedInteraction(ctx, interaction), nil
 	}
 	responder, interaction, result := m.host.exactHumanInteractionTarget(ctx, in.WorkspaceID, in.InteractionID, in.ExpectedResourceVersion, response)
 	if result != nil {
@@ -40,13 +40,16 @@ func (m exactInteractionManager) RespondPermission(ctx context.Context, in plugi
 	if err != nil {
 		return m.host.completeHumanInteractionError(ctx, admission, err, in.InteractionID, in.ExpectedResourceVersion), nil, nil
 	}
-	if _, ok := m.host.service.humanInteractionReceipts.consume(in.HumanResponseReceiptID, in.WorkspaceID, in.InteractionID, in.ExpectedResourceVersion, response.Kind, response); !ok {
-		return m.host.completeHumanInteractionResult(ctx, admission, &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: "human_response_receipt_invalid_or_used"}, in.InteractionID, in.ExpectedResourceVersion), nil, nil
+	actingCtx, receipt, result := m.host.consumeHumanResponse(ctx, in.HumanResponseReceiptID, in.WorkspaceID, in.InteractionID, in.ExpectedResourceVersion, response, in.ApprovalRevision, in.ManifestDigest)
+	if result != nil {
+		return m.host.completeHumanInteractionResult(ctx, admission, result, in.InteractionID, in.ExpectedResourceVersion), nil, nil
 	}
-	err = responder.RespondToPermission(ctx, PluginPermissionResponse{TaskID: interaction.TaskID, SessionID: interaction.SessionID, RequestID: interaction.RequestID, PendingID: interaction.ID, OptionID: optionID, Cancelled: in.Cancelled})
+	err = responder.RespondToPermission(actingCtx, PluginPermissionResponse{TaskID: interaction.TaskID, SessionID: interaction.SessionID, RequestID: interaction.RequestID, PendingID: interaction.ID, OptionID: optionID, Cancelled: in.Cancelled, LinkedUser: receipt.Delegation != nil})
 	if err != nil {
+		m.host.releaseLinkedResponseClaim(ctx, in.HumanResponseReceiptID, receipt)
 		return m.host.completeHumanInteractionError(ctx, admission, err, interaction.ID, in.ExpectedResourceVersion), nil, nil
 	}
+	m.host.markLinkedResponseConsumed(ctx, in.HumanResponseReceiptID, receipt)
 	resolved := taskmodels.InteractionStatusApproved
 	if rejected || in.Cancelled {
 		resolved = taskmodels.InteractionStatusRejected
@@ -56,6 +59,7 @@ func (m exactInteractionManager) RespondPermission(ctx context.Context, in plugi
 		return exactUnavailableResult("interaction_readback_unavailable"), nil, nil
 	}
 	result, err = completeExecutionCommand(ctx, admission, pluginsdk.CommandApplied, "", updated.ID, digestPublicValue(*updated))
+	m.host.attributeInteraction(ctx, updated)
 	return result, updated, err
 }
 
@@ -76,7 +80,7 @@ func (m exactInteractionManager) AnswerClarification(ctx context.Context, in plu
 		if err != nil {
 			return replay, nil, err
 		}
-		return replay, ptrInteraction(interactionModelToDTO(interaction)), nil
+		return replay, m.host.attributedInteraction(ctx, interaction), nil
 	}
 	responder, interaction, result := m.host.exactHumanInteractionTarget(ctx, in.WorkspaceID, in.InteractionID, in.ExpectedResourceVersion, response)
 	if result != nil {
@@ -89,18 +93,49 @@ func (m exactInteractionManager) AnswerClarification(ctx context.Context, in plu
 		}
 		answers[index] = PluginClarificationAnswer{QuestionID: answer.QuestionID, SelectedOptions: answer.SelectedOptions, CustomText: answer.CustomText}
 	}
-	if _, ok := m.host.service.humanInteractionReceipts.consume(in.HumanResponseReceiptID, in.WorkspaceID, in.InteractionID, in.ExpectedResourceVersion, response.Kind, response); !ok {
-		return m.host.completeHumanInteractionResult(ctx, admission, &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: "human_response_receipt_invalid_or_used"}, in.InteractionID, in.ExpectedResourceVersion), nil, nil
+	actingCtx, receipt, result := m.host.consumeHumanResponse(ctx, in.HumanResponseReceiptID, in.WorkspaceID, in.InteractionID, in.ExpectedResourceVersion, response, in.ApprovalRevision, in.ManifestDigest)
+	if result != nil {
+		return m.host.completeHumanInteractionResult(ctx, admission, result, in.InteractionID, in.ExpectedResourceVersion), nil, nil
 	}
-	if err := responder.AnswerClarification(ctx, interaction.ID, answers); err != nil {
+	if err := responder.AnswerClarification(actingCtx, interaction.ID, answers); err != nil {
+		m.host.releaseLinkedResponseClaim(ctx, in.HumanResponseReceiptID, receipt)
 		return m.host.completeHumanInteractionError(ctx, admission, err, interaction.ID, in.ExpectedResourceVersion), nil, nil
 	}
+	m.host.markLinkedResponseConsumed(ctx, in.HumanResponseReceiptID, receipt)
 	updated, err := m.host.reloadInteraction(ctx, interaction, taskmodels.InteractionStatusAnswered)
 	if err != nil {
 		return exactUnavailableResult("interaction_readback_unavailable"), nil, nil
 	}
 	result, err = completeExecutionCommand(ctx, admission, pluginsdk.CommandApplied, "", updated.ID, digestPublicValue(*updated))
+	m.host.attributeInteraction(ctx, updated)
 	return result, updated, err
+}
+
+// consumeHumanResponse spends a receipt for one exact response. A receipt
+// minted for a linked user is re-checked and yields a context acting as that
+// user; a native receipt keeps the plugin context.
+func (h *pluginHost) consumeHumanResponse(
+	ctx context.Context, receiptID, workspaceID, targetID, version string, response HumanInteractionResponse,
+	approvalRevision uint64, manifestDigest string,
+) (context.Context, humanInteractionResponseReceipt, *pluginsdk.CommandResult) {
+	receipt, ok := h.service.humanInteractionReceipts.consume(receiptID, h.installationID, workspaceID, targetID, version, response.Kind, response)
+	if !ok {
+		return nil, humanInteractionResponseReceipt{}, &pluginsdk.CommandResult{Status: pluginsdk.CommandDenied, Reason: reasonHumanResponseReceiptInvalid}
+	}
+	actingCtx, result := h.linkedResponseContext(ctx, receipt, approvalRevision, manifestDigest)
+	if result != nil {
+		return nil, humanInteractionResponseReceipt{}, result
+	}
+	if result := h.claimLinkedResponse(ctx, receiptID, receipt); result != nil {
+		return nil, humanInteractionResponseReceipt{}, result
+	}
+	return actingCtx, receipt, nil
+}
+
+func (h *pluginHost) attributedInteraction(ctx context.Context, interaction *taskmodels.Interaction) *pluginsdk.Interaction {
+	dto := interactionModelToDTO(interaction)
+	h.attributeInteraction(ctx, &dto)
+	return &dto
 }
 
 func (h *pluginHost) exactHumanInteractionTarget(ctx context.Context, workspaceID, interactionID, expectedVersion string, response HumanInteractionResponse) (interactionResponder, *taskmodels.Interaction, *pluginsdk.CommandResult) {
@@ -120,10 +155,10 @@ func (h *pluginHost) exactHumanInteractionTarget(ctx context.Context, workspaceI
 	}
 	task, err := h.taskData.GetTask(ctx, interaction.TaskID)
 	if err != nil || task == nil {
-		return nil, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandNotFound, Reason: "interaction_not_found"}
+		return nil, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandNotFound, Reason: reasonInteractionNotFound}
 	}
 	if task.WorkspaceID != workspaceID {
-		return nil, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandNotFound, Reason: "interaction_not_found"}
+		return nil, nil, &pluginsdk.CommandResult{Status: pluginsdk.CommandNotFound, Reason: reasonInteractionNotFound}
 	}
 	version := digestPublicValue(interactionModelToDTO(interaction))
 	if version != expectedVersion {
@@ -165,5 +200,3 @@ func exactInteractionErrorResult(err error) *pluginsdk.CommandResult {
 	}
 	return exactExecutionErrorResult(err)
 }
-
-func ptrInteraction(value pluginsdk.Interaction) *pluginsdk.Interaction { return &value }

@@ -237,6 +237,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		ProviderAPIKeySecretID:  req.ProviderAPIKeySecretID,
 		UserModified:            true,
 	}
+	canonicalizePiThinkingProfile(agent.Name, profile, false)
 	if err := c.normalizeProviderConfig(ctx, profile, agent.Name); err != nil {
 		return nil, err
 	}
@@ -714,6 +715,13 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if err := c.applyProviderConfigUpdate(ctx, req, profile); err != nil {
 		return nil, err
+	}
+	if req.Mode != nil || req.ConfigOptions != nil {
+		agentName, agentErr := resolveAgentName()
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		canonicalizePiThinkingProfile(agentName, profile, req.ConfigOptions == nil)
 	}
 	if req.Mode != nil || req.EnvVars != nil {
 		agentName, agentErr := resolveAgentName()

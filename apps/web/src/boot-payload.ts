@@ -10,6 +10,8 @@ import type {
   WorkflowStep,
 } from "@/lib/types/http";
 import type { ActivePlugin } from "@/lib/plugins/types";
+import type { SidebarGroupingProvider } from "@kdlbs/plugin-sdk";
+import { readSidebarGroupingProviders } from "@/lib/plugins/sidebar-grouping-metadata";
 
 export type { ActivePlugin };
 
@@ -84,6 +86,7 @@ export type BootPayload = {
   routeData?: BootRouteData;
   entities?: BootEntityGraph;
   plugins?: ActivePlugin[];
+  sidebarGroupings?: readonly SidebarGroupingProvider[];
   /** Replayable per-boot CSRF/accidental-mutation interlock; not authentication. */
   interimSettingsInterlockToken?: string;
 };
@@ -118,6 +121,7 @@ export function readBootPayload(win: Window = window): BootPayload {
     routeData: normalized.routeData as BootRouteData | undefined,
     entities,
     plugins: Array.isArray(payload.plugins) ? readPlugins(payload.plugins) : undefined,
+    sidebarGroupings: readSidebarGroupingProviders(payload.sidebarGroupings),
     interimSettingsInterlockToken: readNonEmptyString(payload.interimSettingsInterlockToken),
   };
 }

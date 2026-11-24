@@ -150,6 +150,13 @@ func TestCopilotLaunchAndRestartCommandsIncludeContextTier(t *testing.T) {
 		_, _, _, cmd, err := mgr.passthroughAgentCommand(ctx, exec, profile)
 		require.NoError(t, err)
 		assertContainsFlagPair(t, cmd.Args(), "--context", "long_context")
+
+		resolved, err := mgr.resolvePassthroughAgent(ctx, exec)
+		require.NoError(t, err)
+		resumeCmd, err := mgr.resumePassthroughCommandWithPreparation(ctx, exec, resolved, true, nil)
+		require.NoError(t, err)
+		assertContainsFlagPair(t, resumeCmd.Args(), "--context", "long_context")
+		require.Contains(t, resumeCmd.Args(), "--continue")
 	})
 
 	t.Run("prepareAgentRestart applies runtimeConfigOverride context_tier before persisted write", func(t *testing.T) {
@@ -212,6 +219,53 @@ func synthesizedCopilotModelState(tier, effort string) *CachedModelState {
 		ConfigOptions:        opts,
 		ConfigOptionsSettled: true,
 	}
+}
+
+func TestConfirmedCopilotLaunchTierIsSeparateFromStagedPreference(t *testing.T) {
+	execution := &AgentExecution{
+		AgentID:   agents.CopilotACPAgentID,
+		AgentArgs: []string{"copilot", "--acp", "--context", acpcompat.CopilotContextTierDefault},
+	}
+	execution.setConfirmedCopilotContextTier(acpcompat.CopilotContextTierLong)
+	execution.SetModelState(synthesizedCopilotModelState(acpcompat.CopilotContextTierDefault, "medium"))
+
+	require.Equal(t, acpcompat.CopilotContextTierLong, launchedExecutionCopilotContextTier(execution))
+	require.Equal(t, acpcompat.CopilotContextTierDefault, effectiveExecutionCopilotContextTier(execution))
+
+	incoming, _ := acpcompat.NormalizeCopilotConfigOptions(nil, acpcompat.CopilotContextTierLong)
+	preserved := preserveStagedCopilotContextTier(execution, incoming)
+	require.Equal(t, acpcompat.CopilotContextTierDefault, currentContextTierFromOptions(preserved))
+}
+
+func TestCopilotReloadModelStateKeepsEffectiveFallback(t *testing.T) {
+	base := &CachedModelState{
+		CurrentModelID:       "provider-default",
+		Models:               []streams.SessionModelInfo{{ModelID: "provider-default"}},
+		ConfigOptions:        []streams.ConfigOption{{ID: modelConfigOptionID, CurrentValue: "requested-model"}},
+		ConfigOptionsSettled: true,
+	}
+	runtimeConfig := models.SessionRuntimeConfig{Model: "requested-model"}
+	cloned := cloneModelStateForCopilotReload(base, runtimeConfig, acpcompat.CopilotContextTierLong)
+	require.Equal(t, "provider-default", cloned.CurrentModelID)
+
+	manager := newTestManager(t)
+	execution := &AgentExecution{AgentID: agents.CopilotACPAgentID, ACPSessionID: "native"}
+	execution.SetModelState(cloned)
+	manager.synchronizeReloadedCopilotModelState(
+		execution, base, runtimeConfig, acpcompat.CopilotContextTierLong, "provider-default",
+	)
+	state := execution.GetModelState()
+	require.Equal(t, "provider-default", state.CurrentModelID)
+	require.Equal(t, "provider-default", configOptionValue(state.ConfigOptions, modelConfigOptionID))
+}
+
+func configOptionValue(options []streams.ConfigOption, id string) string {
+	for _, option := range options {
+		if option.ID == id {
+			return option.CurrentValue
+		}
+	}
+	return ""
 }
 
 // @covers AC-AGENTS-COPILOT-CONTEXT-TIER-001.3

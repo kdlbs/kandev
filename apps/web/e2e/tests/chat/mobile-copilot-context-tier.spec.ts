@@ -133,8 +133,11 @@ test.describe("Mobile Copilot context window selection", () => {
       });
       expect(postReloadOverflow).toBe(false);
     } finally {
-      if (profile) await profile.dispose();
-      await release();
+      try {
+        if (profile) await profile.dispose();
+      } finally {
+        await release();
+      }
     }
   });
 });

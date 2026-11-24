@@ -665,11 +665,12 @@ func baseBranchMetadataKey(spec RepoLaunchSpec) string {
 
 // agentCommands holds both the display strings and structured argv for an agent execution.
 type agentCommands struct {
-	wrapper      launchwrapper.Spec
-	initial      string
-	continue_    string // continue command for one-shot agents (empty if not applicable)
-	args         []string
-	continueArgs []string
+	openCodeRuntime managedruntime.OpenCodeRuntime
+	wrapper         launchwrapper.Spec
+	initial         string
+	continue_       string // continue command for one-shot agents (empty if not applicable)
+	args            []string
+	continueArgs    []string
 }
 
 func newAgentCommands(args, continueArgs []string) agentCommands {
@@ -777,7 +778,10 @@ func (m *Manager) buildAgentCommandWithContext(
 	}
 	args := m.commandBuilder.BuildCommandArgs(agentConfig, cmdOpts)
 	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, cmdOpts)
-	authPolicy, localEnv, err := m.applyLocalRuntimeCommand(ctx, agentConfig, runtime, args, continueArgs)
+	authPolicy, localEnv, args, continueArgs, err := m.applyLocalRuntimeCommand(
+		ctx, req, agentConfig, runtime, args, continueArgs, req.RuntimeAdapterVersion,
+		req.RequiredNativeConversationID != "" || req.ACPSessionID != "",
+	)
 	if err != nil {
 		return agentCommands{}, err
 	}
@@ -787,6 +791,9 @@ func (m *Manager) buildAgentCommandWithContext(
 		return agentCommands{}, err
 	}
 	commands := newAgentCommands(args, continueArgs)
+	commands.openCodeRuntime = managedruntime.OpenCodeRuntime{
+		Family: cmdOpts.ManagedRuntimeFamily, Source: cmdOpts.ManagedRuntimeSource, Version: cmdOpts.ManagedRuntimeVersion,
+	}
 	commands.wrapper = launchwrapper.Profile(commandPrefixTokens)
 	return commands, nil
 }
@@ -891,32 +898,79 @@ func (m *Manager) resolveOtherManagedRuntimeOptions(
 
 func (m *Manager) applyLocalRuntimeCommand(
 	ctx context.Context,
+	req *LaunchRequest,
 	agentConfig agents.Agent,
 	runtime agentruntime.Runtime,
 	args, continueArgs []string,
-) (*acpcompat.AuthPolicy, map[string]string, error) {
+	savedAdapterVersion string,
+	resumingNativeConversation bool,
+) (*acpcompat.AuthPolicy, map[string]string, []string, []string, error) {
 	if runtime != agentruntime.RuntimeStandalone {
-		return nil, nil, nil
+		return nil, nil, args, continueArgs, nil
 	}
 	var env map[string]string
 	if resolver, ok := agentConfig.(agents.LocalRuntimeAgent); ok {
-		local, localEnv, err := resolver.ResolveLocalRuntime(ctx)
+		var local agents.LocalRuntimeSelection
+		var err error
+		if req != nil && req.LocalRuntimeSelection != nil {
+			local = *req.LocalRuntimeSelection
+		} else {
+			if resumingNativeConversation {
+				if savedResolver, ok := agentConfig.(agents.SavedLocalRuntimeAgent); ok {
+					local, err = savedResolver.ResolveSavedLocalRuntime(ctx, savedAdapterVersion)
+				} else {
+					local, err = resolver.ResolveLocalRuntime(ctx)
+				}
+			} else {
+				local, err = resolver.ResolveLocalRuntime(ctx)
+			}
+		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("resolve local %s runtime: %w", agentConfig.DisplayName(), err)
+			return nil, nil, nil, nil, fmt.Errorf("resolve local %s runtime: %w", agentConfig.DisplayName(), err)
 		}
-		env = localEnv
-		localArgs := local.Args()
-		if len(localArgs) > 0 && len(args) > 0 {
-			args[0] = localArgs[0]
+		if req != nil && req.LocalRuntimeSelection == nil {
+			selection := local
+			req.LocalRuntimeSelection = &selection
 		}
-		if len(continueArgs) > 0 && len(localArgs) > 0 {
-			continueArgs[0] = localArgs[0]
+		env = local.Env
+		baseArgs := agentConfig.Runtime().Cmd.Args()
+		if len(args) > 0 {
+			var ok bool
+			args, ok = replaceCommandPrefix(args, baseArgs, local.Command.Args())
+			if !ok {
+				return nil, nil, nil, nil, fmt.Errorf("replace base command for local %s runtime", agentConfig.DisplayName())
+			}
+		}
+		if len(continueArgs) > 0 {
+			var ok bool
+			continueArgs, ok = replaceCommandPrefix(continueArgs, baseArgs, local.Command.Args())
+			if !ok {
+				return nil, nil, nil, nil, fmt.Errorf("replace continue command for local %s runtime", agentConfig.DisplayName())
+			}
+		}
+		if acpcompat.IsAntigravity(agentConfig.ID()) {
+			return acpcompat.AntigravityAuthPolicyForRuntime(local.Variant, local.Version, false), env, args, continueArgs, nil
 		}
 	}
 	if acpcompat.IsAntigravity(agentConfig.ID()) {
-		return acpcompat.AntigravityAuthPolicy(false), env, nil
+		return acpcompat.AntigravityAuthPolicy(false), env, args, continueArgs, nil
 	}
-	return nil, env, nil
+	return nil, env, args, continueArgs, nil
+}
+
+func replaceCommandPrefix(command, baseArgs, localArgs []string) ([]string, bool) {
+	if len(baseArgs) == 0 || len(command) < len(baseArgs) || len(localArgs) == 0 {
+		return nil, false
+	}
+	for index, arg := range baseArgs {
+		if command[index] != arg {
+			return nil, false
+		}
+	}
+	replaced := make([]string, 0, len(localArgs)+len(command)-len(baseArgs))
+	replaced = append(replaced, localArgs...)
+	replaced = append(replaced, command[len(baseArgs):]...)
+	return replaced, true
 }
 
 func validateBuiltAgentCommands(args, continueArgs []string) error {
@@ -2117,6 +2171,15 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if !agentConfig.Enabled() {
 			return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 		}
+		if req.LocalRuntimeSelection == nil {
+			req.LocalRuntimeSelection = execution.LocalRuntimeSelection
+		}
+		if req.AuthPolicy == nil {
+			req.AuthPolicy = execution.AuthPolicy
+		}
+		if req.LocalRuntimeEnv == nil {
+			req.LocalRuntimeEnv = cloneStringMap(execution.LocalRuntimeEnv)
+		}
 		preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execution.MetadataSnapshot())
 		cmds, err := m.buildAgentCommandWithContext(sharedCtx, req, profileInfo, agentConfig, execution.RuntimeName, preferNative)
 		if err != nil {
@@ -2130,6 +2193,10 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		execution.AgentArgs = cmds.args
 		execution.ContinueArgs = cmds.continueArgs
 		execution.LaunchWrapper = cmds.wrapper
+		execution.OpenCodeRuntime = cmds.openCodeRuntime
+		execution.AuthPolicy = req.AuthPolicy
+		execution.LocalRuntimeSelection = req.LocalRuntimeSelection
+		execution.LocalRuntimeEnv = cloneStringMap(req.LocalRuntimeEnv)
 		execution.ExecutionProfileID = executionProfileID(req)
 		if profileInfo != nil {
 			execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
@@ -2389,8 +2456,10 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	m.runSkillDeploy(ctx, req, &reqWithWorktree)
 
 	// 7. Build runtime request and create instance (agent not started yet)
-	if policy, localEnv, err := m.applyLocalRuntimeCommand(
-		ctx, agentConfig, models.ExecutorType(reqWithWorktree.ExecutorType).Runtime(), nil, nil,
+	if policy, localEnv, _, _, err := m.applyLocalRuntimeCommand(
+		ctx, &reqWithWorktree, agentConfig, models.ExecutorType(reqWithWorktree.ExecutorType).Runtime(), nil, nil,
+		reqWithWorktree.RuntimeAdapterVersion,
+		reqWithWorktree.RequiredNativeConversationID != "" || reqWithWorktree.ACPSessionID != "",
 	); err != nil {
 		return nil, err
 	} else {
@@ -2431,7 +2500,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// Build the in-memory AgentExecution from the runtime instance. Extracted
 	// to keep launchInternal under the cyclomatic-complexity budget.
-	execution, err := m.buildExecutionFromInstance(ctx, req, execReq, execInstance, rt, profileInfo, agentConfig, prepResult)
+	execution, err := m.buildExecutionFromInstance(ctx, &reqWithWorktree, execReq, execInstance, rt, profileInfo, agentConfig, prepResult)
 	if err != nil {
 		// Command resolution failed (e.g. a configured command_prefix could not
 		// be tokenised). The execution isn't built yet, so stop the runtime
@@ -2681,6 +2750,9 @@ func (m *Manager) buildExecutionFromInstance(
 	execution.AgentArgs = cmds.args
 	execution.ContinueArgs = cmds.continueArgs
 	execution.LaunchWrapper = cmds.wrapper
+	execution.OpenCodeRuntime = cmds.openCodeRuntime
+	execution.LocalRuntimeSelection = req.LocalRuntimeSelection
+	execution.LocalRuntimeEnv = cloneStringMap(req.LocalRuntimeEnv)
 	return execution, nil
 }
 
@@ -3328,6 +3400,12 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)
 	}
 	configureEnv := cloneStringMap(env)
+	if configureEnv == nil && len(execution.LocalRuntimeEnv) > 0 {
+		configureEnv = make(map[string]string, len(execution.LocalRuntimeEnv))
+	}
+	for key, value := range execution.LocalRuntimeEnv {
+		configureEnv[key] = value
+	}
 	execution.setRuntimeEnvironment(env)
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
@@ -3350,7 +3428,7 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 	// Starting with stale agent configuration could expose an old credential
 	// set, so the subprocess must not start when configuration delivery fails.
 	if execution.AuthPolicy != nil {
-		if err := client.RequireCapability(ctx, acpcompat.AntigravityPersonalAuthCapability); err != nil {
+		if err := client.RequireCapability(ctx, acpcompat.AntigravityRuntimeCapability(execution.AuthPolicy)); err != nil {
 			return "", err
 		}
 	}
@@ -3370,8 +3448,12 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 		// provenance, so keep the private/ordinary path.
 		installContext = nil
 	}
-	if err := client.ConfigureAgentWithProjectDeliveryAndInstallContext(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, installContext, execution.LaunchWrapper); err != nil {
+	if err := client.ConfigureAgentRuntimeWithProjectDeliveryAndInstallContext(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, installContext, execution.OpenCodeRuntime, execution.LaunchWrapper); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
+	}
+
+	if err := m.provisionOpenCodeCredentials(ctx, execution, client); err != nil {
+		return "", err
 	}
 
 	var fullCommand string
@@ -3387,6 +3469,10 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 	if err != nil {
 		m.updateExecutionError(execution.ID, "failed to start agent: "+err.Error())
 		return "", fmt.Errorf("failed to start agent: %w", err)
+	}
+	if execution.AgentID == agents.CopilotACPAgentID {
+		tier, _ := acpcompat.ParseCopilotContextTierFromArgs(agentArgs)
+		execution.setConfirmedCopilotContextTier(tier)
 	}
 
 	bootCommand := fullCommand

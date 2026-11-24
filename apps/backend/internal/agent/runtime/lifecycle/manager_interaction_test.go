@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -58,11 +59,15 @@ type restartMockAgentctlServer struct {
 	setOptions         []restartConfigOption
 
 	failStop                          bool
+	failAgentProcessStop              bool
+	retainedCopilotContextTier        string
 	onStop                            func(context.Context)
 	failSessionNew                    bool
 	initializeError                   string
 	sessionNewError                   string
 	sessionLoadError                  string
+	sessionLoadErrorCode              string
+	sessionLoadErrorDetails           map[string]interface{}
 	configureError                    string
 	startError                        string
 	failSessionReset                  bool
@@ -233,6 +238,27 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 		}
 		_, _ = w.Write([]byte(`{"success":true}`))
 	})
+	mux.HandleFunc("/api/v1/agent/process/stop", func(w http.ResponseWriter, _ *http.Request) {
+		m.recordHTTP("stop-agent")
+		m.mu.Lock()
+		failed := m.failAgentProcessStop
+		m.mu.Unlock()
+		if failed {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"child-scoped stop is unsupported"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true}`))
+	})
+	mux.HandleFunc("/api/v1/agent/copilot-context-tier", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		tier := m.retainedCopilotContextTier
+		m.mu.Unlock()
+		if tier == "" {
+			tier = acpcompat.CopilotContextTierDefault
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"running": true, "context_tier": tier})
+	})
 	mux.HandleFunc("/api/v1/agent/managed-runtime/cache-repair", func(w http.ResponseWriter, r *http.Request) {
 		m.recordHTTP("cache-repair")
 		var request agentctl.RepairManagedRuntimeCacheRequest
@@ -392,6 +418,8 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				_ = json.Unmarshal(msg.Payload, &request)
 				m.mu.Lock()
 				sessionLoadError := m.sessionLoadError
+				sessionLoadErrorCode := m.sessionLoadErrorCode
+				sessionLoadErrorDetails := m.sessionLoadErrorDetails
 				m.loadedSessionIDs = append(m.loadedSessionIDs, request.SessionID)
 				loadModelState := m.newModelState
 				if loadModelState == nil {
@@ -399,7 +427,10 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				}
 				m.mu.Unlock()
 				if sessionLoadError != "" {
-					resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, sessionLoadError, nil)
+					if sessionLoadErrorCode == "" {
+						sessionLoadErrorCode = ws.ErrorCodeInternalError
+					}
+					resp, _ = ws.NewError(msg.ID, msg.Action, sessionLoadErrorCode, sessionLoadError, sessionLoadErrorDetails)
 					break
 				}
 				payload := map[string]interface{}{
