@@ -22,7 +22,7 @@ and replay remain owned by [queue admission](queue-admission.md).
 | .3       | Queued-dispatch error handling, queue handlers, queue API mapping |
 | .4       | Existing handler attachment-cleanup obligation and recovery       |
 | .3 move  | MCP `move_task` deferred-move error mapping                       |
-| .5       | Focus refresh, idle-suspension revalidation, fresh-start replay   |
+| .5       | Focus refresh and resume, idle revalidation, fresh-start replay   |
 
 ## Acquisition and callback lifetime
 
@@ -47,16 +47,26 @@ callbacks. Convert only an internally budgeted acquisition deadline into
 Session locks are taken in one order: route operation lock, then session
 lifecycle lock, then queue admission. Resume and recovery hold the lifecycle
 lock while their continuation reaches prompt admission, so code that already
-holds queue admission must never block on the lifecycle lock. Focus refresh of a
-live session and idle-suspension revalidation acquire the lifecycle lock without
-waiting. When it is busy, a lifecycle operation owns the session, so the session
-is not settled: the attempt is skipped, admission is released, and the next
-focus event or reaper scan retries.
+holds queue admission must never block on the lifecycle lock.
+
+- Focus refresh of a live session and idle-suspension revalidation acquire the
+  lifecycle lock without waiting. When it is busy, a lifecycle operation owns
+  the session, so the session is not settled. Revalidation skips the candidate
+  and the next reaper scan retries. Focus restarts the in-memory idle interval,
+  which revalidation reads under the same admission, and leaves the persisted
+  focus record for a settled execution.
+- Focus on an idle-suspended session decides under admission, then releases it
+  before resuming. The resume takes the route and lifecycle locks first and
+  rechecks suspension provenance under them, so a concurrent resume or stop
+  turns the focus into a no-op.
 
 Fresh-start recovery replays the original submission as a dispatch-only prompt.
 The resume continuation, and with it the lifecycle lock, ends at provider
 acceptance, matching ordinary first launch. Turn results and failures arrive
-through the normal agent event path, not the recovery request.
+through the normal agent event path, not the recovery request. The agent
+runtime watches every dispatch-only prompt for inactivity, as
+[agent stall recovery](../../agents/system-design/agent-stall-recovery.md)
+describes, so the replayed turn keeps its stall notice.
 
 ## Failure and recovery
 

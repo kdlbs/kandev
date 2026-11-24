@@ -38,12 +38,15 @@ cancel a callback that already acquired admission.
   cleanup shall stop its current retry loop after 60 attempts while retaining
   the durable obligation for the existing recovery pass.
 - **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5:** While an agent turn is in flight,
-  including a turn started by launch recovery, session focus and idle-suspension
-  checks shall not keep session admission occupied. Queue mutations, deferred
-  workflow moves, prompt admissions, and later focus requests for that session
-  shall acquire admission within the AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.1
-  budget. Fresh launch recovery shall finish once the provider accepts the
-  replayed submission; the turn continues without blocking those operations.
+  including a turn started by launch recovery, and while focus restores an
+  idle-suspended session, session focus and idle-suspension checks shall not
+  keep session admission occupied. Queue mutations, deferred workflow moves,
+  prompt admissions, and later focus requests for that session shall acquire
+  admission within the AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.1 budget. A focus
+  request received while another lifecycle operation owns the session shall
+  still restart that session's idle-suspension interval. Fresh launch recovery
+  shall finish once the provider accepts the replayed submission; the turn
+  continues without blocking those operations and keeps its inactivity notice.
 
 ## Compatibility and exclusions
 

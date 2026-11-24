@@ -49,24 +49,28 @@ func seedFailedFirstLaunchForReplay(t *testing.T, repo *sqliterepo.Repository) {
 	}))
 }
 
-// replayTurnAgent accepts dispatch-only prompts at once and blocks a prompt
-// that waits for turn completion until the test ends the turn.
+// replayTurnAgent reports acceptance at once and holds a full-turn prompt until
+// the test ends the turn, as the runtime does while a turn is in flight.
 type replayTurnAgent struct {
 	*mockAgentManager
 	startEntered   chan struct{}
 	processStarted chan struct{}
+	turnEntered    chan struct{}
 	turnEnded      chan struct{}
+	turnReturned   chan struct{}
 	endTurnOnce    sync.Once
 }
 
 func newReplayTurnAgent(repo *sqliterepo.Repository) *replayTurnAgent {
 	agent := &replayTurnAgent{
-		startEntered: make(chan struct{}), processStarted: make(chan struct{}), turnEnded: make(chan struct{}),
+		startEntered: make(chan struct{}), processStarted: make(chan struct{}),
+		turnEntered: make(chan struct{}), turnEnded: make(chan struct{}), turnReturned: make(chan struct{}),
 	}
 	agent.mockAgentManager = &mockAgentManager{
-		repoForExecutionLookup: repo,
-		isAgentRunning:         true,
-		isAgentReadyFn:         func(context.Context, string) bool { return true },
+		repoForExecutionLookup:     repo,
+		isAgentRunning:             true,
+		promptAcceptedBeforeResult: true,
+		isAgentReadyFn:             func(context.Context, string) bool { return true },
 		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 			return &executor.LaunchAgentResponse{AgentExecutionID: "fresh-start-lifecycle-execution"}, nil
 		},
@@ -76,7 +80,9 @@ func newReplayTurnAgent(repo *sqliterepo.Repository) *replayTurnAgent {
 		},
 		promptAgentFunc: func(_ context.Context, _ string, _ string, _ []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
 			if !dispatchOnly {
+				close(agent.turnEntered)
 				<-agent.turnEnded
+				close(agent.turnReturned)
 			}
 			return &executor.PromptResult{}, nil
 		},
@@ -85,6 +91,16 @@ func newReplayTurnAgent(repo *sqliterepo.Repository) *replayTurnAgent {
 }
 
 func (a *replayTurnAgent) endTurn() { a.endTurnOnce.Do(func() { close(a.turnEnded) }) }
+
+// joinTurn releases a started turn on any exit path before database teardown.
+func (a *replayTurnAgent) joinTurn() {
+	a.endTurn()
+	select {
+	case <-a.turnEntered:
+		<-a.turnReturned
+	default:
+	}
+}
 
 func waitForSignal(t *testing.T, signal <-chan struct{}, what string) {
 	t.Helper()
@@ -101,7 +117,7 @@ func TestFreshStartReplayReleasesLifecycleAtAcceptance(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedFailedFirstLaunchForReplay(t, repo)
 	agent := newReplayTurnAgent(repo)
-	t.Cleanup(agent.endTurn)
+	t.Cleanup(agent.joinTurn)
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[replayLifecycleTaskID] = &v1.Task{
@@ -146,10 +162,11 @@ func TestFreshStartReplayReleasesLifecycleAtAcceptance(t *testing.T) {
 	require.NoError(t, err)
 	session.State = models.TaskSessionStateWaitingForInput
 	require.NoError(t, repo.UpdateTaskSession(ctx, session))
-	runWithinBudget(t, "focusTaskSession during the replayed turn", func() {
-		_, _, _, focusErr := svc.focusTaskSession(ctx, replayLifecycleTaskID, replayLifecycleSessionID)
-		require.NoError(t, focusErr)
+	focusErr := runWithinBudget(t, "focusTaskSession during the replayed turn", func() error {
+		_, _, _, err := svc.focusTaskSession(ctx, replayLifecycleTaskID, replayLifecycleSessionID)
+		return err
 	})
+	require.NoError(t, focusErr)
 	requireSessionAdmissionFree(t, svc, replayLifecycleSessionID)
 	releaseLifecycle, acquired := svc.tryAcquireSessionLifecycleLock(replayLifecycleSessionID)
 	require.True(t, acquired, "recovery must not hold the session lifecycle lock for the whole turn")

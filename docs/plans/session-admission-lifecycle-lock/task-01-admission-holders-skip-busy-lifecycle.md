@@ -37,7 +37,7 @@ without waiting. If it is busy, they skip this attempt and release admission.
 ## Exclusions
 
 The idle-suspended focus resume (`resumeFocusedIdleSuspension`) is unchanged
-(see plan exclusions). No change to admission, the reaper schedule, or focus
+here; work order 04 moves it out of admission. No change to admission, the reaper schedule, or focus
 eligibility.
 
 ## Acceptance
@@ -83,4 +83,6 @@ Implemented. `refreshFocusedLiveSession` and `suspendWorkspaceIdleCandidate`
 use `tryAcquireSessionLifecycleLock` and skip when it is busy. Both regression
 tests failed first (focus and revalidation each blocked for the 2 s budget) and
 now pass, including their positive controls. The focus, idle-session,
-idle-parking, and idle-focus suites pass under `-race`.
+idle-parking, and idle-focus suites pass under `-race`. Work order 04 later
+made a focus during a busy lifecycle lock restart the in-memory idle interval,
+and renamed the focus test `TestFocusDuringBusyLifecycleKeepsAdmissionFree`.

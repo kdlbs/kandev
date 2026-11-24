@@ -2,8 +2,10 @@
 status: done
 requirements:
   - REQ-TASKS-BOUNDED-QUEUE-ADMISSION-001
+  - REQ-AGENTS-AGENT-STALL-RECOVERY-001
 system_design:
   - ../../specs/tasks/system-design/bounded-session-queue-admission.md
+  - ../../specs/agents/system-design/agent-stall-recovery.md
 ---
 
 # Session Admission Lifecycle Lock-Order Repair
@@ -20,6 +22,9 @@ deferred `move_task` calls.
   moves) and new AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5.
 - [System design](../../specs/tasks/system-design/bounded-session-queue-admission.md),
   section "Lock order with session lifecycle".
+- [Agent stall recovery](../../specs/agents/system-design/agent-stall-recovery.md):
+  AC-AGENTS-AGENT-STALL-RECOVERY-001.1 and .2 now also hold for dispatch-only
+  prompts (work order 04).
 
 ## Confirmed root cause
 
@@ -61,10 +66,12 @@ Sequential. Each one can be verified on its own.
 | 1     | [Admission holders skip a busy lifecycle](task-01-admission-holders-skip-busy-lifecycle.md) | Focus and reaper never wait on the lifecycle lock under admission |
 | 2     | [Release fresh-start replay at acceptance](task-02-release-replay-at-acceptance.md)        | Recovery stops holding the lifecycle lock for a whole turn  |
 | 3     | [Retryable deferred-move timeout](task-03-deferred-move-retryable-timeout.md)              | Agent gets `UNAVAILABLE` and can retry `move_task`          |
+| 4     | [Review follow-ups](task-04-review-follow-ups.md)                                          | Focus resume outside admission, no lost focus, stall notice for dispatch-only prompts |
 
 Work order 1 alone removes the reported hang. Work order 2 removes the
 long-held lifecycle lock that caused it, which other lifecycle callers would
-also wait on. Work order 3 is the error mapping that the issue asks for.
+also wait on. Work order 3 is the error mapping that the issue asks for. Work order 4 closes
+three gaps that an independent review found in work orders 1 and 2.
 
 ## Risks
 
@@ -73,19 +80,18 @@ also wait on. Work order 3 is the error mapping that the issue asks for.
   the normal agent event path, the same as an ordinary first launch. The
   existing fresh-start suites (`TestFreshStart*`) must stay green, especially
   the hold, cancellation, successor-error, and runtime-disappears cases.
-- **Work order 1:** skipping a focus refresh while the lifecycle lock is busy
-  leaves the idle-parking focus floor unchanged for that event. This is
-  acceptable because a session with a lifecycle operation in progress is not
-  settled (AC-EXECUTORS-IDLE-PARKING-001.6), and the next focus event refreshes
-  it.
+- **Work order 4:** every dispatch-only prompt now gets the inactivity
+  watchdog, not only the replay. Automation, peer-message, and continuation
+  turns that stay silent for five minutes now show the same advisory notice and
+  **Cancel turn** action as a user prompt. One manager-owned loop runs the
+  check, so no goroutine outlives the manager.
 
 ## Exclusions
 
-- The focus path that resumes an idle-suspended session still calls
-  `ResumeTaskSessionWithOptions` under admission, which takes the lifecycle
-  lock itself. Work order 2 removes the replay's long hold.
-  `ResumeTaskSessionAndPrompt` (internal message retry) still holds the lock
-  until its turn ends. Reworking either path is a separate change.
+- `ResumeTaskSessionAndPrompt` (internal message retry) still holds the
+  lifecycle lock until its turn ends. It holds no queue admission. The idle
+  reaper's reclaim probe can wait on that lock and delay the shared reaper tick;
+  the review flagged this as pre-existing, and it is a separate change.
 - No change to the admission gate, its 30 s budget, or FIFO semantics. No
   schema, settings, or UI change.
 
@@ -95,7 +101,8 @@ Each work order lists its exact commands. Package checks:
 
 ```text
 make -C apps/backend fmt
-go test -trimpath -race -count=1 ./internal/orchestrator/ -run 'TestFocusTaskSession|TestIdleSession|TestFreshStart|TestSessionAdmission'
+go test -trimpath -race -count=1 ./internal/agent/runtime/lifecycle/ -run 'TestDispatchOnly|TestStallTiming'
+go test -trimpath -race -count=1 ./internal/orchestrator/ -run 'TestFocusTaskSession|TestFocusDuring|TestFocusResume|TestIdleSession|TestFreshStart|TestSessionAdmission'
 go test -trimpath -count=1 ./internal/mcp/handlers/ -run 'TestMoveTask'
 bash scripts/lint-go-changed <changed-go-files>
 make -C apps/backend test
@@ -103,8 +110,15 @@ make -C apps/backend test
 
 ## Implementation verification
 
-All three work orders are done. Each regression test failed before its fix and
-passes after it. `go vet` is clean, and the full `internal/orchestrator`,
-`internal/orchestrator/messagequeue`, and `internal/mcp/handlers` packages pass
-under `go test -race`. `golangci-lint` on the changed packages
-(`--new-from-rev`) reports 0 issues.
+All four work orders are done. Each regression test failed before its fix and
+passes after it. `go vet` is clean. The full `internal/agent/runtime/lifecycle`,
+`internal/orchestrator`, `internal/orchestrator/messagequeue`, and
+`internal/mcp/handlers` packages pass under `go test -race`. `golangci-lint` on
+the changed packages (`--new-from-rev`) reports 0 issues.
+
+A live instance with the E2E mock agent reproduced the issue on the pre-fix
+build: Retry launch held the lifecycle lock for the whole replayed turn, and
+focus requests timed out with `queue session admission timed out`. On the fixed
+build, Retry launch returns at acceptance and focus answers in milliseconds.
+The agent's mid-turn `move_task` is deferred and then applied at turn end. A
+silent replayed turn shows the stall notice.

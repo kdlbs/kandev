@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,48 +20,87 @@ func requireSessionAdmissionFree(t *testing.T, svc *Service, sessionID string) {
 	require.NoError(t, err, "session admission must stay acquirable while a lifecycle operation runs")
 }
 
-func runWithinBudget(t *testing.T, name string, fn func()) {
+// runWithinBudget runs fn on a worker and returns its error to the test
+// goroutine, which owns every assertion.
+func runWithinBudget(t *testing.T, name string, fn func() error) error {
 	t.Helper()
-	done := make(chan struct{})
+	done := make(chan error, 1)
+	finished := make(chan struct{})
 	go func() {
-		defer close(done)
-		fn()
+		defer close(finished)
+		done <- fn()
 	}()
+	t.Cleanup(func() { <-finished })
 	select {
-	case <-done:
+	case err := <-done:
+		return err
 	case <-time.After(lockOrderReturnBudget):
 		t.Fatalf("%s blocked on the session lifecycle lock while holding admission", name)
+		return nil
 	}
 }
 
+// holdLifecycleLock holds the session lifecycle lock until the returned
+// release runs; cleanup releases it on every exit path.
+func holdLifecycleLock(t *testing.T, svc *Service, sessionID string) func() {
+	t.Helper()
+	var once sync.Once
+	release := svc.acquireSessionLifecycleLock(sessionID)
+	releaseOnce := func() { once.Do(release) }
+	t.Cleanup(releaseOnce)
+	return releaseOnce
+}
+
+func persistedFocusRecorded(t *testing.T, svc *Service, sessionID string) bool {
+	t.Helper()
+	session, err := svc.repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	_, ok := session.Metadata[idleParkingFocusMetadataKey]
+	return ok
+}
+
 // @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5
-func TestFocusRefreshSkipsBusyLifecycleWithoutHoldingAdmission(t *testing.T) {
+func TestFocusDuringBusyLifecycleKeepsAdmissionFree(t *testing.T) {
 	ctx := context.Background()
 	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
 	agent.isAgentReadyFn = func(context.Context, string) bool { return true }
 
-	releaseLifecycle := svc.acquireSessionLifecycleLock(row.SessionID)
-	lifecycleReleased := false
-	defer func() {
-		if !lifecycleReleased {
-			releaseLifecycle()
-		}
-	}()
-	runWithinBudget(t, "focusTaskSession", func() {
-		_, _, resumed, err := svc.focusTaskSession(ctx, row.TaskID, row.SessionID)
-		require.NoError(t, err)
-		require.False(t, resumed)
+	releaseLifecycle := holdLifecycleLock(t, svc, row.SessionID)
+	var resumed bool
+	err := runWithinBudget(t, "focusTaskSession", func() error {
+		var focusErr error
+		_, _, resumed, focusErr = svc.focusTaskSession(ctx, row.TaskID, row.SessionID)
+		return focusErr
 	})
+	require.NoError(t, err)
+	require.False(t, resumed)
 	requireSessionAdmissionFree(t, svc, row.SessionID)
-	require.True(t, svc.idleParkingFocusAt[row.SessionID].IsZero(),
-		"focus must not refresh the idle interval while a lifecycle operation owns the session")
+	require.False(t, svc.idleParkingFocusAt[row.SessionID].IsZero(),
+		"focus restarts the in-memory idle interval while a lifecycle operation owns the session")
+	require.False(t, persistedFocusRecorded(t, svc, row.SessionID),
+		"the persisted focus record waits for a settled execution")
 
 	releaseLifecycle()
-	lifecycleReleased = true
+	_, _, _, err = svc.focusTaskSession(ctx, row.TaskID, row.SessionID)
+	require.NoError(t, err)
+	require.True(t, persistedFocusRecorded(t, svc, row.SessionID),
+		"positive control: focus persists once the lifecycle lock is free")
+}
+
+// @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5
+func TestFocusDuringBusyLifecycleDefersIdleSuspension(t *testing.T) {
+	ctx := context.Background()
+	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
+	agent.isAgentReadyFn = func(context.Context, string) bool { return true }
+
+	// A reaper liveness probe holds the lifecycle lock when the user focuses.
+	releaseLifecycle := holdLifecycleLock(t, svc, row.SessionID)
 	_, _, _, err := svc.focusTaskSession(ctx, row.TaskID, row.SessionID)
 	require.NoError(t, err)
-	require.False(t, svc.idleParkingFocusAt[row.SessionID].IsZero(),
-		"positive control: focus refreshes the idle interval once the lifecycle lock is free")
+	releaseLifecycle()
+
+	svc.suspendWorkspaceIdleSessionsOnce(ctx)
+	require.Empty(t, agent.suspensionCalls(), "a focused session must not be suspended on its old idle interval")
 }
 
 // @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5
@@ -68,21 +108,15 @@ func TestIdleSuspensionRevalidationSkipsBusyLifecycle(t *testing.T) {
 	ctx := context.Background()
 	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
 
-	releaseLifecycle := svc.acquireSessionLifecycleLock(row.SessionID)
-	lifecycleReleased := false
-	defer func() {
-		if !lifecycleReleased {
-			releaseLifecycle()
-		}
-	}()
-	runWithinBudget(t, "idle suspension revalidation", func() {
+	releaseLifecycle := holdLifecycleLock(t, svc, row.SessionID)
+	require.NoError(t, runWithinBudget(t, "idle suspension revalidation", func() error {
 		svc.suspendWorkspaceIdleSessionsOnce(ctx)
-	})
+		return nil
+	}))
 	requireSessionAdmissionFree(t, svc, row.SessionID)
 	require.Empty(t, agent.suspensionCalls(), "a session with a lifecycle operation in progress must not be suspended")
 
 	releaseLifecycle()
-	lifecycleReleased = true
 	svc.suspendWorkspaceIdleSessionsOnce(ctx)
 	require.Len(t, agent.suspensionCalls(), 1, "positive control: the skipped candidate is suspended on a later scan")
 }

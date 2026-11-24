@@ -76,4 +76,5 @@ Implemented. `replayInitialPromptSubmission` dispatches with
 `dispatchOnly=true`. The regression test failed first (recovery did not return
 within 3 s while the turn was open) and now passes. `TestFreshStart*`,
 `TestInitialTaskSubmission*`, `TestMissingCheckout*`, and
-`TestWorkflowStartPrompt*` pass under `-race`.
+`TestWorkflowStartPrompt*` pass under `-race`. Work order 04 gives
+dispatch-only prompts, including this replay, the runtime stall watchdog.
