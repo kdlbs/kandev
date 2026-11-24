@@ -16,9 +16,12 @@ agent menus and permission prompts. This capability addresses
 because these actions deliver raw input to an agent PTY, independently of the
 Kandev composer and task shell.
 
+Menu navigation and confirmation must be available when the phone key bar
+first opens. [Issue #5423](https://github.com/kdlbs/kandev/issues/5423).
+
 ## Terminology
 
-- **Navigation bar:** On-screen terminal keys and transient Ctrl/Shift modifiers.
+- **Key bar:** On-screen terminal keys and transient Ctrl/Shift modifiers.
 - **Raw input:** Direct PTY input that creates no Kandev user message.
 - **Phone:** A viewport below the application's 768 CSS-pixel phone boundary,
   regardless of pointer precision.
@@ -33,13 +36,14 @@ Kandev composer and task shell.
 
 - **AC-CLI-MOBILE-PASSTHROUGH-NAV-001.1:** When the phone task Chat surface shows
   a connected passthrough terminal with its composer and comments panel closed,
-  the system shall show the existing terminal navigation bar, including all
-  four arrows, Esc, Tab, Ctrl, Shift, and dedicated Ctrl+C/Ctrl+D actions.
+  the system shall show the terminal key bar. The bar shall include all four
+  arrows, Enter, Esc, Tab, Ctrl, Shift, and dedicated Ctrl+C/Ctrl+D actions.
 - **AC-CLI-MOBILE-PASSTHROUGH-NAV-001.2:** Each navigation action shall deliver
   its terminal sequence once to that visible session's agent PTY. Up, Down,
-  Right, and Left shall send ESC `[A`, `[B`, `[C`, and `[D`; Esc shall send
-  byte 27, Tab byte 9, Ctrl+C byte 3, and Ctrl+D byte 4. Raw input shall neither
-  reach a task shell nor create a Kandev user message.
+  Right, and Left shall send ESC `[A`, `[B`, `[C`, and `[D`, respectively.
+  Enter shall send byte 13 (carriage return). Esc shall send byte 27, Tab byte 9,
+  Ctrl+C byte 3, and Ctrl+D byte 4. Raw input shall neither reach a task shell
+  nor create a Kandev user message.
 - **AC-CLI-MOBILE-PASSTHROUGH-NAV-001.3:** One Ctrl tap shall modify the next
   single letter typed into the terminal and then release. A second tap shall
   make Ctrl sticky until toggled off. Shift+Tab shall send reverse Tab. Paste
@@ -62,17 +66,26 @@ Kandev composer and task shell.
   changing sessions, or leaving phone layout shall clear its transient modifiers
   and input ownership. Later terminal input shall reach only its selected target.
 - **AC-CLI-MOBILE-PASSTHROUGH-NAV-001.8:** At widths of 768 CSS pixels and above,
-  passthrough shall retain its current input and presentation. Managed Chat,
-  task-shell terminals, and Quick Terminal shall retain their existing controls.
+  passthrough shall use the native terminal input and presentation. Managed
+  Chat shall use its structured input controls.
+- **AC-CLI-MOBILE-PASSTHROUGH-NAV-001.9:** When the key bar first opens in a
+  375 CSS-pixel phone viewport, Up, Down, and Enter shall be fully visible and
+  tappable without scrolling.
+- **AC-CLI-MOBILE-PASSTHROUGH-NAV-001.10:** When the key strip overflows, the
+  key bar shall show a visible horizontal swipe cue. Users shall be able to
+  swipe the strip to reach every key.
+- **AC-CLI-MOBILE-PASSTHROUGH-NAV-001.11:** The phone task-shell and Quick
+  Terminal bars shall share the key order and swipe cue of the passthrough
+  bar. When the selected terminal accepts input, Enter shall deliver one
+  carriage return to that terminal.
 
 ## Out of scope
 
-- Tablet-specific navigation additions and desktop floating-bar changes.
-- Quick Terminal floating-bar changes, already implemented separately.
+- Key bars in tablet and desktop layouts.
 - New PTY routes, persistence, provider protocols, or structured prompt behavior.
-- New Enter buttons; raw Enter remains available through the terminal keyboard.
 
 ## Related specifications
 
 - [Mobile passthrough composer](mobile-passthrough-composer.md).
 - [Implementation plan](../../../plans/mobile-passthrough-navigation/plan.md).
+- [Key bar fix plan](../../../plans/mobile-terminal-keybar-discoverability/plan.md).

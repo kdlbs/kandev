@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentLinks } from "@/components/shared/attachment-links";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconMessageCircle } from "@tabler/icons-react";
@@ -7,15 +8,17 @@ import { Button } from "@kandev/ui/button";
 import type { TaskWalkthrough } from "@/lib/types/http";
 import type { WalkthroughComment } from "@/lib/state/slices/comments";
 import { useWalkthroughDrafts, walkthroughDraftKey } from "@/lib/walkthrough-feedback-state";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { CommentForm } from "./comment-form";
 
 export type WalkthroughStepFeedbackProps = {
   walkthrough: TaskWalkthrough;
   sessionId: string | null;
+  taskId?: string | null;
   activeStep: number;
   commentCount: number;
-  onSubmit: (text: string) => boolean;
-  onRun: (text: string) => boolean;
+  onSubmit: (text: string, attachments?: MessageAttachment[]) => boolean;
+  onRun: (text: string, attachments?: MessageAttachment[]) => boolean;
 };
 
 export function WalkthroughCommentList({ comments }: { comments: WalkthroughComment[] }) {
@@ -35,6 +38,7 @@ export function WalkthroughCommentList({ comments }: { comments: WalkthroughComm
             data-status={comment.status}
           >
             <p className="whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{comment.text}</p>
+            <AttachmentLinks attachments={comment.attachments} />
             <span className="mt-1 block text-xs text-muted-foreground">
               {comment.status === "sent"
                 ? t("diff:walkthroughSubmitted")
@@ -50,6 +54,7 @@ export function WalkthroughCommentList({ comments }: { comments: WalkthroughComm
 function StepComposer({
   walkthrough,
   sessionId,
+  taskId,
   activeStep,
   commentCount,
   onSubmit,
@@ -57,7 +62,7 @@ function StepComposer({
 }: WalkthroughStepFeedbackProps) {
   const { t } = useTranslation();
   const key = walkthroughDraftKey(sessionId ?? "", walkthrough, activeStep);
-  const draft = useWalkthroughDrafts((state) => state.drafts[key]?.text ?? "");
+  const draft = useWalkthroughDrafts((state) => state.drafts[key]);
   const setDraft = useWalkthroughDrafts((state) => state.setDraft);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const open = openKey === key;
@@ -75,15 +80,21 @@ function StepComposer({
     setOpenKey(null);
   };
   const updateDraft = (text: string) => setDraft(sessionId ?? "", walkthrough, activeStep, text);
-  const save = (text: string, run: boolean) => {
-    if (!(run ? onRun(text) : onSubmit(text))) return false;
+  const save = (text: string, run: boolean, attachments?: MessageAttachment[]) => {
+    if (!(run ? onRun(text, attachments) : onSubmit(text, attachments))) return false;
     updateDraft("");
+    setDraft(sessionId ?? "", walkthrough, activeStep, []);
     close();
     return true;
   };
   return (
-    // The minimum reserves a 44px input, 44px actions, and their spacing.
-    <div className={open ? "flex min-h-[8.125rem] flex-col px-4 py-2" : "shrink-0 px-4 py-2"}>
+    <div
+      className={
+        open
+          ? "min-h-[8.125rem] max-h-[60dvh] shrink-0 overflow-y-auto overscroll-contain px-4 py-2 [@media(max-height:400px)]:max-h-[8.125rem] [@media(max-height:400px)]:[&_textarea]:h-11 [@media(max-height:400px)]:[&_textarea]:max-h-11"
+          : "shrink-0 px-4 py-2"
+      }
+    >
       <Button
         ref={trigger}
         variant="outline"
@@ -100,14 +111,24 @@ function StepComposer({
         <span className="tabular-nums text-muted-foreground">({commentCount})</span>
       </Button>
       {open && (
-        <div id={composerId} className="flex min-h-0 flex-col">
+        <div id={composerId} className="flex flex-col">
           <CommentForm
-            value={draft}
+            attachmentOptions={
+              taskId
+                ? {
+                    taskId,
+                    initial: draft?.attachments,
+                    onChange: (attachments) =>
+                      setDraft(sessionId ?? "", walkthrough, activeStep, attachments),
+                  }
+                : undefined
+            }
+            value={draft?.text ?? ""}
             onChange={updateDraft}
-            onSubmit={(text) => save(text, false)}
-            onSubmitAndRun={(text) => save(text, true)}
+            onSubmit={(text, attachments) => save(text, false, attachments)}
+            onSubmitAndRun={(text, attachments) => save(text, true, attachments)}
             onCancel={close}
-            className="min-h-0 shadow-none [&_textarea]:min-h-11 [&_textarea]:max-h-[min(9rem,25dvh)] [&_textarea]:overflow-y-auto [&_[data-comment-actions]]:shrink-0 [&_button]:h-7 max-md:[&_button]:h-11 pointer-coarse:[&_button]:h-11 max-md:[&_[data-comment-shortcuts]]:hidden pointer-coarse:[&_[data-comment-shortcuts]]:hidden"
+            className="shadow-none [&_textarea]:min-h-11 [&_textarea]:max-h-[min(9rem,25dvh)] [&_textarea]:overflow-y-auto [&_[data-comment-actions]]:shrink-0 [&_button]:h-7 max-md:[&_button]:h-11 pointer-coarse:[&_button]:h-11 max-md:[&_[data-comment-shortcuts]]:hidden pointer-coarse:[&_[data-comment-shortcuts]]:hidden"
           />
         </div>
       )}

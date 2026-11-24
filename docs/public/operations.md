@@ -210,11 +210,13 @@ Add `--system` to both commands for a system service.
 
 ## Message queue settings
 
-Open **Settings > Preferences > Task Behavior > Runtime** to manage install-wide queue behavior. The default capacity is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting. At or above the new limit, only an eligible direct automatic fold into the existing tail can still succeed; other work is rejected until messages run or are removed. Staged attachments are rejected before a fold or claim. Delivery retries for work accepted before the change are not discarded by the lower cap.
+Open **Settings > Preferences > Task Behavior > Runtime** to manage install-wide queue behavior. The default capacity is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting. At or above the new limit, only an eligible direct automatic fold into an existing target can still succeed; other work is rejected until messages run or are removed. Staged attachments are rejected before a fold or claim. Delivery retries for work accepted before the change are not discarded by the lower cap.
 
 `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence than the saved capacity. A valid environment value makes only that field read-only; zero or a negative value means unlimited. Invalid text is logged and ignored in favor of the saved setting or default. Environment changes require a backend restart, while UI changes do not.
 
-**Automatically merge consecutive messages** is on by default. It is the fallback for every session that has not changed its compact **Auto-merge** queue pill. Untouched sessions follow later global changes. The first per-session change creates an explicit override that survives empty queues and restarts and remains independent for that session's lifetime. An eligible direct admission may fold into the immediate pending predecessor even at capacity because it does not create another row; staged-attachment admissions cannot use this path. Both rows must have the same strict source and compatible task, model, mode, metadata, attachments, and references. Any mismatch or combined limit leaves the new row separate when capacity permits. The earlier row survives and its ID is returned. Turning either setting on does not compact existing rows. This behavior is independent from **Enable queued message merging**, which controls the manual queue action.
+**Automatically merge queued messages** is on by default. It is the fallback for every session that has not changed its compact **Auto-merge** queue pill. Untouched sessions follow later global changes. The first per-session change creates an override that survives empty queues and restarts. Compatible adjacent messages fold into the immediate pending predecessor; agent sub-task messages additionally merge into their sender task's latest queued entry across intervening ordinary messages. Eligible direct folds can succeed at capacity, but staged-attachment admissions cannot use this path. Both rows must have the same strict source and compatible task, model, mode, metadata, attachments, and references. The target's ID survives. Automatic merging remains independent from manual **Enable queued message merging**.
+
+Turning a session's Auto-merge from OFF to ON immediately compacts compatible pending messages, without changing Auto-run or starting delivery. Global changes affect later messages only and never compact the backlog. ON-to-ON and OFF writes do not compact; OFF disables both automatic fold paths without splitting previously merged content. User messages never move across intervening entries. See [queue grouping rules](coordination.md#coordinate-with-targeted-messages).
 
 Each queued message shows a timestamp using your message-time display setting. Merged messages show the latest queued time among their contributing messages.
 
@@ -228,7 +230,7 @@ To recover capacity in one session, expand its queue chip in the task workbench.
 | --- | --- |
 | `data/kandev.db`, `-wal`, `-shm` | Default SQLite database and transient WAL files |
 | `kandev.db`, `-wal`, `-shm` | Legacy default SQLite database checked during startup; Kandev retains it after adoption until you verify the current database |
-| `data/master.key` | Owner-only AES-256 key used to decrypt secrets stored in the database; a database copy without the matching key cannot recover those secret values |
+| `data/master.key` | Owner-only AES-256 key used to decrypt database secrets and derive the default managed Git reissue signer; losing it makes existing secrets unreadable and outstanding default capabilities unverifiable |
 | `data/backups/` | SQLite snapshots when the database uses the default path |
 | `tasks/` and legacy `worktrees/` | Managed Git worktrees and per-task files; may contain uncommitted or untracked work |
 | `repos/` | Kandev-managed source clones |
@@ -854,7 +856,7 @@ Open **Settings > System > Backups**.
 1. Click **Create snapshot**. Kandev runs SQLite `VACUUM INTO`, including committed WAL frames, writes into a private temporary directory, then atomically publishes the snapshot to `manual-<nanoseconds>.db`.
 2. Wait for the manual row to appear. The browser waits up to 15 seconds; on a large database the backend job can continue after that UI timeout, so reload before retrying.
 3. Download the snapshot and copy it off the host.
-4. Back up `<home>/data/master.key` with owner-only access if you need encrypted secrets to remain usable.
+4. Back up the matching `<home>/data/master.key` with owner-only access. It is required to decrypt stored secrets and verify outstanding default managed Git capabilities. If Kandev cannot load a valid 32-byte key at startup, it tries to generate and save a replacement; a replacement does not restore access to data signed or encrypted with the old key.
 5. If canvases are enabled, copy the matching `<home>/plugins/webapps/` artifact directory.
 6. Separately preserve unpushed Git work, executor/provider state, service configuration, and required CLI login files.
 7. Restore into an isolated instance and verify tasks, workflows, secrets, repository references, and canvas releases before calling the backup tested.
@@ -879,6 +881,15 @@ Adapt the source for a custom `--home-dir`. This archive still does not include 
 
 <details>
 <summary>Restore details</summary>
+
+### Duplicate environment preservation during upgrade
+
+Startup keeps one active environment per task while preserving proven
+repository inventory and Git snapshot history before it removes duplicate
+rows. Only exact compatible worktree ownership is transferred. Conflicting
+slots, resource handles or recovery records stop initialization and roll back
+the healing transaction. Keep the original database and its matching runtime;
+do not remove rows or recovery claims to force startup.
 
 ### Restore a System snapshot
 

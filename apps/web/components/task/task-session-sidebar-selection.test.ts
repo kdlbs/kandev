@@ -73,6 +73,7 @@ describe("useSelectionHandlers", () => {
       unpinTasks: vi.fn(),
       pinnedTaskIds: ["pinned"],
       visibleTaskIds: ["a", "b"],
+      visibleTaskOccurrences: ["a", "b"].map((taskId) => ({ taskId, key: taskId })),
       movableSelectedIds: new Set(["a", "b"]),
     };
 

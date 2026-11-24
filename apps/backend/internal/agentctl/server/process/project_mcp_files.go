@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/passthroughconfig"
 )
@@ -56,18 +57,15 @@ func (o *ProjectMCPFilesOwner) Target() types.ProjectMCPTarget {
 	o.mu.Lock()
 	generation := o.generation
 	o.mu.Unlock()
+	mcpURL, _ := config.MCPServerURLForInstance("127.0.0.1", cfg.Port, cfg.InstanceID, cfg.ScopedMCPRoutes, "/mcp")
 	return types.ProjectMCPTarget{
 		Version:       types.ProjectMCPFilesVersion,
 		InstanceID:    cfg.InstanceID,
 		SessionID:     cfg.SessionID,
 		WorkspacePath: cfg.WorkDir,
-		MCPURL:        agentctlMCPServerURL(cfg.Port, "/mcp"),
+		MCPURL:        mcpURL,
 		Generation:    generation,
 	}
-}
-
-func agentctlMCPServerURL(port int, path string) string {
-	return fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
 }
 
 // Prepare materializes generated files inside the helper workspace. It accepts

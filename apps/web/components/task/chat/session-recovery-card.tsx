@@ -20,6 +20,7 @@ import { matchingAutomaticRecovery } from "@/lib/session-recovery-presentation";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { isLocalStorageCause, storageCauseFromError } from "@/lib/session-delivery-storage";
 import { isProcessExitCause } from "./session-process-exit-recovery";
+import { SessionThinkingRecovery } from "./session-thinking-recovery";
 import { resolveAuthenticationRecovery } from "@/lib/session-authentication-recovery";
 
 function useRecoveryFocus(
@@ -175,6 +176,7 @@ export function SessionRecoveryCard({
       />
       <div className="min-w-0 bg-card px-3 pb-3 md:px-4 md:pb-4">
         <StorageSettingsLink cause={storageCause} />
+        <SessionThinkingRecovery sessionId={model.sessionId} error={model.error} />
         <RecoveryAuthenticationGuidance
           required={authentication.required}
           methods={authentication.methods}

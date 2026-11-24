@@ -90,6 +90,14 @@ issue #4052. Implementation status is recorded in the linked plans.
   as a detached commit. When admission includes managed-provider identity proof,
   the checkout metadata directory and origin shall match the selected destination
   and provider identity; a mismatch shall fail closed without relocating the main checkout.
+- **AC-TASKS-WORKTREE-METADATA-RECOVERY-002.10:** On Windows, the no-follow
+  opening that admission, reuse, recovery, and dependency cleanup apply to a
+  checkout or task root shall succeed for an ordinary directory below a drive
+  letter or UNC share root. The operating system's drive-letter link shall not
+  count as a user reparse point. A symbolic link or junction at any path
+  component below the volume root, including an ancestor of the task root,
+  shall still stop the operation before it reads, creates, or removes anything
+  through that component.
 
 ### REQ-TASKS-WORKTREE-METADATA-RECOVERY-003: Exclusive recovery authority
 

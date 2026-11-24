@@ -74,8 +74,10 @@ restart the backend after you change it.
 ## Use CLI passthrough on a phone
 
 Open a task running in CLI passthrough mode. Its connected terminal shows the
-same navigation keys as a task terminal: **Ctrl**, **Shift**, **^C**, **^D**,
-**Esc**, **Tab**, arrows, and other terminal keys. Swipe the row to reach more keys.
+same navigation keys as a task terminal: **Esc**, arrows, **Enter**, and
+**Tab**, followed by **Ctrl**, **Shift**, **^C**, **^D**, and other terminal
+keys. A horizontal swipe icon shows that the row scrolls. Swipe the row to reach
+more keys.
 
 Tap **Ctrl** once to modify the next input, twice to keep it enabled, and again
 to turn it off. **Shift** followed by **Tab** sends reverse Tab. Keys go directly
@@ -92,7 +94,9 @@ Quick Chat is an agent conversation outside the board. Use it for repository ori
 
 ### Comment on an agent reply
 
-In Task Chat or Quick Chat, select text from a settled agent prose reply, then select the comment button that appears beside the selection. The editor works like plan comments: enter feedback and choose **Add** to keep it as pending context, or **Run** to send it immediately. Pending selections use the same inline highlight and comment badge as plans; select either one to update or delete the feedback. Pending message comments are kept for the current browser tab, appear as composer context chips, and are included in the next prompt as Markdown. If the agent is busy, **Run** queues the feedback for its next turn.
+In Task Chat or Quick Chat, select text from a settled agent prose reply, then select the comment button that appears beside the selection. On a phone or tablet, the comment button joins the row of icons above the composer instead, so your device's own selection menu cannot cover it. The same applies in Office threads, Markdown previews, and code files, where the button appears in the bottom-right corner. The editor works like plan comments: enter feedback and choose **Add** to keep it as pending context, or **Run** to send it immediately. Pending selections use the same inline highlight and comment badge as plans; select either one to update or delete the feedback. Pending message comments are kept for the current browser tab, appear as composer context chips, and are included in the next prompt as Markdown. If the agent is busy, **Run** queues the feedback for its next turn.
+
+To include a file with feedback on an agent reply, walkthrough step, or file line, open the paperclip and choose **Add files**. Wait for each file to finish uploading before you add or run the comment. The agent receives a readable file path with that comment. If an upload fails, retry it or remove the file to continue.
 
 Inline comments are available only on ordinary settled prose. Streaming replies, tool/thinking/status output, plans, rich-block content, raw views, and user messages do not accept inline comments.
 
@@ -113,16 +117,20 @@ is running and a green dot when a reply is ready to read. Terminal tabs do not
 contribute to this activity indicator.
 
 On a phone, Quick Terminal includes the same shortcut row as a task terminal:
-**Ctrl**, **Shift**, **^C**, **^D**, **Esc**, **Tab**, navigation keys, and symbols.
-Swipe the row to reach more keys. Tap **^C** to interrupt a command. Tap a modifier
-once for the next input, twice to keep it enabled, and again to turn it off.
-Shortcuts target the selected terminal and keep the keyboard focused. The row
-stays above the on-screen keyboard. Modifiers reset when you switch terminal
-tabs or close the view.
+**Esc**, navigation keys, **Enter**, and **Tab**, followed by **Ctrl**, **Shift**,
+**^C**, **^D**, and symbols. A horizontal swipe icon shows that the row scrolls.
+Swipe the row to reach more keys. Tap **Enter** to run a command or **^C** to
+interrupt it. Tap a modifier once for the next input, twice to keep it enabled,
+and again to turn it off. Shortcuts target the selected terminal and keep the
+keyboard focused. The row stays above the on-screen keyboard. Modifiers reset
+when you switch terminal tabs or close the view.
 
 ### Recover a Quick Terminal
 
 After a shell exits or the backend restarts, the shell process and its state are gone. This includes environment changes, running commands, command history, and screen output.
+
+If Kandev requests a reload after restart, dismiss the Quick Terminal view.
+Select **Reload page**, then reopen Quick Terminal.
 
 To start a shell in the same tab, select the tab and then select **Start new shell**. Selecting or reopening a tab does not start a shell automatically. To open a separate shell, select **New Terminal**.
 
@@ -161,7 +169,7 @@ or rename the chat first, the provisional or user-selected title remains authori
 
 Closing a real chat tab permanently deletes its conversation and hidden backing task data. By default, it also removes the associated worktree. If the worktree has local changes, select **Permanently discard tracked and untracked changes** to remove it, or select **Keep workspace files** to retain the files. There is no undo for the conversation or task.
 
-Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
+Quick Chat conversations remain available until you explicitly delete them or their workspace. Stopping an agent preserves its tab and conversation.
 
 If **Send** stays disabled, complete these steps:
 
@@ -230,7 +238,7 @@ Open Configuration Chat from the floating chat button on Settings pages, turn on
 
 Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can read, create, and update saved prompts by exact name. Every custom prompt is editable through these authorized tools; built-in prompts reject agent writes. The assistant should change a prompt only when the operator explicitly requests or agrees to the change, then read back the saved result. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
 
-Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
+Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. The conversation remains available until you delete it or its workspace.
 
 If the session is broken, choose **Restart session** in the Settings panel header and confirm. Kandev stops the current agent, deletes the conversation and unsent prompts, and starts a blank session with the same agent profile and executor. Configuration changes already made are kept. On phones, confirmation opens in a bottom drawer. If the connection drops during restart, use **Refresh status** in the panel or expanded Quick Chat to recover the result before starting again. If a worktree has uncommitted changes, commit them before restarting.
 
@@ -342,6 +350,9 @@ re-picks their engine and language: preferences are not carried over.
 
 ## Files and editor integrations
 
+Markdown files open in Preview by default on desktop and phones. To start new files in the source view, turn off **Open Markdown files in Preview** in **Settings > Preferences > Terminal & Editors > Editors**, then save. You can switch modes in an open file at any time. The setting applies to newly opened files and preserves the mode of files already open.
+
+
 To open a task folder in your file manager, open the **Open in editor** dropdown in the task toolbar and select **Open folder**. On a phone, use **Files → Workspace actions → Open workspace folder**. For tasks with several worktrees, choose the repository and branch to open.
 
 This opens Finder on macOS, the default file manager on Linux, or Explorer on Windows on the machine running Kandev. A browser connected to a remote Kandev instance does not open that folder on your own device. The host needs a desktop session and an available file manager.
@@ -383,11 +394,42 @@ Closing the preview, file tab, focused viewer, or optional Browser panel removes
 
 ### Comment on a rendered preview
 
-Select **Annotate** in a Browser panel or rendered HTML-file preview. Choose **Select text**, **Select element**, or **Select screenshot region**, make the selection in the page, enter a comment, and select **Save feedback**. Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
+Select text in a Browser panel or rendered HTML-file preview to comment on it directly: a **Comment** button appears beside the selection, or in the bottom selection bar on touch devices. The same comment form used for plan, chat, and file comments opens next to the selection (a bottom sheet on touch devices). Enter a comment and select **Add**, or press Ctrl+Enter (⌘+Enter on macOS).
 
-Screenshot mode rasterizes the selected part of the rendered document and shows the PNG before saving. A screenshot is limited to 16 megapixels and 10 MiB, and one pending collection can contain up to 10 screenshots. Browser rendering features that cannot be read or reproduced by the rasterizer, including some canvas, video, font, and cross-origin resources, can look different or cause capture to fail. A failed capture or upload keeps a retryable draft; discarding it removes its staged image.
+For more than one comment, select **Annotate** to enter annotation mode. The preview gets an outline and a toolbar. On desktop the toolbar floats at the top; drag its handle to move it off the content you want to capture, and double-click the handle to put it back. Kandev remembers its position on each device. On touch devices the toolbar is docked at the bottom:
 
-Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from **Annotate**. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
+- **Interact** uses the page normally, including commenting on a text selection.
+- **Text** captures each text selection.
+- **Element** outlines the candidate under the pointer and captures the element you click.
+- **Region** captures each rectangle you drag. Drag an outline to move it, or drag a corner to resize it; the image is recaptured and the comment kept.
+
+The selected tool stays active after each capture, so you can mark several places in a row. While you write a comment on a text or element capture, the tool pauses and keeps the captured target highlighted. Choosing another tool closes an open comment, as **Close** does, so the new tool works at once. Leave the mode with **Exit**, or press Escape: it first closes an open comment form, then switches to **Interact**, then exits. Escape works whether focus is in Kandev or inside the page. After you leave the mode, numbered markers stay on text and elements you commented on, as comments stay highlighted in chat and plans. Click a marker to edit or delete its comment without entering the mode. Hover a marker to highlight the text or element its comment is about; the highlight stays while that comment is open. Region outlines appear only in annotation mode.
+
+Comments are always written in a comment box next to the capture. On desktop, a comments panel also opens beside the preview the first time you enter the mode. It lists saved comments and unsaved drafts, numbered like their markers on the page. The highlighted count on the toolbar shows and hides the panel; hiding it gives the page the full width. Kandev remembers on each device whether the panel was open. On touch devices the list is a bottom sheet that starts hidden.
+
+Select a number on the page, or **Edit** in the list, to edit or delete that comment in its comment box; picking an entry in the list scrolls the page to it. Closing a new capture's comment with **Close**, Escape, or a click elsewhere removes the capture if you typed nothing, and keeps it as an unsaved draft (shown dashed) if you did. **Annotate** shows a dot while drafts exist; use **Resume** or **Discard** under **Unsaved**. Drafts last until you add or discard them, or close the preview.
+
+Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
+
+The Region tool rasterizes the selected part of the rendered document and shows the PNG before saving. While it captures, the region keeps an animated outline, and the image shows what was under the rectangle when you released it, even if you scroll meanwhile. A capture that does not finish within 15 seconds is removed with an error. A screenshot is limited to 16 megapixels and 10 MiB. Saved and unsaved screenshots together are limited to 10 per task; at the limit the Region tool is disabled with a message until you send or delete some. A failed capture or upload keeps a retryable draft; discarding it removes its staged image. If a moved or resized region cannot be recaptured, the previous outline and image stay.
+
+Region outlines follow the page and any inner panel they were drawn in as you scroll. They also follow the content they were drawn over when the page's layout moves it, such as when the comments panel opens or the window resizes. When that content is removed, hidden, or changes size, the outline turns into a dashed amber warning: the saved screenshot still shows the original area, and moving or resizing the region captures it again from its new position. Kandev never captures again on its own; a capture always takes what is visible inside the outline. Hover a region (or tap its eye button on touch devices) and select **Show capture** to compare the saved screenshot with the live page. Content that scrolls inside a canvas, such as a Flutter app, does not move the outline; the captured image is unaffected.
+
+Previewed pages keep their WebGL drawing buffers, so screenshots of WebGL content drawn on the page's main thread contain the rendered pixels. This includes Flutter web builds made with `flutter build web` and with `--wasm`. Content the rasterizer cannot read still comes out blank or different:
+
+- Canvases rendered inside a worker, which browsers allow only on cross-origin-isolated pages. Kandev previews are not cross-origin isolated, so Flutter renders on the page's main thread there.
+- Some video, font, and cross-origin resources.
+
+When a capture over a canvas comes out as a single solid color, the comment form shows a warning under the thumbnail. Check the image before adding it: a genuinely solid area is fine to keep.
+
+<details>
+<summary>Flutter element feedback</summary>
+
+Flutter draws its UI on a canvas, so the **Element** tool only finds the whole `flutter-view` by default. Call `SemanticsBinding.instance.ensureSemantics()` in your app's `main()` to expose Flutter's semantics tree; element feedback then anchors to the individual `flt-semantics` nodes.
+
+</details>
+
+Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from the toolbar's count, or select a saved region's outline to edit its comment; editing opens the same comment form. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
 
 Send addresses the selected task session. An idle session receives the feedback directly; a busy session receives the same text, element metadata, and PNG attachments through its durable queue. Kandev removes only the exact saved versions accepted with that message. A validation, capacity, attachment, or version conflict leaves the feedback and composer draft available for correction and retry. The preview server and navigated page state remain ephemeral even though the saved feedback is durable.
 
@@ -413,7 +455,7 @@ You can add:
 - VS Code Remote SSH with a required host and optional user and URI scheme;
 - a hosted editor base URL, to which Kandev adds file or folder query parameters.
 
-Desktop editor discovery and custom commands run on the Kandev backend host. The executable must be installed there and visible in its `PATH`; in a remote browser deployment, a local-editor command may therefore launch on the server rather than your laptop. Remote SSH needs a reachable SSH host and a registered VS Code URI handler. Hosted URLs need an accessible service and receive the absolute backend-host path in their `file` or folder query parameter. Configure only trusted custom commands because invoking one executes it on the host.
+Only organization administrators can add or change custom editors when authentication is enabled. Desktop editor discovery and custom commands run on the Kandev backend host. The executable must be installed there and visible in its `PATH`; in a remote browser deployment, a local-editor command may therefore launch on the server rather than your laptop. Remote SSH needs a reachable SSH host and a registered VS Code URI handler. Hosted URLs need an accessible service and receive the absolute backend-host path in their `file` or folder query parameter. Configure only trusted custom commands because invoking one executes it on the host.
 
 ## Language servers
 

@@ -1,3 +1,4 @@
+import { attachCommentFile } from "../../helpers/comment-attachment";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { WsWatcher } from "../../helpers/causal-waits";
 
@@ -40,12 +41,21 @@ export async function exerciseWalkthroughFeedback(page: Page, card: Locator, ws:
   await page.getByTestId("walkthrough-launcher").click();
   await trigger.click();
   await expect(card.getByRole("textbox")).toHaveValue("Draft for step one");
-  const admitted = ws.waitForResponse("message.add");
+  const attachmentId = await attachCommentFile(page, card, "step-note.txt");
+  const admitted = ws.waitForResponse("message.add", {
+    requestWhere: (payload) =>
+      Array.isArray(payload.attachments) &&
+      payload.attachments.some((file) => file.attachment_id === attachmentId),
+  });
   await card.getByRole("button", { name: "Run", exact: true }).click();
   await admitted;
   await expect(
     card.getByTestId("walkthrough-comment").filter({ hasText: "Draft for step one" }),
   ).toHaveAttribute("data-status", "sent");
+  await expect(card.getByRole("link", { name: "step-note.txt" })).toHaveAttribute(
+    "href",
+    new RegExp(attachmentId),
+  );
   await expect(card.getByRole("textbox")).toHaveCount(0);
   await expect(trigger).toContainText("(2)");
   if ((page.viewportSize()?.width ?? 1280) < 768) {

@@ -131,6 +131,29 @@ func (r *SSHExecutor) verifyRecordedControllerIdentity(
 	return nil
 }
 
+// verifySSHResumeController accepts a verified live launch or confirmed
+// absence for resume. Destructive stop and adoption callers keep using the
+// live-only verifier above.
+func (r *SSHExecutor) verifySSHResumeController(
+	ctx context.Context,
+	client *ssh.Client,
+	receipt sshlaunch.Receipt,
+) (bool, error) {
+	result := r.reconcileRecordedController(ctx, client, sshReconcileVerifyRequest(receipt))
+	if err := result.Validate(); err != nil {
+		return false, fmt.Errorf("%w: malformed helper result: %w", errSSHLaunchReconciliationUnresolved, err)
+	}
+	switch result.Outcome {
+	case sshlaunch.OutcomeVerified:
+		return false, nil
+	case sshlaunch.OutcomeAbsent:
+		return true, nil
+	default:
+		return false, fmt.Errorf("%w: outcome=%s reason=%s (%s)",
+			errSSHLaunchReconciliationUnresolved, result.Outcome, result.Reason, result.Detail)
+	}
+}
+
 // reconcileRecordedController dispatches one helper request and normalizes a
 // missing seam into an unresolved result.
 func (r *SSHExecutor) reconcileRecordedController(

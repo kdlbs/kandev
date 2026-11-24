@@ -17,8 +17,17 @@ import {
 import type {
   SessionCapacitySettingsResponse,
   SessionCapacitySettingsSource,
+  SessionCapacityPolicy,
+  SessionCapacitySettingsPatch,
 } from "@/lib/types/system";
 import { useSettingsSaveContributor } from "../settings-save-provider";
+
+import {
+  capacityGradePatch,
+  gradeLimitDrafts,
+  gradeDraftSignature,
+  type GradeLimitDraft,
+} from "./session-capacity-grade-draft";
 
 const MAX_SESSIONS_LIMIT = 2147483647;
 
@@ -48,6 +57,10 @@ type LoadState = {
   setEnabledDraft: Dispatch<SetStateAction<boolean>>;
   maxDraft: string;
   setMaxDraft: Dispatch<SetStateAction<string>>;
+  policyDraft: SessionCapacityPolicy;
+  setPolicyDraft: Dispatch<SetStateAction<SessionCapacityPolicy>>;
+  gradesDraft: GradeLimitDraft[];
+  setGradesDraft: Dispatch<SetStateAction<GradeLimitDraft[]>>;
   loading: boolean;
   loadFailed: boolean;
   reload: () => Promise<void>;
@@ -57,6 +70,8 @@ function useSessionCapacityLoad(): LoadState {
   const [snapshot, setSnapshot] = useState<SessionCapacitySettingsResponse | null>(null);
   const [enabledDraft, setEnabledDraft] = useState(false);
   const [maxDraft, setMaxDraft] = useState("");
+  const [policyDraft, setPolicyDraft] = useState<SessionCapacityPolicy>("automatic");
+  const [gradesDraft, setGradesDraft] = useState<GradeLimitDraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const loadVersion = useRef(0);
@@ -71,6 +86,8 @@ function useSessionCapacityLoad(): LoadState {
       setSnapshot(response);
       setEnabledDraft(response.settings.enabled);
       setMaxDraft(String(response.settings.max_sessions));
+      setPolicyDraft(response.settings.policy ?? "automatic");
+      setGradesDraft(gradeLimitDrafts(response.settings.grade_limits));
     } catch {
       if (version === loadVersion.current) setLoadFailed(true);
     } finally {
@@ -92,6 +109,10 @@ function useSessionCapacityLoad(): LoadState {
     setEnabledDraft,
     maxDraft,
     setMaxDraft,
+    policyDraft,
+    setPolicyDraft,
+    gradesDraft,
+    setGradesDraft,
     loading,
     loadFailed,
     reload,
@@ -107,6 +128,7 @@ type ContributorOptions = {
   isLocked: boolean;
   invalidReason: string | undefined;
   onSaveFailed: (failed: boolean) => void;
+  scopePatch: SessionCapacitySettingsPatch | null;
 };
 
 function sessionCapacityInvalidReason(
@@ -135,27 +157,47 @@ function useSessionCapacityContributor({
   isLocked,
   invalidReason,
   onSaveFailed,
+  scopePatch,
 }: ContributorOptions) {
-  const { snapshot, setSnapshot, enabledDraft, setEnabledDraft, maxDraft, setMaxDraft } = load;
+  const {
+    snapshot,
+    setSnapshot,
+    enabledDraft,
+    setEnabledDraft,
+    maxDraft,
+    setMaxDraft,
+    policyDraft,
+    setPolicyDraft,
+    gradesDraft,
+    setGradesDraft,
+  } = load;
   const isDirty =
     savedEnabled !== undefined &&
     savedMaximum !== undefined &&
-    (enabledDraft !== savedEnabled || maxDraft !== String(savedMaximum));
+    (enabledDraft !== savedEnabled ||
+      maxDraft !== String(savedMaximum) ||
+      policyDraft !== (snapshot?.settings.policy ?? "automatic") ||
+      gradeDraftSignature(gradesDraft) !==
+        gradeDraftSignature(gradeLimitDrafts(snapshot?.settings.grade_limits)));
   const canSave =
     snapshot !== null &&
     isAdmin &&
     !isLocked &&
     (!enabledDraft || parsed !== null) &&
-    savedMaximum !== undefined;
+    savedMaximum !== undefined &&
+    scopePatch !== null;
 
   useSettingsSaveContributor({
     id: "system-session-capacity",
-    revision: `${enabledDraft}:${maxDraft}`,
+    revision: `${enabledDraft}:${maxDraft}:${policyDraft}:${gradeDraftSignature(gradesDraft)}`,
     isDirty,
     canSave,
     invalidReason,
     save: async () => {
-      if (!canSave || savedMaximum === undefined) throw new Error(invalidReason);
+      if (!canSave || savedMaximum === undefined || scopePatch === null)
+        throw new Error(invalidReason);
+      const submittedPolicy = policyDraft;
+      const submittedGrades = gradeDraftSignature(gradesDraft);
       const submittedEnabled = enabledDraft;
       const submittedMaximumDraft = maxDraft;
       const submittedMaximum = parsed ?? savedMaximum;
@@ -164,8 +206,17 @@ function useSessionCapacityContributor({
         const response = await updateSessionCapacitySettings({
           enabled: submittedEnabled,
           max_sessions: submittedMaximum,
+          ...scopePatch,
         });
         setSnapshot(response);
+        setPolicyDraft((current) =>
+          current === submittedPolicy ? (response.settings.policy ?? "automatic") : current,
+        );
+        setGradesDraft((current) =>
+          gradeDraftSignature(current) === submittedGrades
+            ? gradeLimitDrafts(response.settings.grade_limits)
+            : current,
+        );
         setEnabledDraft((current) =>
           current === submittedEnabled ? response.settings.enabled : current,
         );
@@ -180,6 +231,8 @@ function useSessionCapacityContributor({
     discard: () => {
       if (savedEnabled !== undefined) setEnabledDraft(savedEnabled);
       if (savedMaximum !== undefined) setMaxDraft(String(savedMaximum));
+      setPolicyDraft(snapshot?.settings.policy ?? "automatic");
+      setGradesDraft(gradeLimitDrafts(snapshot?.settings.grade_limits));
       onSaveFailed(false);
     },
   });
@@ -197,13 +250,19 @@ export function useSessionCapacitySettings() {
   const parsed = parseSessionCapacityMaximum(load.maxDraft);
   const isAdmin = role === undefined || role === "admin";
   const isLocked = load.snapshot?.effective.locked === true;
-  const invalidReason = sessionCapacityInvalidReason(
-    t,
-    isAdmin,
-    isLocked,
-    load.enabledDraft,
-    parsed,
-  );
+  const scopePatch = load.snapshot
+    ? capacityGradePatch(
+        load.snapshot.settings,
+        load.enabledDraft,
+        load.policyDraft,
+        load.gradesDraft,
+      )
+    : null;
+  const invalidReason =
+    sessionCapacityInvalidReason(t, isAdmin, isLocked, load.enabledDraft, parsed) ??
+    (load.enabledDraft && scopePatch === null
+      ? t("system:sessionCapacityGradeValidation")
+      : undefined);
   const contributor = useSessionCapacityContributor({
     load,
     parsed,
@@ -213,6 +272,7 @@ export function useSessionCapacitySettings() {
     isLocked,
     invalidReason,
     onSaveFailed: setSaveFailed,
+    scopePatch,
   });
 
   return {
@@ -225,5 +285,9 @@ export function useSessionCapacitySettings() {
     isLocked,
     invalidReason,
     saveFailed,
+    scopeInvalid: load.enabledDraft && scopePatch === null,
+    gradeSupported:
+      load.snapshot?.settings.policy !== undefined &&
+      load.snapshot?.settings.grade_limits !== undefined,
   };
 }

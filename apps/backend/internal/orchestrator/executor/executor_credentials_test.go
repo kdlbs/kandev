@@ -41,12 +41,16 @@ type fakeGitHubCredentialLeaseIssuer struct {
 type fakeGitCredentialLeaseReissuer struct {
 	fakeGitHubCredentialLeaseIssuer
 	capability gitcredentials.ReissueCapability
+	reissueErr error
 }
 
 func (f *fakeGitCredentialLeaseReissuer) IssueWithReissueCapability(
 	ctx context.Context,
 	req gitcredentials.Scope,
 ) (gitcredentials.Lease, gitcredentials.ReissueCapability, error) {
+	if f.reissueErr != nil {
+		return gitcredentials.Lease{}, gitcredentials.ReissueCapability{}, f.reissueErr
+	}
 	lease, err := f.Issue(ctx, req)
 	return lease, f.capability, err
 }

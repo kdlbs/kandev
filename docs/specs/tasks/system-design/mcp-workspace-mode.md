@@ -12,7 +12,7 @@ requirements:
 
 ## Boundary and evidence
 
-This design changes task-creation admission, not Office task creation.
+This design covers MCP task-creation admission and subtask materialization.
 `server.ModeOffice` explicitly excludes Kanban tools because Office agents
 use CLI commands. `server.profileToolGroups` exposes generic creation to
 Kanban and external callers, but not Office sessions.
@@ -36,7 +36,7 @@ them.
 | REQ-TASKS-MCP-WORKSPACE-MODE-001 | Trusted admission; Destination resolution |
 | REQ-TASKS-MCP-WORKSPACE-MODE-002 | Surface contract |
 | REQ-TASKS-MCP-WORKSPACE-MODE-003 | External compatibility; Errors |
-| REQ-TASKS-MCP-WORKSPACE-MODE-004 | Materialization schema discoverability |
+| REQ-TASKS-MCP-WORKSPACE-MODE-004 | Subtask materialization policy, Inherited repository compatibility, Materialization schema discoverability |
 
 ## Surface contract
 
@@ -101,6 +101,31 @@ Kanban root creation in another permitted Kanban workspace must not inherit
 source repositories owned by a different workspace. Preserve applicable
 profile precedence after admission.
 
+### Subtask materialization policy
+
+Resolve the admitted parent, including `parent_id="self"` redirection, before
+`resolveMCPWorkspacePolicy` chooses the mode. Resolve the mode before mapping
+the parent's task repositories. An omitted mode with a resolved parent becomes
+an explicit service policy of `new_workspace`. This keeps the existing MCP
+precedence over a saved `default_child_workspace`. The policy continues to
+carry the parent's child ordering through the normal task service path.
+
+When the caller omits repositories, treat a fresh child as a new branch
+selection. Keep the parent's repository IDs, base selections, and order.
+Apply a supplied top-level base override before combining equivalent
+selections. Group by repository ID and exact effective Git base ref, using the
+saved repository default for an empty base when known. Retain the first
+selection in task-repository order. Send empty checkout branches and no
+inherited placement so the existing Worktree allocator creates a fresh branch
+per selection under the child's environment.
+
+This normalization is limited to repository inputs derived from the resolved
+parent for `new_workspace`. Explicit repository inputs use the normal create
+validation, including duplicate rejection and contribution binding. Existing
+top-level selection, profile inheritance, logical workspace, and hierarchy
+behavior use their original paths. [Issue #4606](https://github.com/kdlbs/kandev/issues/4606)
+owns default parity across other task-creation surfaces.
+
 ### Inherited repository compatibility
 
 An explicit repository selection does not change what `inherit_parent` means:
@@ -118,6 +143,28 @@ with bounded guidance to select `workspace_mode=new_workspace`; it does not
 rewrite the repository input, silently change workspace mode, or alter the
 parent environment. A parent without a materialized environment retains the
 existing launch-time validation path.
+
+When the caller explicitly asks to share and omits repositories and branch
+overrides, copy the parent's ordered task-repository rows with their existing
+`BaseBranch`, `CheckoutBranch`, and `WorkspaceRelativePath`. Mark a copied
+checkout name as reuse-only in the existing repository metadata.
+
+Extend `ValidateInheritedWorkspaceRepositorySelection` to check copied slots
+after external-ID lookup and before insertion. For a ready Worktree parent,
+use the existing branch identity planner and include relative placement in
+the match, following the same canonical slot rules as launch. Keep distinct
+row selection. When no canonical slot matches, the exact Git branch name may
+identify its unique active holder at that placement; reject multiple holders.
+Retain launch compatibility for a legacy unscoped Worktree row when no scoped
+rows for that repository are live. Count only live Worktree rows with a
+worktree ID. On failure, return the repository and requested checkout or base
+through the existing validation response. If the parent is still preparing,
+the existing launch check runs once inventory is ready.
+
+The existing launch matcher and workspace group binding reuse the worktree
+IDs. Use the copied name to derive the slot. Omit that name from fresh Git
+requests so an eligible executor transition creates a new branch from the
+saved base for the same slot.
 
 This creation-time repository check does not select the runtime workspace. A
 later executor mismatch follows the [additional-session workspace reuse
@@ -180,16 +227,12 @@ The pinned `mcp-go` v1.0.0-beta.1 supports this property option; existing
 `mcp.Required()` or a default. Both `ModeTask` (through `registerKanbanTools`)
 and `ModeExternal` use this registration.
 
-Field description: "Optional materialized-workspace mode. Omit for
-subtasks to inherit the parent's workspace/worktree. inherit_parent requires
-parent_id and reuses the parent's materialized workspace/worktree;
-new_workspace requests a separate workspace/worktree."
-
-Keep `resolveMCPWorkspacePolicy` in `internal/mcp/handlers/handlers.go`
-unchanged. It trims input, defaults blank with a parent to `inherit_parent`,
-leaves blank root policy unspecified, rejects explicit inheritance without a
-parent, and accepts only the two explicit modes. Do not advertise the broader
-service's `shared_group` or an invented `shared` alias.
+The field description explains the separate workspace default for subtasks,
+how to name `inherit_parent` to share a parent's files, and the existing
+executor and Kubernetes limits. The handler trims internal input, defaults
+blank mode with a parent to `new_workspace`, and leaves blank root policy
+unspecified. It still rejects `inherit_parent` without a parent. The schema
+continues to advertise exactly two explicit modes.
 
 ### Compatibility and schema propagation
 
@@ -218,8 +261,9 @@ description semantics, both accepted values, omission, and rejected
 blank/unsupported inputs without dispatch. The direct policy matrix in
 `handlers/workspace_policy_test.go` and existing handler tests preserve root,
 parent, trimming, and rejection behavior. The public MCP reference and
-coordination guide document omission and blank-input compatibility.
-No rendered UI changes or browser test are needed.
+coordination guide document omission and blank-input compatibility. The
+Worktree end-to-end fixture drives the MCP tool to verify workspace isolation
+and sharing.
 
 - [Enum implementation plan](../../../plans/mcp-workspace-mode-enum/plan.md)
 
@@ -231,3 +275,4 @@ No rendered UI changes or browser test are needed.
 - [Kanban profile defaults](../requirements/mcp-task-agent-profile-default.md)
 - [External-ID boundaries](../requirements/external-id-idempotency-boundaries.md)
 - [Implementation plan](../../../plans/mcp-workspace-mode/plan.md)
+- [Subtask workspace repair](../../../plans/mcp-subtask-workspaces/plan.md)

@@ -30,6 +30,7 @@ const (
 	sidebarNotInOp                  = "not_in"
 	sidebarCustomSortKey            = "custom"
 	sidebarSQLNull                  = "NULL"
+	sidebarEntryContinuation        = "continuation"
 )
 
 type sidebarPageRow struct {
@@ -74,6 +75,9 @@ func (r *Repository) QuerySidebarTaskPage(
 		return nil, err
 	}
 	if err := validateSidebarTaskPreferences(query, prefs); err != nil {
+		return nil, err
+	}
+	if err := validateSidebarPluginGrouping(query, prefs); err != nil {
 		return nil, err
 	}
 	snapshot, err := beginSidebarQuerySnapshot(ctx, r.ro)
@@ -153,6 +157,7 @@ func (r *Repository) readSidebarTaskPage(
 		return nil, err
 	}
 	result := buildSidebarTaskPageResult(workspaceID, query, prefs, page, totalTasks, totalVisible, totalGroups, headerRows, pageRows, tasks)
+	projectSidebarPluginGrouping(result, prefs.PluginGrouping)
 	if err := snapshot.commit(ctx); err != nil {
 		return nil, err
 	}
@@ -353,6 +358,7 @@ func loadSidebarPageTasks(ctx context.Context, tx *sqlx.Tx, repo *Repository, ro
 	for _, row := range rows {
 		if task := byID[row.taskID]; task != nil {
 			ordered = append(ordered, task)
+			delete(byID, row.taskID)
 		}
 	}
 	return ordered, nil
@@ -369,16 +375,16 @@ func buildSidebarTaskPageResult(
 	tasks []*models.Task,
 ) *models.SidebarTaskPageResult {
 	entries := make([]models.SidebarTaskPageEntry, 0, len(rows)+len(headerRows))
-	pageIDs := make(map[string]struct{}, len(rows))
+	pageIDs := make(map[[2]string]struct{}, len(rows))
 	for _, row := range rows {
-		pageIDs[row.taskID] = struct{}{}
+		pageIDs[[2]string{row.groupKey, row.taskID}] = struct{}{}
 	}
 	rowsByGroup := make(map[string][]sidebarPageRow, len(headerRows))
 	for _, row := range rows {
 		rowsByGroup[row.groupKey] = append(rowsByGroup[row.groupKey], row)
 	}
-	emittedContinuations := make(map[string]struct{})
 	for _, header := range headerRows {
+		emittedContinuations := make(map[string]struct{})
 		groupRows := rowsByGroup[header.groupKey]
 		continuation := len(groupRows) > 0 && groupRows[0].continuesGroup
 		entries = append(entries, models.SidebarTaskPageEntry{
@@ -387,11 +393,11 @@ func buildSidebarTaskPageResult(
 		})
 		for _, row := range groupRows {
 			if row.parentID != "" {
-				_, parentOnPage := pageIDs[row.parentID]
+				_, parentOnPage := pageIDs[[2]string{row.groupKey, row.parentID}]
 				_, continuationEmitted := emittedContinuations[row.parentID]
 				if !parentOnPage && !continuationEmitted {
 					entries = append(entries, models.SidebarTaskPageEntry{
-						Kind: "continuation", ParentID: row.parentID, ParentTitle: row.parentTitle, Depth: max(row.depth-1, 0),
+						Kind: sidebarEntryContinuation, GroupKey: row.groupKey, ParentID: row.parentID, ParentTitle: row.parentTitle, Depth: max(row.depth-1, 0),
 					})
 					emittedContinuations[row.parentID] = struct{}{}
 				}
@@ -399,7 +405,7 @@ func buildSidebarTaskPageResult(
 			entries = append(entries, models.SidebarTaskPageEntry{
 				Kind: "task", TaskID: row.taskID, GroupKey: row.groupKey,
 				GroupLabel: row.groupLabel, WorkflowName: row.workflowName, StepName: row.stepName,
-				StepColor: row.stepColor, ParentID: row.parentID, Depth: row.depth,
+				StepColor: row.stepColor, ParentID: row.parentID, ParentTitle: row.parentTitle, Depth: row.depth,
 				WIPQueuePosition: row.wipPosition, WIPQueueTotal: row.wipTotal, SubtaskCount: row.subtaskCount,
 			})
 		}
@@ -426,10 +432,16 @@ func sidebarTaskQueryKey(workspaceID string, query models.SidebarTaskViewQuery, 
 		OrderedTaskIDs         []string            `json:"ordered_task_ids"`
 		SubtaskOrderByParentID map[string][]string `json:"subtask_order_by_parent_id"`
 		ColorSettingsDigest    string              `json:"color_settings_digest,omitempty"`
+		GroupingRevision       string              `json:"grouping_revision,omitempty"`
+		GroupingGeneration     string              `json:"grouping_generation,omitempty"`
 	}
 	preferences := queryPreferences{
 		PinnedTaskIDs: prefs.PinnedTaskIDs, OrderedTaskIDs: prefs.OrderedTaskIDs,
 		SubtaskOrderByParentID: prefs.SubtaskOrderByParentID,
+	}
+	if prefs.PluginGrouping != nil {
+		preferences.GroupingRevision = prefs.PluginGrouping.Snapshot.Revision
+		preferences.GroupingGeneration = prefs.PluginGrouping.Generation
 	}
 	if sidebarQueryHasSort(query, "color") {
 		encoded, _ := json.Marshal(sidebarColorSettings(prefs))

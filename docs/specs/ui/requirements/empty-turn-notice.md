@@ -35,6 +35,8 @@ app is broken.
 - **AC-UI-EMPTY-TURN-NOTICE-001.9:** A turn that ends in a recoverable agent failure is not an empty turn. Its recovery/error entry is the turn's outcome, so the completed turn reports `had_output=true` and no empty-turn notice is shown for it. The recovery/error entry is the only explanation the user needs; a "finished without producing any output" notice stacked on top of it is misleading.
 - **AC-UI-EMPTY-TURN-NOTICE-001.10:** A recoverable agent failure does not create a second turn whose only content is the recovery status message. The failure's recovery/error entry attaches to the turn that failed, so at most one turn completes for the failure and no empty-turn notice appears for a separate recovery-message turn.
 - **AC-UI-EMPTY-TURN-NOTICE-001.11:** For a session known to use CLI passthrough, completion without stored chat output shall not produce an empty-turn notice. Once hydration identifies that mode, the transcript shall also hide any earlier synthetic empty-turn notice. Stored errors and ordinary messages shall remain visible.
+- **AC-UI-EMPTY-TURN-NOTICE-001.12:** When a silent turn completion includes a live configuration-command result, task chat shall show that result beneath the command in place of the generic empty-turn notice. The result shall use the completed turn's identity, remain out of saved history, and disappear on reload.
+- **AC-UI-EMPTY-TURN-NOTICE-001.13:** A confirmed configuration-command result shall disappear after five visible seconds. An unconfirmed result shall remain readable until dismissed or replaced. Neither result shall move focus or jump the conversation to the latest message.
 
 ## Migrated source detail
 
@@ -47,6 +49,7 @@ When a user sends a message to the agent chat and the turn completes with **no c
 - When a structured agent turn completes having produced **no agent output**, the chat shows an unobtrusive inline status notice instead of nothing.
 - "Output" means at least one agent message that is a tool call (`tool_call`/`tool_edit`/`tool_read`/`tool_execute`), a native plan/todo (`agent_plan`/`todo`), a permission or clarification prompt (`permission_request`/`clarification_request`), or a non-empty text response (`message`/`content`). Incidental per-turn messages — lifecycle `status`/`script_execution` notices, `log`, `progress`, and `thinking` — do **not** count as output.
 - The backend is authoritative: the `session.turn.completed` event carries a transient `had_output` boolean computed from the turn's persisted messages at completion time (no DB column; the notice is live-only).
+- When that completion carries a configuration-command result, task chat shows the command-specific status row instead of the generic empty-turn hint. The result is live-only, uses the same deterministic turn key, and is not restored from conversation history.
 - The notice text adapts to the triggering user message:
   - **No leading `/`** → "The agent finished without producing any output."
   - **`/cmd` not in the agent's advertised commands** → "`/cmd` isn't a command this agent recognizes, so it returned no output. Try resending your request as a normal message, without the leading slash."

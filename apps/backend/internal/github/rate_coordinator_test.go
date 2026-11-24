@@ -199,6 +199,161 @@ func TestRateCoordinatorInteractiveAdmissionCancellationPreservesRateDetails(t *
 	}
 }
 
+func TestRateCoordinatorOptInInteractiveAdmissionReturnsQuotaRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		reason    string
+		operation OperationRateLimitKind
+	}{
+		{name: "primary quota", reason: rateLimitBlockPrimary, operation: OperationRateLimitPrimaryExhaustion},
+		{name: "secondary throttle", reason: rateLimitBlockSecondary, operation: OperationRateLimitSecondaryThrottle},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			coordinator := NewRateCoordinator(nil, nil)
+			tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+				Kind: AuthPrincipalHuman, Login: "opt-in-interactive-user-" + tc.name,
+			}, nil)
+			retryAt := time.Now().Add(time.Hour).UTC()
+			if tc.reason == rateLimitBlockPrimary {
+				tracker.Record(RateSnapshot{
+					Resource: ResourceCore, Limit: 5000, Remaining: 0,
+					RemainingObserved: true, ParsedFromHeaders: true, UpdatedAt: time.Now().UTC(),
+				})
+				tracker.ObservePrimary(ResourceCore, retryAt, RetrySourceRetryAfter)
+			} else {
+				tracker.ObserveSecondary(ResourceCore, retryAt, RetrySourceRetryAfter, "fixture")
+			}
+
+			ctx, cancel := context.WithTimeout(
+				WithNonBlockingGitHubAdmission(context.Background()), 25*time.Millisecond,
+			)
+			defer cancel()
+			release, err := admission.acquire(ctx, ResourceCore)
+			if release != nil {
+				release()
+				t.Fatal("quota-blocked interactive request entered the provider")
+			}
+			var waitErr *AdmissionWaitError
+			if !errors.As(err, &waitErr) {
+				t.Fatalf("admission error = %v, want AdmissionWaitError", err)
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("quota admission waited for the guard deadline: %v", err)
+			}
+			if !errors.Is(err, ErrGitHubAdmissionWaitRequired) {
+				t.Fatalf("admission error = %v, want explicit non-blocking refusal cause", err)
+			}
+			if !waitErr.RetryAt.Equal(retryAt) || waitErr.RetrySource != RetrySourceRetryAfter {
+				t.Fatalf("retry boundary = (%s, %s), want (%s, %s)",
+					waitErr.RetryAt, waitErr.RetrySource, retryAt, RetrySourceRetryAfter)
+			}
+			if waitErr.Reason != tc.reason {
+				t.Fatalf("wait reason = %q, want %q", waitErr.Reason, tc.reason)
+			}
+			details, ok := OperationRateLimitFromError(err, time.Now().UTC())
+			if !ok || details.Kind != tc.operation || details.RetryAt == nil || !details.RetryAt.Equal(retryAt) {
+				t.Fatalf("operation rate details = %+v, ok %t", details, ok)
+			}
+		})
+	}
+}
+
+func TestRateCoordinatorOptInInteractiveAdmissionUsesLatestActiveQuotaDeadline(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "overlapping-quota-user",
+	}, nil)
+	now := time.Now().UTC()
+	primaryRetryAt := now.Add(time.Hour)
+	secondaryRetryAt := now.Add(time.Minute)
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Limit: 5000, Remaining: 0,
+		RemainingObserved: true, ParsedFromHeaders: true,
+		ResetAt: primaryRetryAt, UpdatedAt: now,
+	})
+	tracker.ObservePrimary(ResourceCore, primaryRetryAt, RetrySourcePrimaryReset)
+	tracker.ObserveSecondary(ResourceCore, secondaryRetryAt, RetrySourceRetryAfter, "fixture")
+
+	ctx, cancel := context.WithTimeout(WithNonBlockingGitHubAdmission(context.Background()), time.Second)
+	defer cancel()
+	release, err := admission.acquire(ctx, ResourceCore)
+	if release != nil {
+		release()
+		t.Fatal("quota-blocked interactive request entered the provider")
+	}
+	var waitErr *AdmissionWaitError
+	if !errors.As(err, &waitErr) {
+		t.Fatalf("admission error = %v, want AdmissionWaitError", err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("quota admission waited for the guard deadline: %v", err)
+	}
+	if !errors.Is(err, ErrGitHubAdmissionWaitRequired) {
+		t.Fatalf("admission error = %v, want explicit non-blocking refusal cause", err)
+	}
+	if !waitErr.RetryAt.Equal(primaryRetryAt) || waitErr.RetrySource != RetrySourcePrimaryReset {
+		t.Fatalf("retry boundary = (%s, %s), want later primary reset (%s, %s)",
+			waitErr.RetryAt, waitErr.RetrySource, primaryRetryAt, RetrySourcePrimaryReset)
+	}
+	if waitErr.Reason != rateLimitBlockPrimary {
+		t.Fatalf("wait reason = %q, want %q", waitErr.Reason, rateLimitBlockPrimary)
+	}
+}
+
+func TestRateCoordinatorOptInInteractiveAdmissionUsesSecondaryDeadlineWithHealthyPrimary(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "secondary-only-with-healthy-primary-user",
+	}, nil)
+	now := time.Now().UTC()
+	primaryResetAt := now.Add(time.Hour)
+	secondaryRetryAt := now.Add(time.Minute)
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Limit: 5000, Remaining: 4000,
+		RemainingObserved: true, ParsedFromHeaders: true,
+		ResetAt: primaryResetAt, UpdatedAt: now,
+	})
+	tracker.ObserveSecondary(ResourceCore, secondaryRetryAt, RetrySourceRetryAfter, "fixture")
+
+	ctx, cancel := context.WithTimeout(WithNonBlockingGitHubAdmission(context.Background()), time.Second)
+	defer cancel()
+	release, err := admission.acquire(ctx, ResourceCore)
+	if release != nil {
+		release()
+		t.Fatal("quota-blocked interactive request entered the provider")
+	}
+	var waitErr *AdmissionWaitError
+	if !errors.As(err, &waitErr) {
+		t.Fatalf("admission error = %v, want AdmissionWaitError", err)
+	}
+	if !errors.Is(err, ErrGitHubAdmissionWaitRequired) {
+		t.Fatalf("admission error = %v, want explicit non-blocking refusal cause", err)
+	}
+	if !waitErr.RetryAt.Equal(secondaryRetryAt) || waitErr.RetrySource != RetrySourceRetryAfter {
+		t.Fatalf("retry boundary = (%s, %s), want secondary deadline (%s, %s)",
+			waitErr.RetryAt, waitErr.RetrySource, secondaryRetryAt, RetrySourceRetryAfter)
+	}
+	if waitErr.Reason != rateLimitBlockSecondary {
+		t.Fatalf("wait reason = %q, want %q", waitErr.Reason, rateLimitBlockSecondary)
+	}
+}
+
+func TestRateCoordinatorOptInInteractiveAdmissionPreservesCancellation(t *testing.T) {
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "opt-in-cancelled-user",
+	}, nil)
+	retryAt := time.Now().Add(time.Hour).UTC()
+	tracker.ObserveSecondary(ResourceCore, retryAt, RetrySourceRetryAfter, "fixture")
+	ctx, cancel := context.WithCancel(WithNonBlockingGitHubAdmission(context.Background()))
+	cancel()
+
+	_, err := admission.acquire(ctx, ResourceCore)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("admission error = %v, want parent cancellation", err)
+	}
+}
+
 func TestRateCoordinatorNonBlockingBackgroundAdmissionDefersLocalPacing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		coordinator := NewRateCoordinator(nil, nil)

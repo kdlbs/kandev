@@ -157,6 +157,11 @@ func TestSessionAgentSnapshotNonTerminalFilterAndEphemeralCleanup(t *testing.T) 
 		if _, err := repo.db.Exec(`UPDATE tasks SET is_ephemeral = ? WHERE id = ?`, fixture.ephemeral, fixture.taskID); err != nil {
 			t.Fatal(err)
 		}
+		if fixture.ephemeral {
+			if _, err := repo.db.Exec(`UPDATE tasks SET metadata = ? WHERE id = ?`, `{"config_mode":true}`, fixture.taskID); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if _, err := repo.db.Exec(`UPDATE task_sessions SET agent_profile_id = ?, state = ? WHERE id = ?`, "agent-profile", fixture.state, fixture.sessionID); err != nil {
 			t.Fatal(err)
 		}

@@ -42,6 +42,12 @@ turn and queued follow-up to settle without freezing my other sessions.
   previous client or the client the replacement is publishing. A concurrent
   persistence write shall therefore never blank a live endpoint.
 
+- **AC-PLATFORM-AGENTCTL-CLIENT-LEASE-001.4:** Replaying a recovered durable
+  delivery stream shall hold the client lease only for each synchronous
+  agentctl request. It shall release the lease before SQL operations and
+  lifecycle callbacks. Each request shall use the client that started the
+  replay or fail if that client was replaced, detached, or closed.
+
 ## Compatibility and exclusions
 
 Stop, client replacement, detach, and every other lease user are unchanged.

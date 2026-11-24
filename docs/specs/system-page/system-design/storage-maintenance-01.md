@@ -159,8 +159,8 @@ Decision: [ADR-2026-07-19-workspace-symlink-entries](../../../decisions/2026-07-
 Retention override:
 [ADR-2026-07-29-quarantine-retention-override](../../../decisions/2026-07-29-quarantine-retention-override.md)
 
-- Archive, delete, cascade, workspace-delete, and quick-chat expiration persist a task resource
-  cleanup intent before mutating or removing the task row. Cleanup inventory needed after a
+- Archive, delete, cascade, workspace-delete, and explicit Quick Chat deletion persist a task
+  resource cleanup intent before mutating or removing the task row. Cleanup inventory needed after a
   task deletion is captured in that intent and is not dependent on foreign-keyed rows surviving.
 - A durable worker replaces detached fire-and-forget task cleanup. Failed and interrupted jobs
   remain retryable across backend restarts with their last error and next attempt time.

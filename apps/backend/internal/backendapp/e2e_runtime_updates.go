@@ -27,6 +27,12 @@ type e2eRuntimeUpdateHooks struct {
 	once          sync.Once
 }
 
+// e2eDisablesNativeUpdateChecks reports whether this is an E2E backend, which
+// must never run a host agent's native update check, canned release or not.
+func e2eDisablesNativeUpdateChecks() bool {
+	return os.Getenv("KANDEV_E2E_MOCK") == e2eEnabledValue
+}
+
 func newE2ERuntimeUpdateHooks() *e2eRuntimeUpdateHooks {
 	if os.Getenv("KANDEV_E2E_MOCK") != "true" || os.Getenv("KANDEV_MOCK_AGENT") != "true" {
 		return nil

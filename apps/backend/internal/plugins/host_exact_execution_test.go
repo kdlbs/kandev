@@ -22,6 +22,7 @@ func TestExactExecutionControls(t *testing.T) {
 	want := map[string]string{
 		"EnsureTaskRunExact":               "host.v2.write:execution",
 		"StopTaskRunExact":                 "host.v2.write:execution",
+		"CancelTurnExact":                  "host.v2.write:execution",
 		"RecoverSessionExact":              "host.v2.write:execution",
 		"CancelPendingTaskTransitionExact": "host.v2.write:execution",
 		"GetSessionModeContextExact":       "host.v2.read:sessions",
@@ -39,16 +40,23 @@ func TestExactExecutionControls(t *testing.T) {
 }
 
 type fakeExactExecutionController struct {
-	ensureCalls, stopCalls, recoverCalls, cancelCalls, modeCalls int
-	activeExecutionID                                            string
-	ensureErr, recoverErr                                        error
-	callerInstallations                                          []string
-	ensureInput                                                  pluginsdk.ExactTaskRunCommand
-	stopInput                                                    pluginsdk.ExactTaskExecutionCommand
-	recoverInput                                                 pluginsdk.ExactSessionRecoveryCommand
-	cancelInput                                                  pluginsdk.ExactPendingTransitionCommand
-	modeReadInput                                                pluginsdk.ExactTaskExecutionCommand
-	modeSetInput                                                 pluginsdk.ExactSessionModeCommand
+	ensureCalls, stopCalls, recoverCalls, cancelCalls, modeCalls, turnCancelCalls int
+	activeExecutionID                                                             string
+	turnActive                                                                    bool
+	ensureErr, recoverErr                                                         error
+	callerInstallations                                                           []string
+	ensureInput                                                                   pluginsdk.ExactTaskRunCommand
+	stopInput                                                                     pluginsdk.ExactTaskExecutionCommand
+	recoverInput                                                                  pluginsdk.ExactSessionRecoveryCommand
+	cancelInput                                                                   pluginsdk.ExactPendingTransitionCommand
+	modeReadInput                                                                 pluginsdk.ExactTaskExecutionCommand
+	modeSetInput                                                                  pluginsdk.ExactSessionModeCommand
+	// Step approval: the observed state, approvals made, and the acting user.
+	stepAwaiting   bool
+	stepVersion    string
+	stepErr        error
+	approveCalls   int
+	approveActorID string
 }
 
 func (f *fakeExactExecutionController) EnsureTaskRun(_ context.Context, installationID string, in pluginsdk.ExactTaskRunCommand) (pluginsdk.ExactTaskRunResult, error) {
@@ -69,6 +77,15 @@ func (f *fakeExactExecutionController) StopTaskRun(_ context.Context, installati
 		return false, status.Error(codes.Aborted, "replacement execution")
 	}
 	return true, nil
+}
+
+func (f *fakeExactExecutionController) CancelTurn(_ context.Context, installationID string, in pluginsdk.ExactTaskExecutionCommand) (bool, error) {
+	f.callerInstallations = append(f.callerInstallations, installationID)
+	f.turnCancelCalls++
+	if in.ExpectedExecutionID != f.activeExecutionID {
+		return false, status.Error(codes.Aborted, "replacement execution")
+	}
+	return f.turnActive, nil
 }
 
 func (f *fakeExactExecutionController) RecoverSession(_ context.Context, installationID string, in pluginsdk.ExactSessionRecoveryCommand) (pluginsdk.ExactTaskRunResult, error) {
@@ -102,6 +119,33 @@ func (f *fakeExactExecutionController) SetSessionMode(_ context.Context, install
 		return "", status.Error(codes.Aborted, "replacement execution")
 	}
 	return in.ModeID, nil
+}
+
+func (f *fakeExactExecutionController) GetStepApproval(_ context.Context, _ string, in pluginsdk.ExactStepApprovalQuery) (pluginsdk.StepApproval, error) {
+	if f.stepErr != nil {
+		return pluginsdk.StepApproval{}, f.stepErr
+	}
+	return pluginsdk.StepApproval{
+		SessionID: in.SessionID, TaskID: "task-exact", Awaiting: f.stepAwaiting, FromStepID: "review", ToStepID: "done",
+		ResourceVersion: f.stepVersion,
+	}, nil
+}
+
+func (f *fakeExactExecutionController) ApproveStep(ctx context.Context, _ string, in pluginsdk.ExactStepApprovalCommand) (pluginsdk.StepApprovalResult, error) {
+	if f.stepErr != nil {
+		return pluginsdk.StepApprovalResult{}, f.stepErr
+	}
+	if !f.stepAwaiting {
+		return pluginsdk.StepApprovalResult{}, status.Error(codes.FailedPrecondition, "not awaiting")
+	}
+	if in.ExpectedResourceVersion != f.stepVersion {
+		return pluginsdk.StepApprovalResult{}, status.Error(codes.Aborted, "changed")
+	}
+	f.approveCalls++
+	f.approveActorID = actingUserID(ctx)
+	f.stepAwaiting = false
+	f.stepVersion = "sha256:approved"
+	return pluginsdk.StepApprovalResult{FromStepID: "review", ToStepID: "done"}, nil
 }
 
 func newExactExecutionHost(t *testing.T, controller *fakeExactExecutionController) (*pluginHost, string) {
@@ -314,5 +358,66 @@ func TestExactExecutionResourceVersionValidation(t *testing.T) {
 	valid.ExpectedTaskResourceVersion = "not-a-version"
 	if validTaskRunCommand(valid) {
 		t.Fatal("malformed task version was accepted")
+	}
+}
+
+func TestExactCancelTurnOutcomes(t *testing.T) {
+	controller := &fakeExactExecutionController{activeExecutionID: "exec-current", turnActive: true}
+	host, digest := newExactExecutionHost(t, controller)
+	manager, ok := pluginsdk.HostExecutionCommands(host)
+	if !ok {
+		t.Fatal("execution commands are not exposed")
+	}
+	ctx := context.Background()
+	command := pluginsdk.ExactTaskExecutionCommand{
+		RequestID: "request-cancel-turn", WorkspaceID: "workspace-execution", TaskID: "task-exact", SessionID: "session-exact",
+		ExpectedSessionResourceVersion: "2026-09-26T09:01:00Z", ExpectedExecutionID: "exec-old", IdempotencyKey: "cancel-old",
+		ApprovalRevision: 1, ManifestDigest: digest,
+	}
+	if result, cancelled, err := manager.CancelTurn(ctx, command); err != nil || result.Status != pluginsdk.CommandConflict || cancelled {
+		t.Fatalf("stale cancel = %+v cancelled=%v err=%v, want CONFLICT", result, cancelled, err)
+	}
+
+	command.ExpectedExecutionID, command.IdempotencyKey = "exec-current", "cancel-current"
+	if result, cancelled, err := manager.CancelTurn(ctx, command); err != nil || result.Status != pluginsdk.CommandApplied || !cancelled {
+		t.Fatalf("cancel = %+v cancelled=%v err=%v, want APPLIED", result, cancelled, err)
+	}
+	if result, cancelled, err := manager.CancelTurn(ctx, command); err != nil || result.Status != pluginsdk.CommandAlreadyApplied || !cancelled || controller.turnCancelCalls != 2 {
+		t.Fatalf("cancel replay = %+v cancelled=%v calls=%d err=%v, want ALREADY_APPLIED without a new effect", result, cancelled, controller.turnCancelCalls, err)
+	}
+
+	controller.turnActive = false
+	command.IdempotencyKey = "cancel-idle"
+	if result, cancelled, err := manager.CancelTurn(ctx, command); err != nil || result.Status != pluginsdk.CommandNoChange || cancelled {
+		t.Fatalf("idle cancel = %+v cancelled=%v err=%v, want NO_CHANGE", result, cancelled, err)
+	}
+
+	command.IdempotencyKey, command.ApprovalRevision = "cancel-stale-grant", 2
+	if result, _, err := manager.CancelTurn(ctx, command); err != nil || result.Status != pluginsdk.CommandDenied || controller.turnCancelCalls != 3 {
+		t.Fatalf("cancel with a stale grant revision = %+v calls=%d err=%v, want DENIED before the controller", result, controller.turnCancelCalls, err)
+	}
+	for _, installationID := range controller.callerInstallations {
+		if installationID != "execution-installation" {
+			t.Fatalf("controller caller installation = %q, want the host-derived installation", installationID)
+		}
+	}
+}
+
+// TestExactCancelTurnOverWire proves the command travels the real broker
+// transport: SDK client -> proto -> grpcHostServer -> host -> controller.
+func TestExactCancelTurnOverWire(t *testing.T) {
+	controller := &fakeExactExecutionController{activeExecutionID: "exec-current", turnActive: true}
+	host, digest := newExactExecutionHost(t, controller)
+	manager, ok := pluginsdk.HostExecutionCommands(dialPluginHostOverWire(t, host))
+	if !ok {
+		t.Fatal("execution commands are not exposed over the wire")
+	}
+	result, cancelled, err := manager.CancelTurn(context.Background(), pluginsdk.ExactTaskExecutionCommand{
+		RequestID: "request-wire-cancel", WorkspaceID: "workspace-execution", TaskID: "task-exact", SessionID: "session-exact",
+		ExpectedSessionResourceVersion: "2026-09-26T09:01:00Z", ExpectedExecutionID: "exec-current", IdempotencyKey: "wire-cancel",
+		ApprovalRevision: 1, ManifestDigest: digest,
+	})
+	if err != nil || result.Status != pluginsdk.CommandApplied || !cancelled || controller.turnCancelCalls != 1 {
+		t.Fatalf("wire cancel = %+v cancelled=%v calls=%d err=%v", result, cancelled, controller.turnCancelCalls, err)
 	}
 }

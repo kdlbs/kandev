@@ -4,6 +4,8 @@ export function causeLabel(code: string | undefined, translate: TFunction): stri
   if (code === "process_exited") {
     return translate("task:sessionBootstrapProcessExitedBody");
   }
+  if (code?.startsWith("thinking_level_"))
+    return translate("task:sessionBootstrapThinkingFailedTitle");
   return causeLabelSwitch(code, translate);
 }
 

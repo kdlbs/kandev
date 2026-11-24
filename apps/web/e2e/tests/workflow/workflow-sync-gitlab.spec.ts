@@ -304,3 +304,40 @@ workflows:
     expect(config.path).toBe(".kandev/workflows");
   });
 });
+
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-006.1
+test.describe("GitLab workflow sync prompt references", () => {
+  test("warns about a step prompt that references a missing saved prompt", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const yaml = `version: 1
+type: kandev_workflow
+workflows:
+  - name: Reference check
+    steps:
+      - name: Review
+        position: 0
+        color: bg-blue-500
+        is_start_step: true
+        prompt: "Apply @missing-team-rules before review"`;
+    await apiClient.configureGitLab(seedData.workspaceId);
+    await apiClient.mockGitLabAddRepoFiles(seedData.workspaceId, GITLAB_PROJECT, "main", [
+      { path: ".kandev/workflows/refs.yaml", content: yaml },
+    ]);
+    const configured = await apiClient.rawRequest(
+      "POST",
+      `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+      { provider: "gitlab", project_path: GITLAB_PROJECT, poll_enabled: false },
+    );
+    expect(configured.ok).toBe(true);
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+    const status = testPage.getByTestId("workflow-sync-status");
+    const response = waitForHttp(testPage, "POST", /^\/api\/v1\/workflow-sync\/sync$/);
+    await status.getByTestId("workflow-sync-now").click();
+    expect((await response).ok()).toBe(true);
+    await expect(status.getByTestId("workflow-sync-warnings")).toContainText("@missing-team-rules");
+  });
+});

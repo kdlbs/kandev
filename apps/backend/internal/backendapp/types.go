@@ -35,6 +35,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
+	"github.com/kandev/kandev/internal/promptsync"
 	quickterminalrepository "github.com/kandev/kandev/internal/quickterminal/repository"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
@@ -58,11 +59,13 @@ import (
 )
 
 type Repositories struct {
-	RequiredStores *requiredstores.Tracker
-	Task           *sqliterepo.Repository
-	Analytics      analyticsrepository.Repository
-	AgentSettings  settingsstore.Repository
-	User           userstore.Repository
+	RequiredStores                   *requiredstores.Tracker
+	gitCredentialReissueSigner       *gitcredentials.ReissueCapabilitySigner
+	gitCredentialReissueSignerSource string
+	Task                             *sqliterepo.Repository
+	Analytics                        analyticsrepository.Repository
+	AgentSettings                    settingsstore.Repository
+	User                             userstore.Repository
 	// UserAccounts is the account-management view of the same user store
 	// (list/create/role/status), consumed by the auth service.
 	UserAccounts  userstore.AccountRepository
@@ -110,9 +113,12 @@ type Services struct {
 	// WorkflowSync keeps workspace workflows in sync with definition files
 	// in a configured GitHub repository. Nil when GitHub is unavailable.
 	WorkflowSync *workflowsync.Service
-	Share        *share.HTTPHandlers
-	Office       *officeservice.Service
-	OfficeSvcs   *office.Services
+	// PromptSync keeps install-wide saved prompts in sync with Markdown files
+	// in one repository directory.
+	PromptSync *promptsync.Service
+	Share      *share.HTTPHandlers
+	Office     *officeservice.Service
+	OfficeSvcs *office.Services
 	// OrchScheduler is the office SchedulerIntegration constructed by
 	// startSchedulingRuntime. Exposed here so registerRoutes can
 	// wire SetTaskContextProvider after the HandoffService is built.

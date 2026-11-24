@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/ctxmutex"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/opencode"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -142,9 +143,10 @@ type AgentExecution struct {
 	// adoption. It is used to reconcile the descriptor's bounded high-water
 	// mark before a live stream is attached.
 	DeliveryReplayCursor uint64
-	AgentCommand         string               // Command to start the agent subprocess
-	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
-	LaunchWrapper        launchwrapper.Spec   `json:"-"`
+	AgentCommand         string             // Command to start the agent subprocess
+	ContinueCommand      string             // Command for follow-up prompts (one-shot agents)
+	LaunchWrapper        launchwrapper.Spec `json:"-"`
+	OpenCodeRuntime      opencode.Runtime
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
@@ -397,6 +399,7 @@ type AgentExecution struct {
 	providerDefaultModelState    *CachedModelState
 	authoritativeConfigResponses map[string]*CachedModelState
 	pendingConfigSettlement      *configSettlement
+	sessionConfigurationMu       sync.Mutex
 	modelStateMu                 sync.RWMutex
 
 	// Cached auth methods from agent_capabilities (for error recovery metadata)
@@ -1951,6 +1954,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 
 // MessageAttachment represents an image or file attachment for agent prompts.
 type MessageAttachment struct {
+	CommentID    string
 	AttachmentID string // file-backed descriptor ID; Data is empty for staged files
 	Type         string // "image", "audio", or "resource"
 	Data         string // base64-encoded data
@@ -1974,7 +1978,7 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ResourceCircuitKey string
+	ExecutionGrade     string
 	ProfileID          string
 	ProfileName        string
 	AgentID            string
@@ -1982,6 +1986,7 @@ type AgentProfileInfo struct {
 	Model              string // applied through ACP model selection at session start
 	Mode               string // applied via ACP session/set_mode at session start (empty = use agent default)
 	ConfigOptions      map[string]string
+	ResourceCircuitKey string
 	// FallbackModel is the optional single ACP model ID to switch to when
 	// Model is unavailable. Ignored when AutoFallback is enabled.
 	FallbackModel string

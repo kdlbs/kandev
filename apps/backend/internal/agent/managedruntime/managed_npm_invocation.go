@@ -8,6 +8,8 @@ import (
 const managedNPMInvocationHeadLength = 6
 
 const (
+	managedNPMCommandName       = "npx"
+	managedNPMYesFlag           = "--yes"
 	managedNPMOfflinePreference = "--prefer-offline"
 	managedNPMOnlinePreference  = "--prefer-online"
 )
@@ -38,7 +40,7 @@ func ParseManagedNPMInvocation(command []string, packageName string, requiredArg
 	if len(command) < managedNPMInvocationHeadLength {
 		return ManagedNPMInvocation{}, errors.New("managed npm command is not a direct npx invocation")
 	}
-	if command[0] != "npx" || command[1] != "--yes" {
+	if command[0] != managedNPMCommandName || command[1] != managedNPMYesFlag {
 		return ManagedNPMInvocation{}, errors.New("managed npm command is not a direct npx invocation")
 	}
 	if command[2] != managedNPMOfflinePreference && command[2] != managedNPMOnlinePreference {

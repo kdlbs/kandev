@@ -13,8 +13,9 @@ import { getManualRightWidth } from "@/lib/local-storage";
 import { enforcePinnedTargets } from "./dockview-pinned-enforce";
 import { clearAllPinnedTargets, setPinnedTarget } from "./layout-manager";
 
-function makeApi() {
+function makeApi(orientation?: "VERTICAL" | "HORIZONTAL") {
   const splitview = {
+    orientation,
     length: 2,
     getViewSize: vi.fn(() => 400),
     resizeView: vi.fn(),
@@ -59,4 +60,42 @@ describe("enforcePinnedTargets", () => {
 
     expect(splitview.resizeView).toHaveBeenCalledWith(1, 320);
   });
+});
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe("enforcePinnedTargets root orientation", () => {
+  const ctx = {
+    sidebarVisible: true,
+    rightPanelsVisible: true,
+    maximized: false,
+    envId: "env-a",
+  };
+
+  beforeEach(() => {
+    clearAllPinnedTargets();
+    vi.mocked(getManualRightWidth).mockReturnValue(null);
+  });
+
+  it("leaves the rows of a VERTICAL root alone even with right and sidebar targets", () => {
+    setPinnedTarget("right", 250);
+    setPinnedTarget("sidebar", 260);
+    vi.mocked(getManualRightWidth).mockReturnValue(240);
+    const { api, splitview } = makeApi("VERTICAL");
+
+    enforcePinnedTargets(api, ctx);
+
+    expect(splitview.resizeView).not.toHaveBeenCalled();
+  });
+
+  it.each([["HORIZONTAL" as const], [undefined]])(
+    "still restores the right column of a %s root",
+    (orientation) => {
+      setPinnedTarget("right", 250);
+      const { api, splitview } = makeApi(orientation);
+
+      enforcePinnedTargets(api, ctx);
+
+      expect(splitview.resizeView).toHaveBeenCalledWith(1, 250);
+    },
+  );
 });

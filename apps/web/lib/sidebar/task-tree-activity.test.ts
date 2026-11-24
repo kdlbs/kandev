@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
-import { applySort, applyView, flattenVisibleTaskIds } from "./apply-view";
+import { applySort, applyView } from "./apply-view";
+import { flattenVisibleSidebarTasks } from "./visible-task-order";
 
 const ACTIVITY = {
   early: "2026-04-01",
@@ -127,7 +128,7 @@ describe("task tree activity root and child order", () => {
     const grouped = applyView(tasks, lastActivityView());
 
     expect(grouped.groups[0].tasks.map((item) => item.id)).toEqual(["parent", "peer"]);
-    expect(flattenVisibleTaskIds(grouped, [], ["parent"])).toEqual(["parent", "peer"]);
+    expect(flattenVisibleSidebarTasks(grouped, [], ["parent"]).taskIds).toEqual(["parent", "peer"]);
     expect(grouped.groups[0].tasks.map((item) => item.id)).toEqual(["parent", "peer"]);
   });
 });

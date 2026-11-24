@@ -61,6 +61,52 @@ type capableAgentAdapter struct {
 	modelState   *streams.SessionModelState
 }
 
+type configurationResultAgentAdapter struct {
+	capableAgentAdapter
+	configurationResult streams.ConfigurationResult
+}
+
+type unconfirmedModeResultAdapter struct {
+	bareAgentAdapter
+	setConfigErr error
+}
+
+type rejectedConfigurationOptionAdapter struct {
+	bareAgentAdapter
+	setConfigErr error
+}
+
+func (a *unconfirmedModeResultAdapter) SetConfigOption(_ context.Context, _, _ string) error {
+	return a.setConfigErr
+}
+
+func (a *unconfirmedModeResultAdapter) SetConfigOptionWithResult(_ context.Context, configID, value string) (streams.ConfigurationResult, error) {
+	return streams.ConfigurationResult{ConfigID: configID, Requested: value}, nil
+}
+
+func (a *rejectedConfigurationOptionAdapter) SetConfigOption(_ context.Context, _, _ string) error {
+	return a.setConfigErr
+}
+
+func (a *rejectedConfigurationOptionAdapter) SetConfigOptionWithResult(_ context.Context, configID, value string) (streams.ConfigurationResult, error) {
+	return streams.ConfigurationResult{ConfigID: configID, Requested: value}, a.setConfigErr
+}
+
+func (a *configurationResultAgentAdapter) SetModelWithResult(_ context.Context, modelID string) (streams.ConfigurationResult, error) {
+	a.modelID = modelID
+	return a.configurationResult, nil
+}
+
+func (a *configurationResultAgentAdapter) SetConfigOptionWithResult(_ context.Context, configID, value string) (streams.ConfigurationResult, error) {
+	a.modeID = configID + "=" + value
+	return a.configurationResult, nil
+}
+
+func (a *configurationResultAgentAdapter) SetConfigOption(_ context.Context, configID, value string) error {
+	a.modeID = configID + "=" + value
+	return nil
+}
+
 type forkCapableAgentAdapter struct {
 	capableAgentAdapter
 	completedTurn string
@@ -255,6 +301,140 @@ func TestAdapterActions_ForwardPayloadToAdapter(t *testing.T) {
 			assertAdapterActionSuccess(t, tc.invoke(s, msg))
 			tc.assertReceived(t, agentAdapter)
 		})
+	}
+}
+
+func TestAgentSessionConfigurationSettersReturnAdapterEvidence(t *testing.T) {
+	tests := []struct {
+		name    string
+		action  string
+		payload map[string]any
+		result  streams.ConfigurationResult
+		invoke  func(*Server, *ws.Message) *ws.Message
+	}{
+		{
+			name:    "model",
+			action:  "agent.session.set_model",
+			payload: map[string]any{"model_id": "requested-model"},
+			result: streams.ConfigurationResult{
+				Requested: "requested-model", Effective: "effective-model", Confirmed: true,
+			},
+			invoke: func(s *Server, msg *ws.Message) *ws.Message { return s.handleWSSetModel(context.Background(), msg) },
+		},
+		{
+			name:   "config option",
+			action: "agent.session.set_config_option",
+			payload: map[string]any{
+				"config_id": "reasoning_effort", "value": "high", "include_configuration_result": true,
+			},
+			result: streams.ConfigurationResult{
+				ConfigID: "reasoning_effort", Requested: "high", Effective: "medium", Confirmed: true,
+			},
+			invoke: func(s *Server, msg *ws.Message) *ws.Message {
+				return s.handleWSSetConfigOption(context.Background(), msg)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(t)
+			s.procMgr.SetAdapterForTest(&configurationResultAgentAdapter{configurationResult: tc.result})
+			msg, err := ws.NewRequest("req-config-result", tc.action, tc.payload)
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+
+			response := tc.invoke(s, msg)
+			if response.Type == ws.MessageTypeError {
+				t.Fatalf("setter failed: %s", string(response.Payload))
+			}
+			var got streams.ConfigurationResult
+			if err := response.ParsePayload(&got); err != nil {
+				t.Fatalf("parse configuration result: %v", err)
+			}
+			if got != tc.result {
+				t.Fatalf("configuration result = %+v, want %+v", got, tc.result)
+			}
+		})
+	}
+}
+
+func TestAgentSessionSetConfigOptionReturnsUnconfirmedModeEvidence(t *testing.T) {
+	s := newTestServer(t)
+	strictErr := errors.New("requested mode was not confirmed by the agent")
+	adapter := &unconfirmedModeResultAdapter{
+		bareAgentAdapter: bareAgentAdapter{sessionID: "session-1"}, setConfigErr: strictErr,
+	}
+	s.procMgr.SetAdapterForTest(adapter)
+	msg, err := ws.NewRequest("req-mode-config", "agent.session.set_config_option", map[string]any{
+		"config_id": "codex_mode", "value": "plan", "include_configuration_result": true,
+	})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	response := s.handleWSSetConfigOption(context.Background(), msg)
+	if response.Type == ws.MessageTypeError {
+		t.Fatalf("picker result path rejected structured unconfirmed evidence: %s", string(response.Payload))
+	}
+	var got streams.ConfigurationResult
+	if err := response.ParsePayload(&got); err != nil {
+		t.Fatalf("parse configuration result: %v", err)
+	}
+	want := streams.ConfigurationResult{ConfigID: "codex_mode", Requested: "plan"}
+	if got != want {
+		t.Fatalf("mode result = %+v, want unconfirmed result %+v", got, want)
+	}
+}
+
+func TestAgentSessionSetConfigOptionLegacyPathPreservesStrictModeError(t *testing.T) {
+	strictErr := errors.New("requested mode was not confirmed by the agent")
+	s := newTestServer(t)
+	s.procMgr.SetAdapterForTest(&unconfirmedModeResultAdapter{
+		bareAgentAdapter: bareAgentAdapter{sessionID: "session-1"}, setConfigErr: strictErr,
+	})
+	msg, err := ws.NewRequest("req-mode-config-legacy", "agent.session.set_config_option", map[string]string{
+		"config_id": "codex_mode", "value": "plan",
+	})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	response := s.handleWSSetConfigOption(context.Background(), msg)
+	if response.Type != ws.MessageTypeError {
+		t.Fatalf("legacy setter response type = %q, want error", response.Type)
+	}
+	var got ws.ErrorPayload
+	if err := response.ParsePayload(&got); err != nil {
+		t.Fatalf("parse setter error: %v", err)
+	}
+	if got.Message != strictErr.Error() {
+		t.Fatalf("legacy setter error = %q, want %q", got.Message, strictErr.Error())
+	}
+}
+
+func TestAgentSessionConfigOptionPreservesExplicitProviderRejection(t *testing.T) {
+	s := newTestServer(t)
+	providerErr := errors.New("set session config option failed: unsupported value")
+	s.procMgr.SetAdapterForTest(&rejectedConfigurationOptionAdapter{
+		bareAgentAdapter: bareAgentAdapter{sessionID: "session-1"},
+		setConfigErr:     streams.NewSessionConfigurationRejectedError(providerErr),
+	})
+	msg, err := ws.NewRequest("req-config-rejected", "agent.session.set_config_option", map[string]any{
+		"config_id": "reasoning_effort", "value": "high", "include_configuration_result": true,
+	})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	response := s.handleWSSetConfigOption(context.Background(), msg)
+	var got ws.ErrorPayload
+	if err := response.ParsePayload(&got); err != nil {
+		t.Fatalf("parse rejection: %v", err)
+	}
+	if got.Code != ws.ErrorCodeValidation || !strings.Contains(got.Message, "unsupported value") {
+		t.Fatalf("provider rejection = %+v, want validation error with readable reason", got)
 	}
 }
 

@@ -74,13 +74,23 @@ func TestCompleteOfficeTaskAsHumanPublishesOnlyCommittedStateChanges(t *testing.
 		t.Fatal(err)
 	}
 
-	if _, err := svc.CompleteOfficeTaskAsHuman(ctx, "final-done-event-task", finalStepID); err != nil {
+	change, err := svc.CompleteOfficeTaskAsHuman(ctx, "final-done-event-task", finalStepID)
+	if err != nil {
 		t.Fatalf("CompleteOfficeTaskAsHuman: %v", err)
+	}
+	if !change.Matched || !change.Changed || change.OldState != v1.TaskStateInProgress ||
+		change.Task == nil || change.Task.State != v1.TaskStateCompleted {
+		t.Fatalf("completion receipt = %+v, want matched IN_PROGRESS to COMPLETED transition", change)
 	}
 	assertFinalStepStateEvents(t, eventBus.GetPublishedEvents(), 1)
 
-	if _, err := svc.CompleteOfficeTaskAsHuman(ctx, "final-done-event-task", finalStepID); err != nil {
+	change, err = svc.CompleteOfficeTaskAsHuman(ctx, "final-done-event-task", finalStepID)
+	if err != nil {
 		t.Fatalf("no-op CompleteOfficeTaskAsHuman: %v", err)
+	}
+	if !change.Matched || change.Changed || change.OldState != v1.TaskStateCompleted ||
+		change.Task == nil || change.Task.State != v1.TaskStateCompleted {
+		t.Fatalf("no-op completion receipt = %+v, want matched unchanged COMPLETED task", change)
 	}
 	assertFinalStepStateEvents(t, eventBus.GetPublishedEvents(), 1)
 }

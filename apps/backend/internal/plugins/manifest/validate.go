@@ -138,10 +138,13 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateRepoURL()...)
 	errs = append(errs, m.validateUIPages()...)
 	errs = append(errs, m.validateUIBundle()...)
+	errs = append(errs, m.validateFileViewers()...)
 	errs = append(errs, m.validateWebApps()...)
 	errs = append(errs, m.validateUIKeybindings()...)
 	errs = append(errs, m.validateWebhooks()...)
 	errs = append(errs, m.validateActions()...)
+	errs = append(errs, m.validateNotificationFormatters()...)
+	errs = append(errs, m.validateSidebarGroupings()...)
 	errs = append(errs, m.validateAutomationConditions()...)
 	errs = append(errs, m.validateCapabilityMinimumVersions()...)
 	errs = append(errs, m.validateRepositoryProviders()...)
@@ -756,7 +759,7 @@ func (m *Manifest) validateActions() []error {
 		}
 		seen[action.Key] = true
 		if action.ResourceScope != ActionScopeWorkspace && action.ResourceScope != ActionScopeTask &&
-			action.ResourceScope != ActionScopeRepository {
+			action.ResourceScope != ActionScopeRepository && action.ResourceScope != ActionScopeNotificationProvider {
 			errs = append(errs, fmt.Errorf("action %q has invalid scope %q", action.Key, action.ResourceScope))
 		}
 		if access := action.EffectiveAccess(); access != ActionAccessAuthenticated && access != ActionAccessAdmin {

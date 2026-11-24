@@ -736,6 +736,7 @@ func (r *Repository) initTaskSchema() error {
 		description TEXT DEFAULT '',
 		state TEXT DEFAULT 'TODO',
 		priority INTEGER DEFAULT 0,
+		execution_grade TEXT NOT NULL DEFAULT '',
 		position INTEGER DEFAULT 0,
 		wip_admitted INTEGER NOT NULL DEFAULT 1,
 		queued_for_step_id TEXT NOT NULL DEFAULT '',
@@ -1152,6 +1153,12 @@ func (r *Repository) initAttachmentsSchema() error {
 		ON task_message_attachments(owner_id, state, expires_at);
 	CREATE INDEX IF NOT EXISTS idx_task_message_attachments_scope
 		ON task_message_attachments(workspace_id, task_id, session_id, state);
+	CREATE TABLE IF NOT EXISTS task_plan_comment_attachments (
+		comment_id TEXT NOT NULL REFERENCES task_plan_comments(id) ON DELETE CASCADE,
+		attachment_id TEXT NOT NULL UNIQUE REFERENCES task_message_attachments(id) ON DELETE CASCADE,
+		position INTEGER NOT NULL,
+		PRIMARY KEY (comment_id, position)
+	);
 	CREATE TABLE IF NOT EXISTS task_creation_attachments (
 		task_id TEXT NOT NULL,
 		attachment_id TEXT NOT NULL,
@@ -1409,6 +1416,8 @@ const sessionWorktreeSchemaDDL = `
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,
 		execution_profile_id TEXT NOT NULL DEFAULT '',
+		admitted_execution_grade TEXT NOT NULL DEFAULT '',
+		admitted_execution_grade_known INTEGER NOT NULL DEFAULT 0,
 		route_generation INTEGER NOT NULL DEFAULT 0,
 		route_state TEXT NOT NULL DEFAULT '',
 		route_reason TEXT NOT NULL DEFAULT '',

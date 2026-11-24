@@ -90,6 +90,14 @@ Use one polite `role="status"` per visible operation and keep Retry's accessible
 Details use a keyboard-accessible disclosure with wrapped text. Do not move focus on automatic progress.
 All new copy uses existing i18n catalogs in five languages, with generated Traditional Chinese variants.
 
+For AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-002.12, `SessionHistoryFeedback` keeps its spinner inside the `aria-hidden` wrapper.
+That wrapper uses `display: flex` to remove the inline grid's baseline space.
+The outer row's existing `align-items: center` then aligns the spinner with the adjacent label.
+Loading and retrying share this markup on desktop, phone, and task preview.
+The correction stays local to `components/task/chat/session-entry-feedback.tsx`.
+Shared spinner CSS, animation, copy, status announcements, and recovery state retain their existing contracts.
+Rendered tests compare the spinner and label centers during loading and retrying, then release history and check successful recovery.
+
 ## Persistence, security, and observability
 
 No database, protocol, public API, or permission changes are required.
@@ -102,3 +110,4 @@ The cause of the observed seven-second delivery delay is unconfirmed. This desig
 
 - [Original ordering repair](../../../plans/session-subscription-recovery/plan.md)
 - [Delayed session entry](../../../plans/session-entry-recovery/plan.md)
+- [Conversation loading alignment](../../../plans/conversation-loading-alignment/plan.md)

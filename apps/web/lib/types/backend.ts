@@ -473,7 +473,8 @@ export type CanvasLifecyclePayload = {
 export type BackendMessageMap = SessionBackendMessageMap &
   OfficeBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
-  import("@/lib/types/review").ReviewBackendMessageMap & {
+  import("@/lib/types/review").ReviewBackendMessageMap &
+  import("./plugins").PluginBackendMessageMap & {
     "prompts.changed": BackendMessage<"prompts.changed", Record<string, never>>;
     "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
     "task.reordered": BackendMessage<"task.reordered", TaskReorderedPayload>;
@@ -655,6 +656,7 @@ export type {
   SessionPendingActionChangedPayload,
   TaskSessionNotificationPayload,
   TaskSessionAgentctlPayload,
+  ConfigurationCommandResult,
   TurnEventPayload,
   AvailableCommandPayload,
   AvailableCommandsPayload,

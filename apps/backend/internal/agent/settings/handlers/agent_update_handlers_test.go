@@ -219,6 +219,9 @@ func TestAgentUpdatePreviewEndpointIsReadOnly(t *testing.T) {
 
 func TestAgentUpdateStatusEndpointIsReadOnly(t *testing.T) {
 	t.Setenv("KANDEV_E2E_MOCK", "true")
+	// Native update checks resolve executables from PATH; an empty PATH keeps
+	// this test from starting any host agent CLI.
+	t.Setenv("PATH", t.TempDir())
 	router, ctrl, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
 	var statusResponse struct {
 		Statuses []dto.AgentUpdateStatusDTO `json:"statuses"`

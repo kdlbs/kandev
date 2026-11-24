@@ -59,8 +59,8 @@ export type TaskRowProps = {
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
   selectedTaskIds?: Set<string>;
-  onToggleSelectTask?: (taskId: string) => void;
-  onSelectTaskRange?: (taskId: string) => void;
+  onToggleSelectTask?: (taskId: string, occurrenceKey?: string) => void;
+  onSelectTaskRange?: (taskId: string, occurrenceKey?: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
   onBulkDelete?: (taskIds: string[]) => void;
   onBulkPin?: (taskIds: string[]) => void;

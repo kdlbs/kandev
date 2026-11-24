@@ -135,7 +135,7 @@ func resolve(
 	); err != nil {
 		return nil, err
 	}
-	snapshot, err := readSnapshot(ctx, tx, db, taskID)
+	snapshot, err := ReadSnapshot(ctx, tx, db, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func Consume(
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return nil, repoerrors.ErrTaskPlanNotFound
 	}
-	return readSnapshot(ctx, tx, db, resolved.TaskID)
+	return ReadSnapshot(ctx, tx, db, resolved.TaskID)
 }
 
 func validateTargetSession(
@@ -319,23 +319,23 @@ func consumeQuery(resolved *Resolution) (string, []interface{}) {
 		strings.Join(conditions, ` OR `) + `)`, args
 }
 
-func readSnapshot(
+func ReadSnapshot(
 	ctx context.Context,
-	tx *sqlx.Tx,
+	q sqlx.QueryerContext,
 	db *sqlx.DB,
 	taskID string,
 ) (*models.TaskPlanCommentSnapshot, error) {
 	snapshot := &models.TaskPlanCommentSnapshot{TaskID: taskID, Comments: make([]*models.TaskPlanComment, 0)}
-	err := tx.QueryRowContext(ctx, db.Rebind(`
-		SELECT id, comments_revision FROM task_plans WHERE task_id = ?
-	`), taskID).Scan(&snapshot.PlanID, &snapshot.Revision)
+	err := sqlx.GetContext(ctx, q, snapshot, db.Rebind(`
+		SELECT id AS plan_id, comments_revision AS revision FROM task_plans WHERE task_id = ?
+	`), taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, repoerrors.ErrTaskPlanNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read task plan comment head: %w", err)
 	}
-	rows, err := tx.QueryContext(ctx, db.Rebind(`
+	rows, err := q.QueryContext(ctx, db.Rebind(`
 		SELECT `+commentSelectCols+` FROM task_plan_comments
 		WHERE task_id = ? AND plan_id = ? ORDER BY created_at, id
 	`), taskID, snapshot.PlanID)
@@ -355,6 +355,12 @@ func readSnapshot(
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate task plan comments: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close task plan comments: %w", err)
+	}
+	if err := ReadAttachments(ctx, q, db, taskID, snapshot.Comments); err != nil {
+		return nil, err
 	}
 	return snapshot, nil
 }

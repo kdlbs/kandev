@@ -35,6 +35,20 @@ func recordedAgentctlInstanceID(runtime agentruntime.Runtime, backendExecutionID
 			return "", errors.New("docker agentctl instance identity is missing")
 		}
 		return backendExecutionID, nil
+	case agentruntime.RuntimePluginRemote:
+		if _, present := metadata[MetadataKeyPluginExecutor]; present {
+			inventory, err := decodePluginExecutorInventory(metadata)
+			if err != nil {
+				return "", fmt.Errorf("decode plugin agentctl identity: %w", err)
+			}
+			if id := strings.TrimSpace(inventory.RuntimeIdentity); id != "" {
+				return id, nil
+			}
+		}
+		if strings.TrimSpace(backendExecutionID) == "" {
+			return "", errors.New("plugin agentctl instance identity is missing")
+		}
+		return backendExecutionID, nil
 	default:
 		if strings.TrimSpace(backendExecutionID) == "" {
 			return "", errors.New("backend execution identity is missing")
@@ -61,7 +75,9 @@ func (m *Manager) captureAuthenticatedAgentSessionEvidence(ctx context.Context, 
 	if err := validateRemoteSessionAssociation(instance, association, expectedID); err != nil {
 		return err
 	}
-	instance.ProviderSessionID = association.NativeSessionID
+	if association.NativeSessionID != "" {
+		instance.ProviderSessionID = association.NativeSessionID
+	}
 	instance.agentSessionAssociation = association
 	return m.captureRemoteDeliveryEvidence(ctx, instance, association)
 }
@@ -71,12 +87,23 @@ func validateRemoteSessionAssociation(
 	association *agentctl.AgentSessionAssociation,
 	expectedID string,
 ) error {
-	if association == nil || association.AgentStatus != agentProcessStatusRunning ||
-		association.InstanceID != expectedID || association.SessionID != instance.SessionID ||
-		association.NativeSessionID == "" || association.IncarnationID == "" || association.HarnessGeneration == 0 {
+	if association == nil || association.InstanceID != expectedID || association.SessionID != instance.SessionID ||
+		association.IncarnationID == "" || association.HarnessGeneration == 0 {
 		return errors.New("authenticated remote session association does not match persisted owner")
 	}
-	if instance.ProviderSessionID != "" && instance.ProviderSessionID != association.NativeSessionID {
+	switch association.AgentStatus {
+	case agentProcessStatusRunning:
+		if association.NativeSessionID == "" {
+			return errors.New("authenticated running session has no native session")
+		}
+	case agentProcessStatusStopped:
+		if instance.RuntimeName != agentruntime.RuntimeRemoteDocker && instance.RuntimeName != agentruntime.RuntimePluginRemote {
+			return errors.New("authenticated stopped session is unsupported for this runtime")
+		}
+	default:
+		return errors.New("authenticated remote agent status is unsupported")
+	}
+	if instance.ProviderSessionID != "" && association.NativeSessionID != "" && instance.ProviderSessionID != association.NativeSessionID {
 		return errors.New("authenticated remote native session changed")
 	}
 	return nil
@@ -154,12 +181,12 @@ func (m *Manager) validateLegacyRemoteGeneration(
 		return fmt.Errorf("verify legacy remote harness generation: %w", err)
 	}
 	if generation == nil || generation.Generation <= 0 || uint64(generation.Generation) != association.HarnessGeneration ||
-		generation.NativeSessionID == "" || generation.NativeSessionID != association.NativeSessionID {
+		association.NativeSessionID != "" && generation.NativeSessionID != association.NativeSessionID {
 		return errors.New("legacy remote agent session does not match current SQL generation")
 	}
 	// Legacy recovery records have no stream descriptor to carry these pins.
 	// The association is retained on the recovery instance and applied to the
 	// reconstructed execution after this SQL-generation check succeeds.
-	instance.ProviderSessionID = association.NativeSessionID
+	instance.ProviderSessionID = generation.NativeSessionID
 	return nil
 }

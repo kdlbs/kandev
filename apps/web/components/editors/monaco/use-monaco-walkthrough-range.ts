@@ -22,6 +22,8 @@ import {
 } from "@/lib/walkthrough-editor-range";
 import { useIsWalkthroughOpenForTask } from "@/lib/walkthrough-open-state";
 
+import { getMonacoInstance } from "./monaco-init";
+
 export { getWalkthroughEditorRange } from "@/lib/walkthrough-editor-range";
 
 type UseMonacoWalkthroughRangeOpts = {
@@ -125,6 +127,37 @@ function useMonacoModelSnapshot(editor: monacoEditor.IStandaloneCodeEditor | nul
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+function revealWalkthroughRange(
+  editor: monacoEditor.IStandaloneCodeEditor,
+  range: WalkthroughEditorRange,
+): boolean {
+  const container = editor.getContainerDomNode();
+  const { height } = editor.getLayoutInfo();
+  if (!container.clientHeight || !container.clientWidth || height <= 0) return false;
+
+  const start = { lineNumber: range.startLine, column: 1 };
+  const end = { lineNumber: range.endLine, column: 1 };
+  const first = editor.getScrolledVisiblePosition(start);
+  const last = editor.getScrolledVisiblePosition(end);
+  if (!first || !last) return false;
+
+  const fits = last.top + last.height - first.top <= height;
+  editor.revealLinesInCenter(
+    range.startLine,
+    fits ? range.endLine : range.startLine,
+    getMonacoInstance()?.editor.ScrollType.Immediate,
+  );
+
+  const revealedStart = editor.getScrolledVisiblePosition(start);
+  const revealedEnd = fits ? editor.getScrolledVisiblePosition(end) : revealedStart;
+  return (
+    !!revealedStart &&
+    !!revealedEnd &&
+    revealedStart.top >= 0 &&
+    revealedEnd.top + revealedEnd.height <= height
+  );
+}
+
 function useMonacoWalkthroughDecorations(
   editor: monacoEditor.IStandaloneCodeEditor | null,
   range: WalkthroughEditorRange | null,
@@ -156,19 +189,31 @@ function useMonacoWalkthroughDecorations(
       return;
     }
 
-    const next = { editor, model: editor.getModel(), anchorKey, ...range };
-    const previous = revealedRef.current;
-    if (
-      previous?.editor === next.editor &&
-      previous.model === next.model &&
-      previous.anchorKey === next.anchorKey &&
-      previous.startLine === next.startLine &&
-      previous.endLine === next.endLine
-    ) {
-      return;
-    }
-    revealedRef.current = next;
-    editor.revealLinesInCenter(range.startLine, range.endLine);
+    const model = editor.getModel();
+    if (!model) return;
+    const next = { editor, model, anchorKey, ...range };
+    const reveal = () => {
+      if (editor.getModel() !== model) return;
+      const previous = revealedRef.current;
+      if (
+        previous?.editor === next.editor &&
+        previous.model === next.model &&
+        previous.anchorKey === next.anchorKey &&
+        previous.startLine === next.startLine &&
+        previous.endLine === next.endLine
+      ) {
+        return;
+      }
+      if (revealWalkthroughRange(editor, range)) revealedRef.current = next;
+    };
+
+    const layout = editor.onDidLayoutChange(reveal);
+    reveal();
+    const frame = requestAnimationFrame(reveal);
+    return () => {
+      cancelAnimationFrame(frame);
+      layout.dispose();
+    };
   }, [anchorKey, editor, modelSnapshot, range]);
 }
 

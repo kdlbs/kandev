@@ -93,3 +93,19 @@ describe("fetchAndOpenFile", () => {
     expect(toast).not.toHaveBeenCalled();
   });
 });
+
+it("opens an STL selection without reading bytes through the text API", async () => {
+  const open = vi.fn();
+  const toast = vi.fn();
+  await fetchAndOpenFile(SESSION_ID, "external-model.stl", open, toast, { repo: REPO });
+  expect(requestFileContentMock).not.toHaveBeenCalled();
+  expect(open).toHaveBeenCalledWith(
+    expect.objectContaining({
+      path: "external-model.stl",
+      repo: REPO,
+      previewOnly: true,
+      content: "",
+    }),
+  );
+  expect(toast).not.toHaveBeenCalled();
+});

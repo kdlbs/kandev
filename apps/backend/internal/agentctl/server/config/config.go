@@ -29,6 +29,8 @@ import (
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/mcpurl"
+	"github.com/kandev/kandev/internal/common/opencode"
 	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -275,6 +277,13 @@ type InstanceConfig struct {
 	// of accidentally configuring or starting the new instance's agent.
 	InstanceID string
 
+	// ScopedMCPRoutes binds native built-in MCP endpoints to this helper ID.
+	ScopedMCPRoutes bool
+
+	// NativeMCPRoutePrefix is the validated prefix shared by native routes and
+	// transports for this helper.
+	NativeMCPRoutePrefix string `json:"-"`
+
 	// Port is the HTTP server port for this instance
 	Port int
 
@@ -293,6 +302,7 @@ type InstanceConfig struct {
 
 	// AgentArgs is the parsed command (derived from AgentCommand)
 	AgentArgs             []string
+	OpenCodeRuntime       opencode.Runtime   `json:"opencode_runtime,omitzero"`
 	LaunchWrapper         launchwrapper.Spec `json:"launch_wrapper,omitzero"`
 	LaunchWrapperRequired bool               `json:"launch_wrapper_required,omitempty"`
 
@@ -755,6 +765,11 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) (*Ins
 	}
 
 	applyOverrides(cfg, overrides)
+	routePrefix, err := mcpurl.RoutePrefix(cfg.InstanceID, cfg.ScopedMCPRoutes)
+	if err != nil {
+		return nil, fmt.Errorf("invalid scoped MCP instance identity")
+	}
+	cfg.NativeMCPRoutePrefix = routePrefix
 	if cfg.McpProfile != nil && cfg.McpProfile.BuiltinPackages != nil && port <= 0 {
 		return nil, fmt.Errorf("built-in MCP packages require an instance port")
 	}
@@ -791,6 +806,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.InstanceID != "" {
 		cfg.InstanceID = overrides.InstanceID
 	}
+	cfg.ScopedMCPRoutes = overrides.ScopedMCPRoutes
 	if overrides.Protocol != "" {
 		cfg.Protocol = overrides.Protocol
 	}
@@ -915,6 +931,7 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
 	InstanceID                   string
+	ScopedMCPRoutes              bool
 	Protocol                     agent.Protocol
 	AgentCommand                 string
 	WorkDir                      string
@@ -1362,15 +1379,28 @@ func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfi
 }
 
 func injectKandevMcpServerAtHost(servers []McpServerConfig, port int, host string) []McpServerConfig {
+	result, _ := injectKandevMcpServerForInstance(servers, port, host, "", false)
+	return result
+}
+
+func injectKandevMcpServerForInstance(servers []McpServerConfig, port int, host, instanceID string, scoped bool) ([]McpServerConfig, error) {
+	sseURL, err := MCPServerURLForInstance(host, port, instanceID, scoped, "/sse")
+	if err != nil {
+		return nil, err
+	}
+	httpURL, err := MCPServerURLForInstance(host, port, instanceID, scoped, "/mcp")
+	if err != nil {
+		return nil, err
+	}
 	kandevMcpSse := McpServerConfig{
 		Name: kandevMcpServerName,
 		Type: "sse",
-		URL:  MCPServerURL(host, port, "/sse"),
+		URL:  sseURL,
 	}
 	kandevMcpHttp := McpServerConfig{
 		Name: kandevMcpServerName,
 		Type: "http",
-		URL:  MCPServerURL(host, port, "/mcp"),
+		URL:  httpURL,
 	}
 
 	// Filter out any existing kandev server and prepend the local ones
@@ -1381,5 +1411,5 @@ func injectKandevMcpServerAtHost(servers []McpServerConfig, port int, host strin
 			result = append(result, srv)
 		}
 	}
-	return result
+	return result, nil
 }

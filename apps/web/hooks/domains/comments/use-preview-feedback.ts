@@ -5,11 +5,12 @@ import {
   createTaskPreviewFeedback,
   deleteTaskPreviewFeedback,
   getTaskPreviewFeedback,
+  replaceTaskPreviewFeedbackScreenshot,
   updateTaskPreviewFeedback,
   type CreateTaskPreviewFeedbackInput,
 } from "@/lib/api/domains/preview-feedback-api";
 import type { AppState } from "@/lib/state/store";
-import type { TaskPreviewFeedbackSnapshot } from "@/lib/types/http";
+import type { PreviewCaptureRect, TaskPreviewFeedbackSnapshot } from "@/lib/types/http";
 import { generateUUID } from "@/lib/utils";
 
 type AppStore = ReturnType<typeof useAppStoreApi>;
@@ -111,6 +112,24 @@ function usePreviewFeedbackMutations(taskId: string | null | undefined, store: A
       ),
     [apply, taskId],
   );
+  const replaceScreenshot = useCallback(
+    (
+      id: string,
+      expectedVersion: number,
+      captureRect: PreviewCaptureRect,
+      screenshotAttachmentId: string,
+    ) =>
+      apply(() =>
+        replaceTaskPreviewFeedbackScreenshot({
+          taskId: taskId ?? "",
+          id,
+          expectedVersion,
+          captureRect,
+          screenshotAttachmentId,
+        }),
+      ),
+    [apply, taskId],
+  );
   const remove = useCallback(
     (id: string, expectedVersion: number) =>
       apply(() => deleteTaskPreviewFeedback({ taskId: taskId ?? "", id, expectedVersion })),
@@ -122,7 +141,7 @@ function usePreviewFeedbackMutations(taskId: string | null | undefined, store: A
     [apply, taskId],
   );
 
-  return { create, update, remove, clear, isMutating, mutationError };
+  return { create, update, replaceScreenshot, remove, clear, isMutating, mutationError };
 }
 
 /** Task-owned pending rendered-page feedback shared by every task surface. */
