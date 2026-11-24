@@ -47,6 +47,11 @@ test.describe("GitHub PR follow-up automation on mobile", () => {
     const reviewRequested = card.locator("label").filter({ hasText: "Review requested" });
     await expectInsideViewport(testPage, newCommits);
     await expectInsideViewport(testPage, reviewRequested);
+    const includeExisting = card
+      .locator("label")
+      .filter({ hasText: "Also run on pull requests already open" });
+    await expectInsideViewport(testPage, includeExisting);
+    await includeExisting.tap();
     await newCommits.tap();
     await reviewRequested.tap();
     const quiet = card.getByLabel(/Wait until pushes stop for/);
@@ -84,5 +89,10 @@ test.describe("GitHub PR follow-up automation on mobile", () => {
     await expect(
       testPage.getByTestId("trigger-card-github_pr").getByLabel(/Wait until pushes stop for/),
     ).toHaveValue("5");
+    await expect(
+      testPage
+        .getByTestId("trigger-card-github_pr")
+        .getByRole("checkbox", { name: "Also run on pull requests already open" }),
+    ).toBeChecked();
   });
 });

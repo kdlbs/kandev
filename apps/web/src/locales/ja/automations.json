@@ -137,6 +137,8 @@
   "prQuietPeriodHelp": "PRのヘッドがこの時間変わらなかった場合にのみ新しいコミットで発火。0にすると次のチェックで発火。",
   "prReviewersLabel": "レビュアー（カンマ区切り）",
   "prReviewersHelp": "ユーザーのログイン名またはorg/team名。空にすると任意のレビュアーに反応。",
+  "prIncludeExistingLabel": "すでにオープンのプルリクエストでも実行",
+  "prIncludeExistingHelp": "このトリガーの作成前からオープンだった一致するプルリクエストごとに1回実行します。オフの場合は、後からオープンされたプルリクエストだけが対象です。",
   "prTriggerRepositoryHelp": "PRトリガー、常にPR自身のリポジトリ使う。",
   "pushTriggerHelp": "コードが一致ブランチにプッシュされたとき発火",
   "recentRuns": "最近の実行",

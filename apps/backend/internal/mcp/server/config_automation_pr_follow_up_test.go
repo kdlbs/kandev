@@ -8,6 +8,7 @@ import (
 )
 
 // @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004.1
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.10
 func TestConfigAutomationAcceptsPerPRSettings(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{"id": "saved"}}
 	s := newTestServer(t, backend)
@@ -17,7 +18,7 @@ func TestConfigAutomationAcceptsPerPRSettings(t *testing.T) {
 		"pr_continuation_step_id": "review", "pr_merged_action": "archive", "pr_closed_action": "delete",
 		"triggers": []interface{}{map[string]interface{}{"type": "github_pr", "enabled": true, "config": map[string]interface{}{
 			"events": []interface{}{"opened", "new_commits", "review_requested"}, "quiet_period_minutes": float64(10),
-			"reviewers": []interface{}{"kandev-bot"},
+			"reviewers": []interface{}{"kandev-bot"}, "include_existing_prs": true,
 		}}},
 	}
 	result := callTool(t, s, "create_automation_kandev", args)

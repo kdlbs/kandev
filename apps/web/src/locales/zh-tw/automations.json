@@ -137,6 +137,8 @@
   "prQuietPeriodHelp": "只有當 PR 頭提交在這段時間內保持不變時，新提交才會觸發。設為 0 則在下次檢查時觸發。",
   "prReviewersLabel": "審查者（逗號分隔）",
   "prReviewersHelp": "使用者登入名或 org/team 名稱。留空則回應任何審查者。",
+  "prIncludeExistingLabel": "也對已開啟的提取要求執行",
+  "prIncludeExistingHelp": "對此觸發器建立前就已開啟的每個匹配提取要求執行一次。否則只對之後開啟的提取要求執行。",
   "prTriggerRepositoryHelp": "PR 觸發器始終使用 PR 自己的儲存庫。",
   "pushTriggerHelp": "程式碼推送到匹配的分支時觸發",
   "recentRuns": "最近執行記錄",

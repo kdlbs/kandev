@@ -79,6 +79,7 @@ export function GitHubPRConfig({ config, workspaceId, onUpdate }: GitHubPRConfig
   return (
     <div className="space-y-3">
       <EventsSection events={events} onToggle={toggleEvent} />
+      {events.includes("opened") && <IncludeExistingInput config={config} onUpdate={onUpdate} />}
       {events.includes("new_commits") && <QuietPeriodInput config={config} onUpdate={onUpdate} />}
       {events.includes("review_requested") && (
         <ReviewersInput config={config} onUpdate={onUpdate} />
@@ -133,6 +134,27 @@ type FieldProps = {
   config: Record<string, unknown>;
   onUpdate: (config: Record<string, unknown>) => void;
 };
+
+function IncludeExistingInput({ config, onUpdate }: FieldProps) {
+  const { t } = useTranslation();
+  const checked = (config.include_existing_prs as boolean) ?? false;
+  return (
+    <div className="space-y-1">
+      <label className="flex min-h-11 items-center gap-1.5 cursor-pointer sm:min-h-0">
+        <Checkbox
+          checked={checked}
+          onCheckedChange={(value) => onUpdate({ ...config, include_existing_prs: value === true })}
+          aria-describedby="github-pr-include-existing-help"
+          className="cursor-pointer"
+        />
+        <span className="text-sm">{t("automations:prIncludeExistingLabel")}</span>
+      </label>
+      <p id="github-pr-include-existing-help" className="text-xs text-muted-foreground">
+        {t("automations:prIncludeExistingHelp")}
+      </p>
+    </div>
+  );
+}
 
 function QuietPeriodInput({ config, onUpdate }: FieldProps) {
   const { t } = useTranslation();

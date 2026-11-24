@@ -10,10 +10,9 @@ owners:
 
 ## Overview
 
-A `github_pr` automation can start a review when a pull request opens. It
-cannot follow up on new pushes or review requests, and it leaves the review
-task behind when the pull request ends. A person must restart reviews and tidy
-up tasks by hand.
+A `github_pr` automation can start a review when a pull request opens, but
+cannot follow up on pushes or review requests, and leaves the task behind when
+the pull request ends.
 
 This capability adds two events to the `github_pr` trigger:
 
@@ -25,9 +24,8 @@ follow-up continues the task that handled the pull request earlier, can use its
 own prompt, and can move the task to a chosen workflow step. When the pull
 request is merged or closed, Kandev can archive or delete that task.
 
-The office system owns this contract because it owns automation trigger
-semantics, admission, continuation, and automation task lifecycle. The GitHub
-integration only supplies pull-request reads.
+The office system owns automation triggers, admission, continuation, and task
+lifecycle. The GitHub integration only supplies pull-request reads.
 
 Source: [issue #5464](https://github.com/kdlbs/kandev/issues/5464).
 
@@ -49,8 +47,8 @@ Source: [issue #5464](https://github.com/kdlbs/kandev/issues/5464).
   task per PR subject for an automation.
 - **PR task:** The task currently mapped to a PR subject under the per-PR
   policy.
-- **Busy PR task:** A PR task that has an open automation run, or whose
-  primary session is running or starting a turn.
+- **Busy PR task:** A PR task with an open automation run or a running or
+  starting session.
 - **Follow-up prompt:** The optional prompt used when a firing continues an
   existing PR task.
 - **Continuation step:** The optional workflow step that a visible PR task
@@ -62,9 +60,8 @@ Source: [issue #5464](https://github.com/kdlbs/kandev/issues/5464).
 
 ### REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001: Fire once for each new PR head
 
-**Intent:** Let an automation react to new commits on an open pull request
-exactly once for each settled head, without a burst of firings for pull
-requests that were already open.
+**Intent:** React once to each settled head of an open pull request, without a
+burst of firings for pull requests that were already open.
 
 **User story:** As a maintainer, I want an automation to fire when a
 contributor pushes to an open pull request, so that an automated reviewer can
@@ -75,8 +72,8 @@ review the new changes without manual restarts.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.1:** When a `github_pr` trigger's
   saved `events` list contains the exact value `opened`, `new_commits`, or
   `review_requested`, the system shall poll the trigger's explicit
-  repositories for open pull requests. A list without any of these values
-  shall produce no provider read, run, or dedup reservation.
+  repositories for open pull requests. Otherwise it shall make no provider
+  read, run, or dedup reservation.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.2:** When a trigger first sees an
   open pull request, the system shall record the baseline and shall not fire
   `new_commits` or `review_requested` for it. This also applies when either
@@ -97,25 +94,28 @@ review the new changes without manual restarts.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.6:** When any firing for a pull
   request is admitted, deduplicated, or skipped by the concurrency cap, the
   system shall store the pull request's current head and requested reviewers
-  as its observation and clear any quiet-period wait. When admission is
-  deferred or fails with an error, the observation shall stay unchanged so
-  that a later poll tries again.
+  as its observation and clear any quiet-period wait. A deferred or failed
+  admission shall leave the observation unchanged so a later poll retries.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.7:** The system shall fire at most
   one `github_pr` firing per pull request per poll. The precedence is
   `opened`, then `new_commits`, then `review_requested`. Transitions that the
   firing covers shall be stored as processed under AC-001.6.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.8:** When a pull request does not
   match the trigger's filters, the system shall not fire for it but shall
-  still store its current observation. A pull request that later matches
-  therefore fires only for changes made after that point.
+  still store its observation, so a later match fires only for later changes.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.9:** When a pull request is no
   longer open, the system shall delete its observation after a complete
   listing of the repository's open pull requests. A reopened pull request
   starts from a new baseline.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.10:** When `opened` is selected,
-  the existing once-per-PR firing and the dedup key
-  `pr:<owner>/<repo>#<number>` shall remain unchanged. Any combination of the
-  three events can be selected on one trigger.
+  the system shall fire it once per matching pull request, with dedup key
+  `pr:<owner>/<repo>#<number>`. By default it shall fire only for a pull
+  request created at or after the trigger's creation, and not for one whose
+  stored observation shows it was open before `opened` was selected. An
+  unknown creation time counts as new. When `include_existing_prs` is true,
+  every matching open pull request shall fire once. A poll shall not resubmit
+  an `opened` firing whose dedup key is held. Any combination of the three
+  events can be selected on one trigger.
 
 ### REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-002: Apply PR filters and expose PR context
 
@@ -171,6 +171,9 @@ automation editor on every viewport.
   every control in the section shall be reachable, readable, and operable
   without horizontal scrolling. Each checkbox shall have a touch target of at
   least 44 pixels on phone.
+- **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-003.6:** When **Opened** is selected,
+  the section shall show a localized **Also run on pull requests already
+  open** checkbox bound to `include_existing_prs`, cleared by default.
 
 ### REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004: Continue one task per pull request
 
@@ -184,11 +187,9 @@ earlier findings and conversation.
 
 #### Acceptance criteria
 
-- **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004.1:** When an automation is created
-  or edited through the API, the MCP configuration tools, or the editor, the
-  system shall accept `reuse_per_pr` as a continuation policy alongside
-  `new_task` and `reuse_thread`. The policy shall support the hidden and
-  normal-task target modes. The system shall reject it for the managed
+- **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004.1:** The API, MCP configuration
+  tools, and editor shall accept the `reuse_per_pr` continuation policy for
+  the hidden and normal-task targets, and reject it for the managed
   conversation target with a validation error.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004.2:** When a `github_pr` firing of a
   per-PR automation has no PR task, the system shall create a task for the
@@ -212,18 +213,17 @@ earlier findings and conversation.
   between admission and dispatch, the system shall mark the run failed with a
   reason that states that the task is busy. The system shall not create a
   second task for the PR subject.
-- **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004.7:** When a per-PR automation fires
-  without a PR subject, such as a manual run or a schedule, the system shall
-  create an isolated task as `new_task` does.
+- **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004.7:** A per-PR firing without a PR
+  subject, such as a manual run, shall create an isolated task as `new_task`
+  does.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004.8:** The `max_concurrent_runs`
   limit shall continue to apply to the whole automation under the per-PR
   policy. The policy shall not force a value.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004.9:** When a per-PR run is retried,
   the retry shall use the same PR-subject lookup and prompt selection as the
   original firing.
-- **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004.10:** When automations are exported
-  to YAML, a per-PR automation shall export `continuation_policy:
-  reuse_per_pr`.
+- **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004.10:** YAML export shall emit
+  `continuation_policy: reuse_per_pr`.
 
 ### REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-005: Move continued PR tasks to a chosen step
 
@@ -254,9 +254,8 @@ review again.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-005.5:** When a firing creates a new or
   replacement PR task, the system shall start it in the automation's
   configured start step, not the continuation step.
-- **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-005.6:** When automations are exported
-  to YAML, the continuation step shall export as
-  `workflow.continuation_step: <step name>`.
+- **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-005.6:** YAML export shall emit the
+  continuation step as `workflow.continuation_step: <step name>`.
 
 ### REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006: Configure per-PR continuation in the editor
 
@@ -378,5 +377,3 @@ reviews.
 - End-of-PR actions for mapped pull requests whose repository is no longer in
   any of the automation's `github_pr` triggers.
 - Running the continuation step's own auto-start prompt.
-- Changing the deduplication of `opened` firings or of skipped-run records for
-  `opened`.

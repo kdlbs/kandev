@@ -43,7 +43,8 @@ Adjacent contracts used but not owned:
 - The task service owns archive and delete. This design calls the existing
   lifecycle methods.
 - The [settings event-selection design](automations-settings-02.md#github-pr-event-selection)
-  owns the `opened` eligibility rule. This design widens it.
+  owns which event selections poll. This design owns which open PRs `opened`
+  fires for (AC-001.10).
 - The [continuity requirements](../requirements/automation-continuity.md) own
   `new_task`, `reuse_thread`, exact run binding, and coordinator authority.
   The per-PR policy reuses their binding and dispatch path.
@@ -111,12 +112,14 @@ Filters, in order:
 
 ## Trigger config, data, and placeholders
 
-`GitHubPRTriggerConfig` gains two fields:
+`GitHubPRTriggerConfig` gains three fields:
 
 - `QuietPeriodMinutes int` (`quiet_period_minutes`). Validated to 0–1440 in
   `AddTrigger` and `UpdateTrigger`.
 - `Reviewers []string` (`reviewers`). Logins or `org/team-slug`, compared
   without case.
+- `IncludeExistingPRs bool` (`include_existing_prs`). Off by default; when
+  set, `opened` also fires for PRs that were open before the trigger existed.
 
 The `Events` comment is updated to list `opened`, `new_commits`, and
 `review_requested`. The registry default stays `{"events":["opened"]}`.
@@ -161,7 +164,13 @@ The evaluator computes candidates for each listed PR:
 - **`review_requested` candidate:** the event is selected and the set of
   matching reviewers in the current requested set, minus `row.requested`, is
   not empty.
-- **`opened` candidate:** the existing rule.
+- **`opened` candidate:** the event is selected, the PR matches the filters,
+  no run holds `pr:o/r#n`, and the PR is eligible. With
+  `include_existing_prs`, every PR is eligible. Otherwise a PR is eligible
+  when its row, if any, tracks `opened`, and its `created_at` is zero or not
+  before the trigger's `created_at`. A row that does not track `opened` means
+  the PR was open before `opened` was selected. `trigger.update` keeps the
+  trigger row, so editing a trigger does not move the cutoff.
 
 The evaluator chooses at most one ready candidate per PR, in the order
 `opened`, `new_commits`, `review_requested` (AC-001.7). It does not fire
@@ -192,8 +201,8 @@ this automation's run dedup keys for the PR. A reopened PR, a recreated
 trigger, or a second trigger with another reviewer filter therefore never
 reuses a key that an earlier request holds.
 
-Each row also stores `tracked_events`, the follow-up events the trigger
-selected when the row was written. When an event is added to the trigger, the
+Each row also stores `tracked_events`, the events the trigger selected when
+the row was written, including `opened`. When an event is added to the trigger, the
 next poll rebaselines that event's state (head or requested set) instead of
 firing for changes made before it was selected.
 
@@ -216,9 +225,10 @@ for each enabled github_pr trigger
 
 Split `chooseCandidate`, `updateObservation`, and `runEndOfPRActions` into
 separate functions, in a new `evaluator_pr_observation.go` if needed, so the
-Go complexity limits hold. `opened` still calls `FireTrigger` on every poll for
-each matching PR, so its existing dedup and skipped-run behavior is
-unchanged.
+Go complexity limits hold. Before `opened` calls `FireTrigger`, the evaluator
+checks `HasRunWithDedupKey` for `pr:o/r#n`. A held key counts as a duplicate
+without calling admission, so steady-state polling writes no duplicate-skip
+audit row and logs no unique-key warning.
 
 ## Per-PR continuation policy
 
@@ -376,7 +386,9 @@ control uses an existing primitive.
   `review_requested`. When `new_commits` is checked, an `Input type=number`
   (min 0, max 1440) appears for `quiet_period_minutes`. When
   `review_requested` is checked, an `Input` appears for `reviewers` and is
-  parsed on blur like the authors field.
+  parsed on blur like the authors field. When `opened` is checked, an
+  **Also run on pull requests already open** checkbox binds
+  `include_existing_prs`.
 - The continuation section renders the third `RadioGroupItem`
   (`reuse_per_pr`) when the form has a `github_pr` trigger or the saved policy
   is `reuse_per_pr`. Selecting it does not change `maxConcurrentRuns`.

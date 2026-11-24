@@ -11,8 +11,10 @@ requirements:
   - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-007
   - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-008
   - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-009
+  - REQ-OFFICE-AUTOMATION-RUNS-001
 system_design:
   - ../../specs/office/system-design/automations-pr-follow-up.md
+  - ../../specs/office/system-design/automation-run-recorded-events.md
 legacy_specs: []
 ---
 
@@ -213,6 +215,8 @@ Firing behavior has no live GitHub in E2E. Integration tests prove it with
 - [x] [Task 03: Continue one task per PR](task-03-per-pr-continuation.md)
 - [x] [Task 04: Move continued PR tasks to a step](task-04-continuation-step.md)
 - [x] [Task 05: Archive or delete PR tasks when the PR ends](task-05-end-of-pr-actions.md)
+- [x] [Task 06: Fire `opened` only for new pull requests](task-06-opened-new-prs-only.md)
+- [x] [Task 07: Show recorded runs without a reload](task-07-run-recorded-events.md)
 
 ## Verification results
 
@@ -262,6 +266,19 @@ Not changed:
 - The window between the busy check and an end-of-PR delete, if a person
   starts a turn at that instant. The delete uses the lifecycle-aware task
   deletion, which stops running sessions.
+
+## Test-phase follow-ups
+
+Manual testing on an isolated instance found three gaps, all fixed in tasks 06
+and 07:
+
+- Saving a trigger started a task for every pull request already open. `opened`
+  now fires only for pull requests created after the trigger, unless
+  **Also run on pull requests already open** is checked.
+- Every poll resubmitted each held `opened` key and logged a unique-key warning.
+  The evaluator now checks the key before admission.
+- The Automations and history pages did not show runs recorded while nothing
+  was open. A workspace-scoped `automation.run.created` event refreshes them.
 
 ## Risks
 

@@ -137,6 +137,8 @@
   "prQuietPeriodHelp": "PR 헤드가 이 시간 동안 바뀌지 않아야 새 커밋으로 실행됩니다. 0이면 다음 확인 때 실행됩니다.",
   "prReviewersLabel": "리뷰어(쉼표로 구분)",
   "prReviewersHelp": "사용자 로그인 또는 org/team 이름입니다. 비워 두면 모든 리뷰어에 반응합니다.",
+  "prIncludeExistingLabel": "이미 열려 있는 풀 리퀘스트에도 실행",
+  "prIncludeExistingHelp": "이 트리거를 만들기 전부터 열려 있던 일치하는 풀 리퀘스트마다 한 번 실행합니다. 끄면 나중에 열린 풀 리퀘스트만 실행됩니다.",
   "prTriggerRepositoryHelp": "PR 트리거는 항상 PR 자체의 리포지토리를 사용합니다.",
   "pushTriggerHelp": "일치하는 브랜치에 코드가 푸시될 때 트리거됩니다",
   "recentRuns": "최근 실행",

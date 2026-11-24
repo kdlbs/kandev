@@ -45,7 +45,7 @@ async function saveAndReload(page: Page, automations: AutomationsPage) {
 }
 
 test.describe("automations — GitHub PR follow-up", () => {
-  test("saves New commits, quiet period, Review requested, and reviewers", async ({
+  test("saves New commits, quiet period, Review requested, reviewers, and already-open PRs", async ({
     testPage,
     seedData,
     apiClient,
@@ -69,6 +69,11 @@ test.describe("automations — GitHub PR follow-up", () => {
     const reviewers = card.getByLabel(/Reviewers/);
     await reviewers.fill("kandev-bot, acme/reviewers");
     await reviewers.blur();
+    const includeExisting = card.getByRole("checkbox", {
+      name: "Also run on pull requests already open",
+    });
+    await expect(includeExisting).not.toBeChecked();
+    await includeExisting.click();
 
     await saveAndReload(testPage, automations);
 
@@ -81,6 +86,9 @@ test.describe("automations — GitHub PR follow-up", () => {
     await expect(reopened.getByRole("checkbox", { name: "Review requested" })).toBeChecked();
     await expect(reopened.getByLabel(/Wait until pushes stop for/)).toHaveValue("10");
     await expect(reopened.getByLabel(/Reviewers/)).toHaveValue("kandev-bot, acme/reviewers");
+    await expect(
+      reopened.getByRole("checkbox", { name: "Also run on pull requests already open" }),
+    ).toBeChecked();
   });
 
   test("saves per-PR continuation, continuation step, and end-of-PR actions", async ({

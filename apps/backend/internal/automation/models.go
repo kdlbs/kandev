@@ -494,6 +494,9 @@ type GitHubPRTriggerConfig struct {
 	// Reviewers filters review_requested by user login or org/team-slug,
 	// compared without case. Empty matches any requested reviewer.
 	Reviewers []string `json:"reviewers,omitempty"`
+	// IncludeExistingPRs lets opened fire for pull requests created before
+	// the trigger. Without it, opened fires only for newer pull requests.
+	IncludeExistingPRs bool `json:"include_existing_prs,omitempty"`
 }
 
 // GitHubPushTriggerConfig filters push-to-branch events.

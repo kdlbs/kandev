@@ -24,6 +24,8 @@ type followUpPR struct {
 	Labels    []string
 	Reviewers []string
 	Teams     []string
+	// CreatedAt is omitted from the listing when zero.
+	CreatedAt time.Time
 }
 
 // followUpTransport serves GET /repos/{owner}/{repo}/pulls from a mutable
@@ -104,13 +106,17 @@ func followUpPRJSON(owner, repo string, pr followUpPR) map[string]any {
 	for _, slug := range pr.Teams {
 		teams = append(teams, map[string]string{"slug": slug})
 	}
-	return map[string]any{
+	item := map[string]any{
 		"number": pr.Number, "title": fmt.Sprintf("PR %d", pr.Number), "state": "open", "draft": pr.Draft,
 		"html_url": fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, repo, pr.Number),
 		"head":     map[string]string{"ref": "feature", "sha": pr.Head},
 		"base":     map[string]string{"ref": base}, "user": map[string]string{"login": author},
 		"labels": labels, "requested_reviewers": reviewers, "requested_teams": teams,
 	}
+	if !pr.CreatedAt.IsZero() {
+		item["created_at"] = pr.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	return item
 }
 
 type prFollowUpFixture struct {

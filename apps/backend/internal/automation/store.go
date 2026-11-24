@@ -27,6 +27,8 @@ type Store struct {
 	db                   *sqlx.DB // writer
 	ro                   *sqlx.DB // reader
 	launchIdentityGuards bool
+	// runRecorded, when set, is called after a run row insert commits.
+	runRecorded func(ctx context.Context, automationID, runID string, status RunStatus)
 }
 
 // NewStore creates a new automation store and initializes the schema.
@@ -1779,7 +1781,11 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 		r.RetryLaunchConfigSnapshot, r.RetryLaunchConfigVersion, r.RetryResolvedPrompt,
 		r.RetryResolvedTitle, r.RetryResolvedTriggerAt, r.RetryContinuationSnapshot,
 		r.AutomationRevision, r.TriggerRevision, r.CreatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	s.notifyRunRecorded(ctx, r.AutomationID, r.ID, r.Status)
+	return nil
 }
 
 // AdoptTriggeredRun upgrades the admission row for callers that still report

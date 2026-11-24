@@ -1,4 +1,18 @@
 import type { BuiltinMCPPackage, BuiltinMCPDescriptor } from "./builtin-mcp";
+import type { BackendMessage } from "./backend-message";
+
+/** Workspace-scoped notice that a run row was recorded. Identifiers only. */
+export type AutomationRunCreatedPayload = {
+  workspace_id: string;
+  automation_id: string;
+  run_id: string;
+  status: string;
+};
+
+export type AutomationBackendMessageMap = {
+  "automation.run.created": BackendMessage<"automation.run.created", AutomationRunCreatedPayload>;
+};
+
 export type AutomationMCPSelection = {
   builtin_packages: BuiltinMCPPackage[];
   definition_ids: string[];

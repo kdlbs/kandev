@@ -152,3 +152,21 @@ describe("GitHub PR reviewer filter", () => {
     });
   });
 });
+
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-003.6
+describe("GitHub PR already-open pull requests", () => {
+  const includeLabel = /Also run on pull requests already open/;
+
+  it("is shown only when Opened is selected and saves include_existing_prs", () => {
+    renderConfig({ events: ["new_commits"] });
+    expect(screen.queryByRole("checkbox", { name: includeLabel })).toBeNull();
+    cleanup();
+
+    const config = { events: ["opened"] };
+    const { onUpdate } = renderConfig(config);
+    const checkbox = screen.getByRole("checkbox", { name: includeLabel });
+    expect(checkbox.getAttribute(checkedAttribute)).toBe("false");
+    fireEvent.click(checkbox);
+    expect(onUpdate).toHaveBeenLastCalledWith({ ...config, include_existing_prs: true });
+  });
+});

@@ -279,11 +279,15 @@ type Service struct {
 
 // NewService creates a new automation service.
 func NewService(store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
-	return &Service{
+	s := &Service{
 		store:    store,
 		eventBus: eventBus,
 		logger:   log,
 	}
+	if store != nil && eventBus != nil {
+		store.runRecorded = s.publishRunRecorded
+	}
+	return s
 }
 
 // Store returns the underlying store (for scheduler/poller access).

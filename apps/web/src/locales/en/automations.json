@@ -137,6 +137,8 @@
   "prQuietPeriodHelp": "New commits fire only after the PR head stays unchanged this long. Use 0 to fire on the next check.",
   "prReviewersLabel": "Reviewers (comma-separated)",
   "prReviewersHelp": "User logins or org/team names. Leave empty to react to any reviewer.",
+  "prIncludeExistingLabel": "Also run on pull requests already open",
+  "prIncludeExistingHelp": "Runs once for each matching pull request that was open before this trigger was created. Otherwise only pull requests opened later run.",
   "prTriggerRepositoryHelp": "PR triggers always use the PR's own repository.",
   "pushTriggerHelp": "Triggers when code is pushed to matching branches",
   "recentRuns": "Recent runs",

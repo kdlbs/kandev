@@ -137,6 +137,8 @@
   "prQuietPeriodHelp": "只有当 PR 头提交在这段时间内保持不变时，新提交才会触发。设为 0 则在下次检查时触发。",
   "prReviewersLabel": "审查者（逗号分隔）",
   "prReviewersHelp": "用户登录名或 org/team 名称。留空则响应任何审查者。",
+  "prIncludeExistingLabel": "也对已打开的拉取请求运行",
+  "prIncludeExistingHelp": "对此触发器创建前就已打开的每个匹配拉取请求运行一次。否则只对之后打开的拉取请求运行。",
   "prTriggerRepositoryHelp": "PR 触发器始终使用 PR 自己的仓库。",
   "pushTriggerHelp": "代码推送到匹配的分支时触发",
   "recentRuns": "最近运行记录",

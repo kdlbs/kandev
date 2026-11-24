@@ -136,6 +136,8 @@
   "prQuietPeriodHelp": "Os novos commits só disparam depois de o topo do PR ficar inalterado durante este tempo. Use 0 para disparar na próxima verificação.",
   "prReviewersLabel": "Revisores (separados por vírgulas)",
   "prReviewersHelp": "Logins de utilizadores ou nomes org/equipa. Deixe vazio para reagir a qualquer revisor.",
+  "prIncludeExistingLabel": "Executar também em pull requests já abertos",
+  "prIncludeExistingHelp": "Executa uma vez para cada pull request correspondente que já estava aberto antes de este acionador ser criado. Caso contrário, só são executados os pull requests abertos depois.",
   "prTriggerRepositoryHelp": "Os acionadores de PR usam sempre o repositório do próprio PR.",
   "pushTriggerHelp": "Aciona quando é feito push de código para branches correspondentes",
   "recentRuns": "Execuções recentes",

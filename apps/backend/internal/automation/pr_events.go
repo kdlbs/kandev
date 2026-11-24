@@ -48,9 +48,12 @@ func (s prEventSelection) any() bool { return s.opened || s.newCommits || s.revi
 // observes reports whether the trigger needs stored PR observations.
 func (s prEventSelection) observes() bool { return s.newCommits || s.reviewRequested }
 
-// tracked lists the selected follow-up events in a stable order.
+// tracked lists the selected events in a stable order.
 func (s prEventSelection) tracked() string {
 	var events []string
+	if s.opened {
+		events = append(events, PREventOpened)
+	}
 	if s.newCommits {
 		events = append(events, PREventNewCommits)
 	}
@@ -60,10 +63,33 @@ func (s prEventSelection) tracked() string {
 	return strings.Join(events, ",")
 }
 
+// trackedFor is tracked for an existing observation. A pull request whose
+// observation lacks opened was open before opened was selected, so opened
+// stays untracked for it until the observation is pruned.
+func (s prEventSelection) trackedFor(obs *PRObservation) string {
+	if s.opened && !obs.tracks(PREventOpened) {
+		s.opened = false
+	}
+	return s.tracked()
+}
+
 // tracks reports whether an observation was recorded for event. Rows written
 // before events were tracked count as tracking every event.
 func (o *PRObservation) tracks(event string) bool {
 	return o.TrackedEvents == "" || slices.Contains(strings.Split(o.TrackedEvents, ","), event)
+}
+
+// openedEligible reports whether opened may fire for pr. By default only a
+// pull request created at or after the trigger qualifies, and one observed
+// before opened was selected does not; an unknown creation time counts as new.
+func openedEligible(t *AutomationTrigger, cfg *GitHubPRTriggerConfig, pr *github.PR, obs *PRObservation) bool {
+	if cfg.IncludeExistingPRs {
+		return true
+	}
+	if obs != nil && !obs.tracks(PREventOpened) {
+		return false
+	}
+	return pr.CreatedAt.IsZero() || !pr.CreatedAt.Before(t.CreatedAt)
 }
 
 // validateGitHubPRConfig checks only the fields this feature owns, so a legacy
@@ -216,7 +242,7 @@ func choosePRFollowUp(
 	if sel.reviewRequested && !obs.tracks(PREventReviewRequested) {
 		next.Requested = current
 	}
-	next.TrackedEvents = sel.tracked()
+	next.TrackedEvents = sel.trackedFor(obs)
 	if !matched {
 		next.HeadSHA, next.Requested = pr.HeadSHA, current
 		next.PendingHeadSHA, next.PendingSince = "", nil
@@ -268,7 +294,7 @@ func chooseNewCommits(
 // deduplicated, or skipped by the concurrency cap.
 func processedObservation(obs *PRObservation, pr *github.PR, firing *prFiring, sel prEventSelection) *PRObservation {
 	next := cloneObservation(obs)
-	next.TrackedEvents = sel.tracked()
+	next.TrackedEvents = sel.trackedFor(obs)
 	next.HeadSHA, next.Requested = pr.HeadSHA, requestedReviewerKeys(pr)
 	next.PendingHeadSHA, next.PendingSince = "", nil
 	if firing.event == PREventReviewRequested {

@@ -59,7 +59,7 @@ func (e *GitHubEvaluator) evaluatePR(
 	sel prEventSelection, repo github.RepoFilter, pr *github.PR, obs *PRObservation,
 ) {
 	matched := prMatchesFilters(pr, cfg)
-	if sel.opened && matched && e.handleOpened(ctx, t, sel, repo, pr, obs) {
+	if sel.opened && matched && openedEligible(t, cfg, pr, obs) && e.handleOpened(ctx, t, sel, repo, pr, obs) {
 		return
 	}
 	if !sel.observes() {
@@ -88,13 +88,22 @@ func (e *GitHubEvaluator) evaluatePR(
 	}
 }
 
-// handleOpened fires opened for a matching PR. It reports true when this
-// poll's handling of the PR is complete: the firing was not a duplicate, or it
-// failed for a PR that already has an observation.
+// handleOpened fires opened for a matching PR whose key is not held yet. It
+// reports true when this poll's handling of the PR is complete: the firing was
+// not a duplicate, or it failed for a PR that already has an observation.
 func (e *GitHubEvaluator) handleOpened(
 	ctx context.Context, t *AutomationTrigger, sel prEventSelection, repo github.RepoFilter, pr *github.PR, obs *PRObservation,
 ) bool {
 	firing := &prFiring{event: PREventOpened, dedupKey: fmt.Sprintf("pr:%s/%s#%d", repo.Owner, repo.Name, pr.Number)}
+	held, err := e.svc.Store().HasRunWithDedupKey(ctx, t.AutomationID, firing.dedupKey)
+	if err != nil {
+		e.logger.Warn("failed to check opened dedup key; retrying next poll",
+			zap.String("trigger_id", t.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
+		return obs != nil
+	}
+	if held {
+		return false
+	}
 	result, err := e.firePRTrigger(ctx, t, pr, repo.Owner, repo.Name, firing)
 	if err == nil && !result.Duplicate {
 		e.recordOpenedOutcome(ctx, t, sel, repo, pr, obs, firing, result)
