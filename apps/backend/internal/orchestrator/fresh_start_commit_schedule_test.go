@@ -140,6 +140,7 @@ func TestFreshStartCommitFirstGenerationCompatibility(t *testing.T) {
 	require.EqualValues(t, 1, current.Generation)
 	require.Equal(t, "native_started", current.CreationReason)
 	require.Equal(t, event.ACPSessionID, current.NativeSessionID)
+	require.Equal(t, event.AdapterVersion, current.AdapterVersion)
 }
 
 func TestFreshStartCommitStaleNativeAfterSuccessor(t *testing.T) {

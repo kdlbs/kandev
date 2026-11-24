@@ -711,7 +711,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
 		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil, a.copilotNativeSessionEvents),
-		ClientInfo:         clientInfoForAgent(a.agentID),
+		ClientInfo:         clientInfoForAgent(a.agentID, a.cfg.AuthPolicy),
 	})
 	if err != nil {
 		span.RecordError(err)

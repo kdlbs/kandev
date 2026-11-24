@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -222,6 +225,52 @@ func TestCopilotPluginProfileProbeFailureReason(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAntigravitySettingsRejectsCapabilitiesFromPreviousRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX CLI script")
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	binDir := t.TempDir()
+	cliPath := filepath.Join(binDir, "agy")
+	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.5.15'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	controller, _, ctx, _, _ := newProviderTestController(t)
+	stale := hostutility.AgentCapabilities{
+		RuntimeVariant: "standalone",
+		Status:         hostutility.StatusOK,
+		Models:         []hostutility.Model{{ID: "standalone-only", Name: "Standalone only"}},
+	}
+	utility := &recordingProfileDiscoveryUtility{
+		agentCapabilities: stale,
+		capabilityResult:  &hostutility.ProfileCapabilityResult{Capabilities: stale},
+	}
+	controller.hostUtility = utility
+	envVars := []dto.ProfileEnvVarDTO{}
+	cliFlags := []dto.CLIFlagDTO{}
+	commandPrefix := ""
+	response, err := controller.FetchProfileDynamicModels(ctx, agents.AntigravityACPAgentID, dto.ProfileCapabilityRequest{
+		AuthorizationScope: "user-antigravity",
+		LaunchSettings: &dto.ProfileLaunchSettingsRequest{
+			EnvVars: &envVars, CLIFlags: &cliFlags, CommandPrefix: &commandPrefix,
+		},
+	})
+	if err != nil {
+		t.Fatalf("FetchProfileDynamicModels: %v", err)
+	}
+	if response.RuntimeVariant != "cli" || response.Status != string(hostutility.StatusProbing) || len(response.Models) != 0 {
+		t.Fatalf("profile snapshot = variant %q, status %q, models %+v; want cli/probing/empty", response.RuntimeVariant, response.Status, response.Models)
+	}
+
+	modelConfig := controller.buildModelConfigFromHostUtility(ctx, agents.AntigravityACPAgentID)
+	if modelConfig.RuntimeVariant != "cli" || modelConfig.Status != string(hostutility.StatusProbing) || len(modelConfig.AvailableModels) != 0 {
+		t.Fatalf("agent snapshot = variant %q, status %q, models %+v; want cli/probing/empty", modelConfig.RuntimeVariant, modelConfig.Status, modelConfig.AvailableModels)
 	}
 }
 

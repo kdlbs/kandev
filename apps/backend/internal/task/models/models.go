@@ -827,6 +827,39 @@ const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
 // reconnection. It is display metadata and is not replayed to the provider.
 const SessionMetaKeyACPModelState = "acp_model_state"
 
+// SessionMetaKeyACPAdapterIdentity keeps runtime provenance attached to the
+// current native ACP session when a legacy session has no generation row.
+const SessionMetaKeyACPAdapterIdentity = "acp_adapter_identity"
+
+// ACPAdapterIdentity binds a tagged adapter version to the native session ID
+// it describes. The ID check prevents stale provenance from selecting a
+// runtime after the provider conversation changes.
+type ACPAdapterIdentity struct {
+	NativeSessionID string `json:"native_session_id"`
+	AdapterVersion  string `json:"adapter_version"`
+}
+
+// ACPAdapterVersionForNativeSession reads provenance only when it belongs to
+// the requested native conversation.
+func ACPAdapterVersionForNativeSession(metadata map[string]interface{}, nativeSessionID string) string {
+	if nativeSessionID == "" || metadata == nil {
+		return ""
+	}
+	raw, ok := metadata[SessionMetaKeyACPAdapterIdentity]
+	if !ok || raw == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return ""
+	}
+	var identity ACPAdapterIdentity
+	if err := json.Unmarshal(encoded, &identity); err != nil || identity.NativeSessionID != nativeSessionID {
+		return ""
+	}
+	return identity.AdapterVersion
+}
+
 // SessionMetaKeyMCPAttachmentState records bounded, safe evidence about MCP
 // attachment for this task session and its immediate prior attempts.
 const SessionMetaKeyMCPAttachmentState = "mcp_attachment_state"
@@ -2688,6 +2721,9 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		"updated_at":                     s.UpdatedAt,
 		"admitted_execution_grade":       s.AdmittedExecutionGrade,
 		"admitted_execution_grade_known": s.AdmittedExecutionGradeKnown,
+	}
+	if adapterVersion := ACPAdapterVersionForNativeSession(s.Metadata, s.DownstreamACPSessionID); adapterVersion != "" {
+		result["runtime_adapter_version"] = adapterVersion
 	}
 	if s.RouteGeneration > 0 {
 		result["route_generation"] = s.RouteGeneration

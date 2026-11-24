@@ -58,7 +58,9 @@ Hermes launches with `hermes acp`. Install the required `hermes` executable from
 
 Goose launches with `goose acp`. Its **Settings > Agents** card runs only the official `download_cli.sh` installer. Homebrew (`block-goose-cli`) and pip (`pip install goose-ai`) are manual alternatives. Configure your model provider with `goose configure`. Goose currently supports task and workspace sessions.
 
-Antigravity has no automated install: Google distributes `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows) as a signed archive through the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp) rather than npm, so extract both files into one directory and add it to PATH yourself. Kandev fails discovery closed when the harness sibling is missing or not executable, so a partial extraction reports as not installed rather than as a broken session.
+For local and worktree executors, Kandev selects a compatible `agy` CLI when it is available. The CLI must support ACP through `agy acp` (version 1.5.0 or later). Google owns CLI installation and updates; use the [Antigravity CLI setup guide](https://antigravity.google/docs/cli). The CLI uses its own Google sign-in. In **Settings > Agents**, choose **Sign in** to run `agy acp --login` on the Kandev host. This sign-in is separate from the standalone server's credentials.
+
+When a compatible CLI is unavailable, Kandev uses the standalone ACP server. The **Settings > Agents > Browse** install action provisions the pinned `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows). Both files must be executable and stay in the same directory. The standalone server has its own Google sign-in and credential store. Its consent flow opens a browser on the Kandev host. Remote and container executors use their own standalone runtime and sign-in.
 
 ## Codex app-server (experimental)
 

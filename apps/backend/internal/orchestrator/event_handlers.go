@@ -4,6 +4,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -72,7 +73,17 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 // SQL revalidates execution ownership atomically with the predecessor CAS.
 // Explicit context continuation owns its generation CAS separately.
 func (s *Service) persistInitialHarnessGeneration(ctx context.Context, data watcher.ACPSessionEventData, tokenAccepted bool) {
-	if !tokenAccepted || data.DeliveryHarnessGeneration == 0 || s.repo == nil {
+	if !tokenAccepted || s.repo == nil {
+		return
+	}
+	if strings.HasPrefix(data.AdapterVersion, "antigravity-") {
+		if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyACPAdapterIdentity,
+			models.ACPAdapterIdentity{NativeSessionID: data.ACPSessionID, AdapterVersion: data.AdapterVersion}); err != nil {
+			s.logger.Warn("failed to persist native ACP runtime identity",
+				zap.String("session_id", data.SessionID), zap.Error(err))
+		}
+	}
+	if data.DeliveryHarnessGeneration == 0 {
 		return
 	}
 	store, ok := s.repo.(sessionContinuityStore)
@@ -113,6 +124,7 @@ func (s *Service) persistFirstHarnessGeneration(
 		IncarnationID:     incarnationID,
 		Generation:        int64(data.DeliveryHarnessGeneration),
 		NativeSessionID:   data.ACPSessionID,
+		AdapterVersion:    data.AdapterVersion,
 		AgentType:         session.AgentProfileID,
 		OriginalWorkspace: session.WorkspacePath,
 		CurrentWorkspace:  session.WorkspacePath,
@@ -173,6 +185,7 @@ func (s *Service) commitReplacementHarnessGeneration(
 		Generation:            current.Generation + 1,
 		PredecessorGeneration: current.Generation,
 		NativeSessionID:       data.ACPSessionID,
+		AdapterVersion:        data.AdapterVersion,
 		AgentType:             session.AgentProfileID,
 		OriginalWorkspace:     session.WorkspacePath,
 		CurrentWorkspace:      session.WorkspacePath,

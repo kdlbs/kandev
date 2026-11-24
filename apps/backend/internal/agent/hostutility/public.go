@@ -97,7 +97,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			Protocol: cfg.Protocol,
 			Command:  command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, LaunchWrapper: launchwrapper.Profile(prefix),
-			ProviderGatewayAuth: gatewayAuth, AuthPolicy: hostUtilityAuthPolicy(ia), OperatorDefined: cfg.OperatorDefined,
+			ProviderGatewayAuth: gatewayAuth, AuthPolicy: hostUtilityAuthPolicy(ia, command), OperatorDefined: cfg.OperatorDefined,
 		},
 	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
@@ -298,6 +298,22 @@ func (m *Manager) RefreshWithCommand(
 	return caps, nil
 }
 
+func (m *Manager) probeWithLocalRuntime(
+	ctx context.Context,
+	agentType string,
+	selection agents.LocalRuntimeSelection,
+) (AgentCapabilities, error) {
+	if selection.Command.IsEmpty() {
+		return AgentCapabilities{}, errors.New("local runtime command is empty")
+	}
+	m.invalidateModelConfigCache(agentType)
+	inst, ia, err := m.getInstance(ctx, agentType)
+	if err != nil {
+		return AgentCapabilities{}, err
+	}
+	return m.probeWithOverrides(ctx, inst, ia, true, selection.Command, "", selection.Env, nil), nil
+}
+
 // ProbeWithCommand runs a trusted command override without changing the live
 // capability cache. Runtime activation uses this boundary before persistence.
 func (m *Manager) ProbeWithCommand(
@@ -454,7 +470,7 @@ func (m *Manager) ExecutePromptWithMCP(
 			WorkDir:         inst.workDir,
 			Env:             mergeInferenceEnv(agents.RuntimeEnvFor(ia), localEnv),
 			StripEnv:        agents.StripEnvFor(ia),
-			AuthPolicy:      hostUtilityAuthPolicy(ia),
+			AuthPolicy:      hostUtilityAuthPolicy(ia, command),
 			OperatorDefined: cfg.OperatorDefined,
 		},
 		MCPServers: mcpServers,

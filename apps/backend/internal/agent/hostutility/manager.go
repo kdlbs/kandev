@@ -991,7 +991,9 @@ func (m *Manager) probeWithOverrides(
 	}
 	resp, resolvedCommand, err := m.probeManagedRuntime(probeCtx, inst, ia, command, req)
 	if err != nil {
-		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
+		caps := probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
+		stampConfiguredRuntimeVersion(&caps, ia, command)
+		return caps
 	}
 	caps := capabilitiesFromProbe(inst.agentType, resp, time.Now())
 	stampConfiguredRuntimeVersion(&caps, ia, resolvedCommand)
@@ -1298,7 +1300,13 @@ func capabilitiesFromProbe(agentType string, resp *agentctlutil.ProbeResponse, n
 }
 
 func stampConfiguredRuntimeVersion(caps *AgentCapabilities, ia agents.InferenceAgent, command agents.Command) {
-	if caps == nil || caps.RuntimeInfo == nil {
+	if caps == nil {
+		return
+	}
+	if registered, ok := ia.(agents.Agent); ok && acpcompat.IsAntigravity(registered.ID()) {
+		caps.RuntimeVariant = acpcompat.AntigravityRuntimeForCommand(command.Args())
+	}
+	if caps.RuntimeInfo == nil {
 		return
 	}
 	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
@@ -1349,7 +1357,8 @@ func (m *Manager) resolveInferenceCommand(
 	}
 	command := cfg.Command
 	if resolver, ok := ia.(agents.LocalRuntimeAgent); ok {
-		return resolver.ResolveLocalRuntime(ctx)
+		selection, err := resolver.ResolveLocalRuntime(ctx)
+		return selection.Command, selection.Env, err
 	}
 	ag, ok := ia.(agents.Agent)
 	if !ok || m.managedRuntimeSelections == nil {
@@ -1428,8 +1437,8 @@ func (m *Manager) acquireInferenceCommand(
 		release()
 		return agents.Command{}, nil, nil, err
 	}
-	if hostUtilityAuthPolicy(ia) != nil {
-		if err := inst.client.RequireCapability(ctx, acpcompat.AntigravityPersonalAuthCapability); err != nil {
+	if policy := hostUtilityAuthPolicy(ia, command); policy != nil {
+		if err := inst.client.RequireCapability(ctx, acpcompat.AntigravityRuntimeCapability(policy)); err != nil {
 			release()
 			return agents.Command{}, nil, nil, err
 		}
@@ -1462,7 +1471,7 @@ func buildProbeRequest(
 			Env:             agents.RuntimeEnvFor(ia),
 			StripEnv:        agents.StripEnvFor(ia),
 			OperatorDefined: cfg.OperatorDefined,
-			AuthPolicy:      hostUtilityAuthPolicy(ia),
+			AuthPolicy:      hostUtilityAuthPolicy(ia, probeCommand),
 		},
 	}
 }
@@ -1572,12 +1581,16 @@ func managedRuntimeCommandVersion(command agents.Command, spec agents.ManagedNPM
 	return ""
 }
 
-func hostUtilityAuthPolicy(ia agents.InferenceAgent) *acpcompat.AuthPolicy {
+func hostUtilityAuthPolicy(ia agents.InferenceAgent, commands ...agents.Command) *acpcompat.AuthPolicy {
 	ag, ok := ia.(agents.Agent)
 	if !ok || !acpcompat.IsAntigravity(ag.ID()) {
 		return nil
 	}
-	return acpcompat.AntigravityAuthPolicy(false)
+	variant := acpcompat.AntigravityRuntimeStandalone
+	if len(commands) > 0 {
+		variant = acpcompat.AntigravityRuntimeForCommand(commands[0].Args())
+	}
+	return acpcompat.AntigravityAuthPolicyForRuntime(variant, "", false)
 }
 
 func inferenceConfigForHostUtility(ia agents.InferenceAgent) *agents.InferenceConfig {

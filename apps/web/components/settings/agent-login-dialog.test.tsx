@@ -115,4 +115,47 @@ describe("native login command ownership", () => {
     await expect(startSession({ cols: 80, rows: 24 })).rejects.toBe(unavailable);
     expect(start).toHaveBeenCalledTimes(1);
   });
+
+  it("starts Antigravity CLI sign-in with the registered runtime variant", async () => {
+    start.mockResolvedValue({ session_id: "login-session" });
+    render(
+      <AgentLoginDialog
+        open
+        onOpenChange={vi.fn()}
+        agentName="antigravity-acp"
+        runtimeVariant="cli"
+        command={["/host/agy", "acp", "--login"]}
+        variants={{ "antigravity-cli": ["/host/agy", "acp", "--login"] }}
+      />,
+    );
+    const { startSession } = terminal.mock.calls.at(-1)![0];
+    await startSession({ cols: 80, rows: 24 });
+    expect(start).toHaveBeenCalledWith(
+      "antigravity-acp",
+      { cols: 80, rows: 24 },
+      { commandVariant: "antigravity-cli" },
+    );
+    expect(terminal.mock.calls.at(-1)![0].command).toEqual(["/host/agy", "acp", "--login"]);
+  });
+
+  it("explains when the selected Antigravity runtime changed before login", async () => {
+    start.mockRejectedValue(
+      new ApiError("login_runtime_changed", 409, { error_code: "login_runtime_changed" }),
+    );
+    render(
+      <AgentLoginDialog
+        open
+        onOpenChange={vi.fn()}
+        agentName="antigravity-acp"
+        runtimeVariant="cli"
+        command={["/host/agy", "acp", "--login"]}
+        variants={{ "antigravity-cli": ["/host/agy", "acp", "--login"] }}
+      />,
+    );
+    const { startSession } = terminal.mock.calls.at(-1)![0];
+    await expect(startSession({ cols: 80, rows: 24 })).rejects.toThrow(
+      "The selected Antigravity runtime changed. Refresh agent status and try again.",
+    );
+    expect(start).toHaveBeenCalledTimes(1);
+  });
 });
