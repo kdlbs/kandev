@@ -655,7 +655,7 @@
   "useProviderDefault": "使用提供者預設值",
   "thinkingLevelUnavailable": "{{value}}（不可用）",
   "editProfile": "編輯設定檔",
-  "antigravityCLILoginDescription": "Kandev 會在 Kandev 主機上執行 agy acp --login。CLI 與獨立 ACP 伺服器使用不同的登入資訊。",
+  "antigravityCLILoginDescription": "Kandev 會在 Kandev 主機上執行 {{command}}。CLI 與獨立 ACP 伺服器使用不同的登入資訊。",
   "antigravityCLISetupGuide": "Antigravity CLI 安裝指南",
   "antigravityCLISignInHint": "請在 Kandev 主機上登入目前選中的 Antigravity CLI。完成後，Kandev 會重新整理模型清單。",
   "antigravityGoogleSignInRequired": "需要登入 Google",

@@ -655,7 +655,7 @@
   "useProviderDefault": "Usar predefinição do fornecedor",
   "thinkingLevelUnavailable": "{{value}} (indisponível)",
   "editProfile": "Editar perfil",
-  "antigravityCLILoginDescription": "O Kandev executa agy acp --login no anfitrião Kandev. O CLI guarda a sessão separada do servidor autónomo.",
+  "antigravityCLILoginDescription": "O Kandev executa {{command}} no anfitrião Kandev. O CLI guarda a sessão separada do servidor autónomo.",
   "antigravityCLISetupGuide": "Guia de configuração do CLI Antigravity",
   "antigravityCLISignInHint": "Inicie sessão no CLI Antigravity selecionado no anfitrião Kandev. O Kandev atualiza os modelos quando terminar.",
   "antigravityGoogleSignInRequired": "É necessário iniciar sessão na Google",

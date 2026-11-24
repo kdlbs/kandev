@@ -655,7 +655,7 @@
   "useProviderDefault": "プロバイダーの既定値を使用",
   "thinkingLevelUnavailable": "{{value}}（利用不可）",
   "editProfile": "プロファイルを編集",
-  "antigravityCLILoginDescription": "Kandev ホスト上で agy acp --login を実行します。CLI とスタンドアロン ACP サーバーではログイン情報が別々に保存されます。",
+  "antigravityCLILoginDescription": "Kandev ホスト上で {{command}} を実行します。CLI とスタンドアロン ACP サーバーではログイン情報が別々に保存されます。",
   "antigravityCLISetupGuide": "Antigravity CLI のセットアップガイド",
   "antigravityCLISignInHint": "Kandev ホスト上で選択中の Antigravity CLI にサインインしてください。完了するとモデル一覧を更新します。",
   "antigravityGoogleSignInRequired": "Google へのサインインが必要です",

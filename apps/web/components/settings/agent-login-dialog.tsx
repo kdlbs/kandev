@@ -109,7 +109,7 @@ function loginDescription(
     return t("agents:minimaxLoginDescription", { dataDir: "~/.minimax" });
   }
   if (agentName === "antigravity-acp" && runtimeVariant === "cli") {
-    return t("agents:antigravityCLILoginDescription");
+    return t("agents:antigravityCLILoginDescription", { command: "agy acp --login" });
   }
   return description;
 }

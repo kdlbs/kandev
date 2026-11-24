@@ -400,6 +400,9 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 			}, refresh), nil
 		}
 		if caps.RuntimeVariant != currentVariant {
+			if !refresh && caps.Status != hostutility.StatusProbing {
+				c.kickAntigravityRuntimeRefresh(currentVariant)
+			}
 			return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
 				AgentName: agentName, RuntimeVariant: currentVariant,
 				Status: string(hostutility.StatusProbing),
@@ -459,6 +462,29 @@ func (c *Controller) finishDynamicModels(
 	}
 	resp.Models, resp.Discovery = c.hostCLIModelProjection(ctx, agentName, resp.Models, refresh)
 	return resp
+}
+
+func (c *Controller) kickAntigravityRuntimeRefresh(variant string) {
+	if variant == "" || c.hostUtility == nil {
+		return
+	}
+	c.antigravityRuntimeRefreshMu.Lock()
+	if c.antigravityRuntimeRefreshVariant == variant {
+		c.antigravityRuntimeRefreshMu.Unlock()
+		return
+	}
+	c.antigravityRuntimeRefreshVariant = variant
+	c.antigravityRuntimeRefreshMu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := c.hostUtility.Refresh(ctx, agents.AntigravityACPAgentID); err != nil {
+			c.logger.Debug("Antigravity capability refresh after runtime change failed",
+				zap.String("runtime_variant", variant), zap.Error(err))
+		}
+		c.BroadcastAvailableAgents()
+	}()
 }
 
 // ResolveAgentModelConfig returns the complete provider configuration-option

@@ -655,7 +655,7 @@
   "useProviderDefault": "Ũśē ƥŕōvĩďēŕ ďēƒàũĺţ",
   "thinkingLevelUnavailable": "{{value}} (ũńàvàĩĺàƀĺē)",
   "editProfile": "Ēďĩţ ƥŕōƒĩĺē",
-  "antigravityCLILoginDescription": "Ķàńďēv ŕũńś àĝŷ àćƥ --ĺōĝĩń ōń ţĥē Ķàńďēv ĥōśţ. Ţĥē ĆĹĨ ķēēƥś ĩţś śĩĝń-ĩń śēƥàŕàţē ƒŕōḿ ţĥē śţàńďàĺōńē śēŕvēŕ.",
+  "antigravityCLILoginDescription": "Ķàńďēv ŕũńś {{command}} ōń ţĥē Ķàńďēv ĥōśţ. Ţĥē ĆĹĨ ķēēƥś ĩţś śĩĝń-ĩń śēƥàŕàţē ƒŕōḿ ţĥē śţàńďàĺōńē śēŕvēŕ.",
   "antigravityCLISetupGuide": "Àńţĩĝŕàvĩţŷ ĆĹĨ śēţũƥ ĝũĩďē",
   "antigravityCLISignInHint": "Śĩĝń ĩń ţō ţĥē śēĺēćţēď Àńţĩĝŕàvĩţŷ ĆĹĨ ōń ţĥē Ķàńďēv ĥōśţ. Ķàńďēv ŕēƒŕēśĥēś ĩţś ḿōďēĺś ŵĥēń ŷōũ ƒĩńĩśĥ.",
   "antigravityGoogleSignInRequired": "Ĝōōĝĺē śĩĝń-ĩń ŕēqũĩŕēď",

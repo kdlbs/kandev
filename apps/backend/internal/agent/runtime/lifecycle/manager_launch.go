@@ -3399,6 +3399,9 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)
 	}
 	configureEnv := cloneStringMap(env)
+	if configureEnv == nil && len(execution.LocalRuntimeEnv) > 0 {
+		configureEnv = make(map[string]string, len(execution.LocalRuntimeEnv))
+	}
 	for key, value := range execution.LocalRuntimeEnv {
 		configureEnv[key] = value
 	}

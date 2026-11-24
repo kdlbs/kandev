@@ -233,7 +233,14 @@ function RecoveryAuthenticationGuidance({
   const runtimeAdapterVersion = useAppStore(
     (state) => state.taskSessions.items[sessionId]?.runtime_adapter_version,
   );
-  const standaloneAntigravitySession = runtimeAdapterVersion?.startsWith("antigravity-standalone/");
+  const savedAgentName = useAppStore((state) => {
+    const session = state.taskSessions.items[sessionId];
+    const profileId = session?.execution_profile_id || session?.agent_profile_id;
+    return state.agentProfiles.items.find((profile) => profile.id === profileId)?.agent_name;
+  });
+  const standaloneAntigravitySession =
+    runtimeAdapterVersion?.startsWith("antigravity-standalone/") ||
+    (!runtimeAdapterVersion && savedAgentName === "antigravity-acp");
   if (!required) return null;
   return (
     <>

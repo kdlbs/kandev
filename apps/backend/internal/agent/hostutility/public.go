@@ -266,12 +266,16 @@ func (m *Manager) Refresh(ctx context.Context, agentType string) (AgentCapabilit
 		if errors.Is(err, errAgentNotInstalled) {
 			status = StatusNotInstalled
 		}
-		m.cache.set(AgentCapabilities{
+		caps := AgentCapabilities{
 			AgentType:     agentType,
 			Status:        status,
 			Error:         err.Error(),
 			LastCheckedAt: time.Now(),
-		})
+		}
+		if ia, ok := m.registry.GetInferenceAgent(agentType); ok {
+			m.stampConfiguredRuntime(ctx, &caps, ia)
+		}
+		m.cache.set(caps)
 		return AgentCapabilities{}, err
 	}
 	caps := m.probe(ctx, inst, ia, true)

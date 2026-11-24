@@ -73,7 +73,7 @@ Write `TestAntigravityCLILoginUsesResolvedCommand` in loginpty. Cover executable
 ```bash
 (cd apps/backend && go test -trimpath ./internal/agent/loginpty ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/capabilities/handlers -run 'Antigravity' -count=1)
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps && pnpm --filter @kandev/web exec vitest run components/settings/antigravity-runtime-setup.test.tsx components/settings/antigravity-login-dialog.test.tsx)
+(cd apps && pnpm --filter @kandev/web exec vitest run components/settings/antigravity-runtime-setup.test.tsx components/settings/agent-login-dialog.test.tsx components/task/chat/session-recovery-card-authentication.test.tsx)
 pnpm --dir apps/web e2e:run --project chromium tests/settings/antigravity-runtime-setup.spec.ts
 pnpm --dir apps/web e2e:run --project mobile-chrome tests/settings/mobile-antigravity-runtime-setup.spec.ts
 node --test scripts/validate-public-docs.test.mjs
@@ -110,4 +110,4 @@ The user can install or replace the CLI while a settings page is open. Revalidat
 
 ## Results
 
-The review regressions pass for stale runtime snapshots and profile probe variants, old CLI-only discovery, and saved standalone recovery when the host default is CLI. The focused web suite passes 29 tests; web typecheck, lint, i18n checks, and production build pass. Desktop and mobile setup E2E each pass 2 tests; the phone flow verifies consent routing, focus return, readiness refresh, touch-sized controls, and viewport containment. Public docs validation passes 63 checks across 56 pages; specification validation passes for 2,106 specs and 464 decisions.
+The review regressions pass for stale runtime snapshots and profile probe variants, old CLI-only discovery, and saved standalone recovery when the host default is CLI. The added login and session-recovery suites pass 30 tests across 3 files; the Antigravity locale interpolation and pseudo catalog pass `i18n:check`. The prior focused web suite passes 29 tests; web typecheck, lint, and production build pass. Desktop and mobile setup E2E each pass 2 tests; the phone flow verifies consent routing, focus return, readiness refresh, touch-sized controls, and viewport containment. Public docs validation passes 63 checks across 56 pages; specification validation passes for 2,106 specs and 464 decisions.

@@ -20,6 +20,21 @@ func (r *freshStartRotatingTokenStore) UpdateResumeToken(ctx context.Context, se
 	if err := r.Repository.UpdateResumeToken(ctx, sessionID, executionID, token, uuid); err != nil {
 		return err
 	}
+	return r.rotateAcceptedExecution(ctx, sessionID)
+}
+
+func (r *freshStartRotatingTokenStore) UpdateResumeTokenWithACPAdapterIdentity(
+	ctx context.Context,
+	sessionID, executionID, token, uuid string,
+	identity models.ACPAdapterIdentity,
+) error {
+	if err := r.Repository.UpdateResumeTokenWithACPAdapterIdentity(ctx, sessionID, executionID, token, uuid, identity); err != nil {
+		return err
+	}
+	return r.rotateAcceptedExecution(ctx, sessionID)
+}
+
+func (r *freshStartRotatingTokenStore) rotateAcceptedExecution(ctx context.Context, sessionID string) error {
 	r.accepted = true
 	running, err := r.GetExecutorRunningBySessionID(ctx, sessionID)
 	if err != nil {

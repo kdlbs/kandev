@@ -11,7 +11,7 @@ const { refresh, start, terminal } = vi.hoisted(() => ({
 vi.mock("@/lib/api/domains/settings-api", () => ({ fetchDynamicModels: refresh }));
 vi.mock("@/lib/api", () => ({ startAgentLogin: start }));
 vi.mock("@/components/settings/pty-terminal-dialog", () => ({
-  PtyTerminalDialog: (props: { onDone: () => void }) => {
+  PtyTerminalDialog: (props: { onDone: () => void; description?: string }) => {
     terminal(props);
     return <button onClick={props.onDone}>Done</button>;
   },
@@ -128,6 +128,7 @@ describe("native login command ownership", () => {
         variants={{ "antigravity-cli": ["/host/agy", "acp", "--login"] }}
       />,
     );
+    expect(terminal.mock.calls.at(-1)![0].description).toContain("agy acp --login");
     const { startSession } = terminal.mock.calls.at(-1)![0];
     await startSession({ cols: 80, rows: 24 });
     expect(start).toHaveBeenCalledWith(

@@ -57,3 +57,24 @@ func TestAntigravityCLIStartRejectsRetainedPersonalAuthHelper(t *testing.T) {
 		t.Fatal("task configuration reached a helper that lacks CLI runtime support")
 	}
 }
+
+func TestAntigravityCLIStartHandlesLocalRuntimeEnvWithEmptyBaseEnv(t *testing.T) {
+	manager := newTestManager(t)
+	execution := &AgentExecution{
+		ID:              "exec-antigravity-cli-empty-env",
+		SessionID:       "session-antigravity-cli-empty-env",
+		AgentID:         acpcompat.AntigravityAgentID,
+		WorkspacePath:   t.TempDir(),
+		LocalRuntimeEnv: map[string]string{"PATH": t.TempDir()},
+		AuthPolicy: acpcompat.AntigravityAuthPolicyForRuntime(
+			acpcompat.AntigravityRuntimeCLI, "1.5.15", false,
+		),
+	}
+	execution.setRuntimeEnvironment(map[string]string{})
+	_, err := manager.configureAndStartAgentWithPreparedArgsAndPreparation(
+		context.Background(), execution, []string{"agy", "acp"}, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "has no agentctl client") {
+		t.Fatalf("CLI start error = %v, want missing agentctl client after environment setup", err)
+	}
+}

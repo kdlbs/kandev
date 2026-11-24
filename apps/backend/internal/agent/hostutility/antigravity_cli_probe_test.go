@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 )
 
@@ -40,9 +41,14 @@ func TestAntigravityLocalProbePrefersCLIWithStandaloneInstalled(t *testing.T) {
 	t.Setenv("PATH", binDir)
 
 	var selectedCommand []string
-	manager, _ := newProfileProbeTestManager(t, agents.NewAntigravityACP(), nil,
+	var selectedRuntime string
+	manager, _ := newProfileProbeTestManagerWithCapabilities(t, agents.NewAntigravityACP(), nil,
+		[]string{"launch-wrapper.v1", acpcompat.AntigravityCLIRuntimeCapability},
 		func(w http.ResponseWriter, request agentctlutil.ProbeRequest) {
 			selectedCommand = slices.Clone(request.InferenceConfig.Command)
+			if request.InferenceConfig.AuthPolicy != nil {
+				selectedRuntime = request.InferenceConfig.AuthPolicy.RuntimeVariant
+			}
 			if slices.Equal(selectedCommand, []string{cliPath, "acp"}) {
 				_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
 					Success: true,
@@ -56,21 +62,54 @@ func TestAntigravityLocalProbePrefersCLIWithStandaloneInstalled(t *testing.T) {
 				FailureCode: agentctlutil.ProbeFailureAuthenticationRequired,
 			})
 		})
-	result, err := manager.ProbeProfileCapabilities(context.Background(), agents.AntigravityACPAgentID,
-		ProfileCapabilityRequest{
-			Context: ProfileProbeContext{Scope: "user-1:antigravity"},
-			Refresh: true,
-		})
+	result, err := manager.Refresh(context.Background(), agents.AntigravityACPAgentID)
 	if err != nil {
-		t.Fatalf("ProbeProfileCapabilities: %v", err)
+		t.Fatalf("Refresh: %v", err)
 	}
-	if result.Capabilities.Status != StatusOK || len(result.Capabilities.Models) != 1 || result.Capabilities.Models[0].ID != "agy-gemini-3" {
-		t.Fatalf("capabilities = %#v, selected command = %v; want signed-in CLI models", result.Capabilities, selectedCommand)
+	if result.Status != StatusOK || len(result.Models) != 1 || result.Models[0].ID != "agy-gemini-3" {
+		t.Fatalf("capabilities = %#v, selected command = %v; want signed-in CLI models", result, selectedCommand)
 	}
-	if result.Capabilities.RuntimeVariant != "cli" {
-		t.Fatalf("runtime variant = %q, want cli", result.Capabilities.RuntimeVariant)
+	if result.RuntimeVariant != "cli" {
+		t.Fatalf("runtime variant = %q, want cli", result.RuntimeVariant)
 	}
 	if !slices.Equal(selectedCommand, []string{cliPath, "acp"}) {
 		t.Fatalf("selected command = %v, want %v", selectedCommand, []string{cliPath, "acp"})
+	}
+	if selectedRuntime != acpcompat.AntigravityRuntimeCLI {
+		t.Fatalf("probe auth runtime = %q, want %q", selectedRuntime, acpcompat.AntigravityRuntimeCLI)
+	}
+}
+
+func TestAntigravityFailedCLIProbeKeepsSelectedRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake agy executable uses a POSIX script")
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	binDir := t.TempDir()
+	cliPath := filepath.Join(binDir, "agy")
+	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.5.15'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	manager, _ := newProfileProbeTestManagerWithCapabilities(t, agents.NewAntigravityACP(), nil,
+		[]string{"launch-wrapper.v1", acpcompat.AntigravityCLIRuntimeCapability},
+		func(w http.ResponseWriter, _ agentctlutil.ProbeRequest) {
+			_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+				Success:     false,
+				Error:       "Google sign-in required",
+				FailureCode: agentctlutil.ProbeFailureAuthenticationRequired,
+			})
+		})
+	result, err := manager.Refresh(context.Background(), agents.AntigravityACPAgentID)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if result.Status != StatusAuthRequired || result.Error != "Google sign-in required" {
+		t.Fatalf("failed probe = %#v, want visible auth-required status", result)
+	}
+	if result.RuntimeVariant != acpcompat.AntigravityRuntimeCLI {
+		t.Fatalf("failed probe runtime variant = %q, want cli", result.RuntimeVariant)
 	}
 }

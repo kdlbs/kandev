@@ -12,6 +12,7 @@ import (
 func TestBuildAdapterConfigForAntigravityCLIWithoutStandaloneBundle(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	manager := &Manager{
 		cfg: &config.InstanceConfig{

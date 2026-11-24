@@ -509,9 +509,9 @@ func (m *Manager) rebootstrapAgent(ctx context.Context, ia agents.InferenceAgent
 		if errors.Is(err, errAgentNotInstalled) {
 			status = StatusNotInstalled
 		}
-		m.publishCapabilitiesForEpoch(epoch, nil, probeFailureCapabilities(
-			ag.ID(), status, err.Error(), 0, time.Now(),
-		))
+		caps := probeFailureCapabilities(ag.ID(), status, err.Error(), 0, time.Now())
+		m.stampConfiguredRuntime(ctx, &caps, ia)
+		m.publishCapabilitiesForEpoch(epoch, nil, caps)
 		return
 	}
 	caps := m.probe(ctx, inst, resolvedAgent, false)
@@ -566,6 +566,10 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	publish := func(inst *instance, caps AgentCapabilities) {
 		m.publishCapabilitiesForEpoch(epoch, inst, caps)
 	}
+	publishFailure := func(caps AgentCapabilities) {
+		m.stampConfiguredRuntime(ctx, &caps, ia)
+		publish(nil, caps)
+	}
 
 	// Publish "probing" synchronously so the UI can distinguish "not started"
 	// (cache miss) from "in flight".
@@ -577,7 +581,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 
 	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
-		publish(nil, AgentCapabilities{
+		publishFailure(AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusNotConfigured,
 			Error:         "inference config not available",
@@ -593,7 +597,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 			msg = err.Error()
 		}
 		log.Info("skipping host utility bootstrap: agent not installed")
-		publish(nil, AgentCapabilities{
+		publishFailure(AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusNotInstalled,
 			Error:         msg,
@@ -605,7 +609,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	inst, err := m.createInstance(ctx, agentType)
 	if err != nil {
 		log.Warn("failed to create host utility instance", zap.Error(err))
-		publish(nil, AgentCapabilities{
+		publishFailure(AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusFailed,
 			Error:         err.Error(),
@@ -992,7 +996,7 @@ func (m *Manager) probeWithOverrides(
 	resp, resolvedCommand, err := m.probeManagedRuntime(probeCtx, inst, ia, command, req)
 	if err != nil {
 		caps := probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
-		stampConfiguredRuntimeVersion(&caps, ia, command)
+		stampConfiguredRuntimeVersion(&caps, ia, resolvedCommand)
 		return caps
 	}
 	caps := capabilitiesFromProbe(inst.agentType, resp, time.Now())
@@ -1067,7 +1071,7 @@ func (m *Manager) probeManagedRuntime(
 	if err != nil {
 		return nil, command, err
 	}
-	req = cloneProbeRequestWithCommand(req, command)
+	req = cloneProbeRequestWithCommand(req, ia, command)
 	req.InferenceConfig.Env = mergeInferenceEnv(req.InferenceConfig.Env, localEnv)
 	req.InstallContext = managedRuntimeProbeInstallContext(
 		req.InferenceConfig,
@@ -1153,7 +1157,7 @@ func (m *Manager) recoverManagedRuntimeProbe(
 		zap.String("agent_type", inst.agentType),
 		zap.String("recovery_scope", "host_capability_probe"),
 		zap.Int("attempt", 1))
-	retryRequest := cloneProbeRequestWithCommand(failedRequest, recoveryCommand)
+	retryRequest := cloneProbeRequestWithCommand(failedRequest, ia, recoveryCommand)
 	retryRequest.Preparation = preparation
 	response, err := inst.client.Probe(ctx, retryRequest)
 	if err != nil {
@@ -1210,18 +1214,20 @@ func (m *Manager) retryManagedRuntimeProbe(
 	if ctx.Err() != nil || (contextCurrent != nil && !contextCurrent()) {
 		return initial
 	}
-	retryRequest := cloneProbeRequestWithCommand(failedRequest, command)
+	retryRequest := cloneProbeRequestWithCommand(failedRequest, ia, command)
 	retryRequest.InferenceConfig.Env = mergeInferenceEnv(retryRequest.InferenceConfig.Env, localEnv)
 	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, retryRequest, initial)
 }
 
 func cloneProbeRequestWithCommand(
 	request *agentctlutil.ProbeRequest,
+	ia agents.InferenceAgent,
 	command agents.Command,
 ) *agentctlutil.ProbeRequest {
 	retry := *request
 	config := *request.InferenceConfig
 	config.Command = command.Args()
+	config.AuthPolicy = hostUtilityAuthPolicy(ia, command)
 	retry.InferenceConfig = &config
 	return &retry
 }
@@ -1338,6 +1344,18 @@ func stampConfiguredRuntimeVersion(caps *AgentCapabilities, ia agents.InferenceA
 			return
 		}
 	}
+}
+
+func (m *Manager) stampConfiguredRuntime(ctx context.Context, caps *AgentCapabilities, ia agents.InferenceAgent) {
+	ag, ok := ia.(agents.Agent)
+	if !ok {
+		return
+	}
+	command, _, err := m.resolveInferenceCommand(ctx, ag.ID(), ia, agents.Command{})
+	if err != nil {
+		return
+	}
+	stampConfiguredRuntimeVersion(caps, ia, command)
 }
 
 // resolveInferenceCommand selects the trusted exact host version for ordinary

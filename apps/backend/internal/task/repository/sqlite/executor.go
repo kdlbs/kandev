@@ -704,6 +704,28 @@ func (r *Repository) HasActiveExecutorRunningRow(ctx context.Context, sessionID 
 // expectedExecID == "" means "match any agent_execution_id" (used during initial
 // row population when the caller doesn't know/care). Prefer passing the actual ID.
 func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error {
+	return r.updateResumeToken(ctx, sessionID, expectedExecID, resumeToken, lastMessageUUID, nil)
+}
+
+// UpdateResumeTokenWithACPAdapterIdentity commits the native token and its
+// runtime provenance in one transaction. Resume must never accept a token
+// whose runtime association could not be made durable.
+func (r *Repository) UpdateResumeTokenWithACPAdapterIdentity(
+	ctx context.Context,
+	sessionID, expectedExecID, resumeToken, lastMessageUUID string,
+	identity models.ACPAdapterIdentity,
+) error {
+	if identity.NativeSessionID == "" || identity.NativeSessionID != resumeToken || identity.AdapterVersion == "" {
+		return fmt.Errorf("ACP adapter identity must match the resume token and include a runtime version")
+	}
+	return r.updateResumeToken(ctx, sessionID, expectedExecID, resumeToken, lastMessageUUID, &identity)
+}
+
+func (r *Repository) updateResumeToken(
+	ctx context.Context,
+	sessionID, expectedExecID, resumeToken, lastMessageUUID string,
+	identity *models.ACPAdapterIdentity,
+) error {
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required")
 	}
@@ -763,7 +785,44 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 	if err := r.retainQuickChatHistoryTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
+	if err := r.updateACPAdapterIdentityTx(ctx, tx, sessionID, now, identity); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func (r *Repository) updateACPAdapterIdentityTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	now time.Time,
+	identity *models.ACPAdapterIdentity,
+) error {
+	if identity == nil {
+		return nil
+	}
+	identityJSON, err := json.Marshal(identity)
+	if err != nil {
+		return fmt.Errorf("failed to serialize ACP adapter identity: %w", err)
+	}
+	result, err := tx.ExecContext(ctx,
+		r.db.Rebind(metadataKeyUpdateQuery("task_sessions", r.db.DriverName())),
+		metadataKeyUpdateArgs(
+			r.db.DriverName(), models.SessionMetaKeyACPAdapterIdentity,
+			string(identityJSON), now, sessionID,
+		)...,
+	)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", sessionID)
+	}
+	return nil
 }
 
 // RepairExecutorRunningDead repairs a row in place to reflect that its backing

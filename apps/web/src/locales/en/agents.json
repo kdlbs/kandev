@@ -655,7 +655,7 @@
   "useProviderDefault": "Use provider default",
   "thinkingLevelUnavailable": "{{value}} (unavailable)",
   "editProfile": "Edit profile",
-  "antigravityCLILoginDescription": "Kandev runs agy acp --login on the Kandev host. The CLI keeps its sign-in separate from the standalone server.",
+  "antigravityCLILoginDescription": "Kandev runs {{command}} on the Kandev host. The CLI keeps its sign-in separate from the standalone server.",
   "antigravityCLISetupGuide": "Antigravity CLI setup guide",
   "antigravityCLISignInHint": "Sign in to the selected Antigravity CLI on the Kandev host. Kandev refreshes its models when you finish.",
   "antigravityGoogleSignInRequired": "Google sign-in required",

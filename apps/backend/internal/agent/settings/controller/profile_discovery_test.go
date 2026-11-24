@@ -28,6 +28,7 @@ type recordingProfileDiscoveryUtility struct {
 	capabilityResult  *hostutility.ProfileCapabilityResult
 	modelResolution   hostutility.ModelConfigResolution
 	agentCapabilities hostutility.AgentCapabilities
+	refreshCalled     chan struct{}
 }
 
 func (f *recordingProfileDiscoveryUtility) Get(string) (hostutility.AgentCapabilities, bool) {
@@ -38,6 +39,12 @@ func (f *recordingProfileDiscoveryUtility) Get(string) (hostutility.AgentCapabil
 }
 
 func (f *recordingProfileDiscoveryUtility) Refresh(context.Context, string) (hostutility.AgentCapabilities, error) {
+	if f.refreshCalled != nil {
+		select {
+		case f.refreshCalled <- struct{}{}:
+		default:
+		}
+	}
 	return hostutility.AgentCapabilities{Status: hostutility.StatusOK}, nil
 }
 
@@ -250,6 +257,7 @@ func TestAntigravitySettingsRejectsCapabilitiesFromPreviousRuntime(t *testing.T)
 	utility := &recordingProfileDiscoveryUtility{
 		agentCapabilities: stale,
 		capabilityResult:  &hostutility.ProfileCapabilityResult{Capabilities: stale},
+		refreshCalled:     make(chan struct{}, 2),
 	}
 	controller.hostUtility = utility
 	envVars := []dto.ProfileEnvVarDTO{}
@@ -271,6 +279,24 @@ func TestAntigravitySettingsRejectsCapabilitiesFromPreviousRuntime(t *testing.T)
 	modelConfig := controller.buildModelConfigFromHostUtility(ctx, agents.AntigravityACPAgentID)
 	if modelConfig.RuntimeVariant != "cli" || modelConfig.Status != string(hostutility.StatusProbing) || len(modelConfig.AvailableModels) != 0 {
 		t.Fatalf("agent snapshot = variant %q, status %q, models %+v; want cli/probing/empty", modelConfig.RuntimeVariant, modelConfig.Status, modelConfig.AvailableModels)
+	}
+
+	dynamic, err := controller.FetchDynamicModels(ctx, agents.AntigravityACPAgentID, false)
+	if err != nil || dynamic.Status != string(hostutility.StatusProbing) {
+		t.Fatalf("dynamic snapshot = %#v, error = %v; want probing while CLI refresh starts", dynamic, err)
+	}
+	select {
+	case <-utility.refreshCalled:
+	case <-time.After(time.Second):
+		t.Fatal("runtime change did not start a replacement capability probe")
+	}
+	if _, err := controller.FetchDynamicModels(ctx, agents.AntigravityACPAgentID, false); err != nil {
+		t.Fatalf("FetchDynamicModels on repeated poll: %v", err)
+	}
+	select {
+	case <-utility.refreshCalled:
+		t.Fatal("repeated settings poll started another probe for the same runtime")
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
