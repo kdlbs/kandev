@@ -33,8 +33,9 @@ gate held. Admission timeouts name the current holder. A deferred MCP
    candidate is retried on a later tick.
 3. `messagequeue`: add a `heldSince time.Time` field to `sessionAdmission`.
    Set it after the gate is acquired and clear it on release, both under
-   `admissionMu`. On `ErrSessionAdmissionTimeout`, log one `Warn` with
-   `session_id` and `held_for`.
+   `admissionMu`. Log one `Warn` with `session_id` and `held_for` when the
+   internal admission budget or caller deadline expires while waiting for the
+   gate. Preserve the caller deadline error.
 4. `mcp/handlers/config_task_handlers.go`: when `SetPendingMove` returns
    `errors.Is(err, messagequeue.ErrSessionAdmissionTimeout)`, return
    `ws.ErrorCodeUnavailable` with "session is busy; retry move_task shortly".
@@ -64,8 +65,9 @@ New test files; do not append to existing large test files.
   `TestFocusRefreshReleasesAdmissionWhenLifecycleLockHeld`,
   `TestIdleSuspensionRevalidationReleasesAdmissionWhenLifecycleLockHeld`.
 - `apps/backend/internal/orchestrator/messagequeue/session_admission_holder_test.go`:
-  `TestSessionAdmissionTimeoutLogsHolder` (zap observer, shortened
-  `admissionWaitTimeout`).
+  `TestSessionAdmissionTimeoutLogsHolder` and
+  `TestSessionAdmissionCallerDeadlineLogsHolder` (zap observer); both release
+  and boundedly join the holder during cleanup.
 - `apps/backend/internal/mcp/handlers/move_task_admission_timeout_test.go`:
   `TestMoveTaskDeferredAdmissionTimeoutIsRetryable`.
 
@@ -78,18 +80,19 @@ New test files; do not append to existing large test files.
 
 ## Verification
 
-From `apps/backend`:
+From the repository root:
 
-```text
+```sh
+(
+cd apps/backend
 go test -trimpath -race -count=1 ./internal/orchestrator/messagequeue -run 'TestSessionAdmission'
 go test -trimpath -race -count=1 ./internal/orchestrator -run 'TestFocusRefresh|TestIdleSuspension|TestFocusTaskSession|TestIdleSession'
 go test -trimpath -race -count=1 ./internal/mcp/handlers -run 'TestMoveTask'
-```
-
-From the repo root:
-
-```text
-bash scripts/lint-go-changed <changed-go-files>
+)
+make -C apps/backend build
+bash scripts/lint-go-changed apps/backend/internal/orchestrator/idle_session_focus.go apps/backend/internal/orchestrator/idle_session_reaper.go apps/backend/internal/orchestrator/messagequeue/service.go apps/backend/internal/mcp/handlers/config_task_handlers.go apps/backend/internal/orchestrator/admission_lifecycle_wait_test.go apps/backend/internal/orchestrator/messagequeue/session_admission_holder_test.go apps/backend/internal/mcp/handlers/move_task_admission_timeout_test.go
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
 ```
 
 ## Results
@@ -100,6 +103,6 @@ Implemented and verified:
 - `go test -trimpath -race -count=1 ./internal/orchestrator -run 'TestFocusRefresh|TestIdleSuspension|TestFocusTaskSession|TestIdleSession'`
 - `go test -trimpath -race -count=1 ./internal/mcp/handlers -run 'TestMoveTask'`
 - `make -C apps/backend build`
-- `bash scripts/lint-go-changed` with all changed backend Go files
+- `bash scripts/lint-go-changed apps/backend/internal/orchestrator/idle_session_focus.go apps/backend/internal/orchestrator/idle_session_reaper.go apps/backend/internal/orchestrator/messagequeue/service.go apps/backend/internal/mcp/handlers/config_task_handlers.go apps/backend/internal/orchestrator/admission_lifecycle_wait_test.go apps/backend/internal/orchestrator/messagequeue/session_admission_holder_test.go apps/backend/internal/mcp/handlers/move_task_admission_timeout_test.go`
 - `python3 scripts/list-docs.py validate`
 - `python3 scripts/lint-spec-files.py --all`

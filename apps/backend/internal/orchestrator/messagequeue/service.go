@@ -390,9 +390,11 @@ func (s *Service) withSessionAdmissionLock(
 
 	if err := entry.gate.lock(waitCtx); err != nil {
 		admissionErr := admissionWaitError(err, ownBudget)
+		logAdmissionTimeout := errors.Is(admissionErr, ErrSessionAdmissionTimeout) ||
+			(!ownBudget && errors.Is(err, context.DeadlineExceeded))
 		var heldFor time.Duration
 		s.admissionMu.Lock()
-		if errors.Is(admissionErr, ErrSessionAdmissionTimeout) && !entry.heldSince.IsZero() {
+		if logAdmissionTimeout && !entry.heldSince.IsZero() {
 			heldFor = time.Since(entry.heldSince)
 		}
 		entry.refs--
@@ -400,7 +402,7 @@ func (s *Service) withSessionAdmissionLock(
 			delete(s.admissions, sessionID)
 		}
 		s.admissionMu.Unlock()
-		if errors.Is(admissionErr, ErrSessionAdmissionTimeout) {
+		if logAdmissionTimeout {
 			s.logger.Warn("queue session admission timed out",
 				zap.String("session_id", sessionID),
 				zap.Duration("held_for", heldFor),
