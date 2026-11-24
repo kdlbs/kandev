@@ -89,6 +89,29 @@ func taskTransitionsToCompleted(current, candidate *models.Task) bool {
 	return candidate.State == v1.TaskStateCompleted && current.State != v1.TaskStateCompleted
 }
 
+// completeAutomaticStepEntryTx applies completion before the task revision
+// changes. Office destinations use the Office approval and status pipeline.
+func (r *Repository) completeAutomaticStepEntryTx(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	if models.IsTerminalTaskState(task.State) {
+		return nil
+	}
+	completing, err := r.isCompletingWorkflowStepTx(ctx, tx, task.WorkflowID, task.WorkflowStepID)
+	if err != nil || !completing {
+		return err
+	}
+	query := `SELECT ` + isFromOfficeProjection("destination") + ` FROM (
+		SELECT workspace_id, CAST(? AS TEXT) AS workflow_id, project_id FROM tasks WHERE id = ?
+	) destination`
+	var office bool
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), task.WorkflowID, task.ID).Scan(&office); err != nil {
+		return err
+	}
+	if !office {
+		task.State = v1.TaskStateCompleted
+	}
+	return nil
+}
+
 func (r *Repository) isCompletingTaskMoveTx(
 	ctx context.Context,
 	tx *sql.Tx,

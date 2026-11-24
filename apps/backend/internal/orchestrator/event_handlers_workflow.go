@@ -526,6 +526,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Atomically admit the target step before exit side effects. A full target
 	// is represented as a durable destination queue entry instead of a failed
 	// transition.
+	oldState := task.State
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
 	// Capture the completion signal before admission and carry its handoff on
@@ -590,6 +591,10 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Publish task updated event via the task service so the payload carries
 	// the full context (session counts, primary session, repositories).
 	s.publishTaskUpdated(ctx, task)
+	if task.State == v1.TaskStateCompleted && task.State != oldState {
+		s.publishTaskStateChanged(ctx, task, oldState)
+		s.processParentChildrenCompletedForTaskState(ctx, taskID, task.State)
+	}
 	if !queued {
 		s.processParentChildrenCompletedForTerminalStepMove(ctx, taskID, toStepID)
 	}
@@ -741,6 +746,10 @@ func (s *Service) updateTransitionTaskWithCapacityAndEffect(
 			)
 			return applied, err
 		}
+	}
+	if appliedRepo, ok := s.repo.(workflowMoveAdmissionAppliedRepository); ok {
+		_, applied, err := appliedRepo.UpdateTaskWithWorkflowStepAdmissionReportingApplied(ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit)
+		return applied, err
 	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
@@ -8432,7 +8441,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 			if !steptelemetry.HasTrigger(transitionCtx) {
 				transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
 			}
-			committedTask, oldWorkflowID, applied, wipLimit, err := s.workflowStore.applyTransitionIfAtStepRaw(
+			committedTask, oldWorkflowID, oldState, applied, wipLimit, err := s.workflowStore.applyTransitionIfAtStepRaw(
 				transitionCtx, taskID, fromStepID, toStepID,
 			)
 			if err != nil {
@@ -8446,6 +8455,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 			// The raw CAS commit intentionally has no side effects. The shared
 			// lifecycle helper performs the remaining task-level work below.
 			s.publishTaskUpdated(ctx, committedTask, oldWorkflowID)
+			s.workflowStore.publishCommittedCompletion(ctx, committedTask, oldState)
 			s.workflowStore.pullNextTaskOnVacate(ctx, fromStepID, taskID)
 			return workflowTransitionCommitResult{
 				Applied:        true,
@@ -8654,7 +8664,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 		settleFailedTransitionSession()
 		return false
 	}
-	if sessionLifecycle {
+	if sessionLifecycle && !terminalTarget {
 		s.processOnExit(ctx, taskID, session, fromStep)
 	}
 
@@ -8690,6 +8700,10 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
+	}
+
+	if sessionLifecycle && terminalTarget {
+		s.processOnExit(ctx, taskID, session, fromStep)
 	}
 
 	// ADR 0015 — record the audit row before the pending signal (if any) is

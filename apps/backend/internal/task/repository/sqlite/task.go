@@ -2394,6 +2394,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		task.QueuedAt = nil
 		if admittedState != nil {
 			task.State = *admittedState
+		} else if guardBusinessState && (actualWorkflowID != task.WorkflowID || actualSourceStepID != targetStepID) {
+			if err := r.completeAutomaticStepEntryTx(ctx, tx, task); err != nil {
+				return false, false, err
+			}
 		}
 	} else {
 		task.WIPAdmitted = false

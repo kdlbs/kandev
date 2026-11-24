@@ -63,12 +63,17 @@ func TestExecuteStepTransitionReportsCompletionGateRefusal(t *testing.T) {
 func TestEngineCompletionGateRefusalSettlesDelivery(t *testing.T) {
 	fixture := newDeliveryWorkflowOutcomeFixture(t, "completion-gate", "work")
 	blockTaskCompletion(t, fixture.repo, fixture.taskID)
+	require.NoError(t, fixture.repo.SetSessionMetadataKey(fixture.ctx, fixture.session.ID, "plan_mode", true))
+	fixture.session = mustGetSession(t, fixture.repo, fixture.session.ID)
 	stepTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	fixture.installStep(t, &wfmodels.WorkflowStep{
 		ID: "work", WorkflowID: "wf1", Position: 0, UpdatedAt: stepTime,
-		Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
-			Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "done"},
-		}}},
+		Events: wfmodels.StepEvents{
+			OnExit: []wfmodels.OnExitAction{{Type: wfmodels.OnExitDisablePlanMode}},
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+				Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "done"},
+			}},
+		},
 	})
 	fixture.installStep(t, &wfmodels.WorkflowStep{
 		ID: "done", WorkflowID: "wf1", Position: 1, UpdatedAt: stepTime, CompleteTaskOnEnter: true,
@@ -81,7 +86,40 @@ func TestEngineCompletionGateRefusalSettlesDelivery(t *testing.T) {
 	task, err := fixture.repo.GetTask(fixture.ctx, fixture.taskID)
 	require.NoError(t, err)
 	require.Equal(t, "work", task.WorkflowStepID)
-	require.Equal(t, models.TaskSessionStateWaitingForInput, mustGetSession(t, fixture.repo, fixture.session.ID).State)
+	session := mustGetSession(t, fixture.repo, fixture.session.ID)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	require.Equal(t, true, session.Metadata["plan_mode"])
+}
+
+func TestEngineCompletesTaskWithVerifiedTaskRevision(t *testing.T) {
+	fixture := newDeliveryWorkflowOutcomeFixture(t, "verified-revision", "work")
+	task, err := fixture.repo.GetTask(fixture.ctx, fixture.taskID)
+	require.NoError(t, err)
+	blockTaskCompletion(t, fixture.repo, task.ID)
+	gate, err := fixture.repo.GetTaskCompletionGate(fixture.ctx, task.ID)
+	require.NoError(t, err)
+	_, err = fixture.repo.VerifyTaskCompletionCriterion(fixture.ctx, models.TaskCompletionEvidenceChange{
+		TaskID: task.ID, WorkspaceID: task.WorkspaceID, ExpectedRevision: gate.Revision,
+		CriterionID: "review", ActorKind: "human", ActorID: "reviewer",
+		Evidence: models.TaskCompletionEvidence{Subject: models.TaskCompletionEvidenceSubject{
+			Kind: models.TaskCompletionEvidenceTaskRevision, ID: task.ID, Revision: task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		}, Summary: "Reviewed"},
+	})
+	require.NoError(t, err)
+	stepTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	fixture.installStep(t, &wfmodels.WorkflowStep{ID: "work", WorkflowID: "wf1", UpdatedAt: stepTime,
+		Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+			Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "done"},
+		}}},
+	})
+	fixture.installStep(t, &wfmodels.WorkflowStep{ID: "done", WorkflowID: "wf1", Position: 1, UpdatedAt: stepTime, CompleteTaskOnEnter: true})
+	_, err = fixture.repo.DB().ExecContext(fixture.ctx, `UPDATE workflow_steps SET complete_task_on_enter = 1 WHERE id = 'done'`)
+	require.NoError(t, err)
+	require.True(t, fixture.service.processOnTurnCompleteViaEngineWithCause(withWorkflowEffect(fixture.ctx, fixture.effect), task.ID, fixture.session, turnCompletionCauseAgentTurn))
+	task, err = fixture.repo.GetTask(fixture.ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, "done", task.WorkflowStepID)
+	require.Equal(t, v1.TaskStateCompleted, task.State)
 }
 
 func blockTaskCompletion(t *testing.T, repo *sqliterepo.Repository, taskID string) {
