@@ -1,6 +1,7 @@
 import { expectPreviewFooter } from "./workflow-move-preview-assertions";
 import { expect, test } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
+import { movePreviewRequestPredicate } from "./workflow-move-preview-stability-helpers";
 import {
   COMPOSER_HISTORY_PROMPT,
   expectComposerActionKeyboardOrder,
@@ -234,12 +235,20 @@ test("uses the desktop next-step anchored form for the same one-shot move contra
   const nextStepButton = testPage.getByTestId("proceed-next-step");
   await expect(nextStepButton).toBeVisible();
   await nextStepButton.hover();
-  await expect(testPage.getByTestId("proceed-next-step-options")).toBeVisible();
-  await expectPreviewFooter(
-    testPage.getByTestId("proceed-next-step-options"),
-    "workflow-move-submit",
-  );
-  await fillMoveOverrides(testPage, { instructions: "" });
+  const options = testPage.getByTestId("proceed-next-step-options");
+  await expect(options).toBeVisible();
+  const isMovePreview = movePreviewRequestPredicate(fixture.taskId, fixture.targetStepId);
+  // The first non-empty instructions refresh the preview and change the form height.
+  await Promise.all([
+    testPage.waitForEvent("requestfinished", {
+      predicate: async (request) =>
+        isMovePreview(request) &&
+        request.postDataJSON()?.entry_options?.instructions === MOVE_INSTRUCTIONS &&
+        (await request.response())?.ok() === true,
+    }),
+    fillMoveOverrides(testPage),
+  ]);
+  await expectPreviewFooter(options, "workflow-move-submit");
   const savedPrompt = await selectMoveSavedPrompt(testPage, apiClient, "keyboard");
   try {
     const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
