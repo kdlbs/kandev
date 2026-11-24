@@ -180,8 +180,9 @@ func (s *Service) processOnTurnCompleteWithCause(
 	if cause == turnCompletionCauseUserCancellation {
 		ctx = cancellationTransitionAttribution(ctx)
 	}
-	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true)
-	return true
+	transitionCapture := &workflowTransitionErrorCapture{}
+	s.executeStepTransition(withWorkflowTransitionErrorCapture(ctx, transitionCapture), taskID, sessionID, currentStep, targetStepID, true)
+	return transitionCapture.err == nil
 }
 
 func (s *Service) shouldSkipLegacyTurnCompletion(
@@ -490,11 +491,11 @@ func (s *Service) onTurnStartTaskAdmission(ctx context.Context, taskID string) (
 // If false, only the step change is applied (used for on_turn_start where the user is about to send a message).
 func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool) {
 	settleFailedTransitionSession := func(transitionErr error) {
+		recordWorkflowTransitionError(ctx, transitionErr)
 		if triggerOnEnter {
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
 			return
 		}
-		recordWorkflowTransitionError(ctx, transitionErr)
 		s.reportWorkflowTurnStartPreparationError(
 			ctx,
 			taskID,
@@ -555,6 +556,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	}
 	applied, err := s.updateTransitionTaskWithCapacityAndEffect(transitionCtx, task, fromStepID, targetStep)
 	if err != nil {
+		s.recordCompletionGateRefusal(ctx, taskID, fromStepID, sessionID, err)
 		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
@@ -8675,6 +8677,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	commitResult, err := commit(applyCtx)
 	if err != nil {
 		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
+		s.recordCompletionGateRefusal(ctx, taskID, result.FromStepID, session.ID, err)
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),

@@ -65,10 +65,28 @@ func (r *Repository) preflightTaskCompletionGateTx(
 	if err := r.checkRequiredSubtaskAssignmentsTx(ctx, tx, current.ID); err != nil {
 		return err
 	}
-	if candidate.State != v1.TaskStateCompleted || current.State == v1.TaskStateCompleted {
+	if !needsTaskCompletionGate(current, candidate) {
 		return nil
 	}
 	return r.checkTaskCompletionMoveOverrideTx(ctx, tx, current, candidate)
+}
+
+func needsTaskCompletionGate(current, candidate *models.Task) bool {
+	if taskTransitionsToCompleted(current, candidate) {
+		return true
+	}
+	stepID := candidate.WorkflowStepID
+	if stepID == "" || (!candidate.IsEphemeral && !candidate.WIPAdmitted && candidate.QueuedForStepID == stepID) {
+		return false
+	}
+	// A task queued in the destination enters it when the queue marker is
+	// cleared and admission is granted, even if its step ID stays the same.
+	return current.WorkflowID != candidate.WorkflowID || current.WorkflowStepID != stepID ||
+		(!current.WIPAdmitted && current.QueuedForStepID == stepID && candidate.WIPAdmitted)
+}
+
+func taskTransitionsToCompleted(current, candidate *models.Task) bool {
+	return candidate.State == v1.TaskStateCompleted && current.State != v1.TaskStateCompleted
 }
 
 func (r *Repository) isCompletingTaskMoveTx(
@@ -76,17 +94,24 @@ func (r *Repository) isCompletingTaskMoveTx(
 	tx *sql.Tx,
 	current, candidate *models.Task,
 ) (bool, error) {
-	if candidate.State == v1.TaskStateCompleted && current.State != v1.TaskStateCompleted {
+	if taskTransitionsToCompleted(current, candidate) {
 		return true, nil
 	}
 	if candidate.WorkflowID == "" || candidate.WorkflowStepID == "" {
 		return false, nil
 	}
-	completing, err := r.isCompletingWorkflowStepTx(ctx, tx, candidate.WorkflowID, candidate.WorkflowStepID)
-	if err != nil {
-		return false, err
-	}
-	return completing, nil
+	return r.isCompletingWorkflowStepTx(ctx, tx, candidate.WorkflowID, candidate.WorkflowStepID)
+}
+
+// readTaskCompletionMoveSourceTx reads admission fields after the task is locked.
+func (r *Repository) readTaskCompletionMoveSourceTx(
+	ctx context.Context, tx *sql.Tx, taskID, workflowID, stepID string,
+) (models.Task, error) {
+	current := models.Task{ID: taskID, WorkflowID: workflowID, WorkflowStepID: stepID}
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT state, execution_grade, wip_admitted = 1, COALESCE(queued_for_step_id, '') FROM tasks WHERE id = ?
+	`), taskID).Scan(&current.State, &current.ExecutionGrade, &current.WIPAdmitted, &current.QueuedForStepID)
+	return current, err
 }
 
 func (r *Repository) checkRequiredSubtaskAssignmentsTx(ctx context.Context, tx *sql.Tx, taskID string) error {
@@ -112,24 +137,25 @@ func (r *Repository) checkTaskCompletionMoveOverrideTx(
 	if len(snapshot.Criteria) == 0 || len(snapshot.Blockers) == 0 {
 		return nil
 	}
-	return validateTaskCompletionMoveOverride(ctx, current, candidate, snapshot)
+	_, err = validateTaskCompletionMoveOverride(ctx, current, candidate, snapshot)
+	return err
 }
 
-func validateTaskCompletionMoveOverride(ctx context.Context, current, candidate *models.Task, snapshot *models.TaskCompletionGateSnapshot) error {
+func validateTaskCompletionMoveOverride(
+	ctx context.Context, current, candidate *models.Task, snapshot *models.TaskCompletionGateSnapshot,
+) (models.TaskCompletionMoveOverride, error) {
 	override, ok := models.TaskCompletionMoveOverrideFromContext(ctx)
 	if !ok {
-		return repoerrors.ErrTaskCompletionGateBlocked
+		return override, repoerrors.ErrTaskCompletionGateBlocked
 	}
 	if override.TaskID != current.ID || override.WorkspaceID != snapshot.WorkspaceID ||
+		override.ExpectedRevision != snapshot.Revision ||
 		override.SourceWorkflowID != current.WorkflowID || override.SourceStepID != current.WorkflowStepID ||
 		override.TargetWorkflowID != candidate.WorkflowID || override.TargetStepID != candidate.WorkflowStepID ||
 		strings.TrimSpace(override.ActorID) == "" || strings.TrimSpace(override.Reason) == "" {
-		return repoerrors.ErrTaskCompletionCriteriaConflict
+		return override, repoerrors.ErrTaskCompletionCriteriaConflict
 	}
-	if override.ExpectedRevision != snapshot.Revision {
-		return repoerrors.ErrTaskCompletionCriteriaConflict
-	}
-	return nil
+	return override, nil
 }
 
 func (r *Repository) admitCompletionTx(
@@ -201,7 +227,7 @@ func (r *Repository) validateMoveAdmissionStepTx(
 	if err != nil {
 		return err
 	}
-	completesTask := candidate.State == v1.TaskStateCompleted && current.State != v1.TaskStateCompleted
+	completesTask := taskTransitionsToCompleted(current, candidate)
 	if completesTask && !completing {
 		return repoerrors.ErrWorkflowChangeConflict
 	}
@@ -216,7 +242,7 @@ func (r *Repository) validateSetStateAdmissionStepTx(
 	tx *sql.Tx,
 	current, candidate *models.Task,
 ) error {
-	if candidate.State != v1.TaskStateCompleted || current.State == v1.TaskStateCompleted || candidate.WorkflowStepID == "" {
+	if !taskTransitionsToCompleted(current, candidate) || candidate.WorkflowStepID == "" {
 		return nil
 	}
 	return r.requireWorkflowStepTx(ctx, tx, candidate)
@@ -340,8 +366,7 @@ func (r *Repository) updateHumanTaskState(
 	if err := r.admitCompletionTx(ctx, tx, admission, task); err != nil {
 		return nil, "", false, err
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, id, previousState, task.State,
-		task.WorkflowID, task.WorkflowStepID, task.WorkflowID, task.WorkflowStepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, id, previousState, task.State, task.WorkflowID, task.WorkflowStepID); err != nil {
 		return nil, "", false, err
 	}
 	task.UpdatedAt = r.nowUTC()
