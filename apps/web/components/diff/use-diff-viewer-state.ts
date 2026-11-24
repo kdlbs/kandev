@@ -1,3 +1,4 @@
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { useState, useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import type {
   SelectedLineRange,
@@ -283,7 +284,11 @@ type CommentHandlerOpts = {
   data: FileDiffData;
   sessionId?: string;
   repositoryName?: string;
-  addComment: (range: SelectedLineRange, content: string) => DiffComment;
+  addComment: (
+    range: SelectedLineRange,
+    content: string,
+    attachments?: MessageAttachment[],
+  ) => DiffComment;
   removeComment: (commentId: string) => void;
   updateComment: (commentId: string, updates: DiffCommentUpdate) => void;
   setEditingComment: (commentId: string | null) => void;
@@ -320,7 +325,7 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
   );
 
   const createCommentFromSelection = useCallback(
-    (content: string): DiffComment | null => {
+    (content: string, attachments?: MessageAttachment[]): DiffComment | null => {
       if (!selectedLines) return null;
       return buildDiffComment({
         filePath: data.filePath,
@@ -330,22 +335,23 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
         endLine: selectedLines.end,
         side: (selectedLines.side || "additions") as DiffComment["side"],
         text: content,
+        attachments,
       });
     },
     [selectedLines, data.filePath, sessionId, repositoryName],
   );
 
   const submitComment = useCallback(
-    (content: string, runAfter?: (c: DiffComment) => void) => {
+    (content: string, attachments?: MessageAttachment[], runAfter?: (c: DiffComment) => void) => {
       if (!enableComments || !selectedLines) return;
       if (onCommentAdd && externalComments !== undefined) {
-        const comment = createCommentFromSelection(content);
+        const comment = createCommentFromSelection(content, attachments);
         if (comment) {
           onCommentAdd(comment);
           runAfter?.(comment);
         }
       } else if (sessionId) {
-        const stored = addComment(selectedLines, content);
+        const stored = addComment(selectedLines, content, attachments);
         if (runAfter && stored) runAfter(stored);
       }
       setShowCommentForm(false);
@@ -365,12 +371,13 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
   );
 
   const handleCommentSubmit = useCallback(
-    (content: string) => submitComment(content),
+    (content: string, attachments?: MessageAttachment[]) => submitComment(content, attachments),
     [submitComment],
   );
 
   const handleCommentSubmitAndRun = useCallback(
-    (content: string) => submitComment(content, onCommentRun),
+    (content: string, attachments?: MessageAttachment[]) =>
+      submitComment(content, attachments, onCommentRun),
     [submitComment, onCommentRun],
   );
 

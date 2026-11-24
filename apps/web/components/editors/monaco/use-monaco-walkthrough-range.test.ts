@@ -55,12 +55,33 @@ function createModelSwitchingEditor(initialLineCount: number) {
   let modelRevision = 0;
   let model = { id: "model-0", getLineCount: () => lineCount };
   const contentListeners = new Set<() => void>();
+  const layoutListeners = new Set<() => void>();
+  let viewportHeight = 300;
+  let scrollTop = 0;
+  const container = {
+    get clientHeight() {
+      return viewportHeight;
+    },
+    clientWidth: 500,
+  };
   const modelListeners = new Set<() => void>();
   const setDecorations = vi.fn();
-  const revealLinesInCenter = vi.fn();
+  const revealLinesInCenter = vi.fn((startLine: number) => {
+    if (viewportHeight > 0) scrollTop = (startLine - 1) * 20;
+  });
   const editor = {
     createDecorationsCollection: () => ({ set: setDecorations }),
     getModel: () => model,
+    getContainerDomNode: () => container,
+    getLayoutInfo: () => ({ height: viewportHeight }),
+    getScrolledVisiblePosition: ({ lineNumber }: { lineNumber: number }) => ({
+      top: (lineNumber - 1) * 20 - scrollTop,
+      height: 20,
+    }),
+    onDidLayoutChange: (listener: () => void) => {
+      layoutListeners.add(listener);
+      return { dispose: () => layoutListeners.delete(listener) };
+    },
     onDidChangeModel: (listener: () => void) => {
       modelListeners.add(listener);
       return {
@@ -84,6 +105,11 @@ function createModelSwitchingEditor(initialLineCount: number) {
     editor,
     revealLinesInCenter,
     setDecorations,
+    resize(height: number) {
+      viewportHeight = height;
+      for (const listener of layoutListeners) listener();
+    },
+    getScrollTop: () => scrollTop,
     decoratedLines() {
       const decorations = setDecorations.mock.lastCall?.[0] ?? [];
       return decorations.map(
@@ -118,6 +144,8 @@ function createGeometryEditor() {
   const editor = {
     createDecorationsCollection: () => ({ set: vi.fn() }),
     getDomNode: () => dom,
+    getContainerDomNode: () => ({ clientHeight: 300, clientWidth: 500 }),
+    getLayoutInfo: () => ({ height: 300 }),
     getModel: () => ({ id: "model-0", getLineCount: () => 3 }),
     getScrolledVisiblePosition: ({ lineNumber }: { lineNumber: number }) => ({
       top: lineNumber * 20,
@@ -222,6 +250,26 @@ describe("useMonacoWalkthroughRange", () => {
 });
 
 describe("useMonacoWalkthroughRange model changes", () => {
+  // @covers AC-UI-WALKTHROUGH-EDITOR-REVEAL-001.1, AC-UI-WALKTHROUGH-EDITOR-REVEAL-001.2
+  it("reveals the first range when the editor gains a usable layout", () => {
+    const fake = createModelSwitchingEditor(200);
+    fake.resize(0);
+    renderHook(() =>
+      useMonacoWalkthroughRange({
+        editor: fake.editor,
+        editorAreaRef: { current: null },
+        path: WALKTHROUGH_FILE,
+      }),
+    );
+    expect(fake.decoratedLines()).toEqual([2, 3]);
+    act(() => fake.resize(300));
+    expect(fake.getScrollTop()).toBe(20);
+    expect(fake.revealLinesInCenter).toHaveBeenCalledTimes(1);
+
+    act(() => fake.resize(260));
+    expect(fake.revealLinesInCenter).toHaveBeenCalledTimes(1);
+  });
+
   it("reclamps the active range after Monaco switches models", () => {
     const fake = createModelSwitchingEditor(2);
     renderHook(() =>
@@ -236,7 +284,7 @@ describe("useMonacoWalkthroughRange model changes", () => {
     act(() => fake.switchModel(3));
 
     expect(fake.decoratedLines()).toEqual([2, 3]);
-    expect(fake.revealLinesInCenter).toHaveBeenLastCalledWith(2, 3);
+    expect(fake.revealLinesInCenter).toHaveBeenLastCalledWith(2, 3, undefined);
   });
 
   it("reclamps when the current Monaco model line count changes", () => {
@@ -252,7 +300,7 @@ describe("useMonacoWalkthroughRange model changes", () => {
     act(() => fake.changeLineCount(2));
 
     expect(fake.decoratedLines()).toEqual([2]);
-    expect(fake.revealLinesInCenter).toHaveBeenLastCalledWith(2, 2);
+    expect(fake.revealLinesInCenter).toHaveBeenLastCalledWith(2, 2, undefined);
   });
 
   it("does not recenter for same-model line count changes outside the active range", () => {
@@ -286,7 +334,7 @@ describe("useMonacoWalkthroughRange model changes", () => {
     act(() => fake.switchModel(3));
 
     expect(fake.decoratedLines()).toEqual([2, 3]);
-    expect(fake.revealLinesInCenter).toHaveBeenLastCalledWith(2, 3);
+    expect(fake.revealLinesInCenter).toHaveBeenLastCalledWith(2, 3, undefined);
   });
 
   it("unsubscribes from Monaco model events on unmount", () => {

@@ -181,6 +181,7 @@ func buildOwnerBehaviors() map[string]ownerBehavior {
 	behaviors["plugin-state"] = ownerBehavior{actions: []apiAction{pluginStateAction()}}
 	behaviors["plugin-instance-state"] = ownerBehavior{actions: []apiAction{pluginInstanceStateAction()}}
 	behaviors["plugin-user-state"] = ownerBehavior{actions: []apiAction{pluginUserStateAction()}}
+	behaviors["plugin-command-receipts"] = ownerBehavior{actions: []apiAction{pluginIdentityLinkAction()}}
 	behaviors["canvas"] = ownerBehavior{actions: []apiAction{canvasAction()}}
 	behaviors["github"] = ownerBehavior{actions: []apiAction{githubAction()}}
 	behaviors["gitlab"] = ownerBehavior{actions: []apiAction{gitlabAction()}}

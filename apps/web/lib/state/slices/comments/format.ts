@@ -14,6 +14,21 @@ import {
   isWalkthroughComment,
 } from "./types";
 import { t } from "@/lib/i18n";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
+
+export function commentAttachmentsForDelivery(comments: Comment[]): MessageAttachment[] {
+  return comments.flatMap((comment) =>
+    (comment.attachments ?? []).map((attachment) => ({
+      ...attachment,
+      comment_id: comment.attachments?.[0]?.attachment_id,
+    })),
+  );
+}
+
+export function appendCommentAttachmentMarker(lines: string[], comment: Comment): void {
+  const groupId = comment.attachments?.[0]?.attachment_id;
+  if (groupId) lines.push("", `<!-- kandev-comment-files:${groupId} -->`);
+}
 
 /**
  * Format diff review comments as human-readable markdown for sending to agent.
@@ -34,7 +49,9 @@ export function formatReviewCommentsAsMarkdown(comments: ReviewComment[]): strin
     for (const comment of fileComments) {
       if (comment.source === "review-file") {
         const prefix = comment.repositoryName ? `${comment.repositoryName}/` : "";
-        lines.push(`**${prefix}${comment.filePath}**`, toBlockquote(comment.text), "");
+        lines.push(`**${prefix}${comment.filePath}**`, toBlockquote(comment.text));
+        appendCommentAttachmentMarker(lines, comment);
+        lines.push("");
         continue;
       }
       const lineRange =
@@ -49,6 +66,7 @@ export function formatReviewCommentsAsMarkdown(comments: ReviewComment[]): strin
       lines.push(comment.codeContent);
       lines.push("```");
       lines.push(`> ${comment.text}`);
+      appendCommentAttachmentMarker(lines, comment);
       lines.push("");
     }
   }
@@ -99,6 +117,7 @@ export function formatPlanCommentsAsMarkdown(comments: PlanComment[]): string {
       lines.push("```");
     }
     lines.push(toBlockquote(c.text));
+    appendCommentAttachmentMarker(lines, c);
     lines.push("");
   }
 
@@ -144,6 +163,7 @@ export function formatWalkthroughCommentsAsMarkdown(comments: WalkthroughComment
     lines.push("");
     lines.push("User feedback:");
     lines.push(toBlockquote(c.text));
+    appendCommentAttachmentMarker(lines, c);
     lines.push("");
   }
 
@@ -172,6 +192,7 @@ export function formatAgentMessageCommentsAsMarkdown(comments: AgentMessageComme
     lines.push("");
     lines.push("User feedback:");
     lines.push(toBlockquote(comment.text));
+    appendCommentAttachmentMarker(lines, comment);
     lines.push("");
   }
   lines.push("---", "");

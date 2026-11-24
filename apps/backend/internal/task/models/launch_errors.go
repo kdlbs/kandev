@@ -79,6 +79,10 @@ const (
 	AgentErrorCauseCodeNativeResumeUnsupported   = "native_resume_unsupported"
 	AgentErrorCauseCodeModelUnavailable          = "model_unavailable"
 	AgentErrorCauseCodeModelSelectionFailed      = "model_selection_failed"
+	AgentErrorCauseCodeThinkingLevelFailed       = "thinking_level_failed"
+	AgentErrorCauseCodeThinkingLevelUnavailable  = "thinking_level_unavailable"
+	AgentErrorCauseCodeThinkingLevelMismatch     = "thinking_level_mismatch"
+	AgentErrorCauseCodeThinkingLevelUnconfirmed  = "thinking_level_unconfirmed"
 	AgentErrorCauseCodePermissionModeFailed      = "permission_mode_failed"
 	AgentErrorCauseCodePermissionModeUnconfirmed = "permission_mode_unconfirmed"
 	AgentErrorCauseCodePermissionModeMismatch    = "permission_mode_mismatch"
@@ -109,19 +113,23 @@ const AgentErrorCauseProcessExitedDetail = "The agent exited before startup comp
 // resume failure and a workspace fallback can remain distinct without
 // persisting provider transport payloads.
 type AgentErrorCause struct {
-	Operation      string             `json:"operation"`
-	Storage        *AgentErrorStorage `json:"storage,omitempty"`
-	Code           string             `json:"code"`
-	Detail         string             `json:"detail,omitempty"`
-	Reason         string             `json:"reason,omitempty"`
-	RequestedModel string             `json:"requested_model,omitempty"`
-	EffectiveModel string             `json:"effective_model,omitempty"`
-	AttemptedModel string             `json:"attempted_model,omitempty"`
-	RequestedMode  string             `json:"requested_mode,omitempty"`
-	EffectiveMode  string             `json:"effective_mode,omitempty"`
-	RuntimeVersion string             `json:"runtime_version,omitempty"`
-	PromptNotSent  *bool              `json:"prompt_not_sent,omitempty"`
-	ExitCode       *int               `json:"exit_code,omitempty"`
+	Operation        string             `json:"operation"`
+	Storage          *AgentErrorStorage `json:"storage,omitempty"`
+	Code             string             `json:"code"`
+	Detail           string             `json:"detail,omitempty"`
+	Reason           string             `json:"reason,omitempty"`
+	RequestedModel   string             `json:"requested_model,omitempty"`
+	EffectiveModel   string             `json:"effective_model,omitempty"`
+	AttemptedModel   string             `json:"attempted_model,omitempty"`
+	RequestedSetting string             `json:"requested_setting,omitempty"`
+	EffectiveSetting string             `json:"effective_setting,omitempty"`
+	SettingConfigID  string             `json:"setting_config_id,omitempty"`
+	SettingSource    string             `json:"setting_source,omitempty"`
+	RequestedMode    string             `json:"requested_mode,omitempty"`
+	EffectiveMode    string             `json:"effective_mode,omitempty"`
+	RuntimeVersion   string             `json:"runtime_version,omitempty"`
+	PromptNotSent    *bool              `json:"prompt_not_sent,omitempty"`
+	ExitCode         *int               `json:"exit_code,omitempty"`
 }
 
 // AgentErrorStorage is the bounded, validated storage evidence attached to a
@@ -166,6 +174,7 @@ func NormalizeAgentErrorCauses(causes []AgentErrorCause) []AgentErrorCause {
 		identity := cause.Operation + "\x00" + cause.Code + "\x00" + cause.Detail +
 			"\x00" + cause.Reason + "\x00" + cause.RequestedModel + "\x00" + cause.EffectiveModel +
 			"\x00" + cause.AttemptedModel + "\x00" + cause.RequestedMode + "\x00" + cause.EffectiveMode +
+			"\x00" + cause.RequestedSetting + "\x00" + cause.EffectiveSetting + "\x00" + cause.SettingConfigID + "\x00" + cause.SettingSource +
 			"\x00" + cause.RuntimeVersion + "\x00" + agentErrorStorageIdentity(cause.Storage) +
 			"\x00" + agentErrorExitCodeIdentity(cause.ExitCode)
 		switch {
@@ -200,7 +209,7 @@ func AgentErrorCausesEqual(left, right []AgentErrorCause) bool {
 			a.Reason != b.Reason || a.RequestedModel != b.RequestedModel ||
 			a.EffectiveModel != b.EffectiveModel || a.AttemptedModel != b.AttemptedModel ||
 			a.RequestedMode != b.RequestedMode ||
-			a.EffectiveMode != b.EffectiveMode || a.RuntimeVersion != b.RuntimeVersion {
+			a.EffectiveMode != b.EffectiveMode || a.RequestedSetting != b.RequestedSetting || a.EffectiveSetting != b.EffectiveSetting || a.SettingConfigID != b.SettingConfigID || a.SettingSource != b.SettingSource || a.RuntimeVersion != b.RuntimeVersion {
 			return false
 		}
 		if (a.ExitCode == nil) != (b.ExitCode == nil) {
@@ -256,6 +265,10 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 	if cause == nil {
 		return
 	}
+	if normalizeThinkingEvidence(cause) {
+		return
+	}
+	cause.RequestedSetting, cause.EffectiveSetting, cause.SettingConfigID, cause.SettingSource = "", "", "", ""
 	cause.Reason = strings.TrimSpace(cause.Reason)
 	switch cause.Code {
 	case AgentErrorCauseCodeModelUnavailable, AgentErrorCauseCodeModelSelectionFailed:
@@ -305,17 +318,7 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		}
 		cause.RuntimeVersion = safeAgentErrorRuntimeVersion(cause.RuntimeVersion)
 	case AgentErrorCauseCodeProcessExited:
-		reason := cause.Reason
-		exitCode := cause.ExitCode
-		clearAgentErrorCauseEvidence(cause)
-		if reason != AgentErrorCauseReasonMiseConfigUntrusted {
-			reason = AgentErrorCauseReasonUnclassified
-		}
-		cause.Reason = reason
-		if exitCode != nil && (*exitCode >= 0 && *exitCode <= math.MaxUint32) {
-			cause.ExitCode = exitCode
-		}
-		cause.Detail = AgentErrorCauseProcessExitedDetail
+		normalizeProcessExitEvidence(cause)
 	case AgentErrorCauseCodeDeliveryStorage:
 		storage := normalizeAgentErrorStorage(cause.Storage)
 		clearAgentErrorCauseEvidence(cause)
@@ -330,6 +333,20 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		value := *cause.PromptNotSent
 		cause.PromptNotSent = &value
 	}
+}
+
+func normalizeProcessExitEvidence(cause *AgentErrorCause) {
+	reason := cause.Reason
+	exitCode := cause.ExitCode
+	clearAgentErrorCauseEvidence(cause)
+	if reason != AgentErrorCauseReasonMiseConfigUntrusted {
+		reason = AgentErrorCauseReasonUnclassified
+	}
+	cause.Reason = reason
+	if exitCode != nil && (*exitCode >= 0 && *exitCode <= math.MaxUint32) {
+		cause.ExitCode = exitCode
+	}
+	cause.Detail = AgentErrorCauseProcessExitedDetail
 }
 
 func clearAgentErrorCauseEvidence(cause *AgentErrorCause) {
@@ -473,7 +490,7 @@ func NormalizeAgentErrorDetails(details string, causes []AgentErrorCause) string
 func agentErrorCauseEvidenceBytes(cause AgentErrorCause) int {
 	total := len(cause.Operation) + len(cause.Code) + len(cause.Detail) + len(cause.Reason) +
 		len(cause.RequestedModel) + len(cause.EffectiveModel) + len(cause.AttemptedModel) +
-		len(cause.RequestedMode) + len(cause.EffectiveMode) + len(cause.RuntimeVersion)
+		len(cause.RequestedSetting) + len(cause.EffectiveSetting) + len(cause.SettingConfigID) + len(cause.SettingSource) + len(cause.RequestedMode) + len(cause.EffectiveMode) + len(cause.RuntimeVersion)
 	if cause.PromptNotSent != nil {
 		total++
 	}
@@ -507,6 +524,7 @@ func isKnownAgentErrorCauseCode(code string) bool {
 		AgentErrorCauseCodePermissionModeFailed,
 		AgentErrorCauseCodePermissionModeUnconfirmed,
 		AgentErrorCauseCodePermissionModeMismatch,
+		AgentErrorCauseCodeThinkingLevelFailed, AgentErrorCauseCodeThinkingLevelUnavailable, AgentErrorCauseCodeThinkingLevelMismatch, AgentErrorCauseCodeThinkingLevelUnconfirmed,
 		AgentErrorCauseCodeDeliveryStorage,
 		AgentErrorCauseCodePluginPreparationFailed,
 		AgentErrorCauseCodeProcessExited,

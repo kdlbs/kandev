@@ -18,6 +18,7 @@ import {
 import { QueueAffordance } from "@/components/task/chat/queued-ghost-list";
 import { ComposerStatusNotices } from "./composer-status-notices";
 import {
+  commentAttachmentsForDelivery,
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
@@ -262,9 +263,17 @@ async function submitChatPayload({
   });
   const planCommentRefs = toTaskPlanCommentRefs(planComments);
   const previewFeedbackRefs = toTaskPreviewFeedbackRefs(previewFeedback ?? []);
+  const commentAttachments = commentAttachmentsForDelivery([
+    ...(payload.reviewComments ?? []),
+    ...walkthroughComments,
+    ...messageComments,
+  ]);
   const outbound = {
     ...payload,
     message: finalMessage,
+    ...(commentAttachments.length > 0 && {
+      attachments: [...(payload.attachments ?? []), ...commentAttachments],
+    }),
     ...(planCommentRefs.length > 0 ? { planCommentRefs } : {}),
     ...(previewFeedbackRefs.length > 0 ? { previewFeedbackRefs } : {}),
   };

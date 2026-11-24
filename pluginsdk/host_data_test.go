@@ -363,7 +363,7 @@ func TestHostData_Messages(t *testing.T) {
 	impl := &dataRecordingHost{
 		messages: []Message{{
 			ID: "m1", SessionID: "s1", TaskID: "t1", TurnID: "turn1",
-			AuthorType: "user", Content: "hello", Type: "message", CreatedAt: "2026-07-20T09:00:00Z",
+			AuthorType: "user", Content: "hello", Type: "message", CreatedAt: "2026-07-20T09:00:00Z", Source: "plugin:discord",
 		}},
 		messagePage: &PageInfo{NextCursor: "2", HasMore: true},
 	}

@@ -1,5 +1,6 @@
 "use client";
 
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import {
   useCallback,
   useEffect,
@@ -323,7 +324,7 @@ function useMarkdownCommentSubmitters({
   const canRunComment = Boolean(sessionId && taskId);
 
   const createComment = useCallback(
-    (text: string): DiffComment | null => {
+    (text: string, attachments?: MessageAttachment[]): DiffComment | null => {
       if (!sessionId || !textSelection) return null;
       const comment = buildMarkdownPreviewComment({
         filePath: path,
@@ -335,6 +336,7 @@ function useMarkdownCommentSubmitters({
         startLine: textSelection.startLine,
         endLine: textSelection.endLine,
       });
+      if (attachments?.length) comment.attachments = attachments;
       addComment(comment);
       clearTextSelection();
       return comment;
@@ -342,12 +344,9 @@ function useMarkdownCommentSubmitters({
     [addComment, clearTextSelection, path, repositoryId, repositoryName, sessionId, textSelection],
   );
 
-  // Same `editors:` copy as the CodeMirror and Monaco comment flows in
-  // `components/editors/**`, which say exactly this. The markdown preview is
-  // the third surface of the same feature and was the one left in English.
   const submitComment = useCallback(
-    (text: string) => {
-      const comment = createComment(text);
+    (text: string, _selected?: string, attachments?: MessageAttachment[]) => {
+      const comment = createComment(text, attachments);
       if (!comment) return;
       toast({
         title: t("editors:commentAdded"),
@@ -358,7 +357,7 @@ function useMarkdownCommentSubmitters({
   );
 
   const submitAndRunComment = useCallback(
-    async (text: string) => {
+    async (text: string, _selected?: string, attachments?: MessageAttachment[]) => {
       if (!canRunComment) {
         toast({
           title: t("editors:failedToSendComment"),
@@ -367,7 +366,7 @@ function useMarkdownCommentSubmitters({
         });
         return;
       }
-      const comment = createComment(text);
+      const comment = createComment(text, attachments);
       if (!comment) return;
       try {
         const { queued } = await runComment(comment);
@@ -389,13 +388,10 @@ function useMarkdownCommentSubmitters({
   return { submitComment, submitAndRunComment: canRunComment ? submitAndRunComment : undefined };
 }
 
-function useMarkdownCommentRangeView({
-  comments,
-  onShow,
-}: {
-  comments: DiffComment[];
-  onShow: (view: MarkdownCommentView) => void;
-}) {
+function useMarkdownCommentRangeView(
+  comments: DiffComment[],
+  onShow: (view: MarkdownCommentView) => void,
+) {
   return useCallback(
     (range: SourceLineRange, position: { x: number; y: number }) => {
       const rangeComments = comments.filter((comment) => commentsOverlapRange([comment], range));
@@ -450,14 +446,15 @@ function useVisibleMarkdownCommentActions({
     [removeComment, setCommentView, t, toast],
   );
   const updateVisibleComment = useCallback(
-    (commentId: string, text: string) => {
-      updateComment(commentId, { text });
+    (commentId: string, text: string, attachments?: MessageAttachment[]) => {
+      const updates = { text, ...(attachments && { attachments }) };
+      updateComment(commentId, updates);
       setCommentView((view) => {
         if (!view) return view;
         return {
           ...view,
           comments: view.comments.map((comment) =>
-            comment.id === commentId ? { ...comment, text } : comment,
+            comment.id === commentId ? { ...comment, ...updates } : comment,
           ),
         };
       });
@@ -524,10 +521,7 @@ function useMarkdownPreviewActions({
     textSelection,
     clearTextSelection: closeComposer,
   });
-  const showCommentsForRange = useMarkdownCommentRangeView({
-    comments,
-    onShow: setCommentView,
-  });
+  const showCommentsForRange = useMarkdownCommentRangeView(comments, setCommentView);
   const { removeVisibleComment, updateVisibleComment } = useVisibleMarkdownCommentActions({
     setCommentView,
   });
@@ -631,6 +625,7 @@ export function useMarkdownPreviewComments({
   return {
     touch,
     comments,
+    attachmentTaskId: sessionId ? taskId : null,
     currentSelection,
     textSelection,
     commentView,

@@ -46,6 +46,11 @@ type exactExecutionOrchestratorFake struct {
 	recoverCalls int
 	ensureCalls  int
 	stopCalls    []string
+	cancelCalls  []string
+	// observedExecutionID is what ObserveCancelTarget reports; empty means the
+	// execution the commands in these tests observe.
+	observedExecutionID string
+	cancelErr           error
 }
 
 func (f *exactExecutionOrchestratorFake) EnsureSession(_ context.Context, taskID string, _ ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
@@ -61,6 +66,19 @@ func (f *exactExecutionOrchestratorFake) RecoverSession(context.Context, string,
 func (f *exactExecutionOrchestratorFake) StopExecution(_ context.Context, executionID, _ string, _ bool) error {
 	f.stopCalls = append(f.stopCalls, executionID)
 	return nil
+}
+
+func (f *exactExecutionOrchestratorFake) ObserveCancelTarget(context.Context, string) (orchestrator.CancelTarget, error) {
+	executionID := f.observedExecutionID
+	if executionID == "" {
+		executionID = "exec-current"
+	}
+	return orchestrator.CancelTarget{ExecutionID: executionID, TurnID: "turn-1"}, nil
+}
+
+func (f *exactExecutionOrchestratorFake) CancelAgentIfTarget(_ context.Context, sessionID string, _ orchestrator.CancelTarget) error {
+	f.cancelCalls = append(f.cancelCalls, sessionID)
+	return f.cancelErr
 }
 
 type exactExecutionLifecycleFake struct {
@@ -197,5 +215,55 @@ func TestExactExecutionAdapterDoesNotRecoverManuallyCancelledSession(t *testing.
 	}
 	if torch.recoverCalls != 0 {
 		t.Fatalf("orchestrator recover calls = %d, want zero", torch.recoverCalls)
+	}
+}
+
+func TestExactExecutionAdapterCancelTurnInterruptsOnlyTheObservedRunningTurn(t *testing.T) {
+	updatedAt := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	newController := func(state models.TaskSessionState, executionID string) (pluginsExactExecutionController, *exactExecutionOrchestratorFake) {
+		torch := &exactExecutionOrchestratorFake{}
+		return pluginsExactExecutionController{
+			tasks: exactExecutionTaskFake{
+				task:           &models.Task{ID: "task-1", WorkspaceID: "workspace-1"},
+				session:        &models.TaskSession{ID: "session-1", TaskID: "task-1", State: state, UpdatedAt: updatedAt},
+				installationID: "installation-a", instanceKey: "delivery-lead", claimGeneration: 3,
+			},
+			orchestrator: torch,
+			lifecycle:    exactExecutionLifecycleFake{execution: &lifecycle.AgentExecution{ID: executionID}},
+		}, torch
+	}
+	command := pluginsdk.ExactTaskExecutionCommand{
+		WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1",
+		ExpectedSessionResourceVersion: updatedAt.Format(time.RFC3339Nano), ExpectedExecutionID: "exec-current",
+		ManagementInstanceKey: "delivery-lead", ExpectedClaimGeneration: 3,
+	}
+
+	controller, torch := newController(models.TaskSessionStateRunning, "exec-current")
+	if cancelled, err := controller.CancelTurn(context.Background(), "installation-a", command); err != nil || !cancelled {
+		t.Fatalf("running cancel = %v err=%v, want an interrupted turn", cancelled, err)
+	}
+	if len(torch.cancelCalls) != 1 || torch.cancelCalls[0] != "session-1" || len(torch.stopCalls) != 0 {
+		t.Fatalf("cancel calls=%v stop calls=%v, want one CancelAgent and no stop", torch.cancelCalls, torch.stopCalls)
+	}
+
+	controller, torch = newController(models.TaskSessionStateWaitingForInput, "exec-current")
+	if cancelled, err := controller.CancelTurn(context.Background(), "installation-a", command); err != nil || cancelled || len(torch.cancelCalls) != 0 {
+		t.Fatalf("idle cancel = %v calls=%v err=%v, want no change", cancelled, torch.cancelCalls, err)
+	}
+
+	controller, torch = newController(models.TaskSessionStateRunning, "replacement-execution")
+	if _, err := controller.CancelTurn(context.Background(), "installation-a", command); status.Code(err) != codes.Aborted || len(torch.cancelCalls) != 0 {
+		t.Fatalf("replacement execution cancel err=%v calls=%v, want Aborted without an effect", err, torch.cancelCalls)
+	}
+
+	controller, torch = newController(models.TaskSessionStateRunning, "exec-current")
+	if _, err := controller.CancelTurn(context.Background(), "installation-b", command); status.Code(err) != codes.Aborted || len(torch.cancelCalls) != 0 {
+		t.Fatalf("competing installation cancel err=%v calls=%v, want Aborted without an effect", err, torch.cancelCalls)
+	}
+
+	stale := command
+	stale.ExpectedSessionResourceVersion = updatedAt.Add(-time.Second).Format(time.RFC3339Nano)
+	if _, err := controller.CancelTurn(context.Background(), "installation-a", stale); status.Code(err) != codes.Aborted || len(torch.cancelCalls) != 0 {
+		t.Fatalf("stale session cancel err=%v calls=%v, want Aborted without an effect", err, torch.cancelCalls)
 	}
 }

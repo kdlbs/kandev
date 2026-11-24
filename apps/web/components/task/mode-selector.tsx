@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { usableConfigOptions } from "@/components/model-config-selector";
 import { useAppStore } from "@/components/state-provider";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
 import { MobilePillButton } from "@/components/task/mobile/mobile-pill-button";
@@ -33,6 +34,8 @@ import { prioritizeSelectedOption } from "@/lib/utils/selector-options";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 
+const THINKING_LEVEL_LABEL = "agents:thinkingLevel";
+
 type ModeOption = {
   id: string;
   name: string;
@@ -40,6 +43,7 @@ type ModeOption = {
 };
 
 type ModeSelectorState = {
+  thinking?: boolean;
   currentModeId: string;
   availableModes: ModeOption[];
   requestedModeId?: string;
@@ -50,8 +54,8 @@ type ModeSelectorProps = {
   triggerClassName?: string;
 };
 
-function translateModeLabel(t: ReturnType<typeof useTranslation>["t"]) {
-  return t("task:agentPermissionMode");
+function translateModeLabel(t: ReturnType<typeof useTranslation>["t"], thinking?: boolean) {
+  return t(thinking ? THINKING_LEVEL_LABEL : "task:agentPermissionMode");
 }
 
 function resolveSnapshotMode(snapshot: unknown): string | null {
@@ -137,11 +141,15 @@ function useModeSelectorState(sessionId: string | null) {
   const liveModeState = useAppStore((state) =>
     sessionId ? state.sessionMode.bySessionId[sessionId] : undefined,
   );
+  const configOptions = useAppStore((state) =>
+    sessionId ? state.sessionModels.bySessionId[sessionId]?.configOptions : undefined,
+  );
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const taskSessions = useAppStore((state) => state.taskSessions.items);
   const { items: availableAgents } = useAvailableAgents();
 
   const session = sessionId ? (taskSessions[sessionId] ?? null) : null;
+  const isPi = session?.agent_profile_snapshot?.agent_name === "pi-acp";
   const snapshotMode = resolveSnapshotMode(session?.agent_profile_snapshot);
   const profileMode = useMemo(
     () => resolveProfileMode(session?.agent_profile_id, settingsAgents as Agent[]),
@@ -152,18 +160,21 @@ function useModeSelectorState(sessionId: string | null) {
     [availableAgents, session?.agent_profile_id, settingsAgents],
   );
 
-  return useMemo(
-    () =>
-      withRequestedMode(
-        buildModeState(
-          liveModeState ? liveModeState.currentModeId : snapshotMode || profileMode,
-          liveModeState?.availableModes,
-          staticModes,
-        ),
-        liveModeState?.requestedModeId,
+  const hasThinkingConfig =
+    isPi &&
+    usableConfigOptions(configOptions).some((option) => option.category === "thought_level");
+  return useMemo(() => {
+    if (hasThinkingConfig) return undefined;
+    const resolved = withRequestedMode(
+      buildModeState(
+        liveModeState ? liveModeState.currentModeId : snapshotMode || profileMode,
+        liveModeState?.availableModes,
+        staticModes,
       ),
-    [liveModeState, profileMode, snapshotMode, staticModes],
-  );
+      liveModeState?.requestedModeId,
+    );
+    return resolved ? { ...resolved, thinking: isPi } : undefined;
+  }, [liveModeState, profileMode, snapshotMode, staticModes, isPi, hasThinkingConfig]);
 }
 
 function ModeMismatchWarning({
@@ -286,8 +297,8 @@ function MobileModeSelector({
       <MobilePickerSheet
         open={open}
         onOpenChange={setOpen}
-        title={translateModeLabel(t)}
-        description={t("task:availableModes")}
+        title={t(modeState.thinking ? THINKING_LEVEL_LABEL : "task:agentPermissionMode")}
+        description={t(modeState.thinking ? THINKING_LEVEL_LABEL : "task:availableModes")}
         contentTestId="session-mode-picker-scroll"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -486,7 +497,9 @@ function DesktopModeSelector({
         <TooltipContent side="top">{tooltipLabel}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="start" side="top" className="min-w-[280px]">
-        <DropdownMenuLabel>{t("task:availableModes")}</DropdownMenuLabel>
+        <DropdownMenuLabel>
+          {t(modeState.thinking ? THINKING_LEVEL_LABEL : "task:availableModes")}
+        </DropdownMenuLabel>
         {modeState.availableModes.map((mode) => (
           <DropdownMenuItem
             key={mode.id}
@@ -530,7 +543,11 @@ export const ModeSelector = memo(function ModeSelector({
     }
   }, [handleDropdownOpenChange, modeState, sessionId]);
 
-  const handleModeChange = useModeChangeHandler(sessionId, feedback, translateModeLabel(t));
+  const handleModeChange = useModeChangeHandler(
+    sessionId,
+    feedback,
+    translateModeLabel(t, modeState?.thinking),
+  );
 
   if (!sessionId || !modeState) {
     return null;
@@ -554,7 +571,7 @@ export const ModeSelector = memo(function ModeSelector({
     modeState,
     requestedName,
     displayName,
-    defaultLabel: translateModeLabel(t),
+    defaultLabel: translateModeLabel(t, modeState.thinking),
     t,
   });
 

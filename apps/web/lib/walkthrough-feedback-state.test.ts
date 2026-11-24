@@ -46,3 +46,27 @@ it("clears drafts when the owning comment session is cleared", async () => {
   useCommentsStore.getState().clearSessionComments("session");
   expect(useWalkthroughDrafts.getState().drafts).toEqual({});
 });
+
+it("preserves files as step text changes and clears the saved step", () => {
+  const store = useWalkthroughDrafts.getState();
+  const key = walkthroughDraftKey("session", tour, 0);
+  const attachment = {
+    attachment_id: "attachment",
+    type: "resource",
+    mime_type: "text/plain",
+    name: "files.txt",
+    delivery_mode: "path",
+  } as const;
+  store.setDraft("session", tour, 0, [attachment]);
+  store.setDraft("session", tour, 0, "Feedback");
+  expect(useWalkthroughDrafts.getState().drafts[key]).toMatchObject({
+    text: "Feedback",
+    attachments: [attachment],
+  });
+  expect(
+    useWalkthroughDrafts.getState().drafts[walkthroughDraftKey("session", tour, 1)],
+  ).toBeUndefined();
+  store.setDraft("session", tour, 0, "");
+  store.setDraft("session", tour, 0, []);
+  expect(useWalkthroughDrafts.getState().drafts[key]).toBeUndefined();
+});

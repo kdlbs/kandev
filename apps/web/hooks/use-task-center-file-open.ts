@@ -3,7 +3,7 @@
 import {
   shouldOpenFilePreview,
   previewFileState,
-  canOfferViewerAfterReadFailure,
+  canFindViewerForFileType,
 } from "@/lib/plugins/file-viewer-selection";
 import { useAppStoreApi } from "@/components/state-provider";
 import { isRenameReserved, trackRenameOpen } from "./file-rename-continuity";
@@ -64,7 +64,7 @@ export function useTaskCenterFileOpen({
           resolvedPath: response.resolved_path,
         });
       } catch (error) {
-        if (canOfferViewerAfterReadFailure(filePath) && pending.current()) {
+        if (canFindViewerForFileType(filePath) && pending.current()) {
           addFileTab(previewFileState(filePath, repo));
           return;
         }

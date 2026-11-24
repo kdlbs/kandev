@@ -18,6 +18,7 @@ import { useSessionProfileExists } from "./session-stopped-banner";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
 
 import { buildRecoveryCardModel } from "./session-bootstrap-recovery-model";
+import { SessionThinkingRecovery } from "./session-thinking-recovery";
 import { RecoveryCardContent } from "./session-bootstrap-recovery-content";
 import { ManagedCloneRelocationConfirmation } from "./managed-clone-relocation-confirmation";
 import { useOptionalAppStore } from "@/components/state-provider";
@@ -271,7 +272,9 @@ function BootstrapRecoveryView({
         onRelocate={() => setRelocationConfirmationOpen(true)}
         copy={copy}
         t={t}
-      />
+      >
+        <SessionThinkingRecovery sessionId={sessionId} error={model} />
+      </RecoveryCardContent>
       <NewSessionDialog
         open={showDialog}
         onOpenChange={setShowDialog}
