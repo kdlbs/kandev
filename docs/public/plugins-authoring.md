@@ -2564,6 +2564,13 @@ writes title, description, state, and priority: it rejects a workflow step
 change. Priority accepts only `critical`, `high`, `medium`, or `low`; omitted
 priority on `.Create` defaults to `medium`.
 
+`CreateTaskInput.ProjectID` optionally assigns the new task to an existing
+Office project in the task's workspace. Omit the field to keep the normal
+parent-project inheritance behavior. An explicit empty value is invalid. Use
+this field only with a host release that includes it, and set the plugin's
+`min_kandev_version` to that first Stable release or later. Older hosts ignore
+the unknown wire field and can create the task without the selected project.
+
 The read-side `Task.Labels` field remains available only as deprecated API v1
 compatibility for plugins built against Kandev v0.93.0. New plugins should keep
 provider-specific labels or tracker annotations in plugin-owned task state and

@@ -571,7 +571,11 @@ func (h *pluginHost) CreateTaskExact(ctx context.Context, input pluginsdk.ExactT
 	}
 	defer admission.unlock()
 	if admission.record.Receipt.State == exactReceiptStateCompleted {
-		return commandResultFromRecord(admission.record), h.exactTaskReplayValue(ctx, admission.record.Receipt.TargetID), nil
+		result := commandResultFromRecord(admission.record)
+		if result.Status != pluginsdk.CommandApplied && result.Status != pluginsdk.CommandAlreadyApplied {
+			return result, nil, nil
+		}
+		return result, h.exactTaskReplayValue(ctx, admission.record.Receipt.TargetID), nil
 	}
 	prepared, launch, err := (taskReader{host: h}).prepareCreate(ctx, input.Task)
 	if err != nil {
@@ -589,7 +593,7 @@ func (h *pluginHost) CreateTaskExact(ctx context.Context, input pluginsdk.ExactT
 		completed, completeErr := admission.store.Complete(ctx, admission.record.Intent.OperationID,
 			string(pluginsdk.CommandAlreadyApplied), "", existing.ID, dto.ResourceVersion)
 		if completeErr != nil {
-			return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, &dto, nil
+			return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, nil, nil
 		}
 		return commandResultFromRecord(completed), &dto, nil
 	}
@@ -602,7 +606,11 @@ func (h *pluginHost) CreateTaskExact(ctx context.Context, input pluginsdk.ExactT
 		OperationID: admission.record.Intent.OperationID, PayloadDigest: digest,
 	})
 	if err != nil {
-		return &pluginsdk.CommandResult{Status: exactTaskUpdateErrorStatus(err), Reason: "task_create_unavailable"}, nil, nil
+		resultStatus := exactTaskUpdateErrorStatus(err)
+		if resultStatus == pluginsdk.CommandInvalid || resultStatus == pluginsdk.CommandConflict {
+			return completeExactTaskCreateRefusal(ctx, admission, input.ExternalID, resultStatus)
+		}
+		return &pluginsdk.CommandResult{Status: resultStatus, Reason: "task_create_unavailable"}, nil, nil
 	}
 	if created == nil || created.ID == "" {
 		return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "task_create_result_unavailable"}, nil, nil
@@ -618,7 +626,7 @@ func (h *pluginHost) CreateTaskExact(ctx context.Context, input pluginsdk.ExactT
 	completed, err := admission.store.Complete(ctx, admission.record.Intent.OperationID,
 		string(resultStatus), "", created.ID, dto.ResourceVersion)
 	if err != nil {
-		return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, &dto, nil
+		return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, nil, nil
 	}
 	return commandResultFromRecord(completed), &dto, nil
 }
@@ -633,6 +641,15 @@ func completeExactTaskCreateValidationFailure(
 	if resultStatus == pluginsdk.CommandUnavailable {
 		return &pluginsdk.CommandResult{Status: resultStatus, Reason: "task_create_validation_unavailable"}, nil, nil
 	}
+	return completeExactTaskCreateRefusal(ctx, admission, externalID, resultStatus)
+}
+
+func completeExactTaskCreateRefusal(
+	ctx context.Context,
+	admission *exactTaskCreateAdmission,
+	externalID string,
+	resultStatus pluginsdk.CommandStatus,
+) (*pluginsdk.CommandResult, *pluginsdk.Task, error) {
 	completed, err := admission.store.Complete(ctx, admission.record.Intent.OperationID,
 		string(resultStatus), string(resultStatus), externalID, "")
 	if err != nil {

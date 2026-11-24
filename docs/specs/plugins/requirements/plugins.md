@@ -58,6 +58,26 @@ Kandev keeps growing external integrations and surface-specific behavior directl
   reuses a cached copy, and an unchanged file shall revalidate without a body.
   A reinstall of the same plugin version shall therefore load the new files on
   the next page load.
+- **AC-PLUGINS-PLUGINS-001.17:** When an authorized plugin creates a task with
+  `project_id` through `CreateTask` or `CreateTaskExact`, Kandev shall persist
+  the selected Office project and return its ID in the task. A plugin shall be
+  able to create a root task in the project.
+- **AC-PLUGINS-PLUGINS-001.18:** A create that specifies a project shall
+  follow the authorization of its create method. Both methods require the
+  manifest task-write capability. Exact create also requires the current
+  task-write approval in the task workspace.
+- **AC-PLUGINS-PLUGINS-001.19:** A new create shall reject a supplied empty
+  project ID. Missing projects and projects in a different workspace shall
+  return the same invalid-project result. Rejected project selection shall
+  leave no task row, creation event, or launch.
+- **AC-PLUGINS-PLUGINS-001.20:** When a plugin omits `project_id`, the existing
+  create permissions, placement defaults, and parent project inheritance shall
+  apply.
+- **AC-PLUGINS-PLUGINS-001.21:** Exact creates shall include an explicit project
+  in the request identity. Reuse of an idempotency key with a different project
+  selection shall return a conflict. Retries shall recover the prior outcome,
+  including requests without a project that predate this field. A committed
+  task recovered by external identity shall retain its stored project.
 
 ## System design
 
