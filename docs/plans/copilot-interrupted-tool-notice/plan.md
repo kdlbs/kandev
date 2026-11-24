@@ -162,6 +162,19 @@ illustrative. UI-01 covers `006.1` through `006.5`.
   `git diff --check` passed.
 - SQLite projection and retention coverage passed. The optional PostgreSQL
   projection case skipped because the environment had no configured test DB.
+- PR review found that two owned-notice fixtures omitted their seeded turn ID.
+  Both assertions failed before the correction; the positive fixtures now carry
+  the seeded owner while the unowned fallback stays turnless. The lifecycle and
+  SQLite targeted regression commands passed after the correction.
+- Desktop Chromium and mobile Chrome E2E passed with reload assertions for the
+  warning details. The desktop flow reached Details through keyboard navigation
+  from a visible chat control. Fixture cleanup now attempts every resource and
+  environment cleanup step before reporting errors.
+- PR run `45485003280` exposed the same missing owned-turn IDs in the lifecycle
+  and durable projection fixtures, plus one repeated interrupted-status literal
+  in ACP lint. The fixtures now carry their seeded owner IDs, and the adapter
+  reuses `toolStatusInterrupted`. The changed-package Go lint and focused ACP,
+  lifecycle, orchestrator, and SQLite regression commands passed locally.
 
 ## Risks
 

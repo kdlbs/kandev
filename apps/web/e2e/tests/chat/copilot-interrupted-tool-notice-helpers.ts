@@ -14,6 +14,35 @@ type ACPTrace = {
   prompt?: string;
 };
 
+async function runCleanupSteps(
+  message: string,
+  steps: Array<() => void | Promise<void>>,
+): Promise<void> {
+  const errors: unknown[] = [];
+  for (const step of steps) {
+    try {
+      await step();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) {
+    const details = errors.map((error) => (error instanceof Error ? error.message : String(error)));
+    throw new Error(`${message}: ${details.join("; ")}`);
+  }
+}
+
+export function cleanupCopilotInterruptionTest(
+  disposeFixture: (() => Promise<void>) | undefined,
+  releaseEnvironment: () => Promise<void>,
+): Promise<void> {
+  return runCleanupSteps("Copilot interruption test cleanup failed", [
+    () => disposeFixture?.(),
+    releaseEnvironment,
+  ]);
+}
+
 export async function seedCopilotInterruptionTask(
   page: Page,
   apiClient: ApiClient,
@@ -44,14 +73,12 @@ export async function seedCopilotInterruptionTask(
     },
   );
   profileId = profile.id;
-  const dispose = async () => {
-    try {
-      if (taskId) await apiClient.deleteTask(taskId);
-      if (profileId) await apiClient.deleteAgentProfile(profileId, true);
-    } finally {
-      fs.rmSync(tracePath, { force: true });
-    }
-  };
+  const dispose = async () =>
+    runCleanupSteps("Copilot interruption fixture cleanup failed", [
+      () => (taskId ? apiClient.deleteTask(taskId) : undefined),
+      () => (profileId ? apiClient.deleteAgentProfile(profileId, true) : undefined),
+      () => fs.rmSync(tracePath, { force: true }),
+    ]);
 
   try {
     const task = await apiClient.createTaskWithAgent(

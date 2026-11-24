@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import {
+  cleanupCopilotInterruptionTest,
   expectCopilotInterruptionWarningFrame,
   expectCopilotNoticeBeforeReply,
   expectFreshCopilotSessionLoad,
@@ -49,8 +50,22 @@ test.describe("Copilot interrupted tool notice", () => {
       );
       const detailsButton = status.getByRole("button", { name: "Details" });
       await expect(detailsButton).toHaveAttribute("aria-expanded", "false");
-      await detailsButton.focus();
-      await detailsButton.press("Enter");
+      const previousMessageControl = status.locator(
+        'xpath=preceding::button[@aria-label="Go to previous message"][1]',
+      );
+      await expect(previousMessageControl).toBeVisible();
+      await previousMessageControl.click();
+      let reachedDetails = false;
+      for (let tabCount = 0; tabCount < 5; tabCount += 1) {
+        if (await detailsButton.evaluate((button) => button === document.activeElement)) {
+          reachedDetails = true;
+          break;
+        }
+        await testPage.keyboard.press("Tab");
+      }
+      expect(reachedDetails).toBe(true);
+      await expect(detailsButton).toBeFocused();
+      await testPage.keyboard.press("Enter");
       await expect(status.getByTestId("copilot-interruption-details")).toContainText(
         "Warning: 1 tool call(s) had no recorded result at resume.",
       );
@@ -98,10 +113,17 @@ test.describe("Copilot interrupted tool notice", () => {
           .getByTestId("copilot-interruption-status")
           .getByTestId("copilot-interruption-details"),
       ).toHaveCount(0);
+      const restoredStatus = testPage.getByTestId("copilot-interruption-status");
+      await expect(restoredStatus).toContainText(
+        "The pending question was interrupted. You can continue the conversation.",
+      );
+      await restoredStatus.getByRole("button", { name: "Details" }).click();
+      await expect(restoredStatus.getByTestId("copilot-interruption-details")).toContainText(
+        "Warning: 1 tool call(s) had no recorded result at resume.",
+      );
       await expectCopilotNoticeBeforeReply(apiClient, fixture.sessionId);
     } finally {
-      if (disposeFixture) await disposeFixture();
-      await releaseEnvironment();
+      await cleanupCopilotInterruptionTest(disposeFixture, releaseEnvironment);
     }
   });
 });

@@ -170,7 +170,7 @@ func interruptedCopilotCall(update *acp.SessionToolCallUpdate) bool {
 		return false
 	}
 	code, _ := raw["code"].(string)
-	return code == "interrupted"
+	return code == toolStatusInterrupted
 }
 
 func copilotRecoveryClassification(

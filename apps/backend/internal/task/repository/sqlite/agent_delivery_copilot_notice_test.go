@@ -29,8 +29,9 @@ func TestCopilotInterruptedToolStatusProjection(t *testing.T) {
 			seedCombinedDeliveryBatchSession(t, repo)
 			events := []*models.AgentDeliveryEvent{
 				copilotNoticeDeliveryEvent(t, 1, copilotNoticeStatusMessageID, copilotNoticeWarning,
-					streams.CopilotInterruptionClarification),
-				copilotNoticeDeliveryEvent(t, 2, copilotNoticeReplyMessageID, "Here is the next step.", ""),
+					streams.CopilotInterruptionClarification, "turn-combined-batch"),
+				copilotNoticeDeliveryEvent(t, 2, copilotNoticeReplyMessageID, "Here is the next step.", "",
+					"turn-combined-batch"),
 			}
 			effects := combinedDeliveryBatchEffects(events)
 
@@ -120,7 +121,7 @@ func TestCopilotInterruptionWithoutOwnedTurnProjectsAsOrdinaryText(t *testing.T)
 	repo := newRepoForSessionTests(t)
 	seedCombinedDeliveryBatchSession(t, repo)
 	event := copilotNoticeDeliveryEvent(t, 1, "copilot-unowned-notice", copilotNoticeWarning,
-		streams.CopilotInterruptionClarification)
+		streams.CopilotInterruptionClarification, "")
 	effects := combinedDeliveryBatchEffects([]*models.AgentDeliveryEvent{event})
 
 	if _, err := repo.ReceiveAndProjectCanonicalAgentDeliveryEvents(ctx, []*models.AgentDeliveryEvent{event}, effects, 0); err != nil {
@@ -139,7 +140,7 @@ func TestCopilotInterruptionWithoutOwnedTurnProjectsAsOrdinaryText(t *testing.T)
 func copilotNoticeDeliveryEvent(
 	t *testing.T,
 	sequence int64,
-	messageID, content, classification string,
+	messageID, content, classification, turnID string,
 ) *models.AgentDeliveryEvent {
 	t.Helper()
 	data := map[string]any(nil)
@@ -148,6 +149,7 @@ func copilotNoticeDeliveryEvent(
 	}
 	payload, err := json.Marshal(streams.AgentEvent{
 		Type: streams.EventTypeMessageChunk, Text: content,
+		TurnID:                 turnID,
 		CanonicalMessageBaseID: messageID, CanonicalMessageID: messageID,
 		PromptGeneration: 17, Data: data,
 	})

@@ -98,9 +98,9 @@ sequentially with fresh builds. The work order introduces the named tests.
 
 ```bash
 (cd apps/backend && go test -trimpath -race -count=1 ./internal/agentctl/server/adapter/transport/acp -run '^TestCopilotInterruptedToolRecovery')
-(cd apps/backend && go test -trimpath -count=1 ./internal/agent/runtime/lifecycle -run '^(TestCopilotInterruptionNoticeDoesNotRecordAssistantActivity|TestUnownedCopilotInterruptionDoesNotInheritPendingSuccessorTurn)$')
+(cd apps/backend && go test -trimpath -count=1 ./internal/agent/runtime/lifecycle -run 'CopilotInterrupt')
 (cd apps/backend && go test -trimpath -count=1 ./internal/orchestrator -run '^TestCopilotInterruptionNotice')
-(cd apps/backend && go test -trimpath -tags fts5 -count=1 ./internal/task/repository/sqlite -run '^TestCopilotInterruption')
+(cd apps/backend && go test -trimpath -tags fts5 -count=1 ./internal/task/repository/sqlite -run '^TestCopilotInterrupt')
 pnpm --dir apps install --frozen-lockfile
 pnpm --dir apps/web exec vitest run components/task/chat/messages/status-message.test.tsx
 pnpm --dir apps/web run i18n:check
@@ -199,3 +199,27 @@ fallbacks. The Chromium E2E also verified a 44px Details hit area at 375px with
 a fine pointer and a 24px control at 1280px with a fine pointer. Mobile Chrome
 E2E, web typecheck, i18n checks, status-message tests, spec validation, and
 `git diff --check` passed after the remediation.
+
+The owned-notice regression fixtures include the seeded `TurnID`; the unowned
+fallback remains turnless. Before the fixture correction, the lifecycle and
+SQLite regression tests failed on the status classification assertions. After
+the correction, the following targeted commands passed:
+
+```bash
+(cd apps/backend && go test -trimpath -count=1 ./internal/agent/runtime/lifecycle -run 'CopilotInterrupt')
+(cd apps/backend && go test -trimpath -tags fts5 -count=1 ./internal/task/repository/sqlite -run '^TestCopilotInterrupt')
+pnpm --dir apps/web e2e:run --no-build --host --shards 1 --project chromium tests/chat/copilot-interrupted-tool-notice.spec.ts
+pnpm --dir apps/web e2e:run --no-build --host --shards 1 --project mobile-chrome tests/chat/mobile-copilot-interrupted-tool-notice.spec.ts
+```
+
+Both browser commands passed after the review assertions were added. The desktop
+test reached Details through keyboard navigation from a visible chat action and
+reopened the disclosure after reload. The mobile test reopened the disclosure
+after reload by touch and checked the persisted warning text. Shared cleanup
+now attempts task, profile, trace, and environment cleanup independently.
+
+The first PR CI run also reproduced the owned-turn fixture failures in the
+lifecycle and durable projection suites and found a repeated interrupted-status
+literal in ACP lint. After adding the seeded turn IDs and reusing
+`toolStatusInterrupted`, changed-package Go lint and the focused ACP,
+lifecycle, orchestrator, and SQLite regression commands passed.

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import {
+  cleanupCopilotInterruptionTest,
   expectCopilotInterruptionWarningFrame,
   expectCopilotNoticeBeforeReply,
   expectFreshCopilotSessionLoad,
@@ -153,10 +154,15 @@ test.describe("Copilot interrupted tool notice on mobile", () => {
           .getByTestId("copilot-interruption-status")
           .getByTestId("copilot-interruption-details"),
       ).toHaveCount(0);
+      const restoredStatus = testPage.getByTestId("copilot-interruption-status");
+      await expect(restoredStatus).toContainText("The pending question was interrupted.");
+      await restoredStatus.getByRole("button", { name: "Details" }).tap();
+      await expect(restoredStatus.getByTestId("copilot-interruption-details")).toContainText(
+        "Warning: 1 tool call(s) had no recorded result at resume.",
+      );
       await expectCopilotNoticeBeforeReply(apiClient, fixture.sessionId);
     } finally {
-      if (disposeFixture) await disposeFixture();
-      await releaseEnvironment();
+      await cleanupCopilotInterruptionTest(disposeFixture, releaseEnvironment);
     }
   });
 });

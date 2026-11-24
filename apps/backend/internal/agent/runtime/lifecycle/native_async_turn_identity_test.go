@@ -223,7 +223,7 @@ func TestNativeMessageWithoutAnyGroupingIdentityUsesReplaySequence(t *testing.T)
 func TestCopilotInterruptionNoticeUsesDistinctCanonicalMessageID(t *testing.T) {
 	execution := &AgentExecution{SessionID: "session", DeliveryStreamID: "stream"}
 	status := agentctl.AgentEvent{
-		Type: streams.EventTypeMessageChunk, Text: "warning", PromptGeneration: 17,
+		Type: streams.EventTypeMessageChunk, Text: "warning", PromptGeneration: 17, TurnID: "owned-turn",
 		Data: map[string]any{streams.AgentEventDataCopilotInterruptionNotice: streams.CopilotInterruptionTool},
 	}
 	reply := status
