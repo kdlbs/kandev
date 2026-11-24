@@ -716,12 +716,10 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 		zap.String("trigger_type", string(evt.TriggerType)))
 
 	if continuationSession != nil {
-		releaseStep, stepErr := s.movePRTaskToContinuationStep(ctx, a, task, evt.RunID)
-		if stepErr != nil {
+		if stepErr := s.movePRTaskToContinuationStep(ctx, a, task); stepErr != nil {
 			s.recordFailedRun(ctx, evt, stepErr.Error())
 			return
 		}
-		defer releaseStep()
 		prompt = prContinuationPrompt(a, evt, retrySnapshot, retrySnapshot != nil && !retryInitialTriggerData, prompt)
 		if s.dispatchAutomationContinuation(ctx, a, task, continuationSession, prompt, metadata, evt.RunID, action, reasons.Thread, retryOperation) && retryRun != nil {
 			s.acknowledgeRetryEventAfterBinding(ctx, evt)

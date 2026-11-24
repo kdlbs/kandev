@@ -63,7 +63,12 @@ test.describe("GitHub PR follow-up automation on mobile", () => {
     await expectInsideViewport(testPage, step);
     await expectInsideViewport(testPage, merged);
     await merged.tap();
-    await testPage.getByRole("option", { name: "Archive task" }).tap();
+    const archiveOption = testPage.getByRole("option", { name: "Archive task" });
+    // The menu opens with a zoom-in animation; measure once it settles.
+    await expect
+      .poll(async () => (await archiveOption.boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(44);
+    await archiveOption.tap();
 
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.tap();

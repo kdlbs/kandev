@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -24,6 +26,7 @@ const prObservationTablesSQL = `
 		review_generation BIGINT NOT NULL DEFAULT 0,
 		pending_head_sha TEXT NOT NULL DEFAULT '',
 		pending_since {{timestamp}},
+		tracked_events TEXT NOT NULL DEFAULT '',
 		updated_at {{timestamp}} NOT NULL,
 		PRIMARY KEY (trigger_id, repo_owner, repo_name, pr_number)
 	);
@@ -41,6 +44,9 @@ type PRObservation struct {
 	ReviewGeneration int64
 	PendingHeadSHA   string
 	PendingSince     *time.Time
+	// TrackedEvents lists the follow-up events this observation was recorded
+	// for, so an event added later starts from its own baseline.
+	TrackedEvents string
 }
 
 type prObservationRow struct {
@@ -53,12 +59,14 @@ type prObservationRow struct {
 	ReviewGeneration int64        `db:"review_generation"`
 	PendingHeadSHA   string       `db:"pending_head_sha"`
 	PendingSince     sql.NullTime `db:"pending_since"`
+	TrackedEvents    string       `db:"tracked_events"`
 }
 
 func (r prObservationRow) toObservation() (*PRObservation, error) {
 	obs := &PRObservation{
 		TriggerID: r.TriggerID, RepoOwner: r.RepoOwner, RepoName: r.RepoName, PRNumber: r.PRNumber,
 		HeadSHA: r.HeadSHA, ReviewGeneration: r.ReviewGeneration, PendingHeadSHA: r.PendingHeadSHA,
+		TrackedEvents: r.TrackedEvents,
 	}
 	if r.PendingSince.Valid {
 		since := r.PendingSince.Time.UTC()
@@ -76,7 +84,7 @@ func (s *Store) ListPRObservations(ctx context.Context, triggerID, owner, repo s
 	var rows []prObservationRow
 	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT trigger_id, repo_owner, repo_name, pr_number, head_sha, requested,
-			review_generation, pending_head_sha, pending_since
+			review_generation, pending_head_sha, pending_since, tracked_events
 		FROM automation_pr_observations
 		WHERE trigger_id = ? AND repo_owner = ? AND repo_name = ?`), triggerID, owner, repo)
 	if err != nil {
@@ -115,17 +123,18 @@ func (s *Store) UpsertPRObservation(ctx context.Context, obs *PRObservation) err
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO automation_pr_observations (
 			trigger_id, repo_owner, repo_name, pr_number, head_sha, requested,
-			review_generation, pending_head_sha, pending_since, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			review_generation, pending_head_sha, pending_since, tracked_events, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(trigger_id, repo_owner, repo_name, pr_number) DO UPDATE SET
 			head_sha = excluded.head_sha,
 			requested = excluded.requested,
 			review_generation = excluded.review_generation,
 			pending_head_sha = excluded.pending_head_sha,
 			pending_since = excluded.pending_since,
+			tracked_events = excluded.tracked_events,
 			updated_at = excluded.updated_at`),
 		obs.TriggerID, obs.RepoOwner, obs.RepoName, obs.PRNumber, obs.HeadSHA, string(encoded),
-		obs.ReviewGeneration, obs.PendingHeadSHA, pendingSince, time.Now().UTC())
+		obs.ReviewGeneration, obs.PendingHeadSHA, pendingSince, obs.TrackedEvents, time.Now().UTC())
 	return err
 }
 
@@ -145,4 +154,26 @@ func (s *Store) deletePRObservationsForTrigger(ctx context.Context, triggerID st
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(
 		`DELETE FROM automation_pr_observations WHERE trigger_id = ?`), triggerID)
 	return err
+}
+
+// MaxReviewRequestGeneration returns the highest generation already used in
+// an automation's review-request dedup keys for one PR, so a new baseline
+// (after a reopen or a recreated trigger) never reuses a held key.
+func (s *Store) MaxReviewRequestGeneration(ctx context.Context, automationID, prefix string) (int64, error) {
+	var keys []string
+	err := s.ro.SelectContext(ctx, &keys, s.ro.Rebind(`
+		SELECT dedup_key FROM automation_runs
+		WHERE automation_id = ? AND SUBSTR(dedup_key, 1, ?) = ?`),
+		automationID, len(prefix), prefix)
+	if err != nil {
+		return 0, err
+	}
+	var highest int64
+	for _, key := range keys {
+		generation, err := strconv.ParseInt(strings.TrimPrefix(key, prefix), 10, 64)
+		if err == nil && generation > highest {
+			highest = generation
+		}
+	}
+	return highest, nil
 }

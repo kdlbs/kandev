@@ -184,7 +184,18 @@ Dedup keys:
 | --- | --- |
 | `opened` | `pr:o/r#n` (unchanged) |
 | `new_commits` | `pr:o/r#n@<head_sha>` |
-| `review_requested` | `pr:o/r#n/review-requested/<review_generation+1>` |
+| `review_requested` | `pr:o/r#n/review-requested/<generation>` |
+
+A review firing's generation is allocated when it fires: one more than the
+larger of the row's `review_generation` and the highest generation already in
+this automation's run dedup keys for the PR. A reopened PR, a recreated
+trigger, or a second trigger with another reviewer filter therefore never
+reuses a key that an earlier request holds.
+
+Each row also stores `tracked_events`, the follow-up events the trigger
+selected when the row was written. When an event is added to the trigger, the
+next poll rebaselines that event's state (head or requested set) instead of
+firing for changes made before it was selected.
 
 ## Evaluator control flow
 
@@ -234,8 +245,8 @@ automation's `continuation_task_id` column is not used by this policy.
 
 `automation.Service` gains an injected `PRTaskController` interface
 (`SetPRTaskController`), implemented by the orchestrator and wired in
-`backendapp`. Its `AutomationPRTaskBusy` returns true when the task's primary
-session is `CREATED`, `STARTING`, or `RUNNING`. The same interface exposes
+`backendapp`. Its `AutomationPRTaskBusy` returns true when any session of the
+task is `CREATED`, `STARTING`, or `RUNNING`. The same interface exposes
 `ArchiveAutomationPRTask` and `DeleteAutomationPRTask` for end-of-PR actions.
 
 Inside `admitTriggerLocked`, after the dedup check and before the capacity
@@ -269,13 +280,15 @@ taskID = continuations.Get(automationID, subject)
 if taskID == ""                                   -> create, map, action=created
 task = repo.GetTask(taskID)
 if missing / archived / incompatible              -> create, map, action=replaced
-session = primary session
+session = GetPrimarySessionByTaskID (never a newer secondary tab)
 if session ready (WAITING_FOR_INPUT, IDLE)        -> continue, action=resumed
 if session running or starting                    -> fail run "PR task is busy"
 otherwise (completed, failed, cancelled, none)    -> create, map, action=replaced
 ```
 
-The compatibility check reuses `continuationTaskIncompatibility`. For this
+A task or session read failure other than "not found" fails the run instead of
+creating a replacement. The compatibility check reuses
+`continuationTaskIncompatibility`. For this
 policy only, it matches the workflow ID and not the start step. Repository
 compatibility uses the PR's repository from
 `resolveGitHubPRTriggerRepository`.
@@ -314,17 +327,18 @@ applies is rejected. The editor clears the field first.
 Before `dispatchAutomationContinuation`, when the field is set and the task is
 in another step:
 
-1. Stamp `MetaKeyAutomationStartOwned = runID` through `SetTaskMetadataKey`.
-   `autoStartTaskForLoadedStep` then skips the workflow agent start.
-2. Move the task with the task service `MoveTask`, keeping its workflow.
-3. On an error or a missing step, release the marker, mark the run failed with
-   `continuation step unavailable: <reason>`, and stop.
-4. Dispatch the turn. Release the marker after the run binds or fails, through
-   `releaseAutomationStartOwnership`. Startup reconciliation
-   (`reconcileAutomationStartOwnership`) clears a marker left by a crash.
+1. Move the task with the task service `MoveTaskWithOptions`, keeping its
+   workflow, with one-shot `EntryOptions{SkipStepPrompt: true}`. A continued
+   task always has a session, so the move enters the step through the
+   existing-session lifecycle; the entry option suppresses the step's prompt
+   and starts no turn, as the coordinator's undo move does.
+2. On an error or a missing step, mark the run failed with
+   `continuation step unavailable: <reason>` and stop.
+3. Dispatch the turn.
 
-The step's auto-start prompt, handoff text, and reset-context action do not
-run (AC-005.3).
+The step's auto-start prompt does not run (AC-005.3). The step's other
+on-enter actions, such as resetting the agent context or switching the agent
+profile, still apply because they are part of the step the owner chose.
 
 ## End-of-PR actions
 
@@ -339,11 +353,12 @@ repository per evaluation cycle, for `reuse_per_pr` automations:
 for each mapping (automationID, subject in this repo) whose PR is not in the listing
   pr = GetAutomationPR(owner, repo, number)        // one read per ended PR
   if read fails or pr.State == open -> skip (retry next poll)
+  reload the automation; skip unless it is still enabled and reuse_per_pr
   action = merged ? PRMergedAction : PRClosedAction
   if action != keep
     if HasActiveRunForTask || busy(task) -> skip (retry next poll)
     archive: task service ArchiveTask; delete: DeleteTaskWithLifecycleAndReason(reason="automation: PR merged|closed")
-    an already archived or missing task counts as done
+    an already archived or missing task counts as done, so delete never removes a task a person archived
   delete mapping
 ```
 
@@ -419,6 +434,7 @@ CREATE TABLE IF NOT EXISTS automation_pr_observations (
   review_generation BIGINT NOT NULL DEFAULT 0,
   pending_head_sha  TEXT NOT NULL DEFAULT '',
   pending_since     TIMESTAMP NULL,
+  tracked_events    TEXT NOT NULL DEFAULT '',
   updated_at        TIMESTAMP NOT NULL,
   PRIMARY KEY (trigger_id, repo_owner, repo_name, pr_number)
 );
@@ -437,8 +453,12 @@ CREATE TABLE IF NOT EXISTS automation_pr_continuations (
 ```
 
 The `automations` columns `follow_up_prompt`, `pr_continuation_step_id`,
-`pr_merged_action`, and `pr_closed_action` are added through the existing
-additive `ALTER TABLE` list. No data migration is needed. Deleting a task does
+`pr_merged_action`, and `pr_closed_action`, and
+`automation_pr_observations.tracked_events`, are added through the existing
+additive `ALTER TABLE` list. Both tables are registered as required automation
+tables in `internal/persistence/requiredstores`. Run worktree retention
+(`PrunableRunTaskIDs`, `RunWorkspaceInUse`) never reclaims a task that is
+mapped to an open PR. No data migration is needed. Deleting a task does
 not cascade to mappings. A stale mapping is replaced at dispatch, or removed
 by the end-of-PR pass.
 

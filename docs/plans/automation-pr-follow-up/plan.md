@@ -228,6 +228,41 @@ Recorded on 2026-11-24. Each work order lists its targeted results.
 - E2E: `automations-pr-follow-up.spec.ts` (chromium) 2 passed; `mobile-automations-pr-follow-up.spec.ts` (mobile-chrome) 1 passed.
 - `node scripts/validate-public-docs.mjs`, `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`: passed.
 
+## Review and live-test fixes
+
+Recorded on 2026-11-24. An independent review session (GPT-6.2 Sol XHigh) and
+a live E2E-profile instance with mock GitHub found these issues after the
+first commit. All are fixed with regression tests:
+
+- A continued task moved to its continuation step also ran the step's own
+  prompt, because the start-ownership marker only guards tasks without a
+  session. Found live, and also by the review. The move now uses
+  `MoveTaskWithOptions` with `EntryOptions{SkipStepPrompt: true}`.
+- A review request after a PR was closed and reopened, after a trigger was
+  recreated, or from a second trigger reused a held dedup key and was dropped.
+  Found live, and also by the review. The generation is now allocated when the
+  request fires, from the automation's existing run keys.
+- Continuation read the newest session rather than the primary one, and
+  treated read errors as missing resources.
+- Delete removed a task that a person had already archived.
+- End-of-PR actions used the automation snapshot from before the PR read; they
+  now reload it and skip a disabled automation or a changed policy.
+- Adding an event to an existing trigger fired for changes made before it was
+  selected. Observations now record `tracked_events`.
+- Worktree retention could reclaim the checkout of a task mapped to an open PR.
+- Phone menu items in the continuation selects were 28 px tall; they are now
+  44 px on coarse pointers.
+- The new tables are registered as required tables, with schema replay and
+  upgrade tests.
+
+Not changed:
+
+- A review finding about ambiguous retry-commit recovery, marked plausible.
+  It comes from the shared `reuse_thread` continuation path.
+- The window between the busy check and an end-of-PR delete, if a person
+  starts a turn at that instant. The delete uses the lifecycle-aware task
+  deletion, which stops running sessions.
+
 ## Risks
 
 - **Rate limits.** The cost is one listing request per 100 open PRs per trigger

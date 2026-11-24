@@ -48,6 +48,24 @@ func (s prEventSelection) any() bool { return s.opened || s.newCommits || s.revi
 // observes reports whether the trigger needs stored PR observations.
 func (s prEventSelection) observes() bool { return s.newCommits || s.reviewRequested }
 
+// tracked lists the selected follow-up events in a stable order.
+func (s prEventSelection) tracked() string {
+	var events []string
+	if s.newCommits {
+		events = append(events, PREventNewCommits)
+	}
+	if s.reviewRequested {
+		events = append(events, PREventReviewRequested)
+	}
+	return strings.Join(events, ",")
+}
+
+// tracks reports whether an observation was recorded for event. Rows written
+// before events were tracked count as tracking every event.
+func (o *PRObservation) tracks(event string) bool {
+	return o.TrackedEvents == "" || slices.Contains(strings.Split(o.TrackedEvents, ","), event)
+}
+
 // validateGitHubPRConfig checks only the fields this feature owns, so a legacy
 // config with an unexpected shape elsewhere keeps saving as before.
 func validateGitHubPRConfig(raw json.RawMessage) error {
@@ -144,12 +162,18 @@ type prFiring struct {
 	previousHead string
 	reviewers    []string
 	dedupKey     string
+	// generation is the review-request sequence a review_requested firing uses.
+	generation int64
 }
 
-func baselineObservation(triggerID, owner, repo string, pr *github.PR) *PRObservation {
+func reviewRequestDedupPrefix(owner, repo string, number int) string {
+	return fmt.Sprintf("pr:%s/%s#%d/review-requested/", owner, repo, number)
+}
+
+func baselineObservation(triggerID, owner, repo string, pr *github.PR, sel prEventSelection) *PRObservation {
 	return &PRObservation{
 		TriggerID: triggerID, RepoOwner: owner, RepoName: repo, PRNumber: pr.Number,
-		HeadSHA: pr.HeadSHA, Requested: requestedReviewerKeys(pr),
+		HeadSHA: pr.HeadSHA, Requested: requestedReviewerKeys(pr), TrackedEvents: sel.tracked(),
 	}
 }
 
@@ -164,7 +188,7 @@ func cloneObservation(obs *PRObservation) *PRObservation {
 }
 
 func observationsEqual(a, b *PRObservation) bool {
-	if a.HeadSHA != b.HeadSHA || a.PendingHeadSHA != b.PendingHeadSHA ||
+	if a.HeadSHA != b.HeadSHA || a.PendingHeadSHA != b.PendingHeadSHA || a.TrackedEvents != b.TrackedEvents ||
 		a.ReviewGeneration != b.ReviewGeneration || !slices.Equal(a.Requested, b.Requested) {
 		return false
 	}
@@ -184,6 +208,15 @@ func choosePRFollowUp(
 ) (*prFiring, *PRObservation) {
 	next := cloneObservation(obs)
 	current := requestedReviewerKeys(pr)
+	// An event added to the trigger after this PR was first seen starts from
+	// the PR's current state rather than firing for older changes.
+	if sel.newCommits && !obs.tracks(PREventNewCommits) {
+		next.HeadSHA, next.PendingHeadSHA, next.PendingSince = pr.HeadSHA, "", nil
+	}
+	if sel.reviewRequested && !obs.tracks(PREventReviewRequested) {
+		next.Requested = current
+	}
+	next.TrackedEvents = sel.tracked()
 	if !matched {
 		next.HeadSHA, next.Requested = pr.HeadSHA, current
 		next.PendingHeadSHA, next.PendingSince = "", nil
@@ -193,11 +226,9 @@ func choosePRFollowUp(
 		return firing, next
 	}
 	if sel.reviewRequested {
-		if newly := newlyRequestedReviewers(current, obs.Requested, cfg.Reviewers); len(newly) > 0 {
+		if newly := newlyRequestedReviewers(current, next.Requested, cfg.Reviewers); len(newly) > 0 {
 			return &prFiring{
-				event: PREventReviewRequested, previousHead: obs.HeadSHA, reviewers: newly,
-				dedupKey: fmt.Sprintf("pr:%s/%s#%d/review-requested/%d",
-					obs.RepoOwner, obs.RepoName, pr.Number, obs.ReviewGeneration+1),
+				event: PREventReviewRequested, previousHead: next.HeadSHA, reviewers: newly,
 			}, next
 		}
 	}
@@ -235,12 +266,13 @@ func chooseNewCommits(
 
 // processedObservation is the observation after a firing was admitted,
 // deduplicated, or skipped by the concurrency cap.
-func processedObservation(obs *PRObservation, pr *github.PR, firing *prFiring) *PRObservation {
+func processedObservation(obs *PRObservation, pr *github.PR, firing *prFiring, sel prEventSelection) *PRObservation {
 	next := cloneObservation(obs)
+	next.TrackedEvents = sel.tracked()
 	next.HeadSHA, next.Requested = pr.HeadSHA, requestedReviewerKeys(pr)
 	next.PendingHeadSHA, next.PendingSince = "", nil
 	if firing.event == PREventReviewRequested {
-		next.ReviewGeneration++
+		next.ReviewGeneration = firing.generation
 	}
 	return next
 }

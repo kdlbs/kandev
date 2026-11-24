@@ -247,7 +247,7 @@ review again.
   task, a continuation step is set, and the task is in another step, the
   system shall move the task to the continuation step before it sends the
   prompt. The step's own auto-start prompt shall not run, so the automation's
-  prompt is the only turn sent.
+  prompt is the only turn sent. The step's other on-enter actions still apply.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-005.4:** When the move fails or the
   continuation step no longer exists, the system shall mark the run failed
   with a reason that names the step problem and shall not send the prompt.
@@ -377,7 +377,6 @@ reviews.
   `reuse_per_pr`, and for other trigger types.
 - End-of-PR actions for mapped pull requests whose repository is no longer in
   any of the automation's `github_pr` triggers.
-- Running the continuation step's own auto-start prompt or other on-enter
-  agent actions.
+- Running the continuation step's own auto-start prompt.
 - Changing the deduplication of `opened` firings or of skipped-run records for
   `opened`.

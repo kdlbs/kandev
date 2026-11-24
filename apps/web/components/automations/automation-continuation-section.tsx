@@ -18,6 +18,9 @@ type SectionProps = {
   updateField: UpdateField;
 };
 
+// Phone and other coarse pointers need 44 px menu choices.
+const TOUCH_ITEM_CLASS_NAME = "[@media(pointer:coarse)]:min-h-11";
+
 // The Select needs a non-empty value for "stay in current step"; it maps to
 // the persisted empty step ID.
 const STAY_IN_STEP = "__stay__";
@@ -192,9 +195,11 @@ function ContinuationStepSelect({ form, savedForm, updateField }: SectionProps) 
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={STAY_IN_STEP}>{t("automations:prContinuationStepStay")}</SelectItem>
+          <SelectItem className={TOUCH_ITEM_CLASS_NAME} value={STAY_IN_STEP}>
+            {t("automations:prContinuationStepStay")}
+          </SelectItem>
           {steps.map((step) => (
-            <SelectItem key={step.id} value={step.id}>
+            <SelectItem className={TOUCH_ITEM_CLASS_NAME} key={step.id} value={step.id}>
               {step.name}
             </SelectItem>
           ))}
@@ -241,7 +246,7 @@ function PREndActionSelect({
         </SelectTrigger>
         <SelectContent>
           {PR_END_ACTIONS.map((action) => (
-            <SelectItem key={action} value={action}>
+            <SelectItem className={TOUCH_ITEM_CLASS_NAME} key={action} value={action}>
               {labels[action]}
             </SelectItem>
           ))}

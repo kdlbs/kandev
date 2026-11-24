@@ -63,23 +63,21 @@ func (s *prContinuationAutomationService) SetPRContinuationTaskID(_ context.Cont
 	return nil
 }
 
-// recordingPRLifecycle records moves and observes the start-ownership marker
-// at move time, which is when the workflow's auto-start reads it.
+// recordingPRLifecycle records moves with their one-shot entry options.
 type recordingPRLifecycle struct {
 	repo          *sqliterepo.Repository
 	moves         []string
-	ownerAtMove   string
+	moveOptions   []taskservice.MoveTaskOptions
 	moveErr       error
 	archived      []string
 	deleted       []string
 	deleteReasons []string
 }
 
-func (l *recordingPRLifecycle) MoveTask(ctx context.Context, id, _, stepID string, _ int) (*taskservice.MoveTaskResult, error) {
-	task, _ := l.repo.GetTask(ctx, id)
-	if task != nil {
-		l.ownerAtMove, _ = task.Metadata[models.MetaKeyAutomationStartOwned].(string)
-	}
+func (l *recordingPRLifecycle) MoveTaskWithOptions(
+	_ context.Context, _, _, stepID string, _ int, opts taskservice.MoveTaskOptions,
+) (*taskservice.MoveTaskResult, error) {
+	l.moveOptions = append(l.moveOptions, opts)
 	if l.moveErr != nil {
 		return nil, l.moveErr
 	}
@@ -137,8 +135,30 @@ func seedPRTask(t *testing.T, repo *sqliterepo.Repository, taskID, stepID string
 		return
 	}
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: taskID + "-session", TaskID: taskID, State: state, StartedAt: now, UpdatedAt: now,
+		ID: taskID + "-session", TaskID: taskID, State: state, IsPrimary: true, StartedAt: now, UpdatedAt: now,
 	}))
+}
+
+// TestPRContinuationUsesPrimarySession proves a newer secondary tab neither
+// receives the follow-up nor hides a running primary session.
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004.6
+func TestPRContinuationUsesPrimarySession(t *testing.T) {
+	a := perPRAutomation()
+	f := newPRFixture(t, a)
+	seedPRTask(t, f.repo, "pr-task", "step-done", models.TaskSessionStateRunning)
+	later := time.Now().UTC().Add(time.Minute)
+	require.NoError(t, f.repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "secondary", TaskID: "pr-task", State: models.TaskSessionStateWaitingForInput,
+		StartedAt: later, UpdatedAt: later,
+	}))
+	f.auto.mappings[prTestSubject] = "pr-task"
+
+	_, _, _, _, err := f.prepare(t, a, perPREvent(prTestSubject))
+	require.ErrorIs(t, err, errPRTaskBusy, "the running primary session decides, not the newer secondary tab")
+
+	busy, err := f.svc.AutomationPRTaskBusy(context.Background(), "pr-task")
+	require.NoError(t, err)
+	require.True(t, busy)
 }
 
 type prFixture struct {

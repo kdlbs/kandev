@@ -11,14 +11,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func taskStartOwner(t *testing.T, f *prFixture, taskID string) string {
-	t.Helper()
-	task, err := f.repo.GetTask(context.Background(), taskID)
-	require.NoError(t, err)
-	owner, _ := task.Metadata[models.MetaKeyAutomationStartOwned].(string)
-	return owner
-}
-
 // @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-005.3
 func TestPRContinuationMovesToStepWithoutWorkflowAutoStart(t *testing.T) {
 	a := perPRAutomation()
@@ -32,9 +24,11 @@ func TestPRContinuationMovesToStepWithoutWorkflowAutoStart(t *testing.T) {
 	f.svc.createAutomationTask(context.Background(), evt)
 
 	require.Equal(t, []string{"step-review"}, f.lifecycle.moves)
-	require.Equal(t, "run-17", f.lifecycle.ownerAtMove,
-		"the run owns the agent start while the move publishes task.moved")
-	require.Empty(t, taskStartOwner(t, f, "pr-task"), "ownership is released after dispatch")
+	require.Len(t, f.lifecycle.moveOptions, 1)
+	entry := f.lifecycle.moveOptions[0].EntryOptions
+	require.NotNil(t, entry)
+	require.True(t, entry.SkipStepPrompt, "the step's own prompt must not start a second turn")
+	require.Empty(t, entry.Instructions)
 	require.Nil(t, f.creator.got)
 }
 
@@ -69,7 +63,6 @@ func TestPRContinuationStepMoveFailureFailsRun(t *testing.T) {
 
 	require.Contains(t, f.auto.terminal["run-17"], "continuation step unavailable")
 	require.Contains(t, f.auto.terminal["run-17"], string(automation.RunStatusFailed))
-	require.Empty(t, taskStartOwner(t, f, "pr-task"), "a failed move releases ownership")
 	require.Equal(t, "pr-task", f.auto.mappings[prTestSubject], "the mapping is kept")
 }
 
@@ -101,7 +94,8 @@ func TestAutomationPRTaskArchiveAndDelete(t *testing.T) {
 
 	require.NoError(t, f.svc.DeleteAutomationPRTask(ctx, "live", "automation: PR merged"))
 	require.NoError(t, f.svc.DeleteAutomationPRTask(ctx, "missing", "automation: PR merged"))
-	require.Equal(t, []string{"live"}, f.lifecycle.deleted)
+	require.NoError(t, f.svc.DeleteAutomationPRTask(ctx, "archived", "automation: PR merged"))
+	require.Equal(t, []string{"live"}, f.lifecycle.deleted, "an archived task is never deleted")
 	require.Equal(t, []string{"automation: PR merged"}, f.lifecycle.deleteReasons)
 
 	f.svc.SetAutomationPRTaskLifecycle(nil)

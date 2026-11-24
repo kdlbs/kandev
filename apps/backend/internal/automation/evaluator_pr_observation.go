@@ -59,25 +59,20 @@ func (e *GitHubEvaluator) evaluatePR(
 	sel prEventSelection, repo github.RepoFilter, pr *github.PR, obs *PRObservation,
 ) {
 	matched := prMatchesFilters(pr, cfg)
-	if sel.opened && matched {
-		firing := &prFiring{event: PREventOpened, dedupKey: fmt.Sprintf("pr:%s/%s#%d", repo.Owner, repo.Name, pr.Number)}
-		result, err := e.firePRTrigger(ctx, t, pr, repo.Owner, repo.Name, firing)
-		if err == nil && !result.Duplicate {
-			e.recordOpenedOutcome(ctx, t, sel, repo, pr, obs, firing, result)
-			return
-		}
-		if err != nil && obs != nil {
-			return
-		}
+	if sel.opened && matched && e.handleOpened(ctx, t, sel, repo, pr, obs) {
+		return
 	}
 	if !sel.observes() {
 		return
 	}
 	if obs == nil {
-		e.storeObservation(ctx, baselineObservation(t.ID, repo.Owner, repo.Name, pr))
+		e.storeObservation(ctx, baselineObservation(t.ID, repo.Owner, repo.Name, pr, sel))
 		return
 	}
 	firing, next := choosePRFollowUp(pr, cfg, sel, obs, matched, e.now())
+	if firing != nil && firing.event == PREventReviewRequested && !e.assignReviewGeneration(ctx, t, repo, pr, obs, firing) {
+		firing = nil
+	}
 	if firing == nil {
 		if !observationsEqual(obs, next) {
 			e.storeObservation(ctx, next)
@@ -86,11 +81,26 @@ func (e *GitHubEvaluator) evaluatePR(
 	}
 	result, err := e.firePRTrigger(ctx, t, pr, repo.Owner, repo.Name, firing)
 	if firingAdvancesObservation(result, err) {
-		next = processedObservation(obs, pr, firing)
+		next = processedObservation(obs, pr, firing, sel)
 	}
 	if !observationsEqual(obs, next) {
 		e.storeObservation(ctx, next)
 	}
+}
+
+// handleOpened fires opened for a matching PR. It reports true when this
+// poll's handling of the PR is complete: the firing was not a duplicate, or it
+// failed for a PR that already has an observation.
+func (e *GitHubEvaluator) handleOpened(
+	ctx context.Context, t *AutomationTrigger, sel prEventSelection, repo github.RepoFilter, pr *github.PR, obs *PRObservation,
+) bool {
+	firing := &prFiring{event: PREventOpened, dedupKey: fmt.Sprintf("pr:%s/%s#%d", repo.Owner, repo.Name, pr.Number)}
+	result, err := e.firePRTrigger(ctx, t, pr, repo.Owner, repo.Name, firing)
+	if err == nil && !result.Duplicate {
+		e.recordOpenedOutcome(ctx, t, sel, repo, pr, obs, firing, result)
+		return true
+	}
+	return err != nil && obs != nil
 }
 
 // recordOpenedOutcome stores the observation after a non-duplicate opened
@@ -104,16 +114,35 @@ func (e *GitHubEvaluator) recordOpenedOutcome(
 		return
 	}
 	if obs == nil {
-		e.storeObservation(ctx, baselineObservation(t.ID, repo.Owner, repo.Name, pr))
+		e.storeObservation(ctx, baselineObservation(t.ID, repo.Owner, repo.Name, pr, sel))
 		return
 	}
 	if result.Deferred {
 		return
 	}
-	next := processedObservation(obs, pr, firing)
+	next := processedObservation(obs, pr, firing, sel)
 	if !observationsEqual(obs, next) {
 		e.storeObservation(ctx, next)
 	}
+}
+
+// assignReviewGeneration gives a review_requested firing the next sequence
+// after every key this automation already used for the PR, so a reopened PR,
+// a recreated trigger, or a second trigger never reuses a held dedup key. It
+// reports false when the run history cannot be read; the poll retries.
+func (e *GitHubEvaluator) assignReviewGeneration(
+	ctx context.Context, t *AutomationTrigger, repo github.RepoFilter, pr *github.PR, obs *PRObservation, firing *prFiring,
+) bool {
+	prefix := reviewRequestDedupPrefix(repo.Owner, repo.Name, pr.Number)
+	used, err := e.svc.Store().MaxReviewRequestGeneration(ctx, t.AutomationID, prefix)
+	if err != nil {
+		e.logger.Warn("failed to read review-request generation; retrying next poll",
+			zap.String("trigger_id", t.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
+		return false
+	}
+	firing.generation = max(obs.ReviewGeneration, used) + 1
+	firing.dedupKey = fmt.Sprintf("%s%d", prefix, firing.generation)
+	return true
 }
 
 func (e *GitHubEvaluator) storeObservation(ctx context.Context, obs *PRObservation) {

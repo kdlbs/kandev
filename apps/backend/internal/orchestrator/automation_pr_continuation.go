@@ -9,7 +9,9 @@ import (
 
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
 // errPRTaskBusy fails a per-PR firing whose task became busy after admission.
@@ -25,7 +27,9 @@ type automationPRContinuationState interface {
 // automationPRTaskLifecycle is the slice of the task service the per-PR policy
 // uses to move, archive, and delete PR tasks.
 type automationPRTaskLifecycle interface {
-	MoveTask(ctx context.Context, id, workflowID, workflowStepID string, position int) (*taskservice.MoveTaskResult, error)
+	MoveTaskWithOptions(
+		ctx context.Context, id, workflowID, workflowStepID string, position int, opts taskservice.MoveTaskOptions,
+	) (*taskservice.MoveTaskResult, error)
 	ArchiveTask(ctx context.Context, id string) error
 	DeleteTaskWithLifecycleAndReason(ctx context.Context, id, reason string) error
 }
@@ -58,28 +62,45 @@ func classifyPRSession(session *models.TaskSession) prSessionReadiness {
 	}
 }
 
+// primaryTaskSession returns the task's primary session, or nil when it has
+// none. Other read failures are returned so callers never mistake them for a
+// missing session.
 func (s *Service) primaryTaskSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
-	lookup, ok := s.repo.(interface {
-		GetTaskSessionByTaskID(context.Context, string) (*models.TaskSession, error)
+	reader, ok := s.repo.(interface {
+		GetPrimarySessionByTaskID(context.Context, string) (*models.TaskSession, error)
 	})
 	if !ok {
-		return nil, errors.New("task session lookup is unavailable")
+		return nil, errors.New("primary session lookup is unavailable")
 	}
-	session, err := lookup.GetTaskSessionByTaskID(ctx, taskID)
-	if err != nil {
-		return nil, nil //nolint:nilerr // a missing session classifies as ended
+	session, err := reader.GetPrimarySessionByTaskID(ctx, taskID)
+	if errors.Is(err, repoerrors.ErrNoPrimarySession) || errors.Is(err, models.ErrTaskSessionNotFound) {
+		return nil, nil
 	}
-	return session, nil
+	return session, err
 }
 
-// AutomationPRTaskBusy reports whether a PR task's primary session is
-// starting or running a turn.
+// loadPRTask returns the task, or nil when it no longer exists.
+func (s *Service) loadPRTask(ctx context.Context, taskID string) (*models.Task, error) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if errors.Is(err, repoerrors.ErrTaskNotFound) {
+		return nil, nil
+	}
+	return task, err
+}
+
+// AutomationPRTaskBusy reports whether any session of a PR task is starting
+// or running a turn.
 func (s *Service) AutomationPRTaskBusy(ctx context.Context, taskID string) (bool, error) {
-	session, err := s.primaryTaskSession(ctx, taskID)
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		return false, err
 	}
-	return classifyPRSession(session) == prSessionBusy, nil
+	for _, session := range sessions {
+		if classifyPRSession(session) == prSessionBusy {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ArchiveAutomationPRTask archives a PR task. A missing or already archived
@@ -88,22 +109,23 @@ func (s *Service) ArchiveAutomationPRTask(ctx context.Context, taskID string) er
 	if s.prTaskLifecycle == nil {
 		return errors.New("task lifecycle is unavailable")
 	}
-	task, err := s.repo.GetTask(ctx, taskID)
+	task, err := s.loadPRTask(ctx, taskID)
 	if err != nil || task == nil || task.ArchivedAt != nil {
-		return nil //nolint:nilerr // a missing task needs no archive
+		return err
 	}
 	return s.prTaskLifecycle.ArchiveTask(ctx, taskID)
 }
 
 // DeleteAutomationPRTask deletes a PR task through the lifecycle-aware path.
-// A missing task counts as done.
+// A missing or already archived task counts as done, so a task a person
+// archived is never deleted.
 func (s *Service) DeleteAutomationPRTask(ctx context.Context, taskID, reason string) error {
 	if s.prTaskLifecycle == nil {
 		return errors.New("task lifecycle is unavailable")
 	}
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil {
-		return nil //nolint:nilerr // a missing task needs no delete
+	task, err := s.loadPRTask(ctx, taskID)
+	if err != nil || task == nil || task.ArchivedAt != nil {
+		return err
 	}
 	return s.prTaskLifecycle.DeleteTaskWithLifecycleAndReason(ctx, taskID, reason)
 }
@@ -125,8 +147,11 @@ func (s *Service) findPRContinuation(
 	if taskID == "" {
 		return nil, nil, automation.ThreadActionCreated, "no task exists for this pull request; created the first task", nil
 	}
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil {
+	task, err := s.loadPRTask(ctx, taskID)
+	if err != nil {
+		return nil, nil, automation.ThreadActionResumed, "", fmt.Errorf("load PR task: %w", err)
+	}
+	if task == nil {
 		return nil, nil, automation.ThreadActionReplaced, "the pull request's task was not found; created a replacement task", nil
 	}
 	// A reviewed task normally moves past its start step, so per-PR
@@ -138,7 +163,7 @@ func (s *Service) findPRContinuation(
 	}
 	session, err := s.primaryTaskSession(ctx, task.ID)
 	if err != nil {
-		return nil, nil, automation.ThreadActionReplaced, "", err
+		return nil, nil, automation.ThreadActionResumed, "", fmt.Errorf("load PR task session: %w", err)
 	}
 	switch classifyPRSession(session) {
 	case prSessionReady:
@@ -181,35 +206,24 @@ func prContinuationPrompt(
 }
 
 // movePRTaskToContinuationStep moves a continued normal task to the
-// automation's continuation step while the run owns its agent start, so the
-// step's workflow auto-start does not send a second turn. The returned
-// release clears that ownership after dispatch.
-func (s *Service) movePRTaskToContinuationStep(
-	ctx context.Context, a *automation.Automation, task *models.Task, runID string,
-) (func(), error) {
-	noop := func() {}
+// automation's continuation step. The move skips the step's own prompt, so the
+// automation's follow-up is the only turn the task receives.
+func (s *Service) movePRTaskToContinuationStep(ctx context.Context, a *automation.Automation, task *models.Task) error {
 	if a.ContinuationPolicy != automation.ContinuationPolicyReusePerPR || a.PRContinuationStepID == "" ||
 		task.WorkflowStepID == a.PRContinuationStepID {
-		return noop, nil
+		return nil
 	}
 	if s.prTaskLifecycle == nil {
-		return noop, errors.New("continuation step unavailable: task lifecycle is unavailable")
+		return errors.New("continuation step unavailable: task lifecycle is unavailable")
 	}
-	owner := runID
-	if owner == "" {
-		owner = "pr-continuation:" + task.ID
-	}
-	if err := s.repo.SetTaskMetadataKey(ctx, task.ID, models.MetaKeyAutomationStartOwned, owner); err != nil {
-		return noop, fmt.Errorf("continuation step unavailable: %w", err)
-	}
-	release := func() { s.releaseAutomationStartOwnership(ctx, task.ID, owner) }
-	if _, err := s.prTaskLifecycle.MoveTask(ctx, task.ID, task.WorkflowID, a.PRContinuationStepID, 0); err != nil {
-		release()
-		return noop, fmt.Errorf("continuation step unavailable: %w", err)
+	_, err := s.prTaskLifecycle.MoveTaskWithOptions(ctx, task.ID, task.WorkflowID, a.PRContinuationStepID, 0,
+		taskservice.MoveTaskOptions{EntryOptions: &workflowmove.EntryOptions{SkipStepPrompt: true}})
+	if err != nil {
+		return fmt.Errorf("continuation step unavailable: %w", err)
 	}
 	s.logger.Info("moved PR task to its continuation step",
 		zap.String("automation_id", a.ID), zap.String("task_id", task.ID),
 		zap.String("step_id", a.PRContinuationStepID))
 	task.WorkflowStepID = a.PRContinuationStepID
-	return release, nil
+	return nil
 }

@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/github"
 )
 
 func newEndActionFixture(t *testing.T, merged, closed PREndAction) (*prFollowUpFixture, *fakePRTaskController) {
@@ -106,3 +108,22 @@ func TestEndOfPRActionsIgnoreOtherPolicies(t *testing.T) {
 	require.Empty(t, controller.archived)
 	require.Equal(t, "task-17", f.mapping(t, "acme/widget#17"))
 }
+
+// An automation disabled after the poll began never applies a stale action.
+func TestEndOfPRActionSkippedWhenAutomationDisabled(t *testing.T) {
+	f, controller := newEndActionFixture(t, PREndActionDelete, PREndActionDelete)
+	disabled := false
+	_, err := f.svc.UpdateAutomation(context.Background(), f.automation.ID, &UpdateAutomationRequest{Enabled: &disabled})
+	require.NoError(t, err)
+	f.transport.ended[17] = "closed"
+	f.setPRs(followUpPR{Number: 18, Head: "a"})
+	evalAutomation, err := f.svc.GetAutomation(context.Background(), f.automation.ID)
+	require.NoError(t, err)
+	evalAutomation.Enabled = true // the snapshot taken before the provider read
+	f.evaluator.runEndOfPRActions(context.Background(), evalAutomation, repoFilterForTest(), map[int]bool{18: true})
+
+	require.Empty(t, controller.deleted)
+	require.Equal(t, "task-17", f.mapping(t, "acme/widget#17"))
+}
+
+func repoFilterForTest() github.RepoFilter { return github.RepoFilter{Owner: "acme", Name: "widget"} }

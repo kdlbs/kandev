@@ -402,3 +402,24 @@ func TestPRFiltersApplyBaseBranchLabelsDraftAuthor(t *testing.T) {
 		})
 	}
 }
+
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.2
+func TestNewCommitsAddedLaterStartsFromBaseline(t *testing.T) {
+	f := newPRFollowUpFixture(t, followUpPR{Number: 17, Head: "aaa"})
+	trigger := f.addTrigger(t, reviewRequestedEvents)
+	f.evaluate()
+	f.setPRs(followUpPR{Number: 17, Head: "bbb"})
+	f.evaluate()
+
+	cfg := json.RawMessage(`{` + eventSelectionRepo + `,"events":["review_requested","new_commits"]}`)
+	require.NoError(t, f.svc.UpdateTrigger(context.Background(), trigger.ID, &UpdateTriggerRequest{Config: &cfg}))
+	f.evaluate()
+	f.evaluate()
+	require.Empty(t, f.runs(t), "a push made before new_commits was selected does not fire")
+
+	f.setPRs(followUpPR{Number: 17, Head: "ccc"})
+	f.evaluate()
+	runs := f.runs(t)
+	require.Len(t, runs, 1)
+	require.Equal(t, "bbb", runData(t, runs[0])["previous_head_sha"])
+}

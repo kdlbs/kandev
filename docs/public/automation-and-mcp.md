@@ -256,7 +256,7 @@ Kandev fires at most one of these per PR per poll, in the order above. Every fil
 With **Continue one task per pull request** (`reuse_per_pr`), the first firing for a PR creates its task, and later firings for the same PR send a new turn to that task's session. A firing without a PR, such as **Run now** or a schedule, starts a new task. If the PR's task is deleted, archived, incompatible, or its session ended, Kandev creates a replacement task and records that on the run.
 
 - **Follow-up prompt** (`follow_up_prompt`) replaces the main prompt when a firing continues the PR's task. Leave it empty to reuse the main prompt.
-- **Move to step when continuing** (`pr_continuation_step_id`, normal tasks only) moves the task to a workflow step, such as a review column, before the follow-up. The step's own auto-start prompt does not run.
+- **Move to step when continuing** (`pr_continuation_step_id`, normal tasks only) moves the task to a workflow step, such as a review column, before the follow-up. The step's own auto-start prompt does not run; its other entry actions, such as resetting the agent context, still apply.
 - **When the pull request is merged** and **When the pull request is closed without merging** (`pr_merged_action`, `pr_closed_action`) keep, archive, or delete the PR's task. Kandev applies them directly, without an agent run, within about a minute of the PR ending. Deleting removes the task's conversation and files.
 
 When the PR's task is busy, because a run is open or someone is using its session, Kandev holds new firings and checks again each minute. The next check after the task is free fires once, for the PR's latest state. Maximum concurrent runs still applies to the whole automation.

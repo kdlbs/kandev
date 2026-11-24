@@ -96,3 +96,49 @@ func TestReviewRequestedWithPendingQuietPeriod(t *testing.T) {
 	f.evaluate()
 	require.Len(t, f.runs(t), 1, "the review firing already covered the new head")
 }
+
+// A reopened PR, or a recreated trigger, starts from a new baseline; its next
+// review request must not reuse a dedup key an earlier request already holds.
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-007.4
+func TestReviewRequestedAfterReopenGetsFreshDedupKey(t *testing.T) {
+	f := newPRFollowUpFixture(t, followUpPR{Number: 17, Head: "aaa"})
+	trigger := f.addTrigger(t, reviewRequestedEvents)
+	f.evaluate()
+	f.setPRs(followUpPR{Number: 17, Head: "aaa", Reviewers: []string{"kandev-bot"}})
+	f.evaluate()
+	require.Len(t, f.runs(t), 1)
+
+	f.setPRs()
+	f.evaluate()
+	require.Nil(t, f.observation(t, trigger, 17), "closed PR observation is pruned")
+
+	f.setPRs(followUpPR{Number: 17, Head: "aaa"})
+	f.evaluate()
+	f.setPRs(followUpPR{Number: 17, Head: "aaa", Reviewers: []string{"kandev-bot"}})
+	f.evaluate()
+
+	runs := f.runs(t)
+	require.Len(t, runs, 2, "the request after reopening fires")
+	require.Equal(t, "pr:acme/widget#17/review-requested/2", runs[1].DedupKey)
+}
+
+// Two triggers with different reviewer filters share the automation's dedup
+// scope; the second request must not collide with the first trigger's key.
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-007.4
+func TestReviewRequestedTwoTriggersDoNotCollide(t *testing.T) {
+	f := newPRFollowUpFixture(t, followUpPR{Number: 17, Head: "aaa"})
+	f.addTrigger(t, reviewRequestedEvents+`,"reviewers":["alice-reviewer"]`)
+	f.addTrigger(t, reviewRequestedEvents+`,"reviewers":["bob-reviewer"]`)
+	f.evaluate()
+
+	f.setPRs(followUpPR{Number: 17, Head: "aaa", Reviewers: []string{"alice-reviewer"}})
+	f.evaluate()
+	f.setPRs(followUpPR{Number: 17, Head: "aaa", Reviewers: []string{"alice-reviewer", "bob-reviewer"}})
+	f.evaluate()
+
+	runs := f.runs(t)
+	require.Len(t, runs, 2)
+	require.Equal(t, "pr:acme/widget#17/review-requested/1", runs[0].DedupKey)
+	require.Equal(t, "pr:acme/widget#17/review-requested/2", runs[1].DedupKey)
+	require.Equal(t, "bob-reviewer", runData(t, runs[1])["requested_reviewers"])
+}

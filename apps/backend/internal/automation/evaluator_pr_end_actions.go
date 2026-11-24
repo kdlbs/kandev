@@ -58,6 +58,13 @@ func (e *GitHubEvaluator) endPRContinuation(ctx context.Context, a *Automation, 
 	if err != nil || pr == nil || pr.State == "" || pr.State == githubPRStateOpen {
 		return
 	}
+	// The PR read can be slow; act on the automation's current settings so a
+	// disabled automation or a changed action is never applied from a stale
+	// snapshot.
+	a, err = e.svc.GetAutomation(ctx, a.ID)
+	if err != nil || a == nil || !a.Enabled || a.ContinuationPolicy != ContinuationPolicyReusePerPR {
+		return
+	}
 	action, outcome := normalizePREndAction(a.PRClosedAction), githubPRStateClosed
 	if pr.State == githubPRStateMerged || pr.MergedAt != nil {
 		action, outcome = normalizePREndAction(a.PRMergedAction), githubPRStateMerged
