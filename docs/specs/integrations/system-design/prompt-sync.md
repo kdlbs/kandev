@@ -318,8 +318,8 @@ its normal transport deadline. The source check fetches outside the lock.
 ### Automatic runs
 
 An automatic run fetches outside the service mutex
-(AC-INTEGRATIONS-PROMPT-SYNC-005.5). Background pacing is principal-wide,
-so a dropped deferral would recur after the run's own listing every tick.
+(AC-INTEGRATIONS-PROMPT-SYNC-005.5). Pacing is principal-wide, so a
+dropped deferral recurs after the run's own listing every tick.
 
 1. `SyncIfDue` takes the mutex with `TryLock`, refreshes the credential
    fingerprint, and checks suspension and the schedule. It records an
@@ -327,20 +327,23 @@ so a dropped deferral would recur after the run's own listing every tick.
    context in `Service.automatic`, then releases the mutex.
 2. The run checks the credential workspace, binds the GitHub host, and
    fetches with non-blocking background admission. On
-   `AdmissionDeferredError`, `retryDeferred` calls `Wait` and repeats only
-   that read, so completed reads are kept. GitLab uses the same fetch.
+   `AdmissionDeferredError`, `retryDeferred` waits and repeats only that
+   read, keeping completed reads. Each wait lasts at most `PollInterval`, then
+   rechecks the live fingerprint; a new connection never signals the old
+   principal. GitLab uses the same fetch.
 3. Every other mutation under the mutex calls `supersedeAutomaticLocked`:
-   manual runs, configuration saves, removal, and `RunExclusive`. That
+   manual runs, configuration saves, authorized removal, and `RunExclusive`. That
    cancels the run context, so a wait ends and the run returns without the
    lock. Otherwise the run takes the mutex again. It continues only if its
    context is live, the row exists, and the live fingerprint matches,
    including a change to empty. A discarded run records nothing and logs
    `prompt sync automatic result superseded`.
 4. The run records a fetch error through the failure policy, or applies the
-   files inside `CommitWorkspaceGitHubHost` and records success.
+   files inside `CommitWorkspaceGitHubHost` and records success. A fence
+   rejection before the apply callback is discarded.
 
 `Poller.Stop` cancels the run, which records nothing. Only the poller
-goroutine starts automatic runs, so one runs at a time.
+starts automatic runs, so one runs at a time.
 
 ### Prompt file parsing
 

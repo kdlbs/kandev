@@ -37,7 +37,7 @@ func (s *Service) SyncIfDue(ctx context.Context) {
 		return
 	}
 	defer run.cancel()
-	fetched := s.fetchRun(run.ctx, syncAutomatic, run.cfg, true)
+	fetched := s.fetchRun(run.ctx, syncAutomatic, run.cfg, s.automaticAdmissionWait(run))
 	if run.ctx.Err() != nil {
 		s.logSuperseded(ctx, run)
 		return
@@ -138,17 +138,40 @@ func (c credentialIdentity) changed(now credentialIdentity) bool {
 	return c.known && now.known && c.fingerprint != now.fingerprint
 }
 
-// retryDeferred runs read. When wait is set and GitHub admission defers the
-// read, it waits for an admission change, the retry boundary, or ctx, and runs
-// the read again.
-func retryDeferred[T any](ctx context.Context, wait bool, read func() (T, error)) (T, error) {
+// errAutomaticCredentialChanged ends an automatic admission wait whose
+// connection was replaced or removed.
+var errAutomaticCredentialChanged = errors.New("prompt sync credential changed during automatic sync")
+
+// admissionWait blocks after a deferred read until the read may run again.
+type admissionWait func(context.Context, *github.AdmissionDeferredError) error
+
+// automaticAdmissionWait waits for the deferral at most s.credentialRecheck at
+// a time, then ends the run if its live credential changed. A changed
+// connection does not signal the old principal's admission state.
+func (s *Service) automaticAdmissionWait(run *automaticRun) admissionWait {
+	return func(ctx context.Context, deferred *github.AdmissionDeferredError) error {
+		waitCtx, cancel := context.WithTimeout(ctx, s.credentialRecheck)
+		defer cancel()
+		if err := deferred.Wait(waitCtx); err != nil && ctx.Err() != nil {
+			return err
+		}
+		if run.identity.changed(s.liveIdentity(ctx, run.cfg)) {
+			return errAutomaticCredentialChanged
+		}
+		return nil
+	}
+}
+
+// retryDeferred runs read. With a non-nil wait, a read that GitHub admission
+// defers runs again after wait returns.
+func retryDeferred[T any](ctx context.Context, wait admissionWait, read func() (T, error)) (T, error) {
 	for {
 		value, err := read()
 		var deferred *github.AdmissionDeferredError
-		if !wait || !errors.As(err, &deferred) {
+		if wait == nil || !errors.As(err, &deferred) {
 			return value, err
 		}
-		if err := deferred.Wait(ctx); err != nil {
+		if err := wait(ctx, deferred); err != nil {
 			var zero T
 			return zero, err
 		}

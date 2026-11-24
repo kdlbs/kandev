@@ -95,7 +95,10 @@ Workflow Sync equivalent is AC-INTEGRATIONS-GITHUB-RATE-003.7.
   any admission wait. With the lock taken again, `finishAutomaticLocked`
   accepts the result only if the run context is live, the row exists, and
   the live fingerprint is unchanged, including a change to empty. A
-  cancelled or discarded run records nothing.
+  cancelled or discarded run records nothing. Each admission wait is bounded
+  by `PollInterval` and then rechecks the live fingerprint. A GitHub commit
+  fence that rejects an automatic apply before its callback runs records
+  nothing. Removal supersedes only after authorization succeeds.
 - `promptsync/service.go`: split `syncLocked` into `fetchRun` and
   `applyRun`. Manual and automatic runs share both. The automatic fetch keeps
   non-blocking background admission and wraps each list and read in
@@ -129,8 +132,13 @@ fake defers the first read of every file, which models background pacing.
   wait without opening the gate.
 - `TestAutomaticSyncDiscardsResultAfterCredentialChange`: covers a
   fingerprint that is replaced and one that becomes empty during the wait.
-  The run records no failure.
+  The run ends with its gate still closed and records no failure.
 - `TestAutomaticSyncCancelledDuringFetchRecordsNothing`.
+- `TestAutomaticSyncSurvivesDeniedRemoval`: an unauthorized removal leaves
+  the waiting run able to apply.
+- `TestAutomaticSyncRejectedByCommitFenceRecordsNothing`.
+- Mutation checks confirmed that the guard tests fail without supersession
+  ordering, fence suppression, or the bounded credential recheck.
 - `TestAutomaticRunDeferredByGitHubAdmissionIsNotAFailure` was removed. It
   also passed on the old code, and the tests above cover its assertions.
 

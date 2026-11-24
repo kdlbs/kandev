@@ -261,9 +261,9 @@ temporary failures and to stop repeating permanent ones.
   or apply partial results. **Sync now**, configuration saves, version
   saves, and removal shall not wait for a deferred automatic sync. A
   configuration save, removal, or manual sync during the wait shall end the
-  wait and discard the automatic result without recording it. So shall a
-  credential replacement or disconnection that the provider reports through
-  its connection fingerprint.
+  wait and discard the automatic result without recording it. A credential
+  replacement or disconnection that the provider reports through its
+  connection fingerprint shall do the same within one poll interval.
 
 ### REQ-INTEGRATIONS-PROMPT-SYNC-006: Unresolved references in Workflow Sync
 

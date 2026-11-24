@@ -68,6 +68,9 @@ type Service struct {
 	workspaceExists     func(context.Context, string) (bool, error)
 	now                 func() time.Time
 	jitter              func(time.Duration) time.Duration
+	// credentialRecheck bounds each automatic admission wait between live
+	// credential checks.
+	credentialRecheck time.Duration
 }
 
 // NewService creates the prompt sync service. Either provider client may be
@@ -79,7 +82,7 @@ func NewService(
 	return &Service{
 		store: store, github: githubClients, gitlab: gitlabClients, prompts: prompts, refs: refs,
 		logger: log.WithFields(zap.String("component", "promptsync-service")),
-		now:    time.Now, jitter: reposync.DefaultJitter,
+		now:    time.Now, jitter: reposync.DefaultJitter, credentialRecheck: PollInterval,
 	}
 }
 
@@ -189,7 +192,6 @@ func (s *Service) DeleteConfig(ctx context.Context, removal Removal) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.supersedeAutomaticLocked()
 	cfg, err := s.store.Get(ctx)
 	if err != nil {
 		return err
@@ -199,6 +201,7 @@ func (s *Service) DeleteConfig(ctx context.Context, removal Removal) error {
 			return err
 		}
 	}
+	s.supersedeAutomaticLocked()
 	prompts, err := s.prompts.ListPrompts(ctx)
 	if err != nil {
 		return err
@@ -277,7 +280,7 @@ func (s *Service) syncLocked(
 	ctx context.Context, mode syncMode, cfg *Config, resolutions map[string]promptservice.ConflictChoice,
 ) (*SyncResult, error) {
 	s.supersedeAutomaticLocked()
-	run := s.fetchRun(ctx, mode, cfg, false)
+	run := s.fetchRun(ctx, mode, cfg, nil)
 	if run.err != nil {
 		s.recordRunError(ctx, cfg, mode, run.err)
 		return nil, run.err
@@ -294,9 +297,9 @@ type fetchedRun struct {
 }
 
 // fetchRun checks the credential workspace, binds the GitHub connection, and
-// reads the prompt files. With waitAdmission, a read that GitHub admission
+// reads the prompt files. With a non-nil wait, a read that GitHub admission
 // defers waits for admission and runs again.
-func (s *Service) fetchRun(ctx context.Context, mode syncMode, cfg *Config, waitAdmission bool) fetchedRun {
+func (s *Service) fetchRun(ctx context.Context, mode syncMode, cfg *Config, wait admissionWait) fetchedRun {
 	run := fetchedRun{ctx: ctx, useGitHub: cfg.Provider != reposync.ProviderGitLab && s.github != nil}
 	if run.err = s.checkWorkspace(ctx, cfg.WorkspaceID); run.err != nil {
 		return run
@@ -310,7 +313,7 @@ func (s *Service) fetchRun(ctx context.Context, mode syncMode, cfg *Config, wait
 			return run
 		}
 	}
-	run.files, run.err = s.fetchWith(run.ctx, cfg, waitAdmission)
+	run.files, run.err = s.fetchWith(run.ctx, cfg, wait)
 	return run
 }
 
@@ -320,7 +323,9 @@ func (s *Service) applyRun(
 ) (*SyncResult, error) {
 	ctx := run.ctx
 	var result *SyncResult
+	entered := false
 	apply := func(applyCtx context.Context) error {
+		entered = true
 		var applyErr error
 		result, applyErr = s.apply(applyCtx, run.files, resolutions)
 		return applyErr
@@ -330,6 +335,10 @@ func (s *Service) applyRun(
 		err = s.github.CommitWorkspaceGitHubHost(ctx, cfg.WorkspaceID, apply)
 	} else {
 		err = apply(ctx)
+	}
+	if err != nil && mode == syncAutomatic && run.useGitHub && !entered {
+		s.logger.Info("prompt sync automatic result superseded", zap.String("provider", cfg.Provider))
+		return nil, err
 	}
 	if err != nil {
 		s.recordRunError(ctx, cfg, mode, err)
@@ -357,12 +366,12 @@ func (s *Service) checkWorkspace(ctx context.Context, workspaceID string) error 
 }
 
 func (s *Service) fetch(ctx context.Context, cfg *Config) ([]fetchedFile, error) {
-	return s.fetchWith(ctx, cfg, false)
+	return s.fetchWith(ctx, cfg, nil)
 }
 
-func (s *Service) fetchWith(ctx context.Context, cfg *Config, waitAdmission bool) ([]fetchedFile, error) {
+func (s *Service) fetchWith(ctx context.Context, cfg *Config, wait admissionWait) ([]fetchedFile, error) {
 	reader := reposync.Reader{GitHub: s.github, GitLab: s.gitlab}
-	entries, err := retryDeferred(ctx, waitAdmission, func() ([]reposync.Entry, error) {
+	entries, err := retryDeferred(ctx, wait, func() ([]reposync.Entry, error) {
 		return reader.List(ctx, cfg.source())
 	})
 	if err != nil {
@@ -373,7 +382,7 @@ func (s *Service) fetchWith(ctx context.Context, cfg *Config, waitAdmission bool
 		return nil, err
 	}
 	get := func(ctx context.Context, path string) ([]byte, error) {
-		return retryDeferred(ctx, waitAdmission, func() ([]byte, error) { return getter(ctx, path) })
+		return retryDeferred(ctx, wait, func() ([]byte, error) { return getter(ctx, path) })
 	}
 	if err := completeListing(cfg.Provider, entries); err != nil {
 		return nil, err

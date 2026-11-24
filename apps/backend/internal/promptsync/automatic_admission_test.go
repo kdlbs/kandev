@@ -2,6 +2,7 @@ package promptsync
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -32,6 +33,23 @@ type pacedGitHub struct {
 	gate chan struct{}
 	// onDefer, when set, is closed after the first deferral is returned.
 	onDefer chan struct{}
+	// rejectCommit makes the commit fence reject the apply.
+	rejectCommit bool
+	// unpaced admits every read.
+	unpaced bool
+}
+
+// gateClosed reports whether a gate is set and admission has not opened.
+func (p *pacedGitHub) gateClosed() bool {
+	if p.gate == nil {
+		return false
+	}
+	select {
+	case <-p.gate:
+		return false
+	default:
+		return true
+	}
 }
 
 func newPacedGitHub() *pacedGitHub {
@@ -50,7 +68,11 @@ func (p *pacedGitHub) BindWorkspaceGitHubHost(ctx context.Context, _, _ string) 
 func (p *pacedGitHub) CommitWorkspaceGitHubHost(ctx context.Context, _ string, fn func(context.Context) error) error {
 	p.mu.Lock()
 	p.commits++
+	reject := p.rejectCommit
 	p.mu.Unlock()
+	if reject {
+		return errors.New("github connection replaced")
+	}
 	return fn(ctx)
 }
 
@@ -69,7 +91,7 @@ func (p *pacedGitHub) GetRepoFileContentForWorkspace(_ context.Context, _, _, _,
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.fileAttempts[path]++
-	if !p.deferred[path] {
+	if !p.unpaced && (!p.deferred[path] || p.gateClosed()) {
 		p.deferred[path] = true
 		deferral := &github.AdmissionDeferredError{Delay: time.Millisecond, Reason: "background_pacing"}
 		if p.gate != nil {
@@ -100,9 +122,7 @@ func (p *pacedGitHub) setFingerprint(fingerprint string) {
 func (p *pacedGitHub) stopPacing() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for name := range p.files {
-		p.deferred[DefaultPath+"/"+name] = true
-	}
+	p.unpaced = true
 }
 
 func (p *pacedGitHub) counts() (lists, commits int, attempts map[string]int) {
@@ -262,12 +282,13 @@ func TestAutomaticSyncDiscardsResultAfterCredentialChange(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			gh := newPacedGitHub()
 			svc, prompts := newPacedFixture(t, gh)
+			svc.credentialRecheck = 10 * time.Millisecond
 			ctx := context.Background()
 			svc.refreshCredentialFingerprint(ctx, mustConfig(t, svc))
 			done := startWaitingAutomaticSync(t, ctx, svc, gh)
 
 			gh.setFingerprint(fingerprint)
-			openGateAndWait(t, gh, done)
+			waitForRun(t, done)
 
 			_, commits, _ := gh.counts()
 			assert.Equal(t, 1, commits, "only the configuration save committed")
@@ -316,4 +337,35 @@ func TestAutomaticSyncCancelledDuringFetchRecordsNothing(t *testing.T) {
 	assert.Nil(t, cfg.LastSyncedAt)
 	_, commits, _ := gh.counts()
 	assert.Equal(t, 1, commits, "only the configuration save committed")
+}
+
+func TestAutomaticSyncSurvivesDeniedRemoval(t *testing.T) {
+	gh := newPacedGitHub()
+	svc, prompts := newPacedFixture(t, gh)
+	ctx := context.Background()
+	done := startWaitingAutomaticSync(t, ctx, svc, gh)
+
+	svc.SetWorkspaceAuthorizer(func(context.Context, string) error { return errors.New("denied") })
+	require.Error(t, svc.DeleteConfig(ctx, Removal{}))
+	openGateAndWait(t, gh, done)
+
+	_, err := prompts.GetPromptByName(ctx, "a")
+	require.NoError(t, err, "a denied removal leaves the automatic run able to apply")
+	assert.True(t, mustConfig(t, svc).LastOk)
+}
+
+func TestAutomaticSyncRejectedByCommitFenceRecordsNothing(t *testing.T) {
+	gh := newPacedGitHub()
+	svc, prompts := newPacedFixture(t, gh)
+	gh.mu.Lock()
+	gh.rejectCommit = true
+	gh.mu.Unlock()
+
+	svc.SyncIfDue(context.Background())
+
+	cfg := mustConfig(t, svc)
+	assert.Empty(t, cfg.LastError, "a stale automatic result records no failure")
+	assert.Equal(t, 0, cfg.ConsecutiveFailures)
+	assert.Nil(t, cfg.LastSyncedAt)
+	assertNoSyncedPrompts(t, prompts)
 }
