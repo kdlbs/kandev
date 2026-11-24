@@ -220,7 +220,9 @@ Viewport changes retain the unfinished draft. Cancellation discards it without a
 Ordinary leaves retain their existing immediate selection behavior.
 Composed groups open a focused view with explicit Use configuration.
 The completed choice contains an exact model value and real option values.
-Mode remains in the existing session-permission UI.
+Permission mode remains in the existing session-permission UI.
+[Session setting semantics](session-setting-semantics.md) defines the proposed
+Pi legacy-thinking alias correction and profile-default recovery.
 
 Profile and workflow consumers update their drafts after complete Apply.
 Existing Save persists exact model/options. Group paths and dimension values remain derived presentation state.

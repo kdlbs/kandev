@@ -276,6 +276,7 @@
   "fallbackNext": "fallback: next",
   "fallbackModel": "fallback: {{model}}",
   "modelRequiredForAllProfiles": "Model is required for all profiles.",
+  "claudeExactModelAliasConflict": "Choose a full model ID in Start model, or remove {{envVar}} from Environment Variables.",
   "noAuthHintLogin": "Click Open terminal to sign in, then refresh.",
   "noAuthHintNotInstalled": "Install the agent CLI, then click Refresh.",
   "noAuthHintShell": "Click Open terminal to launch a shell, run the agent's sign-in command, then refresh.",
@@ -649,5 +650,9 @@
   "runtimeUpdatePreviewRequestError": "Couldn't check this update: {{error}}",
   "runtimeUpdatePreviewUnavailable": "This update couldn't be verified for bulk updating. Use Manage versions.",
   "runtimeUpdatePreviewChanged": "The runtime or target version changed. Check for updates again.",
-  "runtimeUpdatePreviewIndividual": "This runtime needs to be updated individually. Use Manage versions."
+  "runtimeUpdatePreviewIndividual": "This runtime needs to be updated individually. Use Manage versions.",
+  "thinkingLevel": "Thinking level",
+  "useProviderDefault": "Use provider default",
+  "thinkingLevelUnavailable": "{{value}} (unavailable)",
+  "editProfile": "Edit profile"
 }

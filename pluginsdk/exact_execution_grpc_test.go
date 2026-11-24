@@ -28,12 +28,15 @@ func (h *exactExecutionHostFixture) ExactInteractionCommands() ExactInteractionC
 }
 
 type exactExecutionManagerFixture struct {
-	ensure   ExactTaskRunCommand
-	stop     ExactTaskExecutionCommand
-	recover  ExactSessionRecoveryCommand
-	cancel   ExactPendingTransitionCommand
-	modeRead ExactTaskExecutionCommand
-	modeSet  ExactSessionModeCommand
+	ensure     ExactTaskRunCommand
+	stop       ExactTaskExecutionCommand
+	cancelTurn ExactTaskExecutionCommand
+	recover    ExactSessionRecoveryCommand
+	cancel     ExactPendingTransitionCommand
+	modeRead   ExactTaskExecutionCommand
+	modeSet    ExactSessionModeCommand
+	stepRead   ExactStepApprovalQuery
+	stepWrite  ExactStepApprovalCommand
 }
 
 func (f *exactExecutionManagerFixture) EnsureTaskRun(_ context.Context, in ExactTaskRunCommand) (*CommandResult, ExactTaskRunResult, error) {
@@ -43,6 +46,11 @@ func (f *exactExecutionManagerFixture) EnsureTaskRun(_ context.Context, in Exact
 
 func (f *exactExecutionManagerFixture) StopTaskRun(_ context.Context, in ExactTaskExecutionCommand) (*CommandResult, bool, error) {
 	f.stop = in
+	return &CommandResult{Status: CommandApplied}, true, nil
+}
+
+func (f *exactExecutionManagerFixture) CancelTurn(_ context.Context, in ExactTaskExecutionCommand) (*CommandResult, bool, error) {
+	f.cancelTurn = in
 	return &CommandResult{Status: CommandApplied}, true, nil
 }
 
@@ -64,6 +72,19 @@ func (f *exactExecutionManagerFixture) GetSessionModeContext(_ context.Context, 
 func (f *exactExecutionManagerFixture) SetSessionMode(_ context.Context, in ExactSessionModeCommand) (*CommandResult, string, error) {
 	f.modeSet = in
 	return &CommandResult{Status: CommandApplied}, in.ModeID, nil
+}
+
+func (f *exactExecutionManagerFixture) GetStepApproval(_ context.Context, in ExactStepApprovalQuery) (StepApproval, error) {
+	f.stepRead = in
+	return StepApproval{
+		SessionID: in.SessionID, TaskID: "task-1", Awaiting: true, FromStepID: "review", FromStepName: "Review",
+		ToStepID: "done", ToStepName: "Done", ResourceVersion: "sha256:step", ObservedAt: "2026-11-22T10:00:00Z",
+	}, nil
+}
+
+func (f *exactExecutionManagerFixture) ApproveStep(_ context.Context, in ExactStepApprovalCommand) (*CommandResult, StepApprovalResult, error) {
+	f.stepWrite = in
+	return &CommandResult{Status: CommandApplied}, StepApprovalResult{FromStepID: "review", ToStepID: "done"}, nil
 }
 
 type exactInteractionManagerFixture struct {
@@ -113,6 +134,12 @@ func TestExactExecutionAndInteractionCommandsRoundTrip(t *testing.T) {
 	require.True(t, stopped)
 	require.Equal(t, base, fixture.execution.stop)
 
+	result, cancelled, err := execution.CancelTurn(context.Background(), base)
+	require.NoError(t, err)
+	require.Equal(t, CommandApplied, result.Status)
+	require.True(t, cancelled)
+	require.Equal(t, base, fixture.execution.cancelTurn)
+
 	recovery := ExactSessionRecoveryCommand{ExactTaskExecutionCommand: base, Action: "resume"}
 	_, recovered, err := execution.RecoverSession(context.Background(), recovery)
 	require.NoError(t, err)
@@ -141,6 +168,25 @@ func TestExactExecutionAndInteractionCommandsRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "plan", current)
 	require.Equal(t, mode, fixture.execution.modeSet)
+
+	stepQuery := ExactStepApprovalQuery{RequestID: "request-step", WorkspaceID: "workspace-1", SessionID: "session-1"}
+	approval, err := execution.GetStepApproval(context.Background(), stepQuery)
+	require.NoError(t, err)
+	require.Equal(t, stepQuery, fixture.execution.stepRead)
+	require.Equal(t, StepApproval{
+		SessionID: "session-1", TaskID: "task-1", Awaiting: true, FromStepID: "review", FromStepName: "Review",
+		ToStepID: "done", ToStepName: "Done", ResourceVersion: "sha256:step", ObservedAt: "2026-11-22T10:00:00Z",
+	}, approval)
+	stepCommand := ExactStepApprovalCommand{
+		RequestID: "request-approve", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExpectedResourceVersion: "sha256:step", IdempotencyKey: "approve-1", HumanResponseReceiptID: "receipt-step",
+		ApprovalRevision: 7, ManifestDigest: "manifest-digest",
+	}
+	result, approved, err := execution.ApproveStep(context.Background(), stepCommand)
+	require.NoError(t, err)
+	require.Equal(t, CommandApplied, result.Status)
+	require.Equal(t, StepApprovalResult{FromStepID: "review", ToStepID: "done"}, approved)
+	require.Equal(t, stepCommand, fixture.execution.stepWrite)
 
 	permission := ExactPermissionResponse{
 		RequestID: "request-permission", WorkspaceID: "workspace-1", InteractionID: "interaction-1",

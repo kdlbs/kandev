@@ -550,6 +550,7 @@ func clearReservedMetadata(metadata map[string]interface{}) map[string]interface
 
 // MessageAttachment represents an attachment (image) in a queued message.
 type MessageAttachment struct {
+	CommentID    string `json:"comment_id,omitempty"`
 	Type         string `json:"type"`
 	Data         string `json:"data"`
 	AttachmentID string `json:"attachment_id,omitempty"`

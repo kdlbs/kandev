@@ -161,6 +161,16 @@ func TestDeliveryRetentionWorkflowOutcome(t *testing.T) {
 				t.Fatalf("fully settled submission = %+v, %v", submission, err)
 			}
 
+			stoppedRepo, stoppedEvent, _ := seedRetentionPromptSubmission(t, engine, "workflow-stopped-recovery")
+			putRetentionWorkflowOutcome(t, stoppedRepo, stoppedEvent,
+				models.DeliveryWorkflowOutcomeStoppedRecovery, retentionPromptTurnID(t, stoppedEvent))
+			stopped, err := stoppedRepo.CompleteAgentDeliveryTerminalSettlement(
+				context.Background(), terminalRetentionEffectKey(stoppedEvent), time.Time{},
+			)
+			if err != nil || !stopped {
+				t.Fatalf("stopped recovery terminal retention result = %v, %v", stopped, err)
+			}
+
 			guardedRepo, guardedEvent, _ := seedRetentionPromptSubmission(t, engine, "workflow-guarded")
 			stepTime := time.Date(2025, 6, 7, 8, 10, 0, 0, time.UTC)
 			seedRetentionWorkflowPolicy(t, guardedRepo, guardedEvent, "workflow-guarded", "step-current", stepTime)

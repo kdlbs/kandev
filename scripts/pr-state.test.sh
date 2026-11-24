@@ -850,6 +850,7 @@ test_snapshot_happy_path() {
   json="$(<"$tmp/out.json")"
 
   assert_jq "pr number" '.pr.number == 123' "$json"
+  assert_jq "PR event resource" '.pr.url == "https://github.com/kdlbs/kandev/pull/123"' "$json"
   assert_jq "branch" '.pr.branch == "feat/pr-state"' "$json"
   assert_jq "head delivery target" '.pr.head_repository_owner == "kdlbs" and .pr.head_repository_name == "kandev" and .pr.head_ref_name == "feat/pr-state" and .pr.head_ref_oid == "abc123" and .pr.maintainer_can_modify == true' "$json"
   assert_jq "base divergence fields" '.pr.base_ref_name == "main" and .pr.base_head_oid == "base-head-sha" and .pr.base_target_oid == "base-head-sha" and .pr.merge_base_oid == "base-branch-sha" and .pr.base_advanced_since_head == true' "$json"

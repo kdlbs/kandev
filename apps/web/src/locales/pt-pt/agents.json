@@ -260,6 +260,7 @@
   "modelOptionsResolutionFailed": "Não foi possível carregar as opções do modelo.",
   "copilotPluginModelOptionsRecovery": "Esta seleção de plugins bloqueia as opções do modelo. Desmarque os plugins, guarde o perfil e tente novamente as opções do modelo.",
   "modelRequiredForAllProfiles": "O modelo é obrigatório em todos os perfis.",
+  "claudeExactModelAliasConflict": "Escolha um ID de modelo completo em Modelo inicial ou remova {{envVar}} das Variáveis de ambiente.",
   "modelSettings": "Definições do modelo",
   "noAuthHintLogin": "Clique em Abrir terminal para iniciar sessão e depois atualize.",
   "noAuthHintNotInstalled": "Instale a CLI do agente e depois clique em Atualizar.",
@@ -649,5 +650,9 @@
   "runtimeUpdatePreviewRequestError": "Não foi possível verificar esta atualização: {{error}}",
   "runtimeUpdatePreviewUnavailable": "Não foi possível verificar esta atualização para atualização em bloco. Utilize Gerir versões.",
   "runtimeUpdatePreviewChanged": "O runtime ou a versão de destino mudou. Verifique novamente as atualizações.",
-  "runtimeUpdatePreviewIndividual": "Este runtime precisa de ser atualizado individualmente. Utilize Gerir versões."
+  "runtimeUpdatePreviewIndividual": "Este runtime precisa de ser atualizado individualmente. Utilize Gerir versões.",
+  "thinkingLevel": "Nível de raciocínio",
+  "useProviderDefault": "Usar predefinição do fornecedor",
+  "thinkingLevelUnavailable": "{{value}} (indisponível)",
+  "editProfile": "Editar perfil"
 }

@@ -132,7 +132,7 @@
   "conflictTierMappingsTitle": "Ŵōŕķśƥàćē ţĩēŕ ḿàƥƥĩńĝś:",
   "conflictWatchersTitle": "Ŵàţćĥēŕś (ŵĩĺĺ ƀē ďĩśàƀĺēď):",
   "conflictUtilityAgentsTitle": "Ũţĩĺĩţŷ àĝēńţś (ŵĩĺĺ ķēēƥ śţàĺē ƀĩńďĩńĝś):",
-  "disableProfileDynamicWarning": "Ďŷńàḿĩć ƥŕōƒĩĺēś ũśē ţĥĩś ƥŕōƒĩĺē àś à ŕōũţĩńĝ ćàńďĩďàţē. Ĩƒ ĩţ ĩś ţĥēĩŕ ōńĺŷ ćàńďĩďàţē, ŕōũţĩńĝ śţōƥś àńď ŕēǫũĩŕēś àćţĩōń ũńţĩĺ ŷōũ ŕē-ēńàƀĺē ţĥĩś ƥŕōƒĩĺē ōŕ ŕēƥĺàćē ţĥē ćàńďĩďàţē.",
+  "disableProfileDynamicWarning": "Ďŷńàḿĩć ƥŕōƒĩĺēś ũśē ţĥĩś ƥŕōƒĩĺē àś à ŕōũţĩńĝ ćàńďĩďàţē. Ĩƒ ĩţ ĩś ţĥēĩŕ ōńĺŷ ćàńďĩďàţē, ŕōũţĩńĝ śţōƥś àńď ŕēqũĩŕēś àćţĩōń ũńţĩĺ ŷōũ ŕē-ēńàƀĺē ţĥĩś ƥŕōƒĩĺē ōŕ ŕēƥĺàćē ţĥē ćàńďĩďàţē.",
   "disableProfileUtilityWarning": "Ũţĩĺĩţŷ àĝēńţś ũśē ţĥĩś ƥŕōƒĩĺē. Ďĩśàƀĺĩńĝ ĩţ ŵĩĺĺ śţōƥ ńēŵ ũţĩĺĩţŷ ćàĺĺś ũńţĩĺ ēàćĥ ƀĩńďĩńĝ ĩś ŕēƥàĩŕēď.",
   "disableProfileAnyway": "Ďĩśàƀĺē ƥŕōƒĩĺē",
   "copied": "Ćōƥĩēď",
@@ -276,6 +276,7 @@
   "fallbackNext": "ƒàĺĺƀàćķ: ńēxţ",
   "fallbackModel": "ƒàĺĺƀàćķ: {{model}}",
   "modelRequiredForAllProfiles": "Ḿōďēĺ ĩś ŕēqũĩŕēď ƒōŕ àĺĺ ƥŕōƒĩĺēś.",
+  "claudeExactModelAliasConflict": "Ćĥōōśē à ƒũĺĺ ḿōďēĺ ĨĎ ĩń Śţàŕţ ḿōďēĺ, ōŕ ŕēḿōvē {{envVar}} ƒŕōḿ Ēńvĩŕōńḿēńţ Vàŕĩàƀĺēś.",
   "noAuthHintLogin": "Ćĺĩćķ Ōƥēń ţēŕḿĩńàĺ ţō śĩĝń ĩń, ţĥēń ŕēƒŕēśĥ.",
   "noAuthHintNotInstalled": "Ĩńśţàĺĺ ţĥē àĝēńţ ĆĹĨ, ţĥēń ćĺĩćķ Ŕēƒŕēśĥ.",
   "noAuthHintShell": "Ćĺĩćķ Ōƥēń ţēŕḿĩńàĺ ţō ĺàũńćĥ à śĥēĺĺ, ŕũń ţĥē àĝēńţ'ś śĩĝń-ĩń ćōḿḿàńď, ţĥēń ŕēƒŕēśĥ.",
@@ -649,5 +650,9 @@
   "runtimeUpdatePreviewRequestError": "Ćōũĺďń'ţ ćĥēćķ ţĥĩś ũƥďàţē: {{error}}",
   "runtimeUpdatePreviewUnavailable": "Ţĥĩś ũƥďàţē ćōũĺďń'ţ ƀē vēŕĩƒĩēď ƒōŕ ƀũĺķ ũƥďàţĩńĝ. Ũśē Ḿàńàĝē vēŕśĩōńś.",
   "runtimeUpdatePreviewChanged": "Ţĥē ŕũńţĩḿē ōŕ ţàŕĝēţ vēŕśĩōń ćĥàńĝēď. Ćĥēćķ ƒōŕ ũƥďàţēś àĝàĩń.",
-  "runtimeUpdatePreviewIndividual": "Ţĥĩś ŕũńţĩḿē ńēēďś ţō ƀē ũƥďàţēď ĩńďĩvĩďũàĺĺŷ. Ũśē Ḿàńàĝē vēŕśĩōńś."
+  "runtimeUpdatePreviewIndividual": "Ţĥĩś ŕũńţĩḿē ńēēďś ţō ƀē ũƥďàţēď ĩńďĩvĩďũàĺĺŷ. Ũśē Ḿàńàĝē vēŕśĩōńś.",
+  "thinkingLevel": "Ţĥĩńķĩńĝ ĺēvēĺ",
+  "useProviderDefault": "Ũśē ƥŕōvĩďēŕ ďēƒàũĺţ",
+  "thinkingLevelUnavailable": "{{value}} (ũńàvàĩĺàƀĺē)",
+  "editProfile": "Ēďĩţ ƥŕōƒĩĺē"
 }

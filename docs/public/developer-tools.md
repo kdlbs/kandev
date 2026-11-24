@@ -74,8 +74,10 @@ restart the backend after you change it.
 ## Use CLI passthrough on a phone
 
 Open a task running in CLI passthrough mode. Its connected terminal shows the
-same navigation keys as a task terminal: **Ctrl**, **Shift**, **^C**, **^D**,
-**Esc**, **Tab**, arrows, and other terminal keys. Swipe the row to reach more keys.
+same navigation keys as a task terminal: **Esc**, arrows, **Enter**, and
+**Tab**, followed by **Ctrl**, **Shift**, **^C**, **^D**, and other terminal
+keys. A horizontal swipe icon shows that the row scrolls. Swipe the row to reach
+more keys.
 
 Tap **Ctrl** once to modify the next input, twice to keep it enabled, and again
 to turn it off. **Shift** followed by **Tab** sends reverse Tab. Keys go directly
@@ -93,6 +95,8 @@ Quick Chat is an agent conversation outside the board. Use it for repository ori
 ### Comment on an agent reply
 
 In Task Chat or Quick Chat, select text from a settled agent prose reply, then select the comment button that appears beside the selection. On a phone or tablet, the comment button joins the row of icons above the composer instead, so your device's own selection menu cannot cover it. The same applies in Office threads, Markdown previews, and code files, where the button appears in the bottom-right corner. The editor works like plan comments: enter feedback and choose **Add** to keep it as pending context, or **Run** to send it immediately. Pending selections use the same inline highlight and comment badge as plans; select either one to update or delete the feedback. Pending message comments are kept for the current browser tab, appear as composer context chips, and are included in the next prompt as Markdown. If the agent is busy, **Run** queues the feedback for its next turn.
+
+To include a file with feedback on an agent reply, walkthrough step, or file line, open the paperclip and choose **Add files**. Wait for each file to finish uploading before you add or run the comment. The agent receives a readable file path with that comment. If an upload fails, retry it or remove the file to continue.
 
 Inline comments are available only on ordinary settled prose. Streaming replies, tool/thinking/status output, plans, rich-block content, raw views, and user messages do not accept inline comments.
 
@@ -113,12 +117,13 @@ is running and a green dot when a reply is ready to read. Terminal tabs do not
 contribute to this activity indicator.
 
 On a phone, Quick Terminal includes the same shortcut row as a task terminal:
-**Ctrl**, **Shift**, **^C**, **^D**, **Esc**, **Tab**, navigation keys, and symbols.
-Swipe the row to reach more keys. Tap **^C** to interrupt a command. Tap a modifier
-once for the next input, twice to keep it enabled, and again to turn it off.
-Shortcuts target the selected terminal and keep the keyboard focused. The row
-stays above the on-screen keyboard. Modifiers reset when you switch terminal
-tabs or close the view.
+**Esc**, navigation keys, **Enter**, and **Tab**, followed by **Ctrl**, **Shift**,
+**^C**, **^D**, and symbols. A horizontal swipe icon shows that the row scrolls.
+Swipe the row to reach more keys. Tap **Enter** to run a command or **^C** to
+interrupt it. Tap a modifier once for the next input, twice to keep it enabled,
+and again to turn it off. Shortcuts target the selected terminal and keep the
+keyboard focused. The row stays above the on-screen keyboard. Modifiers reset
+when you switch terminal tabs or close the view.
 
 ### Recover a Quick Terminal
 

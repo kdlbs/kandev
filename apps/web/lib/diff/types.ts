@@ -25,7 +25,9 @@ export type CommentAnnotation = DiffLineAnnotation<{
   isEditing: boolean;
 }>;
 
-export type DiffCommentUpdate = Partial<Pick<DiffComment, "text" | "status" | "codeContent">>;
+export type DiffCommentUpdate = Partial<
+  Pick<DiffComment, "text" | "status" | "codeContent" | "attachments">
+>;
 
 /**
  * Store state for diff comments — kept for backward compat type references.

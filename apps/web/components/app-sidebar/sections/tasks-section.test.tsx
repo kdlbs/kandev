@@ -15,12 +15,14 @@ const state = {
     views: [{ id: "all", name: "All tasks", filters: [] }],
     activeViewId: "all",
     draft: null,
+    transitionPending: false,
   },
   sidebarViewsByWorkspace: {
     "ws-1": {
       views: [{ id: "all", name: "All tasks", filters: [] }],
       activeViewId: "all",
       draft: null,
+      transitionPending: false,
     },
   },
   toggleAppSidebarSection: vi.fn(),
@@ -74,5 +76,14 @@ describe("TasksSection", () => {
     const header = screen.getByRole("button", { name: "Tasks" }).parentElement;
 
     expect(header?.contains(picker)).toBe(true);
+  });
+
+  it("keeps the picker name stable and announces a pending selection", () => {
+    state.sidebarViewsByWorkspace["ws-1"].transitionPending = true;
+    renderSection();
+
+    const picker = screen.getByTestId("tasks-view-picker");
+    expect(picker.getAttribute("aria-label")).toBe("View: All tasks");
+    expect(screen.getByRole("status").textContent).toBe("Loading All tasks...");
   });
 });

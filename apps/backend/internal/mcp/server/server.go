@@ -156,6 +156,7 @@ type Server struct {
 	filteredPluginTools        plugintools.Snapshot
 	filteredPluginToolsReady   bool
 	pluginToolsEpoch           atomic.Uint64
+	keepAliveCalls             uint64
 }
 
 // ServerOption configures the per-instance MCP transport.
@@ -329,6 +330,7 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		server.WithToolCapabilities(true),
 		server.WithCacheHints(0, mcp.CacheScopePrivate),
 		server.WithHooks(hooks),
+		server.WithToolHandlerMiddleware(s.keepAliveMiddleware),
 	)
 	hooks.AddBeforeAny(func(ctx context.Context, _ any, _ mcp.MCPMethod, _ any) {
 		if server.IsModernRequest(ctx) {
@@ -1667,7 +1669,7 @@ func (s *Server) registerTaskPRLinkTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("manage_task_change_request_kandev",
-			"Link, unlink, or replace a GitHub pull request or GitLab merge request for a task. Provide the operation, target task, provider, canonical repository identity, and positive change request number. Replacement requires the complete old identity and keeps both identities on the same provider.",
+			"Link, unlink, or replace a GitHub pull request or GitLab merge request for a task. Provide the operation, target task, provider, Kandev repository ID, and positive change request number. For link, the repository ID must be attached to the target task. Replacement requires the complete old identity and keeps both identities on the same provider.",
 			taskChangeRequestToolSchema(),
 		),
 		s.wrapHandler("manage_task_change_request_kandev", s.manageTaskChangeRequestHandler()),

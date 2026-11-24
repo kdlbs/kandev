@@ -2,15 +2,51 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestBackgroundWorkOutputMergeUsesJSONDeliveredUTF8Offsets(t *testing.T) {
+	first := streams.WorkloadOutputChunk{
+		Chunk:  string([]byte{0xff, 'A'}),
+		Offset: 0,
+	}
+	first = jsonRoundTripWorkloadOutput(t, first)
+	output, offset, duplicate := mergeChunkIntoOutput("", 0, first.Chunk, first.Offset)
+	require.False(t, duplicate)
+	require.Equal(t, "\uFFFDA", output)
+	require.Equal(t, int64(len(output)), offset)
+
+	second := jsonRoundTripWorkloadOutput(t, streams.WorkloadOutputChunk{
+		Chunk:  "B",
+		Offset: offset,
+	})
+	output, offset, duplicate = mergeChunkIntoOutput(output, offset, second.Chunk, second.Offset)
+	require.False(t, duplicate)
+	require.Equal(t, "\uFFFDAB", output)
+	require.Equal(t, int64(len(output)), offset)
+}
+
+func jsonRoundTripWorkloadOutput(t *testing.T, chunk streams.WorkloadOutputChunk) streams.WorkloadOutputChunk {
+	t.Helper()
+	encoded, err := json.Marshal(chunk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var delivered streams.WorkloadOutputChunk
+	if err := json.Unmarshal(encoded, &delivered); err != nil {
+		t.Fatal(err)
+	}
+	return delivered
+}
 
 func TestBackgroundWorkOutputBounds(t *testing.T) {
 	svc, _, repo := createTestService(t)

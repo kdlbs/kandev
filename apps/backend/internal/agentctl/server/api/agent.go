@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -232,8 +233,8 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	// (AC-EXECUTORS-SURVIVAL-001.5/.6): the permission-request notification
 	// site reads it to decide whether to auto-cancel on a five-second
 	// timeout (attached) or park (detached) when its channel is full.
-	s.procMgr.MarkAttached()
-	defer s.procMgr.MarkDetached()
+	s.procMgr.AttachStream(streamID)
+	defer s.procMgr.DetachStream(streamID)
 
 	ctx, cancel := context.WithCancel(ownedCtx)
 	defer cancel()
@@ -286,7 +287,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	go s.runAgentStreamWriterWithJournalReplay(ctx, conn, streamID, after, s.procMgr.DeliveryStreamID(), updatesCh, mcpRequestCh, writeMessage, &wg, c.Query("stage") == "1")
 	wg.Wait()
 	if s.mcpBackendClient != nil {
-		s.mcpBackendClient.FailStreamRequests(streamID, errors.New("agent stream disconnected"))
+		s.mcpBackendClient.FailStreamRequests(streamID, mcpserver.ErrKandevCallOutcomeUnknown)
 	}
 }
 
@@ -412,6 +413,7 @@ func (s *Server) runAgentStreamWriterWithReplay(ctx context.Context, conn *webso
 }
 
 func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.Conn, streamID string, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, stages ...*streamStageWriter) {
+	s.markStreamWriterReady(streamID)
 	stage, heartbeat, eventWrite := streamStageInputs(writeMessage, stages)
 	for {
 		select {
@@ -441,7 +443,7 @@ func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.C
 				mcpRequestCh = nil
 				continue
 			}
-			if !s.writeAgentStreamMCPRequest(mcpReq, streamID, writeMessage) {
+			if !s.writeAgentStreamMCPRequest(ctx, mcpReq, streamID, writeMessage) {
 				return
 			}
 		}
@@ -457,6 +459,7 @@ type durableAgentStreamWriter struct {
 	wakeups          <-chan struct{}
 	writeMessage     func([]byte) error
 	stage            *streamStageWriter
+	ready            bool
 }
 
 func (w *durableAgentStreamWriter) writeEvent(data []byte) error {
@@ -491,12 +494,16 @@ func (w *durableAgentStreamWriter) run(ctx context.Context, after uint64, draini
 			return
 		}
 		if !draining {
+			if !w.ready {
+				w.ready = true
+				w.server.markStreamWriterReady(w.streamID)
+			}
 			if !w.waitForInput(ctx, &draining) {
 				return
 			}
 			continue
 		}
-		if !w.serviceMCP() || !w.serviceUpdate() {
+		if !w.serviceMCP(ctx) || !w.serviceUpdate() {
 			return
 		}
 		next, caughtUp, err := w.drainPage(ctx, deliveryJournal, after)
@@ -540,13 +547,13 @@ func (w *durableAgentStreamWriter) waitForInput(ctx context.Context, draining *b
 			w.mcpRequestCh = nil
 			return true
 		}
-		return w.server.writeAgentStreamMCPRequest(mcpReq, w.streamID, w.writeMessage)
+		return w.server.writeAgentStreamMCPRequest(ctx, mcpReq, w.streamID, w.writeMessage)
 	}
 	return true
 }
 
-func (w *durableAgentStreamWriter) serviceMCP() bool {
-	if w.mcpRequestCh == nil {
+func (w *durableAgentStreamWriter) serviceMCP(ctx context.Context) bool {
+	if w.mcpRequestCh == nil || !w.ready {
 		return true
 	}
 	select {
@@ -555,7 +562,7 @@ func (w *durableAgentStreamWriter) serviceMCP() bool {
 			w.mcpRequestCh = nil
 			return true
 		}
-		return w.server.writeAgentStreamMCPRequest(mcpReq, w.streamID, w.writeMessage)
+		return w.server.writeAgentStreamMCPRequest(ctx, mcpReq, w.streamID, w.writeMessage)
 	default:
 		return true
 	}
@@ -685,24 +692,48 @@ func (s *Server) writeAgentStreamNotification(notification adapter.AgentEvent, w
 	return true
 }
 
-func (s *Server) writeAgentStreamMCPRequest(mcpReq *ws.Message, streamID string, writeMessage func([]byte) error) bool {
+func (s *Server) markStreamWriterReady(streamID string) {
+	if s.procMgr != nil {
+		s.procMgr.MarkWriterReady(streamID)
+	}
+}
+
+// writeAgentStreamMCPRequest binds a Kandev call to this stream and writes it.
+// It returns false when the writer must stop. A call that cannot be written
+// because the stream already ended is returned to waiting; a bound call whose
+// write fails is failed with an unknown outcome together with every other
+// call bound to this stream.
+func (s *Server) writeAgentStreamMCPRequest(ctx context.Context, mcpReq *ws.Message, streamID string, writeMessage func([]byte) error) bool {
+	client := s.mcpBackendClient
+	if ctx.Err() != nil {
+		if client != nil {
+			client.FailRequestNotSent(mcpReq.ID)
+		}
+		return false
+	}
 	data, err := json.Marshal(mcpReq)
 	if err != nil {
 		s.logger.Error("failed to marshal MCP request", zap.Error(err))
+		if client != nil {
+			client.FailRequest(mcpReq.ID, fmt.Errorf("failed to encode MCP request: %w", err))
+		}
 		return true
+	}
+	if client != nil {
+		if err := client.BindRequestToStream(mcpReq.ID, streamID); err != nil {
+			return true
+		}
 	}
 	if err := writeMessage(data); err != nil {
 		s.logger.Warn("failed to write MCP request",
 			zap.String("request_id", mcpReq.ID),
 			zap.String("action", mcpReq.Action),
+			zap.String("reason", "outcome_unknown"),
 			zap.Error(err))
-		if s.mcpBackendClient != nil {
-			s.mcpBackendClient.FailRequest(mcpReq.ID, fmt.Errorf("failed to write MCP request to agent stream: %w", err))
+		if client != nil {
+			client.FailStreamRequests(streamID, mcpserver.ErrKandevCallOutcomeUnknown)
 		}
 		return false
-	}
-	if s.mcpBackendClient != nil {
-		s.mcpBackendClient.BindRequestToStream(mcpReq.ID, streamID)
 	}
 	return true
 }
@@ -1704,7 +1735,12 @@ func (s *Server) adapterAction(
 
 	if err := action(agentAdapter); err != nil {
 		s.logger.Error(msg.Action+" failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		code := ws.ErrorCodeInternalError
+		var rejected *streams.SessionConfigurationRejectedError
+		if errors.As(err, &rejected) {
+			code = ws.ErrorCodeValidation
+		}
+		resp, _ := ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 		return resp
 	}
 
@@ -1716,22 +1752,38 @@ func (s *Server) handleWSSetModel(ctx context.Context, msg *ws.Message) *ws.Mess
 	var req struct {
 		ModelID string `json:"model_id"`
 	}
-	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+	var result streams.ConfigurationResult
+	resultSupported := false
+	resp := s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
 		ms, ok := a.(adapter.ModelSettableAdapter)
 		if !ok {
 			return fmt.Errorf("agent does not support model switching")
 		}
+		if resultSetter, ok := a.(adapter.ModelConfigurationResultAdapter); ok {
+			resultSupported = true
+			var err error
+			result, err = resultSetter.SetModelWithResult(ctx, req.ModelID)
+			return err
+		}
 		return ms.SetModel(ctx, req.ModelID)
 	})
+	if resp.Type == ws.MessageTypeError || !resultSupported {
+		return resp
+	}
+	settled, _ := ws.NewResponse(msg.ID, msg.Action, result)
+	return settled
 }
 
 func (s *Server) handleWSSetConfigOption(ctx context.Context, msg *ws.Message) *ws.Message {
 	var req struct {
-		ConfigID              string                        `json:"config_id"`
-		Value                 string                        `json:"value"`
-		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
+		ConfigID                   string                        `json:"config_id"`
+		Value                      string                        `json:"value"`
+		SessionSettingsPolicy      streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
+		IncludeConfigurationResult bool                          `json:"include_configuration_result,omitempty"`
 	}
-	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+	var result streams.ConfigurationResult
+	resultSupported := false
+	resp := s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
 		policy := req.SessionSettingsPolicy
 		if policy == "" {
 			policy = streams.SessionSettingsPolicyStrict
@@ -1743,8 +1795,21 @@ func (s *Server) handleWSSetConfigOption(ctx context.Context, msg *ws.Message) *
 		if !ok {
 			return fmt.Errorf("agent does not support set_config_option")
 		}
+		if req.IncludeConfigurationResult {
+			if resultSetter, ok := a.(adapter.ConfigOptionResultAdapter); ok {
+				resultSupported = true
+				var err error
+				result, err = resultSetter.SetConfigOptionWithResult(streams.WithSessionSettingsPolicy(ctx, policy), req.ConfigID, req.Value)
+				return err
+			}
+		}
 		return cs.SetConfigOption(streams.WithSessionSettingsPolicy(ctx, policy), req.ConfigID, req.Value)
 	})
+	if resp.Type == ws.MessageTypeError || !resultSupported {
+		return resp
+	}
+	settled, _ := ws.NewResponse(msg.ID, msg.Action, result)
+	return settled
 }
 
 func (s *Server) handleWSAuthenticate(ctx context.Context, msg *ws.Message) *ws.Message {

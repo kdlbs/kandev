@@ -430,7 +430,7 @@ func ApplyQuery(entries []CatalogEntry, q Query) []CatalogEntry {
 		if entryKind == "" {
 			entryKind = marketplaceKindPlugin
 		}
-		if (kind == "" || entryKind == kind) && matchesText(e, text) && matchesCategory(e, category) {
+		if (kind == "" || entryKind == kind) && matchesText(e, text) && matchesCategory(e, category) && matchesFileExtension(e, q.Extension) {
 			out = append(out, e)
 		}
 	}
@@ -485,4 +485,25 @@ func starsBefore(a, b *int) bool {
 		return true
 	}
 	return *a > *b
+}
+
+func matchesFileExtension(entry CatalogEntry, query string) bool {
+	if query == "" {
+		return true
+	}
+	extension := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(query)), ".")
+	if len(extension) == 0 || len(extension) > 32 {
+		return false
+	}
+	for _, char := range extension {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '_' && char != '-' {
+			return false
+		}
+	}
+	for _, supported := range entry.FileExtensions {
+		if supported == extension {
+			return true
+		}
+	}
+	return false
 }

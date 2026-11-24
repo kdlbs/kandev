@@ -7,6 +7,7 @@ import type { ActiveSessionRecovery } from "@/lib/active-session-recovery";
 import type { Message, TaskSession } from "@/lib/types/http";
 import type { SessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import { SessionRecoveryProvider, useSessionComposerRecovery } from "./session-recovery-context";
+import { SessionThinkingRecovery } from "./session-thinking-recovery";
 import { SessionRecoveryCard } from "./session-recovery-card";
 import { ActionMessage } from "./messages/action-message";
 
@@ -519,4 +520,64 @@ it("keeps a later manual recovery failure visible over the earlier process cause
   expect(card.textContent).not.toContain("mise did not trust this workspace's configuration.");
   expect(screen.queryByTestId(PREREQUISITE)).toBeNull();
   expect(card.textContent).toContain(EXIT_CODE_ONE);
+});
+
+it("routes Pi thinking failures to the owning profile from the active recovery card", () => {
+  render(
+    <StateProvider
+      initialState={
+        {
+          taskSessions: { items: { session } },
+          agentProfiles: { items: [{ id: "profile", agent_name: "pi-acp" }] },
+        } as unknown as Partial<AppState>
+      }
+    >
+      <SessionRecoveryCard
+        model={{
+          sessionId: "session",
+          kind: "generic",
+          error: {
+            message: "startup failed",
+            causes: [
+              {
+                operation: "start",
+                code: "thinking_level_unavailable",
+                reason: "requested_not_advertised",
+                requested_setting: "medium",
+                setting_source: "agent_profile",
+                prompt_not_sent: true,
+              },
+            ],
+          },
+        }}
+        actions={actions}
+        onNewSession={vi.fn()}
+      />
+    </StateProvider>,
+  );
+  expect(screen.getByRole("link", { name: "Edit profile" }).getAttribute("href")).toBe(
+    "/settings/agents/pi-acp/profiles/profile",
+  );
+  expect(screen.getByTestId(RECOVERY_CARD).textContent).toContain("Use provider default");
+});
+
+it("gives neutral Pi thinking guidance when the source is unknown", () => {
+  render(
+    <SessionThinkingRecovery
+      sessionId="session"
+      error={{
+        causes: [
+          {
+            operation: "start",
+            code: "thinking_level_failed",
+            requested_setting: "medium",
+          },
+        ],
+      }}
+    />,
+  );
+  expect(screen.getByTestId("thinking-recovery-guidance").textContent).toContain(
+    "Check the Pi thinking level in the profile and any session or workflow overrides",
+  );
+  expect(screen.queryByRole("link", { name: "Edit profile" })).toBeNull();
 });

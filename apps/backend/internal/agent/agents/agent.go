@@ -300,6 +300,12 @@ type PassthroughOptions struct {
 
 // RuntimeConfig holds Docker / standalone runtime settings.
 type RuntimeConfig struct {
+	// ToolTimeoutEnvKey names the environment variable that bounds one MCP
+	// tool call in this harness, and ToolTimeoutUnit is its unit. Empty means
+	// the harness has no such variable and no floor is applied.
+	ToolTimeoutEnvKey string
+	ToolTimeoutUnit   time.Duration
+
 	// ContainerEnv provides agent-specific environment required only when the
 	// process runs inside a container runtime. These values are independent of
 	// session mode and never reach host or SSH processes.
@@ -578,6 +584,9 @@ type RemoteAuthMethod struct {
 	// FileConflictPolicy controls how an existing target file is handled. It is
 	// an internal transfer contract and is not part of the remote-auth API.
 	FileConflictPolicy RemoteAuthFileConflictPolicy `json:"-"`
+	// ProvisionAtLaunch keeps the credential selection available when the agent
+	// uses its CLI instead of copying a local credential file.
+	ProvisionAtLaunch bool `json:"-"`
 	// SetupScript is an optional shell script that runs on the remote after the
 	// env var is resolved. Used to bootstrap credential files from env vars.
 	// Only meaningful for type="env". Can reference the env var by name.

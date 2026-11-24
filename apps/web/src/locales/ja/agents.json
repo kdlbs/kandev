@@ -272,6 +272,7 @@
   "fallbackNext": "フォールバック: next",
   "fallbackModel": "フォールバック: {{model}}",
   "modelRequiredForAllProfiles": "すべてのプロフィールにモデル必須。",
+  "claudeExactModelAliasConflict": "開始モデルで完全なモデル ID を選択するか、環境変数から {{envVar}} を削除してください。",
   "noAuthHintLogin": "サインインするには Open terminal をクリック、その後更新。",
   "noAuthHintNotInstalled": "エージェント CLI をインストールし、その後 Refresh をクリック。",
   "noAuthHintShell": "シェル起動するには Open terminal をクリック、エージェントのサインインコマンドを実行し、その後更新。",
@@ -649,5 +650,9 @@
   "runtimeUpdatePreviewRequestError": "この更新を確認できませんでした: {{error}}",
   "runtimeUpdatePreviewUnavailable": "この更新を一括更新用に検証できませんでした。「バージョンを管理」を使用してください。",
   "runtimeUpdatePreviewChanged": "ランタイムまたは対象バージョンが変わりました。更新をもう一度確認してください。",
-  "runtimeUpdatePreviewIndividual": "このランタイムは個別に更新する必要があります。「バージョンを管理」を使用してください。"
+  "runtimeUpdatePreviewIndividual": "このランタイムは個別に更新する必要があります。「バージョンを管理」を使用してください。",
+  "thinkingLevel": "思考レベル",
+  "useProviderDefault": "プロバイダーの既定値を使用",
+  "thinkingLevelUnavailable": "{{value}}（利用不可）",
+  "editProfile": "プロファイルを編集"
 }

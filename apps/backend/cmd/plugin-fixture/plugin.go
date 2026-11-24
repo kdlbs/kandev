@@ -267,6 +267,8 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 	switch req.ActionKey {
 	case "notification.prepare":
 		return fixturePrepareNotification(req)
+	case "sidebar-labels", "sidebar-labels-write":
+		return p.sidebarGroupingAction(ctx, req)
 	case connectionStatusAction:
 		if requestedRevocation(req.Body) {
 			p.setCredentialRevoked(req.Context.WorkspaceID)

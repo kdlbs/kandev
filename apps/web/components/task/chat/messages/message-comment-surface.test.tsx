@@ -18,32 +18,35 @@ vi.mock("@/hooks/use-compact-task-chrome", () => ({
 vi.mock("@/hooks/domains/comments/use-run-comment", () => ({
   useRunComment: () => ({ runComment: vi.fn() }),
 }));
-vi.mock("@/components/shared/selection-comment/selection-comment-surface", () => ({
-  SelectionCommentSurface: ({
-    selectedText,
-    onAdd,
-    onClose,
-    errorMessage,
-  }: {
-    selectedText: string;
-    onAdd: (feedback: string) => boolean | void;
-    onClose: () => void;
-    errorMessage?: string | null;
-  }) => (
-    <div data-testid={COMMENT_POPOVER_TEST_ID}>
-      <span>{selectedText}</span>
-      {errorMessage ? <p role="alert">{errorMessage}</p> : null}
-      <button
-        type="button"
-        onClick={() => {
-          if (onAdd(COMMENT_TEXT) !== false) onClose();
-        }}
-      >
-        Save comment
-      </button>
-    </div>
-  ),
-}));
+vi.mock(
+  "@/components/shared/selection-comment/selection-comment-surface",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/components/shared/selection-comment/selection-comment-surface")
+      >();
+    return {
+      ...actual,
+      SelectionCommentSurface: (props: Parameters<typeof actual.SelectionCommentSurface>[0]) => {
+        if (TOUCH_DRAWER.enabled) return <actual.SelectionCommentSurface {...props} />;
+        return (
+          <div data-testid={COMMENT_POPOVER_TEST_ID}>
+            <span>{props.selectedText}</span>
+            {props.errorMessage ? <p role="alert">{props.errorMessage}</p> : null}
+            <button
+              type="button"
+              onClick={() => {
+                if (props.onAdd(COMMENT_TEXT, props.selectedText) !== false) props.onClose();
+              }}
+            >
+              Save comment
+            </button>
+          </div>
+        );
+      },
+    };
+  },
+);
 
 const COMMENT_TRIGGER_TEST_ID = "agent-message-comment-trigger";
 const COMMENT_POPOVER_TEST_ID = "comment-popover";

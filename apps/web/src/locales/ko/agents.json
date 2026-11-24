@@ -270,6 +270,7 @@
   "fallbackNext": "폴백: next",
   "fallbackModel": "폴백: {{model}}",
   "modelRequiredForAllProfiles": "모든 프로필에 모델이 필요합니다.",
+  "claudeExactModelAliasConflict": "시작 모델에서 전체 모델 ID를 선택하거나 환경 변수에서 {{envVar}}을(를) 제거하세요.",
   "noAuthHintLogin": "로그인하려면 터미널 열기를 클릭한 다음 새로 고치세요.",
   "noAuthHintNotInstalled": "에이전트 CLI를 설치한 다음 새로 고침을 클릭하세요.",
   "noAuthHintShell": "셸을 열려면 터미널 열기를 클릭하고 에이전트 로그인 명령을 실행한 다음 새로 고치세요.",
@@ -649,5 +650,9 @@
   "runtimeUpdatePreviewRequestError": "이 업데이트를 확인하지 못했습니다: {{error}}",
   "runtimeUpdatePreviewUnavailable": "이 업데이트를 일괄 업데이트용으로 검증하지 못했습니다. 버전 관리를 사용하세요.",
   "runtimeUpdatePreviewChanged": "런타임 또는 대상 버전이 변경되었습니다. 업데이트를 다시 확인하세요.",
-  "runtimeUpdatePreviewIndividual": "이 런타임은 개별적으로 업데이트해야 합니다. 버전 관리를 사용하세요."
+  "runtimeUpdatePreviewIndividual": "이 런타임은 개별적으로 업데이트해야 합니다. 버전 관리를 사용하세요.",
+  "thinkingLevel": "사고 수준",
+  "useProviderDefault": "공급자 기본값 사용",
+  "thinkingLevelUnavailable": "{{value}} (사용 불가)",
+  "editProfile": "프로필 편집"
 }

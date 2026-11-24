@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useTranslation } from "react-i18next";
-import Link from "@/components/routing/app-link";
+import { InboxOpenTaskLink } from "./inbox-open-task-link";
 import { useAppStore } from "@/components/state-provider";
 import { toast } from "@/lib/toast/sonner";
 import { formatRelativeTime } from "@/lib/i18n/formats";
@@ -41,7 +41,6 @@ import {
   rowSecondaryText,
 } from "@/lib/needs-you-inbox/row-presentation";
 import { resolveThreadSessionStatus } from "@/lib/threads/thread-session-status";
-import { linkToTask } from "@/lib/links";
 import type { TaskSessionState } from "@/lib/types/http";
 import type {
   LateClarificationSnapshot,
@@ -113,20 +112,24 @@ function useRowOutcomeNotice(primaryText: string, bumpRefreshTick: () => void) {
 
 function RowActionsMenu({
   disabled,
-  taskHref,
+  taskId,
+  sessionId,
   onDismiss,
   onSnooze,
 }: {
   disabled: boolean;
-  taskHref: string;
+  taskId: string;
+  sessionId: string;
   onDismiss: () => void;
   onSnooze: (duration: ClarificationInboxSnoozeDuration) => void;
 }) {
   const { t } = useTranslation();
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
+          ref={triggerRef}
           type="button"
           variant="ghost"
           size="icon"
@@ -139,9 +142,14 @@ function RowActionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem asChild className="cursor-pointer">
-          <Link href={taskHref} data-testid="needs-you-inbox-open-task-menu-item">
+          <InboxOpenTaskLink
+            taskId={taskId}
+            sessionId={sessionId}
+            returnFocusRef={triggerRef}
+            data-testid="needs-you-inbox-open-task-menu-item"
+          >
             {t("needsYouInbox:openTask")}
-          </Link>
+          </InboxOpenTaskLink>
         </DropdownMenuItem>
         <DropdownMenuItem className="cursor-pointer" onSelect={onDismiss}>
           {t("needsYouInbox:dismiss")}
@@ -167,10 +175,6 @@ function RowActionsMenu({
   );
 }
 
-function taskHrefForBundle(bundle: ClarificationInboxBundle): string {
-  return linkToTask(bundle.task_id, { sessionId: bundle.session_id ?? undefined });
-}
-
 // eslint-disable-next-line max-lines-per-function -- the row keeps its responsive actions and inline panel together.
 export function NeedsYouInboxRow({
   bundle,
@@ -193,7 +197,6 @@ export function NeedsYouInboxRow({
   const primaryText = rowPrimaryText(bundle, t("needsYouInbox:questionFromAgent"));
   const secondaryText = rowSecondaryText(bundle);
   const questionCount = rowQuestionCount(bundle);
-  const taskHref = taskHrefForBundle(bundle);
   const relativeTime = formatRelativeTime(bundle.created_at);
   const statusLabel = t(
     resolveThreadSessionStatus({
@@ -260,13 +263,18 @@ export function NeedsYouInboxRow({
           size="sm"
           className="hidden shrink-0 cursor-pointer sm:inline-flex"
         >
-          <Link href={taskHref} data-testid="needs-you-inbox-open-task">
+          <InboxOpenTaskLink
+            taskId={bundle.task_id}
+            sessionId={bundle.session_id}
+            data-testid="needs-you-inbox-open-task"
+          >
             {t("needsYouInbox:openTask")}
-          </Link>
+          </InboxOpenTaskLink>
         </Button>
         <RowActionsMenu
           disabled={dismissing || snoozing}
-          taskHref={taskHref}
+          taskId={bundle.task_id}
+          sessionId={bundle.session_id}
           onDismiss={() =>
             void runDismiss(() => dismissClarificationInboxBundle(bundle.pending_id))
           }

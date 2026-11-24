@@ -20,6 +20,7 @@ type ImagePreviewDialogProps = {
   interactive?: boolean;
   /** Keeps question-panel keyboard shortcuts from acting behind the viewer. */
   stopShortcutPropagation?: boolean;
+  aboveAttachmentPicker?: boolean;
 };
 
 export const IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME =
@@ -121,6 +122,7 @@ export function ImagePreviewDialog({
   thumbnailProps,
   interactive = true,
   stopShortcutPropagation = false,
+  aboveAttachmentPicker = false,
 }: ImagePreviewDialogProps) {
   const { t } = useTranslation();
   if (!interactive) {
@@ -155,10 +157,12 @@ export function ImagePreviewDialog({
       <DialogContent
         aria-describedby={undefined}
         showCloseButton={false}
+        overlayClassName={aboveAttachmentPicker ? "z-[80]" : undefined}
         onEscapeKeyDown={stopShortcutPropagation ? (event) => event.stopPropagation() : undefined}
         onKeyDown={stopShortcutPropagation ? (event) => event.stopPropagation() : undefined}
         className={cn(
           IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME,
+          aboveAttachmentPicker && "z-[80]",
           "motion-reduce:data-open:zoom-in-100 motion-reduce:data-closed:zoom-out-100",
         )}
       >

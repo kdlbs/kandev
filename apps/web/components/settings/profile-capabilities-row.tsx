@@ -13,6 +13,7 @@ import {
   profileModelIsDirty,
 } from "@/components/settings/profile-capability-helpers";
 import { ModelPicker, ModePicker } from "@/components/settings/profile-model-fields";
+import { ProfileThinkingPicker } from "./profile-thinking-picker";
 import { ModelDiscoveryNote } from "@/components/settings/model-discovery-note";
 import type { ProfileDiscoveryStatus } from "@/hooks/domains/settings/use-profile-model-capabilities";
 import type {
@@ -106,6 +107,7 @@ function StatusOrAuthMessage({
 }
 
 type ModelAndModePickersProps = {
+  agentName: string;
   discovery?: ModelDiscovery;
   profile: ProfileFormData;
   baselineProfile?: ProfileFormData;
@@ -128,7 +130,47 @@ type ModelAndModePickersProps = {
   onConfigurationApply?: ModelConfigApply;
 };
 
+function ProfileModeControl({
+  agentName,
+  profile,
+  configOptions,
+  modes,
+  currentModeId,
+  onChange,
+  disableUnverifiedModels,
+  configIsLoading,
+}: Pick<
+  ModelAndModePickersProps,
+  | "agentName"
+  | "profile"
+  | "configOptions"
+  | "modes"
+  | "currentModeId"
+  | "onChange"
+  | "disableUnverifiedModels"
+  | "configIsLoading"
+>) {
+  return agentName === "pi-acp" ? (
+    <ProfileThinkingPicker
+      profile={profile}
+      options={configOptions}
+      modes={modes}
+      onChange={onChange}
+      disabled={disableUnverifiedModels || configIsLoading}
+    />
+  ) : (
+    <ModePicker
+      profile={profile}
+      modes={modes}
+      currentModeId={currentModeId}
+      onChange={onChange}
+      disabled={disableUnverifiedModels}
+    />
+  );
+}
+
 function ModelAndModePickers({
+  agentName,
   discovery,
   profile,
   baselineProfile,
@@ -151,7 +193,8 @@ function ModelAndModePickers({
   onConfigurationApply,
 }: ModelAndModePickersProps) {
   const { t } = useTranslation();
-  const hasModes = modes.length > 0;
+  const isPi = agentName === "pi-acp";
+  const hasModes = isPi || modes.length > 0;
   const showModePicker =
     hasModes || Boolean(profile.mode) || Boolean(currentModeId) || !disableUnverifiedModels;
 
@@ -176,7 +219,11 @@ function ModelAndModePickers({
             profile={profile}
             models={models}
             currentModelId={currentModelId}
-            configOptions={configOptions}
+            configOptions={
+              isPi
+                ? configOptions.filter((option) => option.category !== "thought_level")
+                : configOptions
+            }
             onChange={onChange}
             ariaLabel={t("settings:startModelAria")}
             goneModelLabel={t("settings:startModelUnavailable")}
@@ -195,13 +242,18 @@ function ModelAndModePickers({
           data-settings-dirty={profileModeIsDirty(profile, baselineProfile)}
           data-settings-dirty-level="container"
         >
-          <SettingsFieldLabel className={labelCls}>{t("agents:startMode")}</SettingsFieldLabel>
-          <ModePicker
+          <SettingsFieldLabel className={labelCls}>
+            {t(isPi ? "agents:thinkingLevel" : "agents:startMode")}
+          </SettingsFieldLabel>
+          <ProfileModeControl
+            agentName={agentName}
             profile={profile}
+            configOptions={configOptions}
             modes={modes}
             currentModeId={currentModeId}
             onChange={onChange}
-            disabled={disableUnverifiedModels}
+            disableUnverifiedModels={disableUnverifiedModels}
+            configIsLoading={configIsLoading}
           />
         </div>
       )}
@@ -253,6 +305,7 @@ function CapabilitiesRowContent({
   return (
     <div className={gapCls}>
       <ModelAndModePickers
+        agentName={agentName}
         discovery={discovery}
         profile={profile}
         baselineProfile={baselineProfile}
@@ -282,7 +335,7 @@ function CapabilitiesRowContent({
         isLoading={configIsLoading}
         onRetry={onRetryConfig}
       />
-      {activeMode?.description && (
+      {agentName !== "pi-acp" && activeMode?.description && (
         <SettingsFieldDescription>{activeMode.description}</SettingsFieldDescription>
       )}
       {commands.length > 0 && <CommandsButton commands={commands} />}
