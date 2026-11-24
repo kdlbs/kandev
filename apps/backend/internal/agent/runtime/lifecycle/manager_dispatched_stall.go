@@ -45,7 +45,11 @@ func (m *Manager) checkDispatchedPromptStalls(ctx context.Context, threshold tim
 			continue
 		}
 		pending[execution.ID] = struct{}{}
-		generation := execution.promptGenerationSnapshot()
+		if err := execution.promptLifecycleMu.LockContext(ctx); err != nil {
+			return
+		}
+		generation := execution.promptGeneration
+		execution.promptLifecycleMu.Unlock()
 		if generation == 0 || reported[execution.ID] == generation {
 			continue
 		}

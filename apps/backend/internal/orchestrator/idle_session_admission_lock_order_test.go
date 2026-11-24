@@ -132,15 +132,18 @@ func TestIdleSuspensionRevalidationSkipsBusyLifecycle(t *testing.T) {
 func TestIdleSuspensionRevalidationHonorsFocusAfterCandidateSelection(t *testing.T) {
 	ctx := context.Background()
 	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
-	candidate, _, eligible := svc.workspaceIdleCandidate(ctx, row, time.Now().UTC())
+	current, err := svc.repo.GetExecutorRunningBySessionID(ctx, row.SessionID)
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	candidate, _, eligible := svc.workspaceIdleCandidate(ctx, current, now)
 	require.True(t, eligible)
-	require.True(t, svc.idleParkingCandidateDue(candidate.key, time.Now().Add(candidate.timeout), candidate.timeout))
+	require.True(t, svc.idleParkingCandidateDue(candidate.key, now, candidate.timeout))
 	require.True(t, svc.claimIdleParkingCandidate(candidate.key))
 
 	// Focus can reset the interval after selection but before admission.
 	svc.resetIdleParkingCandidates(row.SessionID)
 	summary := idleParkingScanSummary{skipped: make(map[idleParkingSkipReason]int)}
-	svc.suspendWorkspaceIdleCandidate(ctx, row, candidate, agent, &summary)
+	svc.suspendWorkspaceIdleCandidate(ctx, current, candidate, agent, &summary)
 
 	require.Empty(t, agent.suspensionCalls(), "revalidation must honor the refreshed focus interval")
 }

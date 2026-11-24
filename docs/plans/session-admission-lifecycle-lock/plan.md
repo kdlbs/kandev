@@ -110,13 +110,11 @@ make -C apps/backend test
 
 ## Implementation verification
 
-All four work orders are done. The original regression tests failed before
-their fixes and passed after them. Work order 04 now includes additional review
-coverage; those tests await current-head CI after the branch update. `go vet` is
-clean. The full `internal/agent/runtime/lifecycle`,
-`internal/orchestrator`, `internal/orchestrator/messagequeue`, and
-`internal/mcp/handlers` packages pass under `go test -race`. `golangci-lint` on
-the changed packages (`--new-from-rev`) reports 0 issues.
+All four work orders are done. Work order 04 records the backend CI failures
+and the focused race checks that passed after their fixes. The original
+implementation also passed the full race suites for
+`internal/agent/runtime/lifecycle`, `internal/orchestrator`,
+`internal/orchestrator/messagequeue`, and `internal/mcp/handlers`.
 
 A live instance with the E2E mock agent reproduced the issue on the pre-fix
 build: Retry launch held the lifecycle lock for the whole replayed turn, and

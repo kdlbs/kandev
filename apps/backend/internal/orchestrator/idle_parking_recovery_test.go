@@ -29,7 +29,7 @@ func TestIdleParkingUnknownRecoveryReceivesOneStableFullInterval(t *testing.T) {
 	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
 	agent.currentPromptLastActivityAt = time.Time{}
 	agent.currentPromptActivityEpoch.Store(0)
-	now := time.Now().UTC()
+	now := time.Now().UTC().Add(-time.Minute)
 	scan := func(at time.Time) {
 		current, err := svc.repo.GetExecutorRunningBySessionID(context.Background(), row.SessionID)
 		require.NoError(t, err)

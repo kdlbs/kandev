@@ -40,10 +40,6 @@ func TestFocusTaskSessionDoesNotResumeWorkflowParkedSession(t *testing.T) {
 func TestIdleSuspensionResumeShortcutRejectsWorkflowParkedSession(t *testing.T) {
 	ctx := context.Background()
 	svc, _, row := newIdleParkingFixture(t, true, 1, "claude-acp")
-	session, err := svc.repo.GetTaskSession(ctx, row.SessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := svc.repo.SetSessionMetadataKey(ctx, row.SessionID, models.SessionMetaKeyWorkflowParking, models.WorkflowParking{
 		Stamp: "workflow-parking-1", ParkedAt: time.Now().UTC(), SourceSessionID: row.SessionID,
 	}); err != nil {
@@ -51,6 +47,10 @@ func TestIdleSuspensionResumeShortcutRejectsWorkflowParkedSession(t *testing.T) 
 	}
 	row.IdleSuspensionState = models.ExecutorIdleSuspensionSuspended
 	if err := svc.repo.UpsertExecutorRunning(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	session, err := svc.repo.GetTaskSession(ctx, row.SessionID)
+	if err != nil {
 		t.Fatal(err)
 	}
 

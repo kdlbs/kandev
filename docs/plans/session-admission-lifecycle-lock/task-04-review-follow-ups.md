@@ -62,7 +62,9 @@ order closes them:
   `dispatchedPromptStallLoop` beside its remote status loop, registered on its
   WaitGroup and ended by `Stop`. Each tick, `checkDispatchedPromptStalls` runs
   the stall check for every execution whose dispatch-only prompt is pending,
-  once per generation. `waitForPromptDone` and the loop share
+  once per generation. The generation read and the stall snapshot both use
+  the manager stop context to acquire the prompt lifecycle lock.
+  `waitForPromptDone` and the loop share
   `reportPromptStall` (`lifecycle/session.go`).
 
 ## Rejected alternative
@@ -114,9 +116,17 @@ bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/dispa
 
 ## Results
 
-Implemented. The earlier regression tests passed during the initial fix. This
-follow-up adds the listed focus, workflow-parking, and shutdown cases. CI will
-verify the new cases after the branch update. A live instance (E2E mock-agent profile, 5 s stall threshold)
+CI found that the watchdog's first generation read could still block shutdown.
+It also found three test setup errors in idle recovery, focus revalidation, and
+workflow parking. The idle recovery case now ends its simulated interval at
+the current time. The focus and workflow parking cases reload the stored
+records before checking them. The focused race run passed in both packages.
+
+```sh
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=3GiB go test -trimpath -race -count=1 -timeout=5m ./internal/agent/runtime/lifecycle ./internal/orchestrator -run 'TestDispatchOnly|TestFocusTaskSession|TestFocusDuring|TestFocusResume|TestIdleSession|TestIdleParking|TestIdleSuspension|TestHandleAgentStalled|TestFreshStart|TestSessionAdmission')
+```
+
+A live instance (E2E mock-agent profile, 5 s stall threshold)
 confirmed the following. Retry launch returns at acceptance, and focus during
 the replayed turn answers in about 10 ms. The agent's `move_task` is deferred
 and then applied at turn end. "Still waiting for the agent." with
