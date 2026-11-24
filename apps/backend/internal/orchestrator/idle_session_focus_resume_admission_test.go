@@ -73,7 +73,7 @@ func newSuspendedFocusService(t *testing.T) (*Service, *gatedRestoreAgent) {
 	return svc, agent
 }
 
-// @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5
+// @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.9
 func TestFocusResumeOfSuspendedSessionKeepsAdmissionFree(t *testing.T) {
 	ctx := context.Background()
 	svc, agent := newSuspendedFocusService(t)

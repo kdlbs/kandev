@@ -4144,6 +4144,12 @@ func (s *Service) idleSuspensionResumeShortcut(
 	session *models.TaskSession,
 	running *models.ExecutorRunning,
 ) (*executor.TaskExecution, error) {
+	if session == nil {
+		return nil, ErrIdleSuspensionProvenanceRequired
+	}
+	if _, parked := models.LoadWorkflowParking(session.Metadata); parked {
+		return nil, ErrIdleSuspensionProvenanceRequired
+	}
 	if running != nil && running.IdleSuspensionState == models.ExecutorIdleSuspensionNone && idleTaskSessionState(session.State) {
 		if execution, exists := s.executor.GetExecutionBySession(sessionID); exists && execution != nil {
 			return execution, nil

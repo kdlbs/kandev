@@ -8,7 +8,7 @@ plan: "plan.md"
 requirements:
   - REQ-TASKS-BOUNDED-QUEUE-ADMISSION-001
 acceptance_criteria:
-  - AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.3
+  - AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.7
 system_design:
   - ../../specs/tasks/system-design/bounded-session-queue-admission.md
 ---
@@ -41,29 +41,26 @@ No retry loop inside the handler and no change to `SetPendingMove`.
 
 ## Regression test (fails before the fix)
 
-In `apps/backend/internal/mcp/handlers/config_task_defer_source_test.go`, or a
-new sibling file if that one is near the file-length limit, add
-`TestMoveTaskDeferredAdmissionTimeoutIsRetryable`. It uses the existing
-deferred-move fixture with a queue double whose `SetPendingMove` returns
-`messagequeue.ErrSessionAdmissionTimeout`, and asserts the error code. Before
-the fix the code is `INTERNAL_ERROR`.
+In `apps/backend/internal/mcp/handlers/move_task_admission_timeout_test.go`,
+`TestMoveTaskDeferredAdmissionTimeoutIsRetryable` checks that an admission
+timeout returns `UNAVAILABLE` with a retry hint, while another persistence
+error remains `INTERNAL_ERROR`.
 
 ## Files
 
-`apps/backend/internal/mcp/handlers/config_task_handlers.go` and the test file.
+`apps/backend/internal/mcp/handlers/config_task_handlers.go` and
+`apps/backend/internal/mcp/handlers/move_task_admission_timeout_test.go`.
 
 ## Verification
 
 ```text
-cd apps/backend
-go test -trimpath -count=1 ./internal/mcp/handlers/ -run 'TestMoveTask'
-bash ../../scripts/lint-go-changed internal/mcp/handlers/config_task_handlers.go <test-file>
+(cd apps/backend && go test -trimpath -count=1 ./internal/mcp/handlers/ -run 'TestMoveTask')
+bash scripts/lint-go-changed apps/backend/internal/mcp/handlers/config_task_handlers.go apps/backend/internal/mcp/handlers/move_task_admission_timeout_test.go
 ```
 
 ## Results
 
 Implemented. An admission timeout from `SetPendingMove` returns
 `UNAVAILABLE` with a retry hint; other errors keep `INTERNAL_ERROR`. The
-regression test failed first (`INTERNAL_ERROR`) and now passes, as do the
-existing `TestMoveTask*` and `TestDeferMoveTask*` tests. The new test lives in
-`config_task_defer_admission_test.go`.
+regression test covers both outcomes and lives in
+`move_task_admission_timeout_test.go`.

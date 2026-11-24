@@ -24,8 +24,9 @@ without waiting. If it is busy, they skip this attempt and release admission.
 ## Scope
 
 - `refreshFocusedLiveSession` (`idle_session_focus.go`): replace the blocking
-  `acquireSessionLifecycleLock` with a non-blocking acquire. Return without
-  persisting focus when the lock is busy.
+  `acquireSessionLifecycleLock` with a non-blocking acquire. When the lock is
+  busy, return without persisting the focus marker and restart the in-memory
+  idle interval.
 - `suspendWorkspaceIdleCandidate` (`idle_session_reaper.go`): use the same
   non-blocking acquire inside the admission callback. When the lock is busy,
   return with `revalidated == false`, so no suspension happens and the candidate
@@ -54,12 +55,12 @@ eligibility.
 
 ## Regression tests (fail before the fix)
 
-New file `apps/backend/internal/orchestrator/idle_session_admission_lock_order_test.go`:
+`apps/backend/internal/orchestrator/idle_session_admission_lock_order_test.go`:
 
-- `TestFocusRefreshSkipsBusyLifecycleWithoutHoldingAdmission`: hold
-  `acquireSessionLifecycleLock(sessionID)` in the test, run `focusTaskSession`
-  in a goroutine, and assert it returns within 1 s and the admission probe
-  succeeds. Before the fix, focus blocks and the probe times out.
+- `TestFocusDuringBusyLifecycleKeepsAdmissionFree` and
+  `TestFocusDuringBusyLifecycleDefersIdleSuspension`: hold the lifecycle lock,
+  run `focusTaskSession`, and confirm the call returns while session admission
+  stays free.
 - `TestIdleSuspensionRevalidationSkipsBusyLifecycle`: same pattern through
   `suspendWorkspaceIdleCandidate`, reusing the fixtures in
   `idle_session_reaper_test.go`.
@@ -72,9 +73,8 @@ New file `apps/backend/internal/orchestrator/idle_session_admission_lock_order_t
 ## Verification
 
 ```text
-cd apps/backend
-go test -trimpath -race -count=1 ./internal/orchestrator/ -run 'TestFocusRefreshSkipsBusyLifecycle|TestIdleSuspensionRevalidationSkipsBusyLifecycle|TestFocusTaskSession|TestIdleSession'
-bash ../../scripts/lint-go-changed internal/orchestrator/service.go internal/orchestrator/idle_session_focus.go internal/orchestrator/idle_session_reaper.go internal/orchestrator/idle_session_admission_lock_order_test.go
+(cd apps/backend && go test -trimpath -race -count=1 ./internal/orchestrator/ -run 'TestFocusDuringBusyLifecycleKeepsAdmissionFree|TestFocusDuringBusyLifecycleDefersIdleSuspension|TestIdleSuspensionRevalidationSkipsBusyLifecycle|TestFocusTaskSession|TestIdleSession')
+bash scripts/lint-go-changed apps/backend/internal/orchestrator/service.go apps/backend/internal/orchestrator/idle_session_focus.go apps/backend/internal/orchestrator/idle_session_reaper.go apps/backend/internal/orchestrator/idle_session_admission_lock_order_test.go
 ```
 
 ## Results

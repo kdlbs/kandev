@@ -22,7 +22,7 @@ func requireSessionAdmissionFree(t *testing.T, svc *Service, sessionID string) {
 
 // runWithinBudget runs fn on a worker and returns its error to the test
 // goroutine, which owns every assertion.
-func runWithinBudget(t *testing.T, name string, fn func() error) error {
+func runWithinBudget(t *testing.T, name string, unblock func(), fn func() error) error {
 	t.Helper()
 	done := make(chan error, 1)
 	finished := make(chan struct{})
@@ -30,7 +30,12 @@ func runWithinBudget(t *testing.T, name string, fn func() error) error {
 		defer close(finished)
 		done <- fn()
 	}()
-	t.Cleanup(func() { <-finished })
+	t.Cleanup(func() {
+		if unblock != nil {
+			unblock()
+		}
+		<-finished
+	})
 	select {
 	case err := <-done:
 		return err
@@ -60,6 +65,7 @@ func persistedFocusRecorded(t *testing.T, svc *Service, sessionID string) bool {
 }
 
 // @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5
+// @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.9
 func TestFocusDuringBusyLifecycleKeepsAdmissionFree(t *testing.T) {
 	ctx := context.Background()
 	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
@@ -67,7 +73,7 @@ func TestFocusDuringBusyLifecycleKeepsAdmissionFree(t *testing.T) {
 
 	releaseLifecycle := holdLifecycleLock(t, svc, row.SessionID)
 	var resumed bool
-	err := runWithinBudget(t, "focusTaskSession", func() error {
+	err := runWithinBudget(t, "focusTaskSession", releaseLifecycle, func() error {
 		var focusErr error
 		_, _, resumed, focusErr = svc.focusTaskSession(ctx, row.TaskID, row.SessionID)
 		return focusErr
@@ -88,6 +94,7 @@ func TestFocusDuringBusyLifecycleKeepsAdmissionFree(t *testing.T) {
 }
 
 // @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5
+// @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.9
 func TestFocusDuringBusyLifecycleDefersIdleSuspension(t *testing.T) {
 	ctx := context.Background()
 	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
@@ -109,7 +116,7 @@ func TestIdleSuspensionRevalidationSkipsBusyLifecycle(t *testing.T) {
 	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
 
 	releaseLifecycle := holdLifecycleLock(t, svc, row.SessionID)
-	require.NoError(t, runWithinBudget(t, "idle suspension revalidation", func() error {
+	require.NoError(t, runWithinBudget(t, "idle suspension revalidation", releaseLifecycle, func() error {
 		svc.suspendWorkspaceIdleSessionsOnce(ctx)
 		return nil
 	}))
@@ -119,4 +126,21 @@ func TestIdleSuspensionRevalidationSkipsBusyLifecycle(t *testing.T) {
 	releaseLifecycle()
 	svc.suspendWorkspaceIdleSessionsOnce(ctx)
 	require.Len(t, agent.suspensionCalls(), 1, "positive control: the skipped candidate is suspended on a later scan")
+}
+
+// @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.9
+func TestIdleSuspensionRevalidationHonorsFocusAfterCandidateSelection(t *testing.T) {
+	ctx := context.Background()
+	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
+	candidate, _, eligible := svc.workspaceIdleCandidate(ctx, row, time.Now().UTC())
+	require.True(t, eligible)
+	require.True(t, svc.idleParkingCandidateDue(candidate.key, time.Now().Add(candidate.timeout), candidate.timeout))
+	require.True(t, svc.claimIdleParkingCandidate(candidate.key))
+
+	// Focus can reset the interval after selection but before admission.
+	svc.resetIdleParkingCandidates(row.SessionID)
+	summary := idleParkingScanSummary{skipped: make(map[idleParkingSkipReason]int)}
+	svc.suspendWorkspaceIdleCandidate(ctx, row, candidate, agent, &summary)
+
+	require.Empty(t, agent.suspensionCalls(), "revalidation must honor the refreshed focus interval")
 }

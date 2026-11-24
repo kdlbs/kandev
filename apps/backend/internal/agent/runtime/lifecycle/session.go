@@ -1637,7 +1637,7 @@ func (sm *SessionManager) reportPromptStall(
 	promptGeneration uint64,
 	threshold time.Duration,
 ) (owned, reported bool) {
-	snapshot, owned := sm.capturePromptStall(execution, promptGeneration)
+	snapshot, owned := sm.capturePromptStall(ctx, execution, promptGeneration)
 	if !owned {
 		return false, false
 	}

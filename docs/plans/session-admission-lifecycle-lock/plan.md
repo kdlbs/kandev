@@ -18,8 +18,8 @@ session timed out for about 75 minutes, including 21 focus resumes and three
 deferred `move_task` calls.
 
 - [Requirements](../../specs/tasks/requirements/bounded-session-queue-admission.md):
-  AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.3 (amended to name deferred workflow
-  moves) and new AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5.
+  AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.3 and .7, AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.8, and
+  AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.9 and .10.
 - [System design](../../specs/tasks/system-design/bounded-session-queue-admission.md),
   section "Lock order with session lifecycle".
 - [Agent stall recovery](../../specs/agents/system-design/agent-stall-recovery.md):
@@ -101,17 +101,19 @@ Each work order lists its exact commands. Package checks:
 
 ```text
 make -C apps/backend fmt
-go test -trimpath -race -count=1 ./internal/agent/runtime/lifecycle/ -run 'TestDispatchOnly|TestStallTiming'
-go test -trimpath -race -count=1 ./internal/orchestrator/ -run 'TestFocusTaskSession|TestFocusDuring|TestFocusResume|TestIdleSession|TestFreshStart|TestSessionAdmission'
-go test -trimpath -count=1 ./internal/mcp/handlers/ -run 'TestMoveTask'
-bash scripts/lint-go-changed <changed-go-files>
+(cd apps/backend && go test -trimpath -race -count=1 ./internal/agent/runtime/lifecycle/ -run 'TestDispatchOnly|TestStallTiming|TestPromptAcceptanceRestore')
+(cd apps/backend && go test -trimpath -race -count=1 ./internal/orchestrator/ -run 'TestFocusTaskSession|TestFocusDuring|TestFocusResume|TestIdleSession|TestIdleParking|TestIdleSuspension|TestHandleAgentStalled|TestFreshStart|TestSessionAdmission')
+(cd apps/backend && go test -trimpath -count=1 ./internal/mcp/handlers/ -run 'TestMoveTask')
+bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/dispatched_prompt_stall_test.go apps/backend/internal/agent/runtime/lifecycle/manager_dispatched_stall.go apps/backend/internal/agent/runtime/lifecycle/manager_lifecycle.go apps/backend/internal/agent/runtime/lifecycle/session.go apps/backend/internal/agent/runtime/lifecycle/stall_acceptance_restore_test.go apps/backend/internal/agent/runtime/lifecycle/stall_snapshot.go apps/backend/internal/mcp/handlers/config_task_handlers.go apps/backend/internal/mcp/handlers/move_task_admission_timeout_test.go apps/backend/internal/orchestrator/event_handlers_stall.go apps/backend/internal/orchestrator/event_handlers_stall_test.go apps/backend/internal/orchestrator/fresh_start_replay_lifecycle_release_test.go apps/backend/internal/orchestrator/idle_parking_recovery_test.go apps/backend/internal/orchestrator/idle_session_admission_lock_order_test.go apps/backend/internal/orchestrator/idle_session_focus.go apps/backend/internal/orchestrator/idle_session_focus_resume_admission_test.go apps/backend/internal/orchestrator/idle_session_focus_test.go apps/backend/internal/orchestrator/idle_session_reaper.go apps/backend/internal/orchestrator/initial_submission_recovery.go apps/backend/internal/orchestrator/service.go apps/backend/internal/orchestrator/task_operations.go
 make -C apps/backend test
 ```
 
 ## Implementation verification
 
-All four work orders are done. Each regression test failed before its fix and
-passes after it. `go vet` is clean. The full `internal/agent/runtime/lifecycle`,
+All four work orders are done. The original regression tests failed before
+their fixes and passed after them. Work order 04 now includes additional review
+coverage; those tests await current-head CI after the branch update. `go vet` is
+clean. The full `internal/agent/runtime/lifecycle`,
 `internal/orchestrator`, `internal/orchestrator/messagequeue`, and
 `internal/mcp/handlers` packages pass under `go test -race`. `golangci-lint` on
 the changed packages (`--new-from-rev`) reports 0 issues.

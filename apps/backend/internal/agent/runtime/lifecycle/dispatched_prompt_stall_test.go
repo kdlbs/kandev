@@ -2,12 +2,24 @@ package lifecycle
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 )
 
 const dispatchedStallThreshold = 5 * time.Second
+
+type stallWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (ctx *stallWaitContext) Done() <-chan struct{} {
+	ctx.once.Do(func() { close(ctx.waiting) })
+	return ctx.Context.Done()
+}
 
 // dispatchedStallFixture returns a manager and an accepted dispatch-only
 // prompt generation tracked in its execution store.
@@ -76,6 +88,37 @@ func TestDispatchOnlyStallCheckSkipsSettledPrompt(t *testing.T) {
 			t.Fatalf("reported generations = %v, want entries dropped for settled executions", reported)
 		}
 	})
+}
+
+func TestDispatchOnlyStallCheckCanBeCancelledWhileWaitingForPromptLock(t *testing.T) {
+	m, bus, execution, _ := dispatchedStallFixture(t)
+	execution.promptLifecycleMu.Lock()
+	baseCtx, cancel := context.WithCancel(context.Background())
+	ctx := &stallWaitContext{Context: baseCtx, waiting: make(chan struct{})}
+	done := make(chan struct{})
+	go func() {
+		m.checkDispatchedPromptStalls(ctx, 0, map[string]uint64{})
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		execution.promptLifecycleMu.Unlock()
+		<-done
+	})
+	select {
+	case <-ctx.waiting:
+	case <-time.After(time.Second):
+		t.Fatal("stall scan did not wait for the held prompt lifecycle lock")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stall scan did not stop while waiting for the prompt lifecycle lock")
+	}
+	if got := countPublishedEvents(bus, "agent.stalled"); got != 0 {
+		t.Fatalf("stall events after cancellation = %d, want 0", got)
+	}
 }
 
 func TestDispatchedPromptStallLoopEndsAtStop(t *testing.T) {

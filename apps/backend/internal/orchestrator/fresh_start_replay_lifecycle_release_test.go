@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
@@ -111,7 +113,7 @@ func waitForSignal(t *testing.T, signal <-chan struct{}, what string) {
 	}
 }
 
-// @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5
+// @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.8
 func TestFreshStartReplayReleasesLifecycleAtAcceptance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -121,9 +123,20 @@ func TestFreshStartReplayReleasesLifecycleAtAcceptance(t *testing.T) {
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[replayLifecycleTaskID] = &v1.Task{
-		ID: replayLifecycleTaskID, WorkspaceID: "ws1", Title: "Fresh start lifecycle", State: v1.TaskStateInProgress,
+		ID: replayLifecycleTaskID, WorkspaceID: "ws1", WorkflowID: "wf1",
+		Title: "Fresh start lifecycle", State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agent.mockAgentManager)
+	const sourceStepID = "fresh-start-lifecycle-source"
+	const targetStepID = "fresh-start-lifecycle-target"
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[sourceStepID] = &wfmodels.WorkflowStep{ID: sourceStepID, WorkflowID: "wf1", Name: "Source", Position: 0}
+	stepGetter.steps[targetStepID] = &wfmodels.WorkflowStep{ID: targetStepID, WorkflowID: "wf1", Name: "Target", Position: 1}
+	svc.SetWorkflowStepGetter(stepGetter)
+	task, err := repo.GetTask(ctx, replayLifecycleTaskID)
+	require.NoError(t, err)
+	task.WorkflowStepID = sourceStepID
+	require.NoError(t, repo.UpdateTask(ctx, task))
 	attachmentService, err := taskservice.NewAttachmentService(repo, t.TempDir(), nil, testLogger())
 	require.NoError(t, err)
 	svc.SetAttachmentReader(attachmentService)
@@ -135,11 +148,19 @@ func TestFreshStartReplayReleasesLifecycleAtAcceptance(t *testing.T) {
 		close(agent.processStarted)
 	})
 
+	recoveryCtx, cancelRecovery := context.WithCancel(ctx)
 	recoveryDone := make(chan error, 1)
+	recoveryFinished := make(chan struct{})
 	go func() {
-		_, recoverErr := svc.RecoverSessionWithOptions(ctx, replayLifecycleTaskID, replayLifecycleSessionID, "fresh_start", RecoverSessionOptions{})
+		defer close(recoveryFinished)
+		_, recoverErr := svc.RecoverSessionWithOptions(recoveryCtx, replayLifecycleTaskID, replayLifecycleSessionID, "fresh_start", RecoverSessionOptions{})
 		recoveryDone <- recoverErr
 	}()
+	t.Cleanup(func() {
+		cancelRecovery()
+		agent.endTurn()
+		<-recoveryFinished
+	})
 	waitForSignal(t, agent.startEntered, "fresh recovery startup")
 	attempt, ok := svc.resumeAttemptStore().current(replayLifecycleSessionID)
 	require.True(t, ok)
@@ -162,7 +183,7 @@ func TestFreshStartReplayReleasesLifecycleAtAcceptance(t *testing.T) {
 	require.NoError(t, err)
 	session.State = models.TaskSessionStateWaitingForInput
 	require.NoError(t, repo.UpdateTaskSession(ctx, session))
-	focusErr := runWithinBudget(t, "focusTaskSession during the replayed turn", func() error {
+	focusErr := runWithinBudget(t, "focusTaskSession during the replayed turn", nil, func() error {
 		_, _, _, err := svc.focusTaskSession(ctx, replayLifecycleTaskID, replayLifecycleSessionID)
 		return err
 	})
@@ -171,4 +192,33 @@ func TestFreshStartReplayReleasesLifecycleAtAcceptance(t *testing.T) {
 	releaseLifecycle, acquired := svc.tryAcquireSessionLifecycleLock(replayLifecycleSessionID)
 	require.True(t, acquired, "recovery must not hold the session lifecycle lock for the whole turn")
 	releaseLifecycle()
+
+	// A normal terminal event settles the accepted turn and applies a move that
+	// arrived while the dispatch-only replay was still running.
+	session, err = repo.GetTaskSession(ctx, replayLifecycleSessionID)
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateRunning
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, svc.messageQueue.SetPendingMove(ctx, replayLifecycleSessionID, &messagequeue.PendingMove{
+		SessionIncarnationID: session.QueueIncarnationID,
+		TaskID:               replayLifecycleTaskID,
+		WorkflowID:           "wf1",
+		FromStepID:           sourceStepID,
+		WorkflowStepID:       targetStepID,
+	}))
+	activeTurn, err := svc.turnService.GetActiveTurn(ctx, replayLifecycleSessionID)
+	require.NoError(t, err)
+	require.NotNil(t, activeTurn)
+	agent.endTurn()
+	svc.handleAgentReady(ctx, watcher.AgentEventData{
+		TaskID: replayLifecycleTaskID, SessionID: replayLifecycleSessionID,
+		AgentExecutionID: "fresh-start-lifecycle-execution", AgentProfileID: "fresh-start-lifecycle-profile",
+		AttemptID: attempt.identity(), PromptGeneration: agent.currentPromptGeneration.Load(), TurnID: activeTurn.ID,
+	})
+	task, err = repo.GetTask(ctx, replayLifecycleTaskID)
+	require.NoError(t, err)
+	require.Equal(t, targetStepID, task.WorkflowStepID, "the terminal event applies the pending workflow move")
+	_, pendingMoveExists, err := svc.messageQueue.GetPendingMoveWithError(ctx, replayLifecycleSessionID)
+	require.NoError(t, err)
+	require.False(t, pendingMoveExists, "the terminal event consumes the pending move")
 }

@@ -8,7 +8,7 @@ plan: "plan.md"
 requirements:
   - REQ-TASKS-BOUNDED-QUEUE-ADMISSION-001
 acceptance_criteria:
-  - AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5
+  - AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.8
 system_design:
   - ../../specs/tasks/system-design/bounded-session-queue-admission.md
 ---
