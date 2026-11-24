@@ -235,6 +235,7 @@ export function PopoverActions({
   runDisabledReason,
   mutationPending,
   onCancel,
+  hideShortcuts,
 }: {
   isEditing: boolean;
   isDisabled: boolean;
@@ -247,13 +248,14 @@ export function PopoverActions({
   runButtonTestId?: string;
   runDisabledReason?: string | null;
   mutationPending: boolean;
+  hideShortcuts?: boolean;
 }) {
   const { t } = useTranslation();
   const splitAction = Boolean(onSubmitAndRun && !isEditing);
   return (
-    <div className="mt-2 flex items-center justify-between">
+    <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] text-muted-foreground/70">
+        <span className={cn("text-[10px] text-muted-foreground/70", hideShortcuts && "hidden")}>
           {isEditing ? t("task:cmdEnterToUpdate") : t("task:cmdEnterToAdd")}
           {onSubmitAndRun && !isEditing ? t("task:shiftEnterToRun") : ""}
         </span>

@@ -180,6 +180,8 @@
   "attachmentSizeKb": "({{size}} KB)",
   "attachmentsCanTotalUpTo": "Os anexos podem totalizar até {{bytes}}.",
   "addFiles": "Adicionar ficheiros",
+  "commentAttachments": "Ficheiros do comentário",
+  "commentAttachmentsHint": "Anexe capturas de ecrã ou ficheiros a este comentário.",
   "answerAttachments": "Ficheiros da resposta",
   "answerAttachmentsHint": "Anexe capturas de ecrã ou ficheiros a esta resposta.",
   "answerAttachmentsLimit": "Até {{maxFiles}} ficheiros, {{maxSize}} no total.",
@@ -3356,5 +3358,16 @@
   "previewHideCapture": "Ocultar captura",
   "previewHideComments": "Ocultar comentários",
   "referenceCurrentTitle": "Título atual: {{title}}",
-  "referenceOpenForDetails": "Abra a tarefa para ver os detalhes."
+  "referenceOpenForDetails": "Abra a tarefa para ver os detalhes.",
+  "sessionBootstrapThinkingFailedTitle": "Não foi possível aplicar o nível de raciocínio",
+  "sessionBootstrapThinkingUnknownBody": "Não foi possível aplicar o nível de raciocínio antes do arranque.",
+  "sessionBootstrapThinkingUnavailableBody": "{{agent}} não pode usar o nível de raciocínio “{{level}}” com o modelo selecionado.",
+  "sessionBootstrapThinkingMismatchBody": "{{agent}} comunicou “{{effectiveLevel}}” em vez do nível de raciocínio solicitado “{{level}}”.",
+  "sessionBootstrapThinkingUnconfirmedBody": "{{agent}} não confirmou o nível de raciocínio “{{level}}”.",
+  "sessionBootstrapThinkingFailedBody": "{{agent}} não conseguiu aplicar o nível de raciocínio “{{level}}”.",
+  "sessionErrorDetailThinkingLevel": "Nível de raciocínio solicitado",
+  "sessionErrorDetailEffectiveThinkingLevel": "Nível de raciocínio efetivo",
+  "thinkingProfileHelp": "Edite o perfil e escolha Usar predefinição do fornecedor ou um nível de raciocínio suportado. Guarde antes de iniciar uma nova sessão.",
+  "thinkingSessionHelp": "Uma substituição da sessão ou do fluxo de trabalho define este nível de raciocínio. Altere essa substituição ou reponha a configuração da sessão a partir do perfil.",
+  "thinkingUnknownSourceHelp": "Verifique o nível de raciocínio do Pi no perfil e nas substituições da sessão ou do fluxo de trabalho antes de iniciar uma nova sessão."
 }

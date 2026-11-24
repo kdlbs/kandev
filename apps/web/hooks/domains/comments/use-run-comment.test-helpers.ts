@@ -94,3 +94,11 @@ export function makeReviewFileComment(): ReviewFileComment {
     status: "pending",
   };
 }
+
+export const queuedReviewFile = {
+  type: "resource",
+  mime_type: "text/plain",
+  attachment_id: "file-1",
+  name: "notes.txt",
+  delivery_mode: "path",
+} as const;

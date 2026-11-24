@@ -42,6 +42,11 @@ test.describe("Mobile general settings", () => {
 
     await testPage.reload();
     await expect(toggle).not.toBeChecked();
+
+    await testPage.setViewportSize({ width: 900, height: 844 });
+    const tabletToggleBox = await toggle.boundingBox();
+    expect(tabletToggleBox?.width).toBeGreaterThanOrEqual(44);
+    expect(tabletToggleBox?.height).toBeGreaterThanOrEqual(44);
   });
 
   test("keeps host sleep inhibition reachable and contained on a phone viewport", async ({

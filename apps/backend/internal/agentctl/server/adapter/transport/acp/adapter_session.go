@@ -316,7 +316,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.availableModels = initialModels.AvailableModels
 	}
 	if resp.Modes == nil {
-		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
+		a.availableModes, _ = a.sessionModesFromConfig(initialConfigOptions)
 	}
 	a.mu.Unlock()
 	if sessionID != priorSessionID {
@@ -807,7 +807,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.availableModels = initialModels.AvailableModels
 	}
 	if resp.Modes == nil {
-		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
+		a.availableModes, _ = a.sessionModesFromConfig(initialConfigOptions)
 	}
 	a.mu.Unlock()
 	if sessionID != priorSessionID {
@@ -826,7 +826,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// Emit initial session mode if the agent returned mode state
 	if resp.Modes != nil {
 		a.emitInitialModeState(sessionID, resp.Modes, settingsPolicy)
-	} else if _, hasModeOption := modeConfigOption(initialConfigOptions); hasModeOption {
+	} else if _, hasModeOption := a.modeConfigOption(initialConfigOptions); hasModeOption {
 		a.emitInitialModeConfigState(sessionID, initialConfigOptions, settingsPolicy)
 	} else if providerRestoredPolicy(settingsPolicy) == streams.SessionSettingsPolicyProviderRestored {
 		a.emitEmptyInitialModeState(sessionID, settingsPolicy)
@@ -1103,7 +1103,7 @@ func (a *Adapter) emitInitialModeState(sessionID string, modes *acp.SessionModeS
 }
 
 func (a *Adapter) emitInitialModeConfigState(sessionID string, configOptions []streams.ConfigOption, settingsPolicies ...streams.SessionSettingsPolicy) {
-	modeOption, ok := modeConfigOption(configOptions)
+	modeOption, ok := a.modeConfigOption(configOptions)
 	if !ok {
 		return
 	}
@@ -1259,12 +1259,17 @@ func (a *Adapter) emitSetModelEvent(
 	}
 	outConfig = a.dialect.modelConfigAfterChange(outConfig, cachedModels, modelID)
 	a.mu.Lock()
-	if a.sessionID != sessionID ||
+	if a.sessionID != sessionID || a.closed ||
 		(len(expectedGeneration) > 0 && a.configGeneration != expectedGeneration[0]) {
 		a.mu.Unlock()
 		return
 	}
-	if len(outConfig) > 0 {
+	if a.agentID == acpcompat.PiAgentID {
+		outConfig = a.piModelChangeOptionsLocked(modelID, outConfig)
+		a.clearUnknownThinkingModeLocked(outConfig)
+		a.availableModes, _ = a.sessionModesFromConfig(outConfig)
+	}
+	if len(outConfig) > 0 || a.agentID == acpcompat.PiAgentID {
 		// Refresh the cached config options so a subsequent SetConfigOption
 		// (e.g. user toggles reasoning effort after switching model) doesn't
 		// reuse the stale model CurrentValue from session/new and clobber the
@@ -1293,6 +1298,11 @@ func (a *Adapter) emitSetModelEvent(
 	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
 	// than drops on a full updatesCh and must run without a.mu held -- see
 	// emitDialectContextWindow's doc comment for the deadlock this avoids.
+	if a.agentID == acpcompat.PiAgentID {
+		if modeEvent := a.modeEventForConfigSnapshot(event); modeEvent != nil {
+			a.sendUpdate(*modeEvent)
+		}
+	}
 	a.sendUpdate(event)
 }
 
@@ -1361,7 +1371,7 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	if sessionID == "" {
 		return streams.ModeResult{Requested: modeID}, fmt.Errorf("no active session: call NewSession before SetMode")
 	}
-	modeOption, hasModeOption, err := selectSessionModeOption(cachedConfig, availableModes, modeID, requestedConfigID)
+	modeOption, hasModeOption, err := selectSessionModeOption(cachedConfig, availableModes, modeID, requestedConfigID, a.agentID)
 	if err != nil {
 		return streams.ModeResult{Requested: modeID}, err
 	}
@@ -1447,15 +1457,6 @@ func modeConfigOption(options []streams.ConfigOption) (streams.ConfigOption, boo
 		}
 	}
 	return streams.ConfigOption{}, false
-}
-
-func isModeConfigOptionID(options []streams.ConfigOption, configID string) bool {
-	for _, option := range options {
-		if option.ID == configID && isModeConfigOption(option) {
-			return true
-		}
-	}
-	return false
 }
 
 func configOptionAdvertisesValue(option streams.ConfigOption, value string) bool {
@@ -1760,7 +1761,7 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 	if err != nil {
 		return err
 	}
-	if isModeOption && !result.Confirmed {
+	if isModeOption && (!result.Confirmed || (a.agentID == acpcompat.PiAgentID && result.Effective != value)) {
 		return fmt.Errorf("requested mode %q was not confirmed by the agent", value)
 	}
 	return nil
@@ -1787,7 +1788,7 @@ func (a *Adapter) setConfigOptionWithModeClassification(
 	sessionID := a.sessionID
 	cachedConfig := a.availableConfigOptions
 	a.mu.RUnlock()
-	isModeOption := isModeConfigOptionID(cachedConfig, configID)
+	isModeOption := a.isModeConfigOptionID(cachedConfig, configID)
 
 	if conn == nil {
 		return result, isModeOption, fmt.Errorf("adapter not initialized")
@@ -2030,29 +2031,13 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 		return
 	}
 	a.availableConfigOptions = configOptions
-	if modes, found := sessionModesFromConfig(configOptions); found {
+	a.clearUnknownThinkingModeLocked(configOptions)
+	if modes, found := a.sessionModesFromConfig(configOptions); found {
 		a.availableModes = modes
 	}
-	modeEvent := (*AgentEvent)(nil)
-	if _, hasModeOption := modeConfigOption(configOptions); hasModeOption {
-		if currentMode := currentModeFromConfig(configOptions); currentMode != "" {
-			a.noteConfigModeSnapshotLocked(sessionID, currentMode, correlatedModeResponse)
-		}
-		if !correlatedModeResponse {
-			modeEvent = &AgentEvent{
-				Type:                  streams.EventTypeSessionMode,
-				SessionID:             sessionID,
-				SessionSettingsPolicy: providerRestoredPolicy(settingsPolicy),
-				CurrentModeID:         currentModeFromConfig(configOptions),
-				AvailableModes:        append([]streams.SessionModeInfo(nil), a.availableModes...),
-			}
-		}
-	}
+	a.noteConfigModeSnapshotLocked(sessionID, a.currentModeFromConfig(configOptions), correlatedModeResponse)
 	a.sessionSettingsGeneration++
 	event.SessionSettingsGeneration = a.sessionSettingsGeneration
-	if modeEvent != nil {
-		modeEvent.SessionSettingsGeneration = a.sessionSettingsGeneration
-	}
 	if isModelConfigID(configID, configOptions) {
 		if tracker := a.usageBySession[sessionID]; tracker != nil {
 			tracker.maxSize = 0
@@ -2060,8 +2045,10 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 		delete(a.contextSamples, sessionID)
 	}
 	a.mu.Unlock()
-	if modeEvent != nil {
-		a.sendUpdate(*modeEvent)
+	if !correlatedModeResponse {
+		if modeEvent := a.modeEventForConfigSnapshot(event); modeEvent != nil {
+			a.sendUpdate(*modeEvent)
+		}
 	}
 	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
 	// than drops on a full updatesCh and must run without a.mu held -- see

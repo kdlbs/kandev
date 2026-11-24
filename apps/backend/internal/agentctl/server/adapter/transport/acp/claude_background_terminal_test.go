@@ -230,7 +230,22 @@ func cancelClaudeWithQueuedLaunchUpdate(
 	require.True(t, <-workerDone)
 	require.Eventually(t, func() bool { return activeClaudeToolCallCount(a) == 2 }, 2*time.Second, time.Millisecond,
 		"queued completion must be processed before the cancellation sweep")
-	return drainEvents(a)
+	var events []AgentEvent
+	cancelled := 0
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for cancelled < 2 {
+		select {
+		case event := <-a.updatesCh:
+			events = append(events, event)
+			if event.ToolStatus == toolStatusCancelled {
+				cancelled++
+			}
+		case <-timer.C:
+			t.Fatalf("timed out waiting for cancellation updates; received %d of 2", cancelled)
+		}
+	}
+	return events
 }
 
 // @covers AC-AGENTS-BACKGROUND-WORK-010.3

@@ -503,3 +503,33 @@ describe("setStoredAcknowledgedAgentErrors", () => {
     expect(getStoredAcknowledgedAgentErrors()).toEqual({ "session-a": "stamp-v2" });
   });
 });
+
+it("preserves bounded Pi thinking evidence when reading a stored startup failure", () => {
+  const error = readLastAgentError({
+    last_agent_error: {
+      message: "startup failed",
+      occurred_at: OCCURRED_AT,
+      causes: [
+        {
+          operation: "start",
+          code: "thinking_level_mismatch",
+          reason: "effective_mismatch",
+          requested_setting: "medium",
+          effective_setting: "off",
+          setting_config_id: "thought_level",
+          setting_source: "agent_profile",
+          prompt_not_sent: true,
+          requested_mode: "unsafe-alias",
+        },
+      ],
+    },
+  });
+  expect(error?.causes?.[0]).toMatchObject({
+    requested_setting: "medium",
+    effective_setting: "off",
+    setting_config_id: "thought_level",
+    setting_source: "agent_profile",
+    prompt_not_sent: true,
+  });
+  expect(error?.causes?.[0].requested_mode).toBeUndefined();
+});

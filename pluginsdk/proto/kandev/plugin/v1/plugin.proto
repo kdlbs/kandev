@@ -175,15 +175,30 @@ service Host {
   // approval and resource-version/execution-generation fences.
   rpc EnsureTaskRunExact(EnsureTaskRunExactRequest) returns (EnsureTaskRunExactResponse);
   rpc StopTaskRunExact(StopTaskRunExactRequest) returns (StopTaskRunExactResponse);
+  // CancelTurnExact interrupts the observed execution's current turn without
+  // stopping the session; the session stays promptable.
+  rpc CancelTurnExact(CancelTurnExactRequest) returns (CancelTurnExactResponse);
   rpc RecoverSessionExact(RecoverSessionExactRequest) returns (RecoverSessionExactResponse);
   rpc CancelPendingTaskTransitionExact(CancelPendingTaskTransitionExactRequest) returns (CancelPendingTaskTransitionExactResponse);
   rpc GetSessionModeContextExact(GetSessionModeContextExactRequest) returns (GetSessionModeContextExactResponse);
   rpc SetSessionModeExact(SetSessionModeExactRequest) returns (SetSessionModeExactResponse);
+  // GetStepApprovalExact reads whether a session's workflow step awaits the
+  // native Approve action (host.v2.read:sessions). ApproveStepExact approves
+  // it through the same path with a step_approval human response receipt
+  // (host.v2.write:execution). Office approval stages are Unimplemented.
+  rpc GetStepApprovalExact(GetStepApprovalExactRequest) returns (GetStepApprovalExactResponse);
+  rpc ApproveStepExact(ApproveStepExactRequest) returns (ApproveStepExactResponse);
   // Human interaction responses require a Host-issued single-use receipt from
-  // the authenticated native UI, bound to the exact interaction revision and
-  // response payload.
+  // the authenticated native UI or minted for a linked Kandev user, bound to
+  // the exact interaction revision and response payload.
   rpc RespondPermissionExact(RespondPermissionExactRequest) returns (RespondPermissionExactResponse);
   rpc AnswerClarificationExact(AnswerClarificationExactRequest) returns (AnswerClarificationExactResponse);
+  // LinkExternalIdentity redeems a Kandev-issued link code for the calling
+  // installation (api_write: human_responses). RequestHumanResponseReceipt
+  // mints a receipt for the Kandev user linked to an external account
+  // (host.v2.write:human_responses).
+  rpc LinkExternalIdentity(LinkExternalIdentityRequest) returns (LinkExternalIdentityResponse);
+  rpc RequestHumanResponseReceipt(RequestHumanResponseReceiptRequest) returns (RequestHumanResponseReceiptResponse);
   rpc ListWorkspacesExact(ListWorkspacesExactRequest) returns (ListWorkspacesExactResponse);
   rpc ListWorkflowsExact(ListWorkflowsExactRequest) returns (ListWorkflowsExactResponse);
   rpc ListWorkflowStepsExact(ListWorkflowStepsExactRequest) returns (ListWorkflowStepsExactResponse);
@@ -1279,6 +1294,25 @@ message StopTaskRunExactResponse {
   bool stopped = 2;
 }
 
+message CancelTurnExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string expected_session_resource_version = 5;
+  string expected_execution_id = 6;
+  string idempotency_key = 7;
+  uint64 approval_revision = 8;
+  string manifest_digest = 9;
+  string management_instance_key = 10;
+  int64 expected_claim_generation = 11;
+}
+
+message CancelTurnExactResponse {
+  HostCommandResult result = 1;
+  bool cancelled = 2; // false with NO_CHANGE when no turn was active
+}
+
 message RecoverSessionExactRequest {
   string request_id = 1;
   string workspace_id = 2;
@@ -1363,6 +1397,41 @@ message SetSessionModeExactResponse {
   string current_mode_id = 2;
 }
 
+message GetStepApprovalExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string session_id = 3;
+}
+
+message GetStepApprovalExactResponse {
+  string session_id = 1;
+  string task_id = 2;
+  bool awaiting = 3;
+  string from_step_id = 4;
+  string from_step_name = 5;
+  string to_step_id = 6; // empty when approval does not move the task
+  string to_step_name = 7;
+  string resource_version = 8;
+  string observed_at = 9; // RFC3339
+}
+
+message ApproveStepExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string session_id = 3;
+  string expected_resource_version = 4;
+  string idempotency_key = 5;
+  string human_response_receipt_id = 6;
+  uint64 approval_revision = 7;
+  string manifest_digest = 8;
+}
+
+message ApproveStepExactResponse {
+  HostCommandResult result = 1;
+  string from_step_id = 2;
+  string to_step_id = 3;
+}
+
 message HumanInteractionResponseReceipt {
   string id = 1;
   string interaction_id = 2;
@@ -1401,6 +1470,64 @@ message AnswerClarificationExactRequest {
 message AnswerClarificationExactResponse {
   HostCommandResult result = 1;
   Interaction interaction = 2;
+}
+
+message LinkExternalIdentityRequest {
+  string request_id = 1;
+  string code = 2;
+  string provider = 3;
+  string subject = 4;
+  string display_name = 5;
+}
+
+message ExternalIdentityLink {
+  string id = 1;
+  string provider = 2;
+  string subject = 3;
+  string display_name = 4;
+  string user_id = 5;
+  string user_display_name = 6;
+  string created_at = 7; // RFC3339
+}
+
+message LinkExternalIdentityResponse {
+  HostCommandResult result = 1;
+  ExternalIdentityLink link = 2;
+}
+
+message RequestHumanResponseReceiptRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string provider = 3;
+  string subject = 4;
+  string kind = 5; // "permission" | "clarification" | "step_approval"
+  string target_id = 6; // interaction id, or session id for step_approval
+  string expected_resource_version = 7;
+  string option_id = 8;
+  bool cancelled = 9;
+  repeated ClarificationAnswer answers = 10;
+  uint64 approval_revision = 11;
+  string manifest_digest = 12;
+}
+
+message InteractionActor {
+  string user_id = 1;
+  string display_name = 2;
+  string via = 3; // external provider, e.g. "discord"
+}
+
+message HumanResponseReceipt {
+  string id = 1;
+  string kind = 2;
+  string target_id = 3;
+  string resource_version = 4;
+  string expires_at = 5; // RFC3339
+  InteractionActor actor = 6;
+}
+
+message RequestHumanResponseReceiptResponse {
+  HostCommandResult result = 1;
+  HumanResponseReceipt receipt = 2;
 }
 
 message Event {
@@ -2191,6 +2318,7 @@ message Message {
   string content = 6;     // <kandev-system> blocks stripped
   string type = 7;        // "message" default; see MessageType
   string created_at = 8;  // RFC3339
+  string source = 9;      // persisted metadata.source only, e.g. "plugin:<id>"; empty when absent
 }
 message MessageFilter {
   repeated string session_ids = 1; // empty → not constrained by session
@@ -2254,6 +2382,9 @@ message Interaction {
   bool agent_disconnected = 13;
   string created_at = 14; // RFC3339
   string updated_at = 15; // RFC3339
+  // Set on an interaction resolved through a receipt minted for a linked
+  // Kandev user: that user and the external surface.
+  InteractionActor resolved_by = 16;
 }
 message InteractionFilter {
   repeated string session_ids = 1; // empty → not constrained by session

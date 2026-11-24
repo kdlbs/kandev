@@ -93,3 +93,20 @@ Sequential. No delegation authorized.
 
 Implementation is present. See the [implementation record](../../reviews/file-viewers-implementation.md)
 for completed checks and remaining validation gates. No publication is authorized.
+
+## Supported file regression
+
+Status: completed. Focused component tests and the desktop and mobile file viewer flows passed. Covers AC-PLUGINS-FILE-VIEWERS-004.1.
+
+1. Add a failing rendering test for a session that opens `notes.txt` without a
+   matching plugin. Assert that the text is visible and that the discovery
+   button and its bar are absent. Cover a source file and a readable file with
+   an unknown extension to prevent a fix specific to `.txt`.
+2. Correct the shared FileViewerOptions render condition. Keep the editor
+   mounted when a user switches to an installed viewer. Keep unknown-format
+   discovery inside the explicit Open with flow. Verify unsupported binaries
+   still offer the existing marketplace action.
+3. Exercise a desktop file tab and the mobile file panel. Open a supported
+   file after an unsupported file and verify the bar disappears. Switch back
+   and verify discovery is available again. Run the focused component and
+   desktop/mobile Playwright tests against the updated web build.

@@ -88,6 +88,7 @@ export function FilePreview({ sessionId, onOpenFile, ...file }: NativeFilePrevie
   // Keep the permission-aware route if a plugin disappears while this card is open.
   const [pluginPreview, setPluginPreview] = useState(eligible);
   if (eligible && !pluginPreview) setPluginPreview(true);
+  const fileCategory = getFileCategory(file.path);
   const defaultExpanded = useOptionalAppStore(
     (store) => store.imagePreviewsExpandedByDefault,
     true,
@@ -95,7 +96,7 @@ export function FilePreview({ sessionId, onOpenFile, ...file }: NativeFilePrevie
   const [expanded, setExpanded] = useRichOutputViewState(
     JSON.stringify([file.repo, file.path]),
     (pluginPreview && fileViewerCandidates(file.path).length > 0) ||
-      (getFileCategory(file.path) === "image" && defaultExpanded),
+      (fileCategory === "image" && defaultExpanded),
   );
   const { load, state } = useWorkspaceFilePreview(sessionId, file.path, file.repo);
 
@@ -105,9 +106,11 @@ export function FilePreview({ sessionId, onOpenFile, ...file }: NativeFilePrevie
 
   const handleToggle = useCallback(() => {
     const next = !expanded;
+    if (!pluginPreview && next && (fileCategory !== "image" || state.kind === "error")) {
+      void load();
+    }
     setExpanded(next);
-    if (!pluginPreview && next && state.kind === "error") void load();
-  }, [pluginPreview, expanded, load, state.kind]);
+  }, [pluginPreview, expanded, fileCategory, state.kind, load]);
 
   return (
     <article

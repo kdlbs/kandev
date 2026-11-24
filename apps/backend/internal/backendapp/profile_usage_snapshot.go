@@ -271,7 +271,7 @@ func snapshotProcessOverride(agentName string) bool {
 		keys = []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR"}
 	case snapshotCodexACPAgentID, snapshotCodexAppServerAgentID:
 		keys = []string{"CODEX_HOME", "OPENAI_API_KEY", "OPENAI_BASE_URL"}
-	case "opencode-acp":
+	case openCodeAgentID:
 		keys = []string{"OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT"}
 	}
 	for _, key := range keys {

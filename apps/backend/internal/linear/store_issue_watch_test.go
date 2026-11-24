@@ -235,12 +235,12 @@ func TestStore_IssueWatchTask_ReserveDedup(t *testing.T) {
 		t.Error("expected second reservation to lose due to UNIQUE constraint")
 	}
 
-	seen, err := store.ListSeenIssueIdentifiers(ctx, w.ID)
+	seen, err := store.listIssueWatchReservations(ctx, w.ID)
 	if err != nil {
 		t.Fatalf("list seen: %v", err)
 	}
-	if _, ok := seen["ENG-7"]; !ok {
-		t.Error("expected ENG-7 in seen set after reservation")
+	if created, ok := seen["ENG-7"]; !ok || created {
+		t.Error("expected ENG-7 in the reservation set without a task")
 	}
 }
 

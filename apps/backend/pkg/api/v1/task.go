@@ -248,6 +248,7 @@ type TaskEvent struct {
 // Type determines the ACP content block: "image" → ImageBlock, "audio" → AudioBlock,
 // "resource" → ResourceBlock (text or blob based on MIME type).
 type MessageAttachment struct {
+	CommentID    string `json:"comment_id,omitempty"`
 	Type         string `json:"type"`                    // "image", "audio", "resource"
 	AttachmentID string `json:"attachment_id,omitempty"` // File-backed attachment descriptor ID
 	Data         string `json:"data,omitempty"`          // Base64-encoded data
@@ -260,8 +261,13 @@ type MessageAttachment struct {
 	Path string `json:"-"`
 }
 
+const (
+	attachmentDeliveryPath   = "path"
+	attachmentDeliveryPrompt = "prompt"
+)
+
 func (a MessageAttachment) HasValidDeliveryMode() bool {
-	return a.DeliveryMode == "" || a.DeliveryMode == "prompt" || a.DeliveryMode == "path"
+	return a.DeliveryMode == "" || a.DeliveryMode == attachmentDeliveryPrompt || a.DeliveryMode == attachmentDeliveryPath
 }
 
 // ContextFileMeta represents a context file reference attached to a message.

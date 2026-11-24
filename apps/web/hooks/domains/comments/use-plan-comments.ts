@@ -38,6 +38,7 @@ function projectPlanComment(comment: TaskPlanComment): PlanComment {
     from: comment.anchor_from,
     to: comment.anchor_to,
     version: comment.version,
+    ...(comment.attachments && { attachments: comment.attachments }),
     createdAt: comment.created_at,
     updatedAt: comment.updated_at,
     status: "pending",
@@ -198,6 +199,7 @@ function usePlanCommentMutations(
       selectedText: string,
       from?: number,
       to?: number,
+      attachmentIds?: string[],
     ): Promise<PlanComment | null> => {
       if (!taskId || !plan) return null;
       setIsMutating(true);
@@ -214,24 +216,20 @@ function usePlanCommentMutations(
           selectedText,
           anchorFrom,
           anchorTo,
+          attachmentIds,
         ]);
         const id = editing?.id ?? pendingCommentCreateID(pendingCreate, createKey);
+        const mutation = { taskId, planId: plan.id, id, body: commentText, attachmentIds };
         const next = editing
           ? await updateTaskPlanComment({
-              taskId,
-              planId: plan.id,
-              id,
-              body: commentText,
+              ...mutation,
               expectedVersion:
                 base?.taskId === taskId && base.planId === plan.id && base.id === id
                   ? base.version
                   : (editing.version ?? 0),
             })
           : await createTaskPlanComment({
-              taskId,
-              planId: plan.id,
-              id,
-              body: commentText,
+              ...mutation,
               selectedText,
               anchorFrom,
               anchorTo,

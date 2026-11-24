@@ -60,11 +60,28 @@ func (m exactExecutionManager) EnsureTaskRun(ctx context.Context, in pluginsdk.E
 }
 
 func (m exactExecutionManager) StopTaskRun(ctx context.Context, in pluginsdk.ExactTaskExecutionCommand) (*pluginsdk.CommandResult, bool, error) {
+	return m.runSessionExecutionEffect(ctx, exactStopTaskRunMethod, in, func(controller exactExecutionController) (bool, error) {
+		return controller.StopTaskRun(ctx, m.host.installationID, in)
+	})
+}
+
+func (m exactExecutionManager) CancelTurn(ctx context.Context, in pluginsdk.ExactTaskExecutionCommand) (*pluginsdk.CommandResult, bool, error) {
+	return m.runSessionExecutionEffect(ctx, exactCancelTurnMethod, in, func(controller exactExecutionController) (bool, error) {
+		return controller.CancelTurn(ctx, m.host.installationID, in)
+	})
+}
+
+// runSessionExecutionEffect admits one session-fenced execution command and
+// records APPLIED when the effect changed the session, NO_CHANGE otherwise.
+func (m exactExecutionManager) runSessionExecutionEffect(
+	ctx context.Context, method string, in pluginsdk.ExactTaskExecutionCommand,
+	effect func(exactExecutionController) (bool, error),
+) (*pluginsdk.CommandResult, bool, error) {
 	if !validTaskExecutionCommand(in, true) || !validManagementClaimFence(in.ManagementInstanceKey, in.ExpectedClaimGeneration) {
 		return exactInvalidResult(), false, nil
 	}
-	digest := exactCommandDigest(exactStopTaskRunMethod, in)
-	admission, result := m.host.admitExecutionCommand(ctx, exactStopTaskRunMethod, "host.v2.write:execution", in.RequestID, in.WorkspaceID, in.SessionID, in.IdempotencyKey, in.ExpectedSessionResourceVersion, in.ApprovalRevision, in.ManifestDigest, digest)
+	digest := exactCommandDigest(method, in)
+	admission, result := m.host.admitExecutionCommand(ctx, method, "host.v2.write:execution", in.RequestID, in.WorkspaceID, in.SessionID, in.IdempotencyKey, in.ExpectedSessionResourceVersion, in.ApprovalRevision, in.ManifestDigest, digest)
 	if result != nil {
 		return result, false, nil
 	}
@@ -76,17 +93,17 @@ func (m exactExecutionManager) StopTaskRun(ctx context.Context, in pluginsdk.Exa
 	if controller == nil {
 		return exactUnavailableResult("execution_control_unavailable"), false, nil
 	}
-	stopped, err := controller.StopTaskRun(ctx, m.host.installationID, in)
+	changed, err := effect(controller)
 	if err != nil {
 		result, _, finishErr := finishExactExecutionError(ctx, admission, err, in.SessionID, in.ExpectedSessionResourceVersion)
 		return result, false, finishErr
 	}
 	statusValue := pluginsdk.CommandNoChange
-	if stopped {
+	if changed {
 		statusValue = pluginsdk.CommandApplied
 	}
 	result, err = completeExecutionCommand(ctx, admission, statusValue, "", in.SessionID, in.ExpectedSessionResourceVersion)
-	return result, stopped, err
+	return result, changed, err
 }
 
 func (m exactExecutionManager) RecoverSession(ctx context.Context, in pluginsdk.ExactSessionRecoveryCommand) (*pluginsdk.CommandResult, pluginsdk.ExactTaskRunResult, error) {

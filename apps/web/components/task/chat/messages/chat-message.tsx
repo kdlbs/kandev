@@ -153,6 +153,7 @@ function parseUserMessageMetadata(comment: Message) {
   return {
     imageAttachments,
     fileAttachments,
+    attachments: metadata?.attachments,
     contextFiles: metadata?.context_files || [],
     ...userMessageMetadataFlags(metadata, hasContent, hasAttachments),
     senderTask: userMessageSenderTask(metadata),
@@ -245,6 +246,7 @@ type UserMessageAttachment = {
   type: string;
   data?: string;
   attachment_id?: string;
+  comment_id?: string;
   mime_type: string;
   name?: string;
   size_bytes?: number;
@@ -338,6 +340,7 @@ function UserMessageContent({
   const {
     imageAttachments,
     fileAttachments,
+    attachments,
     contextFiles,
     hasPlanMode,
     hasReviewComments,
@@ -382,6 +385,7 @@ function UserMessageContent({
             showRaw,
             hasAttachments,
             content: comment.content,
+            attachments,
             rawContent: comment.raw_content,
             promptMentionComponents,
             taskMentions,

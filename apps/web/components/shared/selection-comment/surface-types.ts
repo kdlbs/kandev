@@ -1,3 +1,6 @@
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
+import type { CommentAttachmentOptions } from "./use-comment-attachments";
+import type { CommentAttachments } from "./comment-attachment-control";
 import type { ReactNode } from "react";
 
 export type SelectionPosition = {
@@ -8,6 +11,7 @@ export type SelectionPosition = {
 export type CommentCallback = (
   comment: string,
   selectedText: string,
+  attachments?: MessageAttachment[],
 ) => boolean | void | Promise<boolean | void>;
 
 export type SelectionCommentSurfaceProps = {
@@ -16,6 +20,8 @@ export type SelectionCommentSurfaceProps = {
   /** Desktop anchor in viewport pixels. */
   position: SelectionPosition;
   onAdd: CommentCallback;
+  attachmentOptions?: CommentAttachmentOptions;
+  attachmentController?: CommentAttachments;
   onAddAndRun?: CommentCallback;
   onClose: () => void;
   /** Opt-in Close control that leaves without saving; text is not required. */
@@ -34,6 +40,7 @@ export type SelectionCommentSurfaceProps = {
   /** Accessible name for the comment field. */
   inputLabel?: string;
   testId?: string;
+  drawerTestId?: string;
   inputTestId?: string;
   addButtonTestId?: string;
   runButtonTestId?: string;

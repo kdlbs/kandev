@@ -456,3 +456,47 @@ func (s *Service) TransferSessionMessageAttachments(
 	}
 	return s.attachmentSvc.TransferSession(ctx, taskID, oldSessionID, newSessionID, attachmentIDs)
 }
+
+// CanonicalizeCommentFiles resolves display descriptors before admitting user
+// feedback. The claim transaction still checks owner, workspace and lifetime.
+func (s *Service) CanonicalizeCommentFiles(ctx context.Context, taskID string, attachments []v1.MessageAttachment) error {
+	if !v1.HasCommentAttachments(attachments) {
+		return nil
+	}
+	if s.attachmentSvc == nil {
+		return ErrAttachmentForbidden
+	}
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.UserID == "" {
+		return ErrAttachmentForbidden
+	}
+	task, err := s.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	for index, input := range attachments {
+		if input.AttachmentID == "" {
+			continue
+		}
+		if input.Data != "" || !input.HasValidDeliveryMode() {
+			return ErrAttachmentInvalid
+		}
+		row, err := s.attachmentSvc.Get(ctx, identity.UserID, input.AttachmentID)
+		if err != nil || row.WorkspaceID != task.WorkspaceID {
+			return ErrAttachmentForbidden
+		}
+		if input.CommentID != "" && !validSessionCommentFile(input, row) {
+			return ErrAttachmentInvalid
+		}
+		attachments[index] = v1.MessageAttachment{
+			AttachmentID: row.ID, CommentID: input.CommentID, Type: row.Kind,
+			Name: row.Name, MimeType: row.MimeType, SizeBytes: row.SizeBytes, DeliveryMode: input.DeliveryMode,
+		}
+	}
+	return nil
+}
+
+func validSessionCommentFile(input v1.MessageAttachment, row *models.TaskMessageAttachment) bool {
+	return input.DeliveryMode == attachmentDeliveryModePath && row.DeliveryMode == attachmentDeliveryModePath &&
+		(row.State != models.AttachmentStateClaimed || row.SessionID != "")
+}

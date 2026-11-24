@@ -91,10 +91,11 @@ function useProfileCompositionDraft({
     (selection: { model: string; configOptions: Record<string, string> }) => {
       onChange({
         model: selection.model,
+        ...(agentName === "pi-acp" && selection.configOptions.thought_level ? { mode: "" } : {}),
         config_options: { ...(profile.config_options ?? {}), ...selection.configOptions },
       });
     },
-    [onChange, profile.config_options],
+    [onChange, profile.config_options, agentName],
   );
   return { resolveConfigurationOptions, applyConfiguration };
 }
