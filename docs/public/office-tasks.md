@@ -16,6 +16,10 @@ Open **Projects** or the sidebar's project add action, create a project, and ope
 
 A project can list local repository paths and supported Git URLs. Root tasks created with that project and no explicit repository selection attach the project's sources before their first launch. An explicit repository selection takes precedence, and a child inherits its parent's repository context. Invalid or unreadable project sources can prevent task creation.
 
+Bare remote URLs resolve from the selected workspace. Public GitHub and GitLab URLs use the built-in provider rules. A self-managed GitLab URL resolves when the workspace has a GitLab connection whose host matches the URL origin exactly, including its scheme, host, and port. An installed repository plugin can resolve its own URL when the plugin is active, declares the repository inspection capability, and has a connection configured for that workspace. Kandev does not hold hostname lists for other providers, so install the plugin for the provider you use.
+
+An unknown URL, a URL that no connection or plugin recognizes, and a URL that two providers both recognize are rejected before any repository or task is created. Saved repository IDs and explicit provider selections keep their existing resolution rules and never fall back to another provider.
+
 Changing the project's sources later does not change existing task attachments. Check the task's actual repository context if it was created before a project edit. See [Executors](executors.md) for environment setup and [Git operations](git-operations.md) for worktrees and repository behavior.
 
 ## Create and assign a task
@@ -24,9 +28,26 @@ Changing the project's sources later does not change existing task attachments. 
 2. Enter a title and a description with the expected result and acceptance checks.
 3. Choose a **Project**. The Office task dialog requires a project and a non-empty title before enabling Create.
 4. Choose an **Assignee**, status, and priority. Choose an Office team member as the assignee; its runtime execution profile is configured separately.
-5. Create the task and open its detail page to inspect the saved properties and activity.
+5. Add files with the paperclip, by pasting an image, or by dropping files on the description box. The composer shows a thumbnail for images and a file chip for other files.
+6. Inspect an attachment before you create the task. Select an image chip to open the larger viewer. Select a file chip to see its name and size.
+7. Create the task and open its detail page to inspect the saved properties and activity. The agent receives the attachments when Office starts the task.
 
-![Office New Task dialog with a task title and Customer portal project selected](../screenshots/office-new-task.png)
+![Office New Task dialog with attachment chips, a Customer portal project selected, and the Create Task action](../screenshots/office-new-task.png)
+
+Attachment limits:
+
+- Up to 10 files.
+- At most 100 MiB per file and 100 MiB in total.
+
+Previews: supported image types use the same preview behavior as the Kanban task composer. Other files show their metadata and are delivered as files, not rendered in the browser.
+
+Upload states:
+
+- Each file shows its upload state. If an upload fails, retry it or remove it.
+- Create stays disabled while a file is uploading, failed, or expired.
+- Removing the problem file enables Create again. Ready files stay attached.
+
+Closing the dialog keeps a draft with its ready attachments. Discard removes the draft and its staged files.
 
 For example, “Add account recovery” should explain expired-link behavior, successful reset behavior, and the tests you expect. “Improve the portal” leaves the result and stopping point unclear.
 
@@ -46,9 +67,36 @@ The Office board groups tasks by status, with columns such as Todo, In Progress,
 
 The task detail brings together properties, documents, subtasks, and activity. Edit the title or description when the brief changes and use the property controls for assignee, project, priority, labels, parent, and blocker relationships.
 
+To remove a label, select its remove control in the **Labels** row. Names such
+as `area/backend` work the same as simple names. Removal persists when you
+reload the task and affects only this task's association; the workspace catalog
+entry and labels on other tasks remain available.
+
+<details>
+<summary>Task-label removal API reference</summary>
+
+Use `DELETE /api/v1/office/workspaces/:wsId/tasks/:taskId/labels?name=<encoded-name>`
+with one query-encoded name. For example, `area/backend` becomes
+`name=area%2Fbackend`; a literal `area%2Fbackend` becomes
+`name=area%252Fbackend`. Encode a literal plus as `%2B` and a space as `+` or
+`%20`. The name is decoded once and matched exactly, including stored spaces.
+
+Success returns HTTP 200 with `{"ok":true}`, including when the valid name is
+already absent from the task. Missing, empty, repeated, or malformed name
+parameters return HTTP 400 without removing labels. Existing authorization
+rules require access to the workspace and task, which must belong together.
+
+The existing `DELETE .../labels/:labelName` route remains compatible with
+single-segment names. Use the query endpoint for slash-containing names.
+Removing a task association does not delete the workspace label.
+
+</details>
+
 ![Office task detail with its brief, properties, documents, and activity area](../screenshots/office-task-detail.png)
 
 Comments are durable task discussion and can wake the relevant agent. In Work they target the primary agent; in Review or Approval the default workflow targets participants who have not yet decided. State what you want the recipient to do, such as “Address the two accessibility findings and request another review.”
+
+To give feedback on an exact passage in an agent comment, select the passage, enter a remark, and choose **Add**. The quote and remark stay in the composer until you send the task comment. On a phone, use **Add** in the selection drawer. Mentions in your remark can route the comment to agents. Mentions copied from the source passage stay quoted and do not start another agent run.
 
 Use **Advanced** mode when you need the task's execution workbench and session conversation. **Simple** mode returns to the Office task view. See [Sessions and review](sessions-and-review.md) and [Developer tools](developer-tools.md) for chat, terminal, editor, changes, and diff behavior.
 
@@ -84,7 +132,9 @@ Workflow participants are Office agents; human users have no workflow approval o
 
 The primary assignee, reviewer, and approver are distinct capacities. A team member can hold more than one capacity on a task; removing one does not necessarily end its session while it still holds another.
 
-Task-completion approval is also a workspace setting. Marking a task Done can be rejected or redirected to review when the workflow is not at its terminal step or required approvals are pending. Resolve the named gate instead of repeatedly changing status.
+To finish a task, drop its card on **Done** in the Office board or choose **Done** in its status picker. If the task is before the final workflow step, this moves it to that step. The task completes only if that step is configured to complete tasks; if the step is full, the move waits in its queue.
+
+Pending approvers or unmet completion criteria can refuse the move, leaving the task in its original status and step. Resolve the named gate before trying again. Tasks already on the final step keep their existing approval check, which can redirect a Done request to review.
 
 ## Handle human requests
 

@@ -52,6 +52,12 @@ export function pluginCredentialConfig(form: PluginCredentialForm): Record<strin
     primaryNetwork: "",
     primaryGwPriority: "",
     additionalNetworks: [],
+    dockerTmpSize: "",
+    dockerTmpSizeDirty: false,
+    dockerLogMaxSize: "",
+    dockerLogMaxSizeDirty: false,
+    dockerLogMaxFiles: "",
+    dockerLogMaxFilesDirty: false,
   });
   return Object.fromEntries(PLUGIN_CREDENTIAL_KEYS.map((key) => [key, config[key] ?? ""]));
 }

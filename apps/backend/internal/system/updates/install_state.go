@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -46,6 +47,7 @@ type serviceInstallMetadata struct {
 	Port            int    `json:"port,omitempty"`
 	SystemUser      string `json:"system_user,omitempty"`
 	NoBootStart     bool   `json:"no_boot_start,omitempty"`
+	Shell           string `json:"shell,omitempty"`
 	InstalledAt     string `json:"installed_at"`
 }
 
@@ -143,11 +145,33 @@ func (s *Service) metadataMatchesService(state InstallStateResponse, metadata *s
 	if !strings.Contains(text, envRunningAsService) || !strings.Contains(text, envServiceMetadata) {
 		return false
 	}
+	if !validServiceInstallShell(metadata) {
+		return false
+	}
+	if state.Manager == serviceManagerLaunchd {
+		shell, err := launchdServiceShell(content, metadata)
+		if err != nil || shell != metadata.Shell {
+			return false
+		}
+	} else if metadata.Shell != "" {
+		return false
+	}
 	if strings.Contains(text, state.MetadataPath) || strings.Contains(text, escapeXML(state.MetadataPath)) {
 		return true
 	}
 	return state.Manager == serviceManagerSystemd &&
 		strings.Contains(text, strings.ReplaceAll(state.MetadataPath, "%", "%%"))
+}
+
+func validServiceInstallShell(metadata *serviceInstallMetadata) bool {
+	if metadata.Shell == "" {
+		return true
+	}
+	if metadata.Manager != serviceManagerLaunchd || metadata.Mode != installModeUser || !filepath.IsAbs(metadata.Shell) {
+		return false
+	}
+	base := filepath.Base(metadata.Shell)
+	return strings.IndexFunc(metadata.Shell, unicode.IsControl) < 0 && (base == "bash" || base == "zsh")
 }
 
 func (s InstallStateResponse) applySupport() (bool, string) {

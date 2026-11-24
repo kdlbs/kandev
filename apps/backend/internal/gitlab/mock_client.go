@@ -50,8 +50,16 @@ type MockClient struct {
 	members            map[string][]ProjectMember
 	mrSubscriptions    map[mockMRKey]bool
 	issueSubscriptions map[mockIssueKey]bool
+	// readyFeedbackReads counts GetMRFeedback calls per MR after MarkMRReady
+	// wrote its title; an MR is present only after that write.
+	readyFeedbackReads map[mockMRKey]int
 	nextMRIID          int
 }
+
+const (
+	mockMRStatusChecking  = "checking"
+	mockMRStatusMergeable = "mergeable"
+)
 
 type mockMRKey struct {
 	Project string
@@ -105,6 +113,7 @@ func (c *MockClient) resetLocked() {
 	c.members = make(map[string][]ProjectMember)
 	c.mrSubscriptions = make(map[mockMRKey]bool)
 	c.issueSubscriptions = make(map[mockIssueKey]bool)
+	c.readyFeedbackReads = make(map[mockMRKey]int)
 	c.nextMRIID = 100
 }
 
@@ -222,11 +231,48 @@ func (c *MockClient) GetAuthenticatedUser(context.Context) (string, error) {
 func (c *MockClient) GetMR(_ context.Context, projectPath string, iid int) (*MR, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	mr, ok := c.mrs[mockMRKey{Project: projectPath, IID: iid}]
+	key := mockMRKey{Project: projectPath, IID: iid}
+	mr, ok := c.mrs[key]
 	if !ok {
 		return nil, fmt.Errorf("mock: MR %s!%d not found", projectPath, iid)
 	}
+	if reads, marked := c.readyFeedbackReads[key]; marked {
+		view := *mr
+		view.DetailedMergeStatus = mockReadyMergeStatus(reads)
+		return &view, nil
+	}
 	return mr, nil
+}
+
+// mockReadyMergeStatus is the merge status an MR reports after Mark as ready:
+// "checking" until two feedback reads have been answered, "mergeable" after.
+func mockReadyMergeStatus(feedbackReads int) string {
+	if feedbackReads < 2 {
+		return mockMRStatusChecking
+	}
+	return mockMRStatusMergeable
+}
+
+// MarkMRReady strips the draft marker from the seeded MR's title. Afterwards
+// every read reports "checking" until GetMRFeedback has been called twice for
+// that MR; no other read advances the transition.
+func (c *MockClient) MarkMRReady(ctx context.Context, projectPath string, iid int) (*MR, error) {
+	key := mockMRKey{Project: projectPath, IID: iid}
+	return markMRReady(
+		func() (*MR, error) { return c.GetMR(ctx, projectPath, iid) },
+		func(title string) error {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			mr := c.mrs[key]
+			mr.Title = title
+			mr.Draft = false
+			if mr.DetailedMergeStatus == detailedMergeStatusDraft {
+				mr.DetailedMergeStatus = mockMRStatusMergeable
+			}
+			c.readyFeedbackReads[key] = 0
+			return nil
+		},
+	)
 }
 
 func (c *MockClient) FindMRByBranch(_ context.Context, projectPath, branch string) (*MR, error) {
@@ -368,6 +414,11 @@ func (c *MockClient) GetMRFeedback(ctx context.Context, projectPath string, iid 
 			pipelines[0].Jobs = jobs
 		}
 	}
+	c.mu.Lock()
+	if _, marked := c.readyFeedbackReads[mockMRKey{Project: projectPath, IID: iid}]; marked {
+		c.readyFeedbackReads[mockMRKey{Project: projectPath, IID: iid}]++
+	}
+	c.mu.Unlock()
 	return &MRFeedback{
 		MR:          mr,
 		Approvals:   approvals,
@@ -590,6 +641,9 @@ func (c *MockClient) MergeMR(_ context.Context, projectPath string, iid int, _ b
 	mr, ok := c.mrs[mockMRKey{Project: projectPath, IID: iid}]
 	if !ok {
 		return nil, fmt.Errorf("mock: MR %s!%d not found", projectPath, iid)
+	}
+	if isDraftMR(mr.Draft, mr.DetailedMergeStatus) {
+		return nil, ErrMRIsDraft
 	}
 	mr.State = gitlabStateMerged
 	now := time.Now().UTC()

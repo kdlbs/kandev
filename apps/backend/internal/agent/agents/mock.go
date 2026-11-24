@@ -41,12 +41,13 @@ type MockAgent struct {
 	// binary can be registered under multiple canonical routing provider
 	// IDs (e.g. "claude-acp", "codex-acp") in E2E mode. When empty the
 	// defaults ("mock-agent", "Mock Agent", "Mock") are returned.
-	id          string
-	name        string
-	displayName string
-	enabled     bool
-	binaryPath  string
-	supportsMCP bool
+	id           string
+	name         string
+	displayName  string
+	enabled      bool
+	binaryPath   string
+	supportsMCP  bool
+	displayOrder int
 }
 
 func NewMockAgent() *MockAgent {
@@ -67,7 +68,8 @@ func NewMockAgent() *MockAgent {
 				BufferMaxBytes:    DefaultBufferMaxBytes,
 			},
 		},
-		supportsMCP: true,
+		supportsMCP:  true,
+		displayOrder: 99,
 	}
 }
 
@@ -87,6 +89,9 @@ func NewMockAgentWithID(id, name, displayName string) *MockAgent {
 
 // SetEnabled enables or disables the mock agent at runtime.
 func (a *MockAgent) SetEnabled(enabled bool) { a.enabled = enabled }
+
+// SetDisplayOrder changes the listing priority for this mock instance.
+func (a *MockAgent) SetDisplayOrder(order int) { a.displayOrder = order }
 
 // SetBinaryPath overrides the mock-agent binary path.
 // Also updates the passthrough command to use the same binary.
@@ -131,7 +136,7 @@ func (a *MockAgent) Description() string {
 	return "Mock agent for testing. Generates simulated responses with all message types."
 }
 func (a *MockAgent) Enabled() bool     { return a.enabled }
-func (a *MockAgent) DisplayOrder() int { return 99 }
+func (a *MockAgent) DisplayOrder() int { return a.displayOrder }
 
 func (a *MockAgent) Logo(v LogoVariant) []byte {
 	if v == LogoDark {
@@ -192,11 +197,15 @@ func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
 }
 
 func (a *MockAgent) Runtime() *RuntimeConfig {
+	env := map[string]string{}
+	if a.ID() == "pi-acp" {
+		env["KANDEV_MOCK_PI_THINKING"] = "true"
+	}
 	canRecover := true
 	return &RuntimeConfig{
 		Cmd:             Cmd(mockAgentDefaultID).Build(),
 		WorkingDir:      "{workspace}",
-		Env:             map[string]string{},
+		Env:             env,
 		ResourceLimits:  ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
 		Protocol:        agent.ProtocolACP,
 		ProjectSkillDir: DefaultProjectSkillDir,

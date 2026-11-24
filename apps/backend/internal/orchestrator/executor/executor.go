@@ -18,7 +18,6 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
-	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
@@ -225,6 +224,18 @@ type sharedGroupWorkspaceBindingTaskSessionCreator interface {
 	CreateTaskSessionWithSharedGroupWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment, string) error
 }
 
+type inheritedTaskEnvironmentTransitionClaimer interface {
+	ClaimInheritedTaskEnvironmentTransition(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+	) (*models.TaskEnvironment, bool, bool, error)
+}
+
 type primarySessionTaskStateStore interface {
 	UpdateTaskStateIfPrimarySessionState(
 		context.Context,
@@ -246,6 +257,10 @@ var (
 	ErrTaskArchived            = errors.New("task is archived")
 	ErrStaleExecution          = errors.New("stale execution: no live execution in memory")
 	ErrAgentCommandMissing     = errors.New("existing execution has no agent command configured")
+	// ErrExecutorActorUnavailable means executor admission could not establish
+	// the user a resume must launch as, so the resume fails closed instead of
+	// launching without an identity.
+	ErrExecutorActorUnavailable = errors.New("resume requires an executor actor, but none is available")
 	// ErrSessionAdvancedToRunning reports that another launch advanced the
 	// session before this launch could persist its prepared runtime data.
 	ErrSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")
@@ -277,6 +292,31 @@ func (e *SessionStateSupersededError) Error() string {
 
 func (e *SessionStateSupersededError) Unwrap() error { return ErrSessionStateSuperseded }
 
+// ErrSessionStateSwitched means a concurrent workflow session switch took
+// ownership of the session before this launch could persist its runtime data.
+// The session is still live under the new owner, so the losing launch exits
+// without failing the task.
+var ErrSessionStateSwitched = errors.New("session taken over by a concurrent workflow session switch")
+
+// SessionStateSwitchedError records the state a workflow session switch left
+// behind when it superseded a stale launch.
+type SessionStateSwitchedError struct {
+	SessionID string
+	State     models.TaskSessionState
+}
+
+func (e *SessionStateSwitchedError) Error() string {
+	return fmt.Sprintf("%s: session %s is %s", ErrSessionStateSwitched, e.SessionID, e.State)
+}
+
+func (e *SessionStateSwitchedError) Unwrap() error { return ErrSessionStateSwitched }
+
+// IsSessionStateSwitched reports whether err is a launch that lost its session
+// to a concurrent workflow session switch.
+func IsSessionStateSwitched(err error) bool {
+	return errors.Is(err, ErrSessionStateSwitched)
+}
+
 // PromptResult contains the result of a prompt operation
 type PromptResult struct {
 	StopReason   string // The reason the agent stopped (e.g., "end_turn")
@@ -294,6 +334,10 @@ const (
 	ProbeResultSettled = client.ProbeResultSettled
 	ProbeResultUnknown = client.ProbeResultUnknown
 )
+
+// ErrAgentctlClientUnavailable indicates that a session's execution is being
+// replaced and its agentctl client is not currently available.
+var ErrAgentctlClientUnavailable = errors.New("agentctl client not available")
 
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
@@ -500,6 +544,7 @@ type RemoteStatusPollRequest struct {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
+	ExecutionGrade             string
 	ProfileID                  string
 	ProfileName                string
 	AgentID                    string
@@ -526,13 +571,18 @@ type LaunchAgentRequest struct {
 	// ResumePassthrough selects conversation resume independently of runtime ownership.
 	ResumePassthrough            bool
 	RequiredNativeConversationID string
+	RuntimeAdapterVersion        string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
 	InterruptedHarnessGeneration uint64
 	CandidateExecutionID         string
 	OnExecutionAllocated         func(context.Context, string) error
 
-	TaskID                string
+	TaskID string
+	// OwnerUserID is the authenticated application owner used for reusable
+	// repair identity. It is resolved from the actor or workspace owner and is
+	// never derived from child environment values.
+	OwnerUserID           string
 	TaskScope             lifecycle.TaskLaunchScope
 	SessionSettingsPolicy ResumeSettingsPolicy
 	WorkspaceID           string // Kandev workspace ID — used to build scratch dir for repo-less tasks
@@ -629,26 +679,27 @@ type LaunchAgentRequest struct {
 	CopyFiles string
 
 	// Worktree configuration for concurrent agent execution
-	UseWorktree             bool   // Whether to use a Git worktree for isolation
-	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID            string // Repository ID for worktree tracking
-	TaskRepositoryID        string // Exact task_repositories row for worktree recovery
-	RepositoryPath          string // Path to the main repository (for worktree creation)
-	BaseBranch              string // Base branch for the worktree (e.g., "main")
-	IntegrationRef          string // Verified terminal integration target for managed branch compaction
-	DefaultBranch           string // Repository's default_branch, used as a fallback when BaseBranch is missing
-	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution      *models.RemoteContribution
-	CheckoutOptions         *models.RepositoryCheckoutOptions
-	ContributionDestination *models.ContributionDestination
-	ComparisonTarget        *models.ComparisonTarget
-	QualifiedPRBase         *models.PRBase
-	WorktreeBranchPrefix    string // Branch prefix for worktree branches
-	WorktreeBranchTemplate  string // Branch name template for worktree branches
-	WorktreeBranchTicket    string // External ticket value for branch templates
-	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
-	RemoteSyncHandled       bool   // Provider-authenticated origin refresh already completed
+	UseWorktree              bool   // Whether to use a Git worktree for isolation
+	WorktreeID               string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID             string // Repository ID for worktree tracking
+	TaskRepositoryID         string // Exact task_repositories row for worktree recovery
+	RepositoryPath           string // Path to the main repository (for worktree creation)
+	BaseBranch               string // Base branch for the worktree (e.g., "main")
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string // Verified terminal integration target for managed branch compaction
+	DefaultBranch            string // Repository's default_branch, used as a fallback when BaseBranch is missing
+	CheckoutBranch           string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber                 int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	ContributionDestination  *models.ContributionDestination
+	ComparisonTarget         *models.ComparisonTarget
+	QualifiedPRBase          *models.PRBase
+	WorktreeBranchPrefix     string // Branch prefix for worktree branches
+	WorktreeBranchTemplate   string // Branch name template for worktree branches
+	WorktreeBranchTicket     string // External ticket value for branch templates
+	PullBeforeWorktree       bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled        bool   // Provider-authenticated origin refresh already completed
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
 	RefreshRepository func(context.Context) error
@@ -691,22 +742,23 @@ type WorkspaceFolderSpec struct {
 // the orchestrator package does not need to import lifecycle types into its
 // public API.
 type RepoSpec struct {
-	TaskRepositoryID        string
-	RepositoryID            string
-	RepositoryPath          string
-	RepositoryURL           string
-	RepoName                string
-	BaseBranch              string
-	IntegrationRef          string
-	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch          string
-	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution      *models.RemoteContribution
-	CheckoutOptions         *models.RepositoryCheckoutOptions
-	ContributionDestination *models.ContributionDestination
-	ComparisonTarget        *models.ComparisonTarget
-	QualifiedPRBase         *models.PRBase
-	WorktreeID              string
+	TaskRepositoryID         string
+	RepositoryID             string
+	RepositoryPath           string
+	RepositoryURL            string
+	RepoName                 string
+	BaseBranch               string
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string
+	DefaultBranch            string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch           string
+	PRNumber                 int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	ContributionDestination  *models.ContributionDestination
+	ComparisonTarget         *models.ComparisonTarget
+	QualifiedPRBase          *models.PRBase
+	WorktreeID               string
 	// AllowBranchReplacement permits explicit branch replacement for this repo.
 	AllowBranchReplacement bool
 	WorktreeBranchPrefix   string
@@ -780,7 +832,8 @@ type LaunchOptions struct {
 	// persisted the execution that will receive this turn, but before its
 	// process is started. Callers use this boundary to bind turn-scoped
 	// evidence to the execution that actually won admission.
-	OnExecutionAdmitted func(executionID string)
+	OnExecutionAdmitted   func(executionID string)
+	OnStartAttemptClaimed func(attemptID string)
 	// OnInitialPromptAccepted transfers startup ownership after lifecycle reports
 	// that the initial prompt was accepted by the provider. OnInitialPromptFailed
 	// closes that ownership when delivery fails before acceptance.
@@ -1037,6 +1090,13 @@ type CancelledResumeExecutionCleanupFunc func(
 // stop still runs, while orphan cleanup uses the record to avoid duplicating it.
 type ExecutionStopOwnerRegistrationFunc func(sessionID, agentExecutionID string, force bool)
 
+// ExecutionReplacementStopOwnerRegistrationFunc requires an exact-execution
+// teardown claim before a profile replacement stops the old execution.
+type ExecutionReplacementStopOwnerRegistrationFunc func(
+	ctx context.Context,
+	sessionID, agentExecutionID string,
+) bool
+
 // TaskReviewStateReconcileFunc is called when runtime work stopped and the
 // parent task should move to REVIEW only if no session is still STARTING/RUNNING.
 type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSessionID string)
@@ -1063,6 +1123,10 @@ type AgentProcessStartFailedFunc func(ctx context.Context, taskID, sessionID, ag
 // repositoryID identifies the repository whose launch failed. Useful for
 // creating repository-scoped user-facing status messages tied to launch errors.
 type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID string, err error)
+
+// LaunchFailureRecordedFunc runs after a pre-agent launch failure and its task
+// state have been persisted. The stamp identifies the exact session failure.
+type LaunchFailureRecordedFunc func(ctx context.Context, taskID, sessionID string, err error, stamp string)
 
 // CeilingReservationReleaseFunc releases the orchestrator's session-ceiling
 // reservation for a session this package just moved out of the counted
@@ -1096,13 +1160,6 @@ type PrimarySessionSetFunc func(ctx context.Context, taskID, sessionID string)
 // and invalidates updates captured before the reset.
 type ContextWindowResetFunc func(ctx context.Context, sessionID string) error
 
-// ExecutorTypeCapabilities provides behavioral queries about executor types.
-// Implemented by the lifecycle manager using its backend registry.
-type ExecutorTypeCapabilities interface {
-	RequiresCloneURL(executorType string) bool
-	ShouldApplyPreferredShell(executorType string) bool
-}
-
 // AttachmentReader is the narrow attachment-store seam used to stream a
 // claimed descriptor into a passthrough workspace.
 type AttachmentReader interface {
@@ -1128,17 +1185,20 @@ type CoordinatorLookup interface {
 
 // Executor manages agent execution for tasks
 type Executor struct {
-	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
-	executorAdmission         func(context.Context, string, string, string) (context.Context, error)
-	agentManager              AgentManagerClient
-	attachmentReader          AttachmentReader
-	repo                      executorStore
-	secretStore               secrets.SecretStore
-	shellPrefs                ShellPreferenceProvider
-	capabilities              ExecutorTypeCapabilities
-	gitlabCredentials         GitLabCredentialResolver
-	logger                    *logger.Logger
-	canvasesEnabled           bool
+	builtinPolicyReader           BuiltinPolicyReader
+	autonomousExecutorContext     func(context.Context, string, string) (context.Context, error)
+	executorAdmission             func(context.Context, string, string, string) (context.Context, error)
+	agentManager                  AgentManagerClient
+	attachmentReader              AttachmentReader
+	repo                          executorStore
+	secretStore                   secrets.SecretStore
+	shellPrefs                    ShellPreferenceProvider
+	managedRuntimeSingleUserOwner func() (string, bool)
+	capabilities                  ExecutorTypeCapabilities
+	gitlabCredentials             GitLabCredentialResolver
+	logger                        *logger.Logger
+	canvasesEnabled               bool
+	workspaceCollaborationEnabled bool
 
 	// coordinators resolves a coordinator conversation task to its
 	// coordinator and reports profile readiness, for the fail-closed
@@ -1200,6 +1260,7 @@ type Executor struct {
 	// orchestrator so coordinator graceful stop and launch cleanup cannot both
 	// tear down the same execution.
 	onExecutionCleanupClaim ExecutionCleanupClaimFunc
+	onStaleExecutionCleanup func(context.Context, string)
 	// Callback for cancelled resume startup cleanup, which must share the
 	// orchestrator's retryable exact-execution teardown claim.
 	onCancelledResumeExecutionCleanup CancelledResumeExecutionCleanupFunc
@@ -1207,6 +1268,8 @@ type Executor struct {
 	// Callback for registering explicit exact-execution teardown ownership before
 	// a legacy stop persists CANCELLED. The requested stop always runs.
 	onExecutionStopOwnerRegistration ExecutionStopOwnerRegistrationFunc
+	// Profile replacements abort when the exact stop cannot be coordinated with cancellation.
+	onExecutionReplacementStopOwnerRegistration ExecutionReplacementStopOwnerRegistrationFunc
 
 	// Callback for REVIEW reconciliation after runtime start failures. Set by the
 	// orchestrator so failed-start writes share the same serialized guard as
@@ -1224,7 +1287,8 @@ type Executor struct {
 
 	// Callback for session launch failures (pre-start). Allows orchestrator
 	// to emit user-friendly guidance for known failure patterns.
-	onLaunchFailed LaunchFailedFunc
+	onLaunchFailed          LaunchFailedFunc
+	onLaunchFailureRecorded LaunchFailureRecordedFunc
 
 	// Callback releasing the session-ceiling reservation for writes this
 	// package makes directly against the repository, bypassing
@@ -1300,20 +1364,6 @@ type RepoCloner interface {
 	BuildCloneURLWithHost(ctx context.Context, provider, host, owner, name string) (string, error)
 }
 
-type authenticatedRepoCloner interface {
-	EnsureWorkspaceClonedWithBasicAuth(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, username, password string,
-	) (string, error)
-}
-
-type strictAuthenticatedRepoCloner interface {
-	RefreshWorkspaceRepositoryWithBasicAuth(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, repositoryPath, username, password string,
-	) error
-}
-
 type remoteStateRepoCloner interface {
 	EnsureWorkspaceClonedWithCredentialRequestAndState(
 		ctx context.Context, request repoclone.GitCredentialRequest,
@@ -1325,24 +1375,11 @@ type remoteStateRepoCloner interface {
 	) (repoclone.RemoteRefState, error)
 }
 
-type remoteStateAuthenticatedRepoCloner interface {
-	EnsureWorkspaceClonedWithBasicAuthAndState(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, username, password string,
-	) (string, repoclone.RemoteRefState, error)
-	RefreshWorkspaceRepositoryWithBasicAuthAndState(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, repositoryPath, username, password string,
-	) (repoclone.RemoteRefState, error)
-}
-
 type localRemoteStateRepoCloner interface {
 	InspectLocalRepositoryRemoteRefState(
 		ctx context.Context, repositoryPath string,
 	) (repoclone.RemoteRefState, error)
 }
-
-const providerAzureDevOps = "azure_devops"
 
 func (e *Executor) ensureClonedWithWorkspaceAuth(
 	ctx context.Context, repo *models.Repository, cloneURL string,
@@ -1365,36 +1402,14 @@ func (e *Executor) ensureClonedWithWorkspaceAuthForSessionAndState(
 	if strings.EqualFold(repo.Provider, "gitlab") && e.gitlabCredentials != nil {
 		credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
 	}
-	if repo.Provider != providerAzureDevOps || !strings.HasPrefix(cloneURL, "https://") {
-		request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
-		if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
-			return stateCloner.EnsureWorkspaceClonedWithCredentialRequestAndState(
-				ctx, request, credentialHost, token,
-			)
-		}
-		path, err := e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+	if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
+		return stateCloner.EnsureWorkspaceClonedWithCredentialRequestAndState(
 			ctx, request, credentialHost, token,
 		)
-		return path, repoclone.RemoteRefStateHasRefs, err
 	}
-	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
-	if !ok || e.secretStore == nil {
-		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("azure DevOps repository clone authentication is unavailable")
-	}
-	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
-	if err != nil {
-		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps clone credential: %w", err)
-	}
-	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
-	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
-		return stateCloner.EnsureWorkspaceClonedWithBasicAuthAndState(
-			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
-			cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
-		)
-	}
-	path, err := authCloner.EnsureWorkspaceClonedWithBasicAuth(
-		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
-		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
+	path, err := e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+		ctx, request, credentialHost, token,
 	)
 	return path, repoclone.RemoteRefStateHasRefs, err
 }
@@ -1524,6 +1539,12 @@ func (e *Executor) SetCanvasesEnabled(enabled bool) {
 	e.canvasesEnabled = enabled
 }
 
+// SetWorkspaceCollaborationEnabled controls whether task MCP profiles expose
+// the report-only delivery mode. Applied before any new session launch.
+func (e *Executor) SetWorkspaceCollaborationEnabled(enabled bool) {
+	e.workspaceCollaborationEnabled = enabled
+}
+
 // SetOnTaskStateChange sets a callback for task state changes.
 // This allows the orchestrator to route state changes through the task service layer
 // which publishes WebSocket events. Without this, async goroutines would only update
@@ -1613,6 +1634,13 @@ func (e *Executor) SetOnExecutionStopOwnerRegistration(fn ExecutionStopOwnerRegi
 	e.onExecutionStopOwnerRegistration = fn
 }
 
+// SetOnExecutionReplacementStopOwnerRegistration sets the required replacement-stop claim.
+func (e *Executor) SetOnExecutionReplacementStopOwnerRegistration(
+	fn ExecutionReplacementStopOwnerRegistrationFunc,
+) {
+	e.onExecutionReplacementStopOwnerRegistration = fn
+}
+
 // SetOnTaskReviewStateReconcile sets the guarded task REVIEW reconciliation
 // callback used after resume/start failures.
 func (e *Executor) SetOnTaskReviewStateReconcile(fn TaskReviewStateReconcileFunc) {
@@ -1688,6 +1716,12 @@ func (e *Executor) SetOnContextWindowReset(fn ContextWindowResetFunc) {
 // the agent process has started.
 func (e *Executor) SetOnLaunchFailed(fn LaunchFailedFunc) {
 	e.onLaunchFailed = fn
+}
+
+// SetOnLaunchFailureRecorded sets a callback for a launch failure after both
+// session and task failure bookkeeping has completed.
+func (e *Executor) SetOnLaunchFailureRecorded(fn LaunchFailureRecordedFunc) {
+	e.onLaunchFailureRecorded = fn
 }
 
 // SetLaunchFailureReviewEligibility wires the narrow review-completion

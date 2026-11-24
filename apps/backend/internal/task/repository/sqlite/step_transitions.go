@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // ListTaskStepTransitions reads newest-first ledger rows using immutable IDs.
@@ -40,6 +41,42 @@ func (r *Repository) ListTaskStepTransitions(ctx context.Context, taskID string,
 		item.FromWorkflowStepID = nullableValue(fromStep)
 		item.ToWorkflowID = nullableValue(toWorkflow)
 		item.ToWorkflowStepID = nullableValue(toStep)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// ListTaskStepTransitionRecords reads oldest-first ledger rows with their
+// attribution, resuming after afterID. Step names come from a left join so a
+// removed or out-of-workspace step keeps its recorded identifier with a null
+// name. workspaceID is the workspace that authorized the read.
+func (r *Repository) ListTaskStepTransitionRecords(ctx context.Context, workspaceID, taskID string, afterID int64, limit int) ([]models.StepTransitionRecord, error) {
+	const query = `SELECT h.id, h.from_workflow_id, h.from_workflow_step_id, fs.name,
+			h.to_workflow_id, h.to_workflow_step_id, ts.name,
+			h.trigger, h.actor_kind, h.actor_id, h.occurred_at
+		FROM task_step_transitions h
+		LEFT JOIN workflows fw ON fw.id = h.from_workflow_id AND fw.workspace_id = ?
+		LEFT JOIN workflow_steps fs ON fs.id = h.from_workflow_step_id AND fs.workflow_id = h.from_workflow_id AND fw.id IS NOT NULL
+		LEFT JOIN workflows tw ON tw.id = h.to_workflow_id AND tw.workspace_id = ?
+		LEFT JOIN workflow_steps ts ON ts.id = h.to_workflow_step_id AND ts.workflow_id = h.to_workflow_id AND tw.id IS NOT NULL
+		WHERE h.task_id = ? AND h.id > ?
+		ORDER BY h.id ASC LIMIT ?`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), workspaceID, workspaceID, taskID, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list task step transition records: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]models.StepTransitionRecord, 0)
+	for rows.Next() {
+		var item models.StepTransitionRecord
+		var fromWorkflow, fromStep, fromName, toWorkflow, toStep, toName, actorID sql.NullString
+		if err := rows.Scan(&item.ID, &fromWorkflow, &fromStep, &fromName, &toWorkflow, &toStep, &toName,
+			&item.Trigger, &item.ActorKind, &actorID, &item.OccurredAt); err != nil {
+			return nil, fmt.Errorf("scan task step transition record: %w", err)
+		}
+		item.FromWorkflowID, item.FromWorkflowStepID, item.FromWorkflowStepName = nullableValue(fromWorkflow), nullableValue(fromStep), nullableValue(fromName)
+		item.ToWorkflowID, item.ToWorkflowStepID, item.ToWorkflowStepName = nullableValue(toWorkflow), nullableValue(toStep), nullableValue(toName)
+		item.ActorID = nullableValue(actorID)
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -106,9 +143,16 @@ type stepTransitionTx interface {
 // serialized against other writers of the same task row. On SQLite the
 // writer pool already serializes writers, so the plain read is sufficient.
 func (r *Repository) readTaskStepInTx(ctx context.Context, tx stepTransitionTx, taskID string) (workflowID, stepID string, found bool, err error) {
+	return r.readTaskStepInTxMode(ctx, tx, taskID, false)
+}
+
+func (r *Repository) readTaskStepInTxMode(ctx context.Context, tx stepTransitionTx, taskID string, noWait bool) (workflowID, stepID string, found bool, err error) {
 	query := `SELECT workflow_id, workflow_step_id FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR UPDATE`
+		if noWait {
+			query += ` NOWAIT`
+		}
 	}
 	var wf, step sql.NullString
 	err = tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&wf, &step)
@@ -119,6 +163,24 @@ func (r *Repository) readTaskStepInTx(ctx context.Context, tx stepTransitionTx, 
 		return "", "", false, err
 	}
 	return wf.String, step.String, true, nil
+}
+
+const taskStateSelectQuery = `SELECT state FROM tasks WHERE id = ?`
+
+// readTaskStateInTx reads the task's current business state inside the same
+// transaction and row lock as readTaskStepInTx. Automatic admission uses it to
+// make the transition's observed state a precondition: a concurrent status
+// write that committed after the caller's snapshot must win over the move.
+func (r *Repository) readTaskStateInTx(ctx context.Context, tx stepTransitionTx, taskID string) (v1.TaskState, error) {
+	query := taskStateSelectQuery
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var state string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&state); err != nil {
+		return "", err
+	}
+	return v1.TaskState(state), nil
 }
 
 // stepTransitionInput is the fully-resolved shape of one ledger row, with
@@ -263,6 +325,46 @@ func (r *Repository) getLatestTaskStepTransitionIDTx(ctx context.Context, tx ste
 		return 0, err
 	}
 	return id, nil
+}
+
+// GetTaskCompletionSnapshot returns one statement-consistent route snapshot
+// for completion result projection. State, workflow, step, queue placement,
+// latest entry, and primary session come from the same read.
+func (r *Repository) GetTaskCompletionSnapshot(ctx context.Context, taskID string) (models.TaskCompletionSnapshot, error) {
+	var snapshot models.TaskCompletionSnapshot
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT COALESCE(t.state, ''),
+		       COALESCE(t.workflow_id, ''),
+		       COALESCE(t.workflow_step_id, ''),
+		       COALESCE(t.queued_for_step_id, ''),
+		       COALESCE((
+		           SELECT id
+		           FROM task_step_transitions
+		           WHERE task_id = t.id
+		           ORDER BY id DESC
+		           LIMIT 1
+		       ), 0),
+		       COALESCE((
+		           SELECT id
+		           FROM task_sessions
+		           WHERE task_id = t.id AND is_primary = 1
+		           ORDER BY started_at DESC
+		           LIMIT 1
+		       ), '')
+		FROM tasks t
+		WHERE t.id = ?
+	`), taskID).Scan(
+		&snapshot.State,
+		&snapshot.WorkflowID,
+		&snapshot.StepID,
+		&snapshot.QueuedForStepID,
+		&snapshot.EntryID,
+		&snapshot.PrimarySessionID,
+	)
+	if err != nil {
+		return models.TaskCompletionSnapshot{}, err
+	}
+	return snapshot, nil
 }
 
 // GetTaskWorkflowStepEntry returns the task's current workflow and step with

@@ -309,8 +309,8 @@ Request page 1 under the new full key, even when the source display was a later
 page. Preserve the source page's identity instead of relabelling its rows as a
 new authoritative page. Disable page navigation based on that transitional
 snapshot until a current-query response establishes bounds. A transient failure
-keeps eligible display content and uses the existing refresh-error and Retry
-presentation; Retry must request page 1. Access denial clears content immediately.
+keeps eligible display content. After bounded recovery is exhausted, the refresh-error
+presentation offers Retry for page 1. Access denial clears content immediately.
 Gate both accepted/transitional server display and complete local projection on
 the authorized workspace during render. Collection or snapshot access-denied
 state must hide rows before effect-driven request cleanup, even when workspace
@@ -395,8 +395,11 @@ Loading, errors, continuation, and page status use localized copy in all six lan
 Use one shared task-query status presenter per visible task-list surface. Remove
 the duplicate archive banner for this query from desktop and phone paths; actual
 workspace-context failures remain separately typed and take presentation priority.
-Initial query failure replaces the list's loading state; refresh failure appears
-once alongside retained rows. Place status immediately below the view controls,
+Permanent initial failures or exhausted temporary recovery replace the loading state.
+Refresh warnings appear once alongside retained rows after automatic recovery ends unsuccessfully.
+The [Platform recovery design](../../platform/system-design/interactive-read-availability.md#quiet-task-refresh-recovery)
+owns retry limits, shared recovery admission, and warning timing.
+Place status immediately below the view controls,
 with pagination below the rows. An invalid filter names its one-based position,
 translated dimension where available, and correction; the existing Filters control
 remains available. Retry is for reads that can succeed unchanged. A screen-reader-only

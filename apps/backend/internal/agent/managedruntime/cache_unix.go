@@ -15,6 +15,45 @@ import (
 
 const managedRuntimeDirectoryOpenFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
 
+func openNpxInventoryDirectoryPath(path string) (*os.File, error) {
+	fd, err := openManagedRuntimeDirectoryPath(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), "npm-cache"), nil
+}
+
+func openNpxInventoryDirectory(parent *os.File, name string) (*os.File, error) {
+	if !validInventoryEntryName(name) {
+		return nil, errors.New("invalid npm execution entry name")
+	}
+	fd, err := unix.Openat(int(parent.Fd()), name, managedRuntimeDirectoryOpenFlags, 0)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), name), nil
+}
+
+func openNpxInventoryFile(parent *os.File, name string) (*os.File, error) {
+	if !validInventoryEntryName(name) {
+		return nil, errors.New("invalid npm execution entry name")
+	}
+	fd, err := unix.Openat(int(parent.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		_ = unix.Close(fd)
+		return nil, err
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		_ = unix.Close(fd)
+		return nil, errors.New("npm execution entry is not a regular file")
+	}
+	return os.NewFile(uintptr(fd), name), nil
+}
+
 // removeNpxExecutionTree walks the cache using directory descriptors. Every
 // component is opened with O_NOFOLLOW and the final unlink is relative to the
 // still-open _npx descriptor, so a concurrent replacement cannot redirect the

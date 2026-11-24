@@ -27,6 +27,7 @@ import { WorkspaceUnavailable } from "./workspace-unavailable";
 import { useTranslation } from "react-i18next";
 import { useWorkspaceRestoration } from "@/hooks/domains/session/use-workspace-restoration";
 import { t } from "@/lib/i18n";
+import { TerminalJumpToLatest } from "./terminal-jump-to-latest";
 
 type ShellTerminalProps = {
   sessionId?: string;
@@ -469,7 +470,11 @@ export function ShellTerminal({
   const terminalFontSize = useAppStore((s) => s.userSettings.terminalFontSize);
   const refs: TerminalRefs = { terminalRef, xtermRef, fitAddonRef, lastOutputLengthRef, outputRef };
   const [isTerminalReady, setIsTerminalReady] = useState(false);
-  const onTerminalReady = useCallback(() => setIsTerminalReady(true), []);
+  const [terminal, setTerminal] = useState<Terminal | null>(null);
+  const onTerminalReady = useCallback(() => {
+    setTerminal(xtermRef.current);
+    setIsTerminalReady(true);
+  }, []);
   useTerminalInit({
     refs,
     isReadOnlyMode,
@@ -542,6 +547,7 @@ export function ShellTerminal({
           </div>
         )}
         {searchBar}
+        <TerminalJumpToLatest terminal={terminal} enabled={!search.isOpen} />
       </div>
     );
   }

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	promptdto "github.com/kandev/kandev/internal/prompts/dto"
 	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -70,10 +71,11 @@ func TestHandleListSharedPrompts_MapsSummariesWithoutContent(t *testing.T) {
 
 	var payload struct {
 		SharedPrompts []struct {
-			Name         string `json:"name"`
-			Builtin      bool   `json:"builtin"`
-			ContentBytes int    `json:"content_bytes"`
-			Content      string `json:"content"`
+			Name            string `json:"name"`
+			Builtin         bool   `json:"builtin"`
+			AllowAgentEdits bool   `json:"allow_agent_edits"`
+			ContentBytes    int    `json:"content_bytes"`
+			Content         string `json:"content"`
 		} `json:"shared_prompts"`
 		Total int `json:"total"`
 	}
@@ -81,10 +83,12 @@ func TestHandleListSharedPrompts_MapsSummariesWithoutContent(t *testing.T) {
 	require.Len(t, payload.SharedPrompts, 2)
 	assert.Equal(t, "code-review", payload.SharedPrompts[0].Name)
 	assert.True(t, payload.SharedPrompts[0].Builtin)
+	assert.False(t, payload.SharedPrompts[0].AllowAgentEdits)
 	assert.Equal(t, len("review é"), payload.SharedPrompts[0].ContentBytes)
 	assert.Empty(t, payload.SharedPrompts[0].Content)
 	assert.Equal(t, "custom", payload.SharedPrompts[1].Name)
 	assert.False(t, payload.SharedPrompts[1].Builtin)
+	assert.True(t, payload.SharedPrompts[1].AllowAgentEdits)
 	assert.Equal(t, 2, payload.Total)
 	assert.NotContains(t, string(resp.Payload), "review é")
 }
@@ -116,10 +120,42 @@ func TestHandleGetSharedPrompt_TrimsNameAndOmitsInternalID(t *testing.T) {
 	assert.Equal(t, "code-review", payload["name"])
 	assert.Equal(t, "Review the change.", payload["content"])
 	assert.Equal(t, true, payload["builtin"])
+	assert.Equal(t, false, payload["allow_agent_edits"])
 	assert.Equal(t, float64(len("Review the change.")), payload["content_bytes"])
 	assert.Equal(t, "2025-01-02T02:04:05Z", payload["created_at"])
 	assert.Equal(t, "2025-01-02T03:04:05Z", payload["updated_at"])
 	assert.NotContains(t, payload, "id")
+}
+
+func TestSharedPromptReadOmitsStaleRepositoryPathForDetachedOverride(t *testing.T) {
+	reader := &sharedPromptReaderStub{prompt: &promptmodels.Prompt{
+		Name: "hook", Content: "Mine", Source: promptmodels.PromptSourceOverride,
+		SourcePath: "p/old-hook.md",
+	}}
+	h := &Handlers{promptReader: reader, logger: testLogger(t)}
+	read := func() sharedPromptRead {
+		resp, err := h.handleGetSharedPrompt(context.Background(), makeWSMessage(t, ws.ActionMCPGetSharedPrompt, map[string]string{
+			"name": "hook",
+		}))
+		require.NoError(t, err)
+		var result sharedPromptRead
+		require.NoError(t, json.Unmarshal(resp.Payload, &result))
+		return result
+	}
+
+	detached := read()
+	assert.Empty(t, promptdto.FromPrompt(reader.prompt).SourcePath)
+	assert.Empty(t, detached.SourcePath)
+	assert.Contains(t, detached.EditGuidance, "Only the local version remains in use")
+	assert.Contains(t, detached.EditGuidance, "repository file is no longer available")
+
+	reader.prompt = &promptmodels.Prompt{
+		Name: "hook", Content: "Mine", AlternateContent: "Repo",
+		Source: promptmodels.PromptSourceOverride, SourcePath: "p/current/hook.md",
+	}
+	linked := read()
+	assert.Equal(t, "p/current/hook.md", linked.SourcePath)
+	assert.NotContains(t, linked.EditGuidance, "no longer available")
 }
 
 func TestHandleGetSharedPrompt_RejectsBlankAndMapsNotFound(t *testing.T) {

@@ -82,6 +82,9 @@ func (s *Service) install(ctx context.Context, r io.Reader, review *preparedThem
 	lock := s.lifecycleLocks.lockFor(result.Manifest.ID)
 	lock.Lock()
 	defer lock.Unlock()
+	captureLock := s.formatterLifecycleLock(result.Manifest.ID)
+	captureLock.Lock()
+	defer captureLock.Unlock()
 	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
 	if rec, err, handled := s.installThemeProfile(result, oldRec, review); handled {
 		return rec, err
@@ -91,7 +94,6 @@ func (s *Service) install(ctx context.Context, r io.Reader, review *preparedThem
 }
 
 func (s *Service) installRuntimePackage(ctx context.Context, result *pkgtar.InstallResult, oldRec *store.Record, hadOldRec bool, unlockCatalog func()) (*store.Record, error) {
-
 	if (hadOldRec && len(oldRec.ExecutorProviders) > 0) || len(result.Manifest.ExecutorProviders) > 0 {
 		s.closeExecutorProviderAdmission(result.Manifest.ID)
 		defer s.reopenExecutorProviderAdmissionIfActive(result.Manifest.ID)
@@ -126,8 +128,6 @@ func (s *Service) installRuntimePackage(ctx context.Context, result *pkgtar.Inst
 	if err := s.persistInstalledRecord(rec, oldRec, hadOldRec, wasRunning, result.InstallPath); err != nil {
 		return nil, err
 	}
-
-	s.registry.Add(rec)
 	unlockCatalog()
 
 	activateErr := s.activate(rec)
@@ -183,11 +183,16 @@ func (s *Service) preparePluginReplacement(ctx context.Context, result *pkgtar.I
 }
 
 func (s *Service) persistInstalledRecord(rec, oldRec *store.Record, hadOldRec, wasRunning bool, installPath string) error {
+	// Hold the policy lease until the new installation version is visible in the registry.
+	s.agentToolPolicyMu.Lock()
+	rec.AgentToolPolicyVersion = uuid.NewString()
 	if err := s.store.Save(rec); err != nil {
+		s.agentToolPolicyMu.Unlock()
 		s.rollbackFailedInstall(installPath, oldRec, hadOldRec && wasRunning)
 		return fmt.Errorf("plugins: persist installed record: %w", err)
 	}
 	if err := s.reviewInstalledApprovals(rec); err != nil {
+		s.agentToolPolicyMu.Unlock()
 		if hadOldRec {
 			if restoreErr := s.store.Save(oldRec); restoreErr != nil {
 				s.log.Warn("plugins: failed to restore old plugin record after approval review error",
@@ -204,6 +209,8 @@ func (s *Service) persistInstalledRecord(rec, oldRec *store.Record, hadOldRec, w
 		s.rollbackFailedInstall(installPath, oldRec, hadOldRec && wasRunning)
 		return err
 	}
+	s.registry.Add(rec)
+	s.agentToolPolicyMu.Unlock()
 	return nil
 }
 
@@ -425,6 +432,9 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	captureLock := s.formatterLifecycleLock(id)
+	captureLock.Lock()
+	defer captureLock.Unlock()
 	rec, err := s.Get(id)
 	if err != nil {
 		return err
@@ -432,6 +442,7 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	if rec.IsThemeDistribution() {
 		return s.uninstallTheme(rec)
 	}
+	s.filePreviewGrantStore().revokeInstallation(rec.InstallationID)
 	if len(rec.ExecutorProviders) > 0 {
 		s.closeExecutorProviderAdmission(id)
 		defer s.reopenExecutorProviderAdmissionIfActive(id)
@@ -472,6 +483,10 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin user state: %w", err)
 	}
+	if err := s.deleteInstallationIdentityLinks(ctx, rec.InstallationID); err != nil {
+		s.reconcileAbortedUninstall(id, wasRunning)
+		return fmt.Errorf("plugins: uninstall aborted, could not remove linked accounts: %w", err)
+	}
 	if err := s.deletePluginAgentConversations(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin agent conversations: %w", err)
@@ -491,6 +506,7 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		return err
 	}
 	s.registry.Remove(id)
+	s.notifySidebarGroupingCatalog(id)
 	s.deletePluginState(id)
 	s.notifyDeliverer()
 	s.notifyAgentToolCatalogChanged()

@@ -1,18 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import Link from "@/components/routing/app-link";
-import {
-  IconAlertTriangle,
-  IconDownload,
-  IconLoader2,
-  IconPlus,
-  IconRefresh,
-  IconTerminal2,
-} from "@tabler/icons-react";
+import { IconAlertTriangle, IconDownload } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
@@ -39,6 +32,7 @@ import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
 import { AgentProfilesSubList } from "@/components/settings/agents/agent-profiles-section";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import { CustomTUIMcpCard } from "@/components/settings/custom-tui-mcp-card";
+import { InstalledAgentsHeader } from "@/components/settings/installed-agents-header";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
 import { DynamicAgentsCard } from "@/components/settings/dynamic-agents-card";
 import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
@@ -49,9 +43,19 @@ import {
   orphanedAgents,
   type DiscoveredAgent,
 } from "@/lib/settings/agent-display-order";
-import { AgentRuntimePolicies } from "@/components/settings/agent-runtime-policies";
-import { AgentOptionsDialog } from "@/app/settings/agents/agent-options-dialog";
-import type { AgentDiscovery, Agent, AvailableAgent, RuntimeUpdate } from "@/lib/types/http";
+import { RuntimePolicyControllers } from "@/components/settings/agent-runtime-policies";
+import { AgentRuntimeUpdateManager } from "@/components/settings/agent-runtime-update-manager";
+import { AgentsRuntimeEntry } from "@/components/settings/agents-runtime-entry";
+import { RuntimeUpdateTargetActions } from "@/components/settings/runtime-update-target-actions";
+import { useAgentRuntimeUpdateManager } from "@/hooks/domains/settings/use-agent-runtime-update-manager";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import type {
+  AgentDiscovery,
+  Agent,
+  AntigravityRuntimeVariant,
+  AvailableAgent,
+  RuntimeUpdate,
+} from "@/lib/types/http";
 import { useProfileOrder } from "@/hooks/domains/settings/use-profile-order";
 import { getAgentListResourceScope } from "@/hooks/domains/settings/agent-list-resource";
 
@@ -67,6 +71,8 @@ type InstalledAgentsSectionProps = {
   savedAgentsByName: Map<string, Agent>;
   resolveDisplayName: (name: string) => string;
   resolveCapabilityStatus: (name: string) => string | undefined;
+  resolveLoginCommand: (name: string) => AgentDiscovery["login_command"];
+  resolveRuntimeVariant: (name: string) => AntigravityRuntimeVariant | undefined;
   resolveRuntimeUpdate: (name: string) => RuntimeUpdate | undefined;
   resolveRuntimeUpdateStatus: (name: string) => AgentUpdateStatus | undefined;
   installJobs: Record<string, InstallJob>;
@@ -87,61 +93,26 @@ type InstalledAgentsSectionProps = {
   setTuiDialogOpen: (open: boolean) => void;
   handleRescan: () => Promise<void>;
   canManage: boolean;
+  onOpenRuntime: (agentName: string, opener: HTMLElement) => void;
 };
-function InstalledAgentsHeader({
-  rescanning,
-  onOpenShell,
-  onOpenTuiDialog,
-  onRescan,
-}: {
-  rescanning: boolean;
-  onOpenShell: () => void;
-  onOpenTuiDialog?: () => void;
-  onRescan: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex w-full flex-wrap gap-2 md:w-auto" data-testid="installed-agents-actions">
-      <AgentOptionsDialog />
-      <Button
-        variant="outline"
-        onClick={onOpenShell}
-        className={installedAgentsActionClassName}
-        data-testid="open-host-shell"
-      >
-        <IconTerminal2 className="h-4 w-4 mr-2" />
-        {t("agents:terminal")}
-      </Button>
-      <Button
-        variant="outline"
-        onClick={onRescan}
-        disabled={rescanning}
-        className={installedAgentsActionClassName}
-        data-testid="rescan-agents-button"
-      >
-        {rescanning ? (
-          <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
-        ) : (
-          <IconRefresh className="h-4 w-4 mr-2" />
-        )}
-        {t("agents:rescan")}
-      </Button>
-      {onOpenTuiDialog && (
-        <Button
-          variant="outline"
-          onClick={onOpenTuiDialog}
-          className={installedAgentsActionClassName}
-          data-testid="new-agent-button"
-        >
-          <IconPlus className="h-4 w-4 mr-2" />
-          {t("agents:addTuiAgent")}
-        </Button>
-      )}
-    </div>
-  );
-}
 
 type AgentCard = { key: string; agent: AgentDiscovery; detected: boolean };
+
+function createAgentSettingsResolvers<TStatus>(
+  availableAgents: AvailableAgent[],
+  statusByAgent: Record<string, TStatus | undefined>,
+) {
+  const agentsByName = new Map(availableAgents.map((agent) => [agent.name, agent]));
+  const findAgent = (name: string) => agentsByName.get(name);
+  return {
+    resolveDisplayName: (name: string) => findAgent(name)?.display_name ?? name,
+    resolveCapabilityStatus: (name: string) => findAgent(name)?.model_config?.status,
+    resolveLoginCommand: (name: string) => findAgent(name)?.login_command,
+    resolveRuntimeVariant: (name: string) => findAgent(name)?.model_config?.runtime_variant,
+    resolveRuntimeUpdate: (name: string) => findAgent(name)?.runtime_update,
+    resolveRuntimeUpdateStatus: (name: string) => statusByAgent[name],
+  };
+}
 
 /**
  * Every agent worth a card, in the backend's rank order: the ones the scan
@@ -161,7 +132,7 @@ function agentCards(
   const orphans: AgentCard[] = orphanedAgents(installedAgents, savedAgents)
     .filter((agent) => agent.name !== DYNAMIC_AGENT_NAME)
     .map((agent) => ({
-      key: agent.id,
+      key: agent.name,
       agent: {
         name: agent.name,
         supports_mcp: agent.supports_mcp,
@@ -187,6 +158,8 @@ function renderInstalledAgentCards({
   resolveDisplayName,
   nativeCodexAvailable,
   resolveCapabilityStatus,
+  resolveLoginCommand,
+  resolveRuntimeVariant,
   resolveRuntimeUpdate,
   resolveRuntimeUpdateStatus,
   installJobs,
@@ -196,11 +169,14 @@ function renderInstalledAgentCards({
   startUpdate,
   handleRescan,
   requestProfileOrder,
+  onOpenRuntime,
 }: Pick<
   InstalledAgentsSectionProps,
   | "savedAgentsByName"
   | "resolveDisplayName"
   | "resolveCapabilityStatus"
+  | "resolveLoginCommand"
+  | "resolveRuntimeVariant"
   | "resolveRuntimeUpdate"
   | "resolveRuntimeUpdateStatus"
   | "installJobs"
@@ -209,6 +185,7 @@ function renderInstalledAgentCards({
   | "previewUpdate"
   | "startUpdate"
   | "handleRescan"
+  | "onOpenRuntime"
 > & {
   cards: AgentCard[];
   nativeCodexAvailable: boolean;
@@ -223,6 +200,8 @@ function renderInstalledAgentCards({
           savedAgent={savedAgentsByName.get(agent.name)}
           displayName={resolveDisplayName(agent.name)}
           profileCreationDisabled={agent.name === "codex-app-server" && !nativeCodexAvailable}
+          runtimeVariant={resolveRuntimeVariant(agent.name)}
+          loginCommand={resolveLoginCommand(agent.name)}
           {...(detected
             ? {
                 capabilityStatus: resolveCapabilityStatus(agent.name),
@@ -232,6 +211,7 @@ function renderInstalledAgentCards({
                 updateJob: updateJobs[agent.name],
                 onPreview: canManage ? previewUpdate : undefined,
                 onUpdate: canManage ? startUpdate : undefined,
+                onOpenRuntime,
                 onAuthComplete: () => void handleRescan(),
               }
             : {})}
@@ -258,6 +238,8 @@ function InstalledAgentsSection({
   savedAgentsByName,
   resolveDisplayName,
   resolveCapabilityStatus,
+  resolveLoginCommand,
+  resolveRuntimeVariant,
   resolveRuntimeUpdate,
   resolveRuntimeUpdateStatus,
   installJobs,
@@ -267,6 +249,7 @@ function InstalledAgentsSection({
   setTuiDialogOpen,
   handleRescan,
   canManage,
+  onOpenRuntime,
 }: InstalledAgentsSectionProps) {
   const { t } = useTranslation();
   const nativeCodexAvailable = useAppStore((state) => state.features?.codexAppServer ?? false);
@@ -331,6 +314,8 @@ function InstalledAgentsSection({
         resolveDisplayName,
         nativeCodexAvailable,
         resolveCapabilityStatus,
+        resolveLoginCommand,
+        resolveRuntimeVariant,
         resolveRuntimeUpdate,
         resolveRuntimeUpdateStatus,
         installJobs,
@@ -340,8 +325,42 @@ function InstalledAgentsSection({
         startUpdate,
         handleRescan,
         requestProfileOrder,
+        onOpenRuntime,
       })}
     </SettingsGroup>
+  );
+}
+
+function InstalledAgentsSettingsSection({
+  state,
+  manager,
+}: {
+  state: ReturnType<typeof useAgentPageState>;
+  manager: ReturnType<typeof useAgentRuntimeUpdateManager>;
+}) {
+  return (
+    <InstalledAgentsSection
+      canManage={state.canManage}
+      installedAgents={state.installedAgents}
+      discoveryOrder={state.discoveryAgents}
+      savedAgents={state.savedAgents}
+      discoveryLoading={state.discoveryLoading}
+      rescanning={state.rescanning}
+      savedAgentsByName={state.savedAgentsByName}
+      resolveDisplayName={state.resolveDisplayName}
+      resolveCapabilityStatus={state.resolveCapabilityStatus}
+      resolveLoginCommand={state.resolveLoginCommand}
+      resolveRuntimeVariant={state.resolveRuntimeVariant}
+      resolveRuntimeUpdate={state.resolveRuntimeUpdate}
+      resolveRuntimeUpdateStatus={state.resolveRuntimeUpdateStatus}
+      installJobs={state.installJobs}
+      updateJobs={state.updateJobs}
+      previewUpdate={state.previewUpdate}
+      startUpdate={state.startUpdate}
+      setTuiDialogOpen={state.setTuiDialogOpen}
+      handleRescan={state.handleRescan}
+      onOpenRuntime={manager.openRuntime}
+    />
   );
 }
 
@@ -359,8 +378,12 @@ function useAgentPageState() {
   // page requires org.config.manage, which only an administrator holds.
   const canManage = useIsAdmin();
   const { updateJobs, previewUpdate, startUpdate } = useAgentRuntimeUpdates();
-  const { refresh: refreshRuntimeUpdateStatuses, statusByAgent } =
-    useAgentRuntimeUpdateStatuses(updateJobs);
+  const {
+    refresh: refreshRuntimeUpdateStatuses,
+    statusByAgent,
+    loading: runtimeStatusLoading,
+    refreshFailed: runtimeStatusFailed,
+  } = useAgentRuntimeUpdateStatuses(updateJobs);
 
   const handleStartUpdate: InstalledAgentsSectionProps["startUpdate"] = async (...args) => {
     const result = await startUpdate(...args);
@@ -375,13 +398,7 @@ function useAgentPageState() {
     () => new Map(savedAgents.map((agent: Agent) => [agent.name, agent])),
     [savedAgents],
   );
-  const resolveDisplayName = (name: string) =>
-    availableAgents.find((item: AvailableAgent) => item.name === name)?.display_name ?? name;
-  const resolveCapabilityStatus = (name: string) =>
-    availableAgents.find((item: AvailableAgent) => item.name === name)?.model_config?.status;
-  const resolveRuntimeUpdate = (name: string) =>
-    availableAgents.find((item: AvailableAgent) => item.name === name)?.runtime_update;
-  const resolveRuntimeUpdateStatus = (name: string) => statusByAgent[name];
+  const agentResolvers = createAgentSettingsResolvers(availableAgents, statusByAgent);
 
   const handleRescan = async () => {
     if (rescanning) {
@@ -432,10 +449,11 @@ function useAgentPageState() {
     rescanning,
     tuiDialogOpen,
     setTuiDialogOpen,
-    resolveDisplayName,
-    resolveCapabilityStatus,
-    resolveRuntimeUpdate,
-    resolveRuntimeUpdateStatus,
+    ...agentResolvers,
+    statusByAgent,
+    runtimeStatusLoading,
+    runtimeStatusFailed,
+    refreshRuntimeUpdateStatuses,
     handleRescan,
     handleCreateCustomTUI,
     installJobs,
@@ -445,37 +463,22 @@ function useAgentPageState() {
   };
 }
 
-export default function AgentsSettingsPage() {
-  const {
-    canManage,
-    savedAgents,
-    installedAgents,
-    discoveryAgents,
-    savedAgentsByName,
-    discoveryLoading,
-    rescanning,
-    tuiDialogOpen,
-    setTuiDialogOpen,
-    resolveDisplayName,
-    resolveCapabilityStatus,
-    resolveRuntimeUpdate,
-    resolveRuntimeUpdateStatus,
-    handleRescan,
-    handleCreateCustomTUI,
-    installJobs,
-    updateJobs,
-    previewUpdate,
-    startUpdate,
-  } = useAgentPageState();
+function AgentsPageHeader({
+  canManage,
+  runtimeEntry,
+}: {
+  canManage: boolean;
+  runtimeEntry: ReactNode;
+}) {
   const { t } = useTranslation();
-
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold">{t("common:agents")}</h2>
-          <p className="text-sm text-muted-foreground mt-1">{t("agents:pageDescription")}</p>
-        </div>
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h2 className="text-2xl font-bold">{t("common:agents")}</h2>
+        <p className="text-sm text-muted-foreground mt-1">{t("agents:pageDescription")}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {runtimeEntry}
         {/* The page's primary action: everything else on this page manages what
             is already installed. */}
         {canManage && (
@@ -491,41 +494,153 @@ export default function AgentsSettingsPage() {
           </Button>
         )}
       </div>
-
-      <Separator />
-
-      <InstalledAgentsSection
-        canManage={canManage}
-        installedAgents={installedAgents}
-        discoveryOrder={discoveryAgents}
-        savedAgents={savedAgents}
-        discoveryLoading={discoveryLoading}
-        rescanning={rescanning}
-        savedAgentsByName={savedAgentsByName}
-        resolveDisplayName={resolveDisplayName}
-        resolveCapabilityStatus={resolveCapabilityStatus}
-        resolveRuntimeUpdate={resolveRuntimeUpdate}
-        resolveRuntimeUpdateStatus={resolveRuntimeUpdateStatus}
-        installJobs={installJobs}
-        updateJobs={updateJobs}
-        previewUpdate={previewUpdate}
-        startUpdate={startUpdate}
-        setTuiDialogOpen={setTuiDialogOpen}
-        handleRescan={handleRescan}
-      />
-
-      <AgentRuntimePolicies
-        hasRuntimeControl={(name) =>
-          installedAgents.some((agent) => agent.name === name) &&
-          Boolean(resolveRuntimeUpdate(name)?.supported)
-        }
-      />
-
-      <AddTUIAgentDialog
-        open={tuiDialogOpen}
-        onOpenChange={setTuiDialogOpen}
-        onSubmit={handleCreateCustomTUI}
-      />
     </div>
+  );
+}
+
+function AgentsRuntimeManagerOverlay({
+  manager,
+  isMobile,
+  statuses,
+  statusLoading,
+  statusFailed,
+  updateJobs,
+  installJobs,
+  canManage,
+  hasRuntimeControl,
+  resolveDisplayName,
+  resolveRuntimeUpdate,
+  previewUpdate,
+  startUpdate,
+  refresh,
+}: {
+  manager: ReturnType<typeof useAgentRuntimeUpdateManager>;
+  isMobile: boolean;
+  statuses: AgentUpdateStatus[];
+  statusLoading: boolean;
+  statusFailed: boolean;
+  updateJobs: Record<string, AgentUpdateJob>;
+  installJobs: Record<string, InstallJob>;
+  canManage: boolean;
+  hasRuntimeControl: (agentName: string) => boolean;
+  resolveDisplayName: (agentName: string) => string;
+  resolveRuntimeUpdate: (agentName: string) => RuntimeUpdate | undefined;
+  previewUpdate: (
+    agentName: string,
+    targetVersion?: string,
+    useDefault?: boolean,
+    targetFamily?: "v2",
+  ) => Promise<AgentUpdatePreview>;
+  startUpdate: (
+    agentName: string,
+    targetVersion: string,
+    useDefault?: boolean,
+    targetFamily?: "v2" | AgentUpdateMode,
+    expectedRuntimeRevision?: number,
+  ) => Promise<AgentUpdateJob>;
+  refresh: () => Promise<boolean>;
+}) {
+  if (manager.view.kind === "closed") return null;
+  return (
+    <AgentRuntimeUpdateManager
+      view={manager.view}
+      isMobile={isMobile}
+      statuses={statuses}
+      statusLoading={statusLoading}
+      refreshFailed={statusFailed}
+      updateJobs={updateJobs}
+      installJobs={installJobs}
+      canManage={canManage}
+      hasRuntimeControl={hasRuntimeControl}
+      resolveDisplayName={resolveDisplayName}
+      resolveRuntimeUpdate={resolveRuntimeUpdate}
+      previewUpdate={previewUpdate}
+      startUpdate={startUpdate}
+      refresh={refresh}
+      onClose={manager.close}
+      onBack={manager.back}
+      onOpenRuntime={manager.openRuntime}
+    />
+  );
+}
+
+export default function AgentsSettingsPage() {
+  const state = useAgentPageState();
+  const {
+    canManage,
+    installedAgents,
+    tuiDialogOpen,
+    setTuiDialogOpen,
+    resolveDisplayName,
+    resolveRuntimeUpdate,
+    statusByAgent,
+    runtimeStatusLoading,
+    runtimeStatusFailed,
+    refreshRuntimeUpdateStatuses,
+    handleCreateCustomTUI,
+    installJobs,
+    updateJobs,
+    previewUpdate,
+    startUpdate,
+  } = state;
+  const { isMobile } = useResponsiveBreakpoint();
+  const manager = useAgentRuntimeUpdateManager();
+  const statuses = useMemo(() => Object.values(statusByAgent), [statusByAgent]);
+  const hasRuntimeControl = (name: string) =>
+    installedAgents.some((agent) => agent.name === name) &&
+    Boolean(resolveRuntimeUpdate(name)?.supported);
+  const entry = (
+    <AgentsRuntimeEntry
+      statuses={statuses}
+      installJobs={installJobs}
+      updateJobs={updateJobs}
+      hasRuntimeControl={hasRuntimeControl}
+      isMobile={isMobile}
+      onOpen={manager.openOverview}
+      buttonRef={manager.headerButtonRef}
+    />
+  );
+
+  return (
+    <RuntimePolicyControllers statuses={statuses}>
+      <div className="space-y-8">
+        <AgentsPageHeader canManage={canManage} runtimeEntry={!isMobile ? entry : null} />
+
+        {isMobile && entry}
+
+        <Separator />
+
+        <InstalledAgentsSettingsSection state={state} manager={manager} />
+
+        <AgentsRuntimeManagerOverlay
+          manager={manager}
+          isMobile={isMobile}
+          statuses={statuses}
+          statusLoading={runtimeStatusLoading}
+          statusFailed={runtimeStatusFailed}
+          updateJobs={updateJobs}
+          installJobs={installJobs}
+          canManage={canManage}
+          hasRuntimeControl={hasRuntimeControl}
+          resolveDisplayName={resolveDisplayName}
+          resolveRuntimeUpdate={resolveRuntimeUpdate}
+          previewUpdate={previewUpdate}
+          startUpdate={startUpdate}
+          refresh={refreshRuntimeUpdateStatuses}
+        />
+
+        <AddTUIAgentDialog
+          open={tuiDialogOpen}
+          onOpenChange={setTuiDialogOpen}
+          onSubmit={handleCreateCustomTUI}
+        />
+
+        <RuntimeUpdateTargetActions
+          statuses={statuses}
+          onOpenOverview={() => manager.openOverview()}
+          onOpenRuntime={(agentName) => manager.openRuntime(agentName)}
+        />
+      </div>
+    </RuntimePolicyControllers>
   );
 }

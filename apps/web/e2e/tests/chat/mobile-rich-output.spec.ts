@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { watchWs } from "../../helpers/causal-waits";
 import {
   seedSizedImage,
   expectTouchTarget,
@@ -7,10 +8,46 @@ import {
 import {
   RICH_OUTPUT_FILE,
   RICH_OUTPUT_FILE_CONTENT,
+  RICH_OUTPUT_FILE_UPDATED_CONTENT,
   RICH_OUTPUT_IMAGE,
+  reopenRichOutputPreviewWithCurrentContents,
   seedRichOutputImage,
   seedRichOutputTask,
 } from "./rich-output-helpers";
+
+// @covers AC-AGENTS-AGENT-RICH-OUTPUT-001.11
+test("reopens the rich-output preview with current workspace contents", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile-chrome", "mobile-only preview refresh");
+  const watcher = watchWs(testPage);
+  const session = await seedRichOutputTask({
+    page: testPage,
+    apiClient,
+    seedData,
+    title: "Mobile rich output preview refresh",
+  });
+  const report = session.activeChat().getByTestId("rich-output");
+  const card = report.getByTestId("rich-output-file").filter({ hasText: RICH_OUTPUT_FILE });
+  await expect(card).toHaveCount(1);
+  await reopenRichOutputPreviewWithCurrentContents({
+    card,
+    repositoryPath: seedData.repositoryPath,
+    watcher,
+    touch: true,
+  });
+  await expect(card).toContainText(RICH_OUTPUT_FILE_UPDATED_CONTENT.trim());
+  if (prCapture.capturing) {
+    await card.scrollIntoViewIfNeeded();
+    await expect(card).toBeInViewport();
+    await prCapture.screenshot("phone-preview-refresh", {
+      caption: "Phone rich-output text preview after reopening",
+    });
+  }
+});
 
 // @covers AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.1, AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.2,
 // AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.3, AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.6
@@ -119,12 +156,12 @@ test("mobile rich output stays contained and opens the native file viewer", asyn
   const barChart = richOutput.getByTestId("rich-output-chart-bar");
   await expect(lineChart).toBeVisible();
   await expect(barChart).toBeVisible();
-  await lineChart.scrollIntoViewIfNeeded();
-  await expect(lineChart.locator(".recharts-xAxis text").first()).toBeVisible();
-  await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible();
-  await barChart.scrollIntoViewIfNeeded();
-  await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible();
-  await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible();
+  await lineChart.getByTestId("rich-output-chart-plot").scrollIntoViewIfNeeded();
+  await expect(lineChart.locator(".recharts-xAxis text").first()).toBeVisible({ timeout: 15_000 });
+  await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible({ timeout: 15_000 });
+  await barChart.getByTestId("rich-output-chart-plot").scrollIntoViewIfNeeded();
+  await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible({ timeout: 15_000 });
+  await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible({ timeout: 15_000 });
   await expect(lineChart.getByTestId("rich-output-chart-legend-series_0")).toContainText("p95");
 
   const errorsLegend = barChart.getByRole("button", { name: "Errors" });

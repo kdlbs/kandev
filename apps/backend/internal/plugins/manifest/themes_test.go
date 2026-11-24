@@ -40,6 +40,8 @@ func TestThemeManifestRejectsMixedAndUnknownFields(t *testing.T) {
 		"runtime:\n  type: binary\n  executables: {linux-amd64: server/main}\n",
 		"ui:\n  bundle: ui/main.js\n",
 		"capabilities:\n  secrets: true\n",
+		"notification_formatters: [{}]\n",
+		"sidebar_groupings: [{}]\n",
 		"future_contribution: dangerous\n",
 	} {
 		t.Run(suffix, func(t *testing.T) {
@@ -81,7 +83,13 @@ func TestThemeManifestVariants(t *testing.T) {
 
 func TestThemeProfileFieldDecisions(t *testing.T) {
 	// Every new manifest field needs an explicit metadata/contribution decision.
-	denied := map[string]bool{"Icon": true, "BaseURL": true, "Endpoints": true, "Capabilities": true, "AutomationConditions": true, "Webhooks": true, "Actions": true, "RepositoryProviders": true, "ExecutorProviders": true, "ReferenceSources": true, "AuthProviders": true, "ConfigSchema": true, "AgentTools": true, "UI": true, "Runtime": true}
+	denied := map[string]bool{
+		"Icon": true, "BaseURL": true, "Endpoints": true, "Capabilities": true,
+		"AutomationConditions": true, "Webhooks": true, "Actions": true,
+		"RepositoryProviders": true, "ExecutorProviders": true, "ReferenceSources": true,
+		"AuthProviders": true, "ConfigSchema": true, "AgentTools": true, "UI": true,
+		"Runtime": true, "NotificationFormatters": true, "SidebarGroupings": true,
+	}
 	typ := reflect.TypeOf(Manifest{})
 	for i := 0; i < typ.NumField(); i++ {
 		name := typ.Field(i).Name

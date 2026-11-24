@@ -19,6 +19,7 @@ import {
   mergeOrphanPendingActionProjection,
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
+import { compareMessageTimestamps } from "./message-timestamp";
 import { resolveRunningNotices } from "./running-notice-activity";
 import {
   buildPromptMessageActions,
@@ -41,6 +42,7 @@ import {
   getWalkthroughLastSeen,
   setWalkthroughLastSeen,
 } from "@/lib/walkthrough-notification-storage";
+import { mergeQueuePolicyMeta } from "./queue-policy-meta";
 
 /** Ensure message metadata exists for a session, initializing with defaults if needed. */
 function ensureMessageMeta(
@@ -104,8 +106,21 @@ function retainDismissedMetadata(
   return true;
 }
 
+/** Keep a newer local row when a delayed/duplicate payload carries an older
+ *  server timestamp. The backend always bumps updated_at on a mutation, so an
+ *  older payload must not reverse a newer outcome such as a promoted
+ *  permission prompt or an approved decision. */
+function isOlderMessagePayload(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): boolean {
+  if (typeof target.updated_at !== "string" || typeof source.updated_at !== "string") return false;
+  return compareMessageTimestamps(target.updated_at, source.updated_at) === 1;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeMessageFields(target: Record<string, unknown>, source: Record<string, any>) {
+  if (isOlderMessagePayload(target, source)) return;
   const noticeResolved = (target.metadata as Message["metadata"])?.running_notice_resolved === true;
   for (const key of Object.keys(source)) {
     if (
@@ -323,6 +338,7 @@ export const defaultSessionState: SessionSliceState = {
   turns: {
     bySession: {},
     activeBySession: {},
+    emptyTurnNoticeTurnIdsBySession: {},
     windowCoverageBySession: {},
     loadedBySession: {},
     reconcileEpochBySession: {},
@@ -919,6 +935,9 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       generations[sessionId] = (generations[sessionId] ?? 0) + 1;
       delete draft.turns.bySession[sessionId];
       delete draft.turns.activeBySession[sessionId];
+      if (draft.turns.emptyTurnNoticeTurnIdsBySession) {
+        delete draft.turns.emptyTurnNoticeTurnIdsBySession[sessionId];
+      }
       if (draft.turns.windowCoverageBySession) {
         delete draft.turns.windowCoverageBySession[sessionId];
       }
@@ -1179,31 +1198,6 @@ function isStaleQueueSnapshot(
   );
 }
 
-function shouldPreserveSessionPolicy(previous: QueueMeta | undefined, meta: QueueMetaInput) {
-  return (
-    previous?.sessionIncarnationId === meta.sessionIncarnationId &&
-    previous?.autoMergeSource === "session" &&
-    meta.autoMergeSource === "global"
-  );
-}
-
-function shouldPreservePolicyRevision(previous: QueueMeta | undefined, meta: QueueMetaInput) {
-  return (
-    previous?.sessionIncarnationId === meta.sessionIncarnationId &&
-    previous?.autoMergeSource === meta.autoMergeSource &&
-    previous?.autoMergeRevision !== undefined &&
-    meta.autoMergeRevision !== undefined &&
-    meta.autoMergeRevision < previous.autoMergeRevision
-  );
-}
-
-function copyAutoMergePolicy(target: QueueMetaInput, source: QueueMeta) {
-  target.autoMergeAvailable = source.autoMergeAvailable;
-  target.autoMergeEnabled = source.autoMergeEnabled;
-  target.autoMergeSource = source.autoMergeSource;
-  target.autoMergeRevision = source.autoMergeRevision;
-}
-
 function resolveQueueMeta(
   currentIncarnationId: string | undefined,
   previous: QueueMeta | undefined,
@@ -1216,12 +1210,13 @@ function resolveQueueMeta(
     Object.assign(nextMeta, previous, meta);
   }
   if (isStaleQueueSnapshot(previous, meta, establishStatusEpoch)) return null;
-  if (
-    previous &&
-    (shouldPreserveSessionPolicy(previous, meta) || shouldPreservePolicyRevision(previous, meta))
-  ) {
-    copyAutoMergePolicy(nextMeta, previous);
-  }
+  Object.assign(
+    nextMeta,
+    mergeQueuePolicyMeta(previous, {
+      ...meta,
+      sessionIncarnationId: nextMeta.sessionIncarnationId,
+    }),
+  );
   return nextMeta;
 }
 

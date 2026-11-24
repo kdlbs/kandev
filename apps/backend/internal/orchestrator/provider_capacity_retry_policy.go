@@ -25,9 +25,34 @@ func (p transientRetryPolicy) maxAttempts() int {
 }
 
 func (p transientRetryPolicy) delay(classified *routingerr.Error, attempt int, now time.Time) time.Duration {
-	if p.windowEndsAt.IsZero() || attempt <= transientMaxAttempts {
+	if p.windowEndsAt.IsZero() {
 		return transientRetryDelayFor(classified, attempt, now)
 	}
+	// A capacity episode reuses the existing ladder. A validated short provider
+	// hint can only raise the first five delays; the fixed later slots and the
+	// thirty-minute deadline stay unchanged.
+	if attempt <= transientMaxAttempts {
+		nominal := transientRetryDelay(attempt)
+		if hint := capacityResetHintDelay(classified, now); hint > nominal {
+			return hint
+		}
+		return nominal
+	}
+	return capacityLongRetryDelay(attempt)
+}
+
+func capacityResetHintDelay(classified *routingerr.Error, now time.Time) time.Duration {
+	if classified == nil || classified.ResetHint == nil {
+		return 0
+	}
+	untilReset := classified.ResetHint.Sub(now)
+	if untilReset < 0 || untilReset > time.Minute {
+		return 0
+	}
+	return untilReset
+}
+
+func capacityLongRetryDelay(attempt int) time.Duration {
 	switch attempt {
 	case 6:
 		return 2 * time.Minute

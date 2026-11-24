@@ -114,54 +114,53 @@ func (cs *CronScheduler) evaluate(ctx context.Context) {
 // fires once on the next tick rather than once per missed occurrence, matching
 // the per-minute dedup key in fire().
 func (cs *CronScheduler) shouldFire(t *AutomationTrigger, now time.Time) bool {
-	var cfg ScheduledTriggerConfig
-	if err := json.Unmarshal(t.Config, &cfg); err != nil {
+	due, err := scheduledTriggerDue(t, now)
+	if err != nil {
 		cs.logger.Debug("invalid scheduled trigger config",
 			zap.String("trigger_id", t.ID), zap.Error(err))
 		return false
 	}
-	if cfg.CronExpression == "" {
-		return false
-	}
+	return due
+}
 
-	// Anchor the next-fire computation to the last evaluation, falling back to
-	// the trigger's creation time so a pinned schedule created mid-day doesn't
-	// fire immediately — its first fire is the next scheduled occurrence after
-	// creation.
+// scheduledTriggerDue reports whether the trigger's saved schedule has an
+// occurrence at or before now. The anchor is the last evaluation, falling back
+// to the trigger's creation time so a pinned schedule created mid-day does not
+// fire immediately.
+func scheduledTriggerDue(t *AutomationTrigger, now time.Time) (bool, error) {
+	cfg, err := decodeScheduledTriggerConfig(t.Config)
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(cfg.CronExpression) == "" {
+		return false, nil
+	}
 	anchor := t.CreatedAt
 	if t.LastEvaluatedAt != nil {
 		anchor = *t.LastEvaluatedAt
 	}
-
 	next, err := nextCronFire(cfg.CronExpression, cfg.Timezone, anchor)
 	if err != nil {
-		cs.logger.Debug("unparseable cron expression",
-			zap.String("trigger_id", t.ID),
-			zap.String("expression", cfg.CronExpression),
-			zap.Error(err))
-		return false
+		return false, err
 	}
-	return !next.After(now)
+	return !next.After(now), nil
 }
 
 func (cs *CronScheduler) fire(ctx context.Context, t *AutomationTrigger, now time.Time) {
-	a, err := cs.svc.Store().GetAutomation(ctx, t.AutomationID)
-	if err != nil || a == nil {
-		return
-	}
-	for _, condition := range a.Triggers {
-		if condition.Type == TriggerTypePluginEvent {
-			return
-		}
-	}
-
 	data, _ := json.Marshal(map[string]string{
 		triggerDataSourceKey: string(TriggerTypeScheduled),
 		"timestamp":          now.Format(time.RFC3339),
 	})
 	dedupKey := fmt.Sprintf("scheduled:%s:%d", t.ID, now.Unix()/60) // Dedup by minute
 
-	if _, err := cs.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeScheduled, data, DedupKey(dedupKey)); err != nil {
+	if _, err := cs.svc.admitScheduledObservation(ctx, scheduledObservation{
+		AutomationID:    t.AutomationID,
+		TriggerID:       t.ID,
+		TriggerRevision: t.TriggerRevision,
+		EvaluatedAt:     now,
+		TriggerData:     data,
+		Dedup:           DedupKey(dedupKey),
+	}); err != nil {
 		cs.logger.Error("failed to fire scheduled trigger",
 			zap.String("trigger_id", t.ID),
 			zap.String("automation_id", t.AutomationID),

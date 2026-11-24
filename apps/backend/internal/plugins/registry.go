@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/plugins/store"
@@ -19,7 +18,7 @@ import (
 //
 // Get and List return copies of the stored *store.Record so callers cannot
 // mutate registry state by holding onto a returned pointer; all writes go
-// through Add / Remove / SetStatus / SetRuntimeState / SetAutoUpdate /
+// through Add / Remove / SetStatus / SetAutoUpdate /
 // SetRestartCount.
 type Registry struct {
 	mu   sync.RWMutex
@@ -43,11 +42,19 @@ func (r *Registry) Load(s store.Store) error {
 	byID := make(map[string]*store.Record, len(records))
 	var migrationErrs []error
 	for _, rec := range records {
-		if rec.InstallationID == "" {
-			migrated := cloneRecord(rec)
+		migrated := cloneRecord(rec)
+		changed := false
+		if migrated.InstallationID == "" {
 			migrated.InstallationID = uuid.NewString()
+			changed = true
+		}
+		if migrated.AgentToolPolicyVersion == "" {
+			migrated.AgentToolPolicyVersion = uuid.NewString()
+			changed = true
+		}
+		if changed {
 			if err := s.Save(migrated); err != nil {
-				migrationErrs = append(migrationErrs, fmt.Errorf("migrate plugin installation id for %s: %w", rec.ID, err))
+				migrationErrs = append(migrationErrs, fmt.Errorf("migrate plugin record identity for %s: %w", rec.ID, err))
 			} else {
 				rec = migrated
 			}
@@ -141,28 +148,6 @@ func (r *Registry) SetRestartCount(id string, count int) (*store.Record, bool) {
 		return nil, false
 	}
 	rec.RestartCount = count
-	return cloneRecord(rec), true
-}
-
-// SetRuntimeState updates the lifecycle status and persisted failure
-// diagnostic for id and returns a copy of the resulting record. The caller is
-// responsible for FSM validation and persistence; this method only performs
-// the in-memory mutation under the registry lock.
-func (r *Registry) SetRuntimeState(id string, status Status, lastError string, lastErrorAt *time.Time) (*store.Record, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	rec, ok := r.byID[id]
-	if !ok {
-		return nil, false
-	}
-	rec.Status = status
-	rec.LastError = lastError
-	if lastErrorAt == nil {
-		rec.LastErrorAt = nil
-	} else {
-		at := *lastErrorAt
-		rec.LastErrorAt = &at
-	}
 	return cloneRecord(rec), true
 }
 

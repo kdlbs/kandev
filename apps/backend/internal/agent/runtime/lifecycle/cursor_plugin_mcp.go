@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -87,6 +88,21 @@ func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithPreparation(
 	executorType string,
 	strategy mcpconfig.PassthroughMCPStrategy,
 	progress *prepareProgressRecorder,
+	operations ...*preparedMCPOperation,
+) error {
+	return m.reconcileAndMaterializeCursorProjectMCPWithClient(ctx, execution, agentConfig, profileInfo, executorType, strategy, nil, progress, operations...)
+}
+
+func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithClient(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	profileInfo *AgentProfileInfo,
+	executorType string,
+	strategy mcpconfig.PassthroughMCPStrategy,
+	client *agentctl.Client,
+	progress *prepareProgressRecorder,
+	operations ...*preparedMCPOperation,
 ) error {
 	if execution == nil || execution.WorkspacePath == "" || !isCursorMCPAuthStrategy(strategy) {
 		return nil
@@ -96,6 +112,14 @@ func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithPreparation(
 	}
 	prepCtx, cancel := context.WithTimeout(ctx, cursorMCPPreparationTimeout)
 	defer cancel()
+	releaseClient := func() {}
+	if client == nil {
+		client, releaseClient = execution.AcquireAgentCtlClient()
+	}
+	defer releaseClient()
+	if client == nil {
+		return fmt.Errorf("agent helper is unavailable for Cursor MCP delivery")
+	}
 
 	workspaceDir := execution.WorkspacePath
 	workspaceKey := cursorProjectMCPWorkspaceKey(workspaceDir)
@@ -103,7 +127,7 @@ func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithPreparation(
 	defer finishCursorProjectMCPPreparation(workspaceKey, generation)
 
 	// 1. Resolve runtime policy & Profile MCP servers
-	policy, allowedProfileServers, reservedProfileNames, err := m.resolveCursorProfileAndPolicy(prepCtx, execution, profileInfo, executorType)
+	policy, allowedProfileServers, reservedProfileNames, err := m.resolveCursorProfileAndPolicy(prepCtx, execution, profileInfo, executorType, operations...)
 	if err != nil {
 		return err
 	}
@@ -120,7 +144,7 @@ func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithPreparation(
 		return err
 	}
 	defer release()
-	targets, err := m.reconcileCursorProjectMCPFiles(prepCtx, workspaceDir, workspaceKey, generation, execution,
+	targets, err := m.reconcileCursorProjectMCPFiles(prepCtx, workspaceDir, workspaceKey, generation, execution, client,
 		allowedProfileServers, allowedImportCandidates)
 	if err != nil {
 		return err
@@ -134,6 +158,7 @@ func (m *Manager) reconcileCursorProjectMCPFiles(
 	workspaceDir, workspaceKey string,
 	generation uint64,
 	execution *AgentExecution,
+	client *agentctl.Client,
 	allowedProfileServers []agentctltypes.McpServer,
 	allowedImportCandidates map[string]agentctltypes.McpServer,
 ) ([]cursorNativeMCPApprovalTarget, error) {
@@ -163,13 +188,17 @@ func (m *Manager) reconcileCursorProjectMCPFiles(
 	}
 
 	// 4. Compose effective mcpServers and ownership mapping
-	newMCPServers, newOwnership := composeEffectiveMCPServers(
+	newMCPServers, newOwnership, err := composeEffectiveMCPServers(
 		execution,
+		client,
 		allowedProfileServers,
 		userOwnedProjectServers,
 		allowedImportCandidates,
 		m.agentMCPHost(execution),
 	)
+	if err != nil {
+		return nil, err
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -484,6 +513,7 @@ func (m *Manager) resolveCursorProfileAndPolicy(
 	execution *AgentExecution,
 	profileInfo *AgentProfileInfo,
 	executorType string,
+	operations ...*preparedMCPOperation,
 ) (mcpconfig.Policy, []agentctltypes.McpServer, map[string]struct{}, error) {
 	backendName := executor.ExecutorTypeToBackend(models.ExecutorType(executorType))
 	policy := mcpconfig.DefaultPolicyForRuntime(backendName)
@@ -495,6 +525,34 @@ func (m *Manager) resolveCursorProfileAndPolicy(
 		}
 	}
 
+	var operation *preparedMCPOperation
+	if len(operations) > 0 {
+		operation = operations[0]
+	}
+	if operation == nil && (m.mcpResolver == nil || execution.WorkspaceID == "") {
+		return m.resolveLegacyCursorProfile(ctx, profileInfo, policy)
+	}
+	if operation == nil {
+		agentConfig, err := m.getAgentConfigForExecution(execution)
+		if err != nil {
+			return policy, nil, nil, err
+		}
+		operation, err = m.prepareExecutionMCP(ctx, execution, agentConfig)
+		if err != nil {
+			return policy, nil, nil, err
+		}
+	}
+	reserved := make(map[string]struct{})
+	for _, server := range operation.servers {
+		reserved[strings.ToLower(strings.TrimSpace(server.Name))] = struct{}{}
+	}
+	for _, entry := range operation.metadata {
+		reserved[strings.ToLower(strings.TrimSpace(entry.RuntimeName))] = struct{}{}
+	}
+	return policy, operation.servers, reserved, nil
+}
+
+func (m *Manager) resolveLegacyCursorProfile(ctx context.Context, profileInfo *AgentProfileInfo, policy mcpconfig.Policy) (mcpconfig.Policy, []agentctltypes.McpServer, map[string]struct{}, error) {
 	reservedProfileNames := make(map[string]struct{})
 	var allowedProfileServers []agentctltypes.McpServer
 	if profileInfo != nil && m.mcpProvider != nil {

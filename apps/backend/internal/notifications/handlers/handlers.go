@@ -29,6 +29,12 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger
 	api.PATCH("/notification-providers/:id", h.httpUpdateProvider)
 	api.DELETE("/notification-providers/:id", h.httpDeleteProvider)
 	api.POST("/notification-providers/:id/test", h.httpTestProvider)
+	api.GET("/notification-providers/:id/formatter", h.httpFormatter)
+	api.PUT("/notification-providers/:id/formatter", h.httpFormatter)
+	api.POST("/notification-providers/:id/formatter/preview", h.httpFormatterPreview)
+	api.POST("/notification-formatters/capture", h.httpFormatterCapture)
+	api.GET("/notification-formatters/capture/:id", h.httpFormatterCapture)
+	api.POST("/notification-formatters/capture/:id/release", h.httpFormatterCapture)
 }
 
 func (h *Handlers) httpListProviders(c *gin.Context) {

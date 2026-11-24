@@ -346,10 +346,17 @@ test.describe("Mobile changes panel", () => {
       await expect
         .poll(() => scrollOwner.evaluate((element) => element.scrollHeight > element.clientHeight))
         .toBe(true);
-      await scrollOwner.evaluate((element) => {
-        element.scrollTop = element.scrollHeight;
-      });
-      await expect(testPage.getByTestId("unstaged-files-section-collapse-toggle")).toHaveCount(0);
+      await expect
+        .poll(async () => {
+          await scrollOwner.evaluate(async (element) => {
+            element.scrollTop = element.scrollHeight;
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            );
+          });
+          return testPage.getByTestId("unstaged-files-section-collapse-toggle").count();
+        })
+        .toBe(0);
       await expandSection(testPage, "unstaged-files-section", 20_000);
       await expect
         .poll(() => scrollOwner.evaluate((element) => element.scrollHeight > element.clientHeight))

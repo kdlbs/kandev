@@ -16,7 +16,14 @@ type MockState = {
   connection: { status: string };
   workspaces: { activeId: string | null };
   workspaceContextGeneration: number;
-  workflows: { items: Workflow[] };
+  workflows: {
+    items: Workflow[];
+    taskWorkflowCoverage?: {
+      workspace_id: string;
+      workflow_ids: string[];
+      complete: boolean;
+    };
+  };
   kanban: { workflowId: string | null; steps: unknown[]; tasks: unknown[] };
   kanbanMulti: { snapshots: Record<string, unknown>; isLoading: boolean };
   clearKanbanMulti: typeof mockClearKanbanMulti;
@@ -94,6 +101,45 @@ it("refreshes boot snapshots when mounted after the socket connects, without a r
   expect(mockSetWorkflowSnapshot).toHaveBeenCalled();
 });
 
+it("reports initial snapshots ready only after every workflow read settles", async () => {
+  resetMocks([
+    { id: "wf-A", workspaceId: "ws-A", name: "A" },
+    { id: "wf-B", workspaceId: "ws-A", name: "B" },
+  ]);
+  const pending = new Map<string, (value: { steps: never[]; tasks: never[] }) => void>();
+  mockFetchWorkflowSnapshot.mockImplementation(
+    (workflowId: string) => new Promise((resolve) => pending.set(workflowId, resolve)),
+  );
+
+  const { result } = renderHook(() => useAllWorkflowSnapshots("ws-A"));
+  await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(2));
+
+  expect(result.current.initialSnapshotsReady).toBe(false);
+  await act(async () => {
+    pending.get("wf-B")?.({ steps: [], tasks: [] });
+  });
+  expect(result.current.initialSnapshotsReady).toBe(false);
+
+  await act(async () => {
+    pending.get("wf-A")?.({ steps: [], tasks: [] });
+  });
+  await waitFor(() => expect(result.current.initialSnapshotsReady).toBe(true));
+});
+
+it("reports an empty workspace ready after its workflow inventory loads", async () => {
+  resetMocks([]);
+  mockState.workflows.taskWorkflowCoverage = {
+    workspace_id: "ws-A",
+    workflow_ids: [],
+    complete: true,
+  };
+
+  const { result } = renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+  await waitFor(() => expect(result.current.initialSnapshotsReady).toBe(true));
+  expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
+});
+
 describe("useAllWorkflowSnapshots — workspace scoping", () => {
   beforeEach(() => {
     resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
@@ -107,17 +153,18 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
     expect(mockClearKanbanMulti).not.toHaveBeenCalled();
   });
 
-  it("preserves boot-hydrated snapshots before the live connection is ready", () => {
+  it("preserves boot-hydrated snapshots before the live connection is ready", async () => {
     mockState.connection.status = "connecting";
     mockState.kanbanMulti.snapshots = {
       "wf-A": { workflowId: "wf-A", workflowName: "A", steps: [], tasks: [] },
     };
 
-    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    const { result } = renderHook(() => useAllWorkflowSnapshots("ws-A"));
 
     expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
     expect(mockSetKanbanMultiLoading).not.toHaveBeenCalledWith(true);
     expect(mockClearKanbanMulti).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current.initialSnapshotsReady).toBe(true));
   });
 
   it("limits a selected-board read to the selected workflow", async () => {

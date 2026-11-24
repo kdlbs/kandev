@@ -16,6 +16,7 @@ import {
 } from "@tabler/icons-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
+import { Switch } from "@kandev/ui/switch";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsRow } from "@/components/settings/settings-group";
 import { SettingsPageHeader } from "@/components/settings/settings-typography";
@@ -56,6 +57,7 @@ import {
   rebaseAppearanceDraft,
   type AppearanceState,
 } from "@/components/settings/appearance-settings-state";
+import { useChatInputSettingsDraft } from "./use-chat-input-settings-draft";
 
 function ChatSubmitKeyCard({
   value,
@@ -511,36 +513,11 @@ export function AppearanceSettings() {
 
 export function KeyboardShortcutsSettings() {
   const { t } = useTranslation();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
   const { items: pluginItems } = usePlugins();
   const pluginShortcutEntries = buildPluginShortcutEntries(pluginItems);
   const integrationEntries = useIntegrationShortcutEntries(pluginItems);
   const shortcuts = useShortcutDraft("general-keyboard-shortcuts");
-  const [saved, setSaved] = useState(() => ({
-    chatSubmitKey: userSettings.chatSubmitKey,
-  }));
-  const [draft, setDraft] = useState(saved);
-  const revision = JSON.stringify(draft);
-
-  useSettingsSaveContributor({
-    id: "general-chat-submit-key",
-    revision,
-    isDirty: revision !== JSON.stringify(saved),
-    save: async () => {
-      const submitted = draft;
-      const current = storeApi.getState().userSettings;
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        chat_submit_key: submitted.chatSubmitKey,
-      });
-      setSaved(submitted);
-      setUserSettings({ ...storeApi.getState().userSettings, ...submitted });
-    },
-    discard: () => setDraft(saved),
-  });
+  const { saved, draft, updateDraft } = useChatInputSettingsDraft();
 
   return (
     <div className="space-y-8">
@@ -549,10 +526,25 @@ export function KeyboardShortcutsSettings() {
         title={t("settings:chatInput")}
         description={t("settings:configureChatInputBehavior")}
       >
+        <SettingsRow
+          label={t("settings:escapeCancelsAgent")}
+          discoveryTargetId={GENERAL_SETTINGS_TARGETS.escapeCancelsAgent}
+          description={t("settings:escapeCancelsAgentDescription")}
+          controlId="escape-cancels-agent"
+          touchTarget="switch"
+          isDirty={draft.escapeCancelsAgent !== saved.escapeCancelsAgent}
+          control={
+            <Switch
+              id="escape-cancels-agent"
+              checked={draft.escapeCancelsAgent}
+              onCheckedChange={(escapeCancelsAgent) => updateDraft({ escapeCancelsAgent })}
+            />
+          }
+        />
         <ChatSubmitKeyCard
           value={draft.chatSubmitKey}
           isDirty={draft.chatSubmitKey !== saved.chatSubmitKey}
-          onChange={(chatSubmitKey) => setDraft((current) => ({ ...current, chatSubmitKey }))}
+          onChange={(chatSubmitKey) => updateDraft({ chatSubmitKey })}
         />
       </SettingsSection>
 

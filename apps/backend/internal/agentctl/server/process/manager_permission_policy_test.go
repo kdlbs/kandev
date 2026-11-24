@@ -248,7 +248,10 @@ func TestInjectedKandevPermissionPolicyRejectsUntrustedRequests(t *testing.T) {
 }
 
 func TestInjectedKandevPermissionPolicyUsesConfiguredMCPHost(t *testing.T) {
-	cfg := (&config.Config{AuthToken: "test-token", ListenHostOverride: "192.0.2.10"}).NewInstanceConfig(43210, nil)
+	cfg, err := (&config.Config{AuthToken: "test-token", ListenHostOverride: "192.0.2.10"}).NewInstanceConfig(43210, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !injectedKandevMCPConfigured(cfg) {
 		t.Fatal("generated configured-host MCP endpoints were not recognized as injected")
 	}
@@ -258,6 +261,33 @@ func TestInjectedKandevPermissionPolicyUsesConfiguredMCPHost(t *testing.T) {
 	}}
 	if injectedKandevMCPConfigured(cfg) {
 		t.Fatal("localhost URL was trusted when the injected endpoint targets another host")
+	}
+}
+
+func TestBuiltinMCPInstanceApprovalMatchesExactScopedEndpoints(t *testing.T) {
+	cfg, err := (&config.Config{}).NewInstanceConfig(43210, &config.InstanceOverrides{InstanceID: "exec-1", ScopedMCPRoutes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := injectedKandevPermissionManager(t, cfg.McpServers)
+	m.cfg.InstanceID = cfg.InstanceID
+	m.cfg.ScopedMCPRoutes = cfg.ScopedMCPRoutes
+	m.cfg.MCPHost = cfg.MCPHost
+	toolName := "mcp__kandev__update_task_plan_kandev"
+	request := &adapter.PermissionRequest{ToolName: &toolName, Options: []adapter.PermissionOption{
+		{OptionID: "allow-always", Kind: streams.PermissionOptionKindAllowAlways},
+		{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce},
+	}}
+	response, approved := m.autoApproveInjectedKandevPermission(request)
+	if !approved || response == nil || response.OptionID != "allow-once" {
+		t.Fatalf("scoped request = %+v, approved = %v; want allow-once approval", response, approved)
+	}
+
+	for _, forgedURL := range []string{"http://localhost:43210/mcp", "http://localhost:43210/i/other/mcp"} {
+		m.cfg.McpServers = []config.McpServerConfig{{Name: "kandev", Type: "http", URL: forgedURL}}
+		if response, approved := m.autoApproveInjectedKandevPermission(request); approved || response != nil {
+			t.Fatalf("forged endpoint %q approved with response %+v", forgedURL, response)
+		}
 	}
 }
 

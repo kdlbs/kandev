@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -64,8 +66,57 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	if err := store.AssignIssueWatchTaskID(ctx, watch.ID, "ENG-123", "task-1"); err != nil {
 		t.Fatalf("assign Linear issue task: %v", err)
 	}
-	seen, err := store.ListSeenIssueIdentifiers(ctx, watch.ID)
-	if err != nil || len(seen) != 1 {
-		t.Fatalf("list Linear seen issues: seen=%d err=%v", len(seen), err)
+	reservations, err := store.listIssueWatchReservations(ctx, watch.ID)
+	if err != nil || len(reservations) != 1 || !reservations["ENG-123"] {
+		t.Fatalf("list Linear reservations: rows=%v err=%v", reservations, err)
 	}
+}
+
+func TestPostgresPendingIssueWatchPollRevision(t *testing.T) {
+	ctx := t.Context()
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	database.SetMaxOpenConns(2)
+	store, err := NewStore(database, database)
+	require.NoError(t, err)
+
+	watch := newTestIssueWatch("ws-1")
+	watch.Filter.RequireBlockersDone = true
+	require.NoError(t, store.CreateIssueWatch(ctx, watch))
+	revision, err := store.issueWatchPollRevision(ctx, watch.ID)
+	require.NoError(t, err)
+
+	type result struct {
+		issueID string
+		applied bool
+		err     error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	for _, issueID := range []string{"id-1", "id-2"} {
+		go func() {
+			<-start
+			applied, err := store.replacePendingIssueIDs(ctx, watch.ID, revision, []string{issueID})
+			results <- result{issueID: issueID, applied: applied, err: err}
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	require.NoError(t, first.err)
+	require.NoError(t, second.err)
+	require.NotEqual(t, first.applied, second.applied)
+	committed := first
+	if second.applied {
+		committed = second
+	}
+	ids, err := store.ListPendingIssueIDs(ctx, watch.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{committed.issueID}, ids)
+
+	require.NoError(t, store.ResetIssueWatchState(ctx, watch.ID))
+	applied, err := store.replacePendingIssueIDs(ctx, watch.ID, revision+1, ids)
+	require.NoError(t, err)
+	require.False(t, applied)
+	ids, err = store.ListPendingIssueIDs(ctx, watch.ID)
+	require.NoError(t, err)
+	require.Empty(t, ids)
 }

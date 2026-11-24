@@ -69,18 +69,17 @@ type Repository interface {
 	ListTasksByWorkspace(ctx context.Context, workspaceID string, includeSystem bool) ([]*sqlite.TaskRow, error)
 	ListTasksFiltered(ctx context.Context, workspaceID string, opts sqlite.ListTasksOptions) (*sqlite.ListTasksFilteredResult, error)
 	GetTaskByID(ctx context.Context, taskID string) (*sqlite.TaskRow, error)
+	GetTaskIDByIdentifier(ctx context.Context, workspaceID, identifier string) (string, error)
 	ListChildTasks(ctx context.Context, parentID string) ([]*sqlite.TaskRow, error)
 	ListBlockersForTasks(ctx context.Context, taskIDs []string) (map[string][]string, error)
 	ListTaskComments(ctx context.Context, taskID string) ([]*models.TaskComment, error)
 	CreateTaskComment(ctx context.Context, comment *models.TaskComment) error
 	GetRunsByCommentIDs(ctx context.Context, commentIDs []string) (map[string]sqlite.CommentRunStatus, error)
-	UpdateTaskState(ctx context.Context, taskID, state string) error
 	GetTaskExecutionFields(ctx context.Context, taskID string) (*sqlite.TaskExecutionFields, error)
 	// UpdateTaskAssignee returns the task's assignment_generation after the
 	// bump, read back inside the same transaction that wrote the runner
 	// seat (see the sqlite implementation's doc comment).
 	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) (int64, error)
-	UpdateTaskStateIfWorkflowStep(ctx context.Context, taskID, expectedStepID, state string) (bool, error)
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error
 	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
@@ -99,6 +98,7 @@ type Repository interface {
 	DeleteTaskBlocker(ctx context.Context, taskID, blockerTaskID string) error
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
 	ListTaskParticipants(ctx context.Context, taskID, role string) ([]sqlite.Participant, error)
+	ListTaskParticipantsAtStep(ctx context.Context, taskID, stepID, role string) ([]sqlite.Participant, error)
 	ListAllTaskParticipants(ctx context.Context, taskID string) ([]sqlite.Participant, error)
 	// ListTaskParticipantsAtCurrentStep is the step-scoped seat read
 	// AC-OFFICE-SESSION-TERM-002.3 requires for session-termination
@@ -116,7 +116,7 @@ type Repository interface {
 	CancelDisplacedParticipantRun(
 		ctx context.Context, taskID, stepID, agentProfileID string,
 	) ([]runssqlite.CancelledRun, error)
-	IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error)
+	IsTaskOnFinalStep(ctx context.Context, taskID string) (final, hasStep bool, err error)
 }
 
 // DecisionStore is the workflow-domain decisions interface required by
@@ -234,6 +234,10 @@ type TaskDetacher interface {
 type TaskLifecyclePublisher interface {
 	PublishTaskUpdatedByID(ctx context.Context, id string)
 }
+
+// TaskStateChangePublisher publishes the immutable receipt of a committed
+// task-state transition through the canonical task event path.
+type TaskStateChangePublisher = shared.TaskStateChangePublisher
 
 // SessionTerminator flips the (task, agent) office session row to a terminal
 // state. Used when an agent stops being a participant on a task — reassignment,
@@ -380,6 +384,15 @@ type RoutingProvider interface {
 	// to "inherit". Returns the zero blob when the agent has no
 	// overrides recorded; an error only on lookup / parse failures.
 	AgentOverrides(ctx context.Context, agentID string) (routing.AgentOverrides, error)
+	// StoredExclusionSetup predicts problems with the workspace's
+	// exclude_author_provider steps under the current routing setup.
+	StoredExclusionSetup(ctx context.Context, workspaceID string) ([]routing.SetupWarning, error)
+	// SeatSteps lists the workspace's ensure_participant_seat actions with
+	// their exclude_author_provider setting.
+	SeatSteps(ctx context.Context, workspaceID string) ([]routing.SeatStep, error)
+	// ReleaseAuthorExclusionParkedRuns re-queues runs at stepIDs that parked
+	// after skipping the author's provider.
+	ReleaseAuthorExclusionParkedRuns(ctx context.Context, workspaceID string, stepIDs []string) error
 }
 
 // RouteAttemptLister is the narrow read-side seam used by the run-detail
@@ -440,11 +453,16 @@ type DashboardService struct {
 	markFixed             MarkFixedHandler                // optional; nil disables the dismiss endpoint
 	decisions             DecisionStore                   // workflow-domain decisions store (ADR 0005 Wave E); nil disables decision endpoints
 	routingProvider       RoutingProvider                 // optional; nil disables /routing endpoints (503)
+	seatExclusionWriter   SeatAuthorExclusionWriter       // optional; nil answers 503 on the seat exclusion write
 	attemptLister         RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 	runResolver           RunResolver                     // optional; nil means status-change activity rows have no run_id
 	runEvents             RunEventAppender                // optional; nil means a refused agent comment read is not recorded on its run
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
+	taskStateWriter       shared.TaskStateWriter          // task repository owns transactional state changes and completion guards
+	taskStateChangeEvents TaskStateChangePublisher
+	humanDoneCompleter    TaskHumanDoneCompleter
+	finalStepMover        TaskFinalStepMover // optional; nil keeps the in_review redirect for human Done on a non-final step
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -658,6 +676,17 @@ func (s *DashboardService) SetTaskDetacher(d TaskDetacher) {
 	s.taskDetacher = d
 }
 
+// SetTaskStateWriter wires the task repository that owns transactional state
+// changes and completion guards.
+func (s *DashboardService) SetTaskStateWriter(w shared.TaskStateWriter) {
+	s.taskStateWriter = w
+}
+
+// SetTaskStateChangePublisher wires the canonical task-state event publisher.
+func (s *DashboardService) SetTaskStateChangePublisher(p TaskStateChangePublisher) {
+	s.taskStateChangeEvents = p
+}
+
 // SetTaskLifecyclePublisher wires the canonical task.updated publisher used
 // after a status change persists a task row mutation.
 func (s *DashboardService) SetTaskLifecyclePublisher(p TaskLifecyclePublisher) {
@@ -853,6 +882,12 @@ func (s *DashboardService) ListTasksFiltered(
 // GetTask returns a single task by ID. Returns nil, nil when not found.
 func (s *DashboardService) GetTask(ctx context.Context, taskID string) (*sqlite.TaskRow, error) {
 	return s.repo.GetTaskByID(ctx, taskID)
+}
+
+// ResolveTaskIdentifier returns the task id for a workspace-scoped identifier
+// such as "KAN-11". Returns "", nil when no task matches.
+func (s *DashboardService) ResolveTaskIdentifier(ctx context.Context, workspaceID, identifier string) (string, error) {
+	return s.repo.GetTaskIDByIdentifier(ctx, workspaceID, identifier)
 }
 
 // ListChildTasks returns direct child tasks of a parent task.

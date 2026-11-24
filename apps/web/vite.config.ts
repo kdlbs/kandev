@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
 import { shouldBundlePseudoLocale } from "./lib/i18n/bundling";
+import { serviceWorkerPlugin } from "./vite-plugins/service-worker";
 
 const LOCALES_DIR = path.resolve(__dirname, "src/locales");
 
@@ -40,6 +41,7 @@ export default defineConfig({
   plugins: [
     react(),
     pseudoLocaleBundling(),
+    serviceWorkerPlugin(),
     {
       name: "theme-bootstrap",
       transformIndexHtml() {

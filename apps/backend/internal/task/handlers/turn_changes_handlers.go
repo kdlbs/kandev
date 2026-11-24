@@ -90,6 +90,12 @@ func (h *TaskHandlers) httpReadTurnChangeContent(c *gin.Context) {
 		c.Request.Context(), c.Param("id"), c.Param("changeSetID"), c.Param("fileChangeID"), variant,
 	)
 	if err != nil {
+		if service.IsRetryableTurnChangeContentError(err) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "historical content is temporarily unavailable", "retryable": true,
+			})
+			return
+		}
 		var expired *service.TurnChangeContentExpiredError
 		if errors.As(err, &expired) || errors.Is(err, service.ErrTurnChangeContentExpired) {
 			reason := models.TurnChangeReasonExpiredAge

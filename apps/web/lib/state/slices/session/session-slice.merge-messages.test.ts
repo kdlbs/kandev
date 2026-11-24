@@ -109,6 +109,80 @@ describe("mergeMessages", () => {
   });
 });
 
+describe("mergeMessages — stale permission presentation", () => {
+  it("keeps a promoted interactive presentation when an older candidate replay arrives", () => {
+    const store = makeStore();
+    const promoted = makeMessage({
+      id: "permission",
+      type: "permission_request",
+      updated_at: "2026-10-29T12:00:01.000Z",
+      metadata: { request_id: "r1", pending_id: "p1", permission_presentation: "interactive" },
+    });
+    store.getState().mergeMessages(SESSION, [promoted]);
+
+    store.getState().mergeMessages(SESSION, [
+      makeMessage({
+        id: "permission",
+        type: "permission_request",
+        updated_at: "2026-10-29T12:00:00.000Z",
+        metadata: { request_id: "r1", pending_id: "p1", permission_presentation: "automatic" },
+      }),
+    ]);
+
+    expect(store.getState().messages.bySession[SESSION][0].metadata?.permission_presentation).toBe(
+      "interactive",
+    );
+  });
+
+  it("does not reopen an approved decision when a stale pending snapshot arrives", () => {
+    const store = makeStore();
+    store.getState().mergeMessages(SESSION, [
+      makeMessage({
+        id: "permission",
+        type: "permission_request",
+        updated_at: "2026-10-29T12:00:02.000Z",
+        metadata: { request_id: "r1", pending_id: "p1", status: "approved" },
+      }),
+    ]);
+
+    store.getState().addMessage(
+      makeMessage({
+        id: "permission",
+        type: "permission_request",
+        updated_at: "2026-10-29T12:00:01.000Z",
+        metadata: { request_id: "r1", pending_id: "p1", status: "pending" },
+      }),
+    );
+
+    expect(store.getState().messages.bySession[SESSION][0].metadata?.status).toBe("approved");
+  });
+
+  it("applies a newer fallback presentation", () => {
+    const store = makeStore();
+    store.getState().mergeMessages(SESSION, [
+      makeMessage({
+        id: "permission",
+        type: "permission_request",
+        updated_at: "2026-10-29T12:00:01.000Z",
+        metadata: { request_id: "r1", pending_id: "p1", permission_presentation: "automatic" },
+      }),
+    ]);
+
+    store.getState().mergeMessages(SESSION, [
+      makeMessage({
+        id: "permission",
+        type: "permission_request",
+        updated_at: "2026-10-29T12:00:03.000Z",
+        metadata: { request_id: "r1", pending_id: "p1", permission_presentation: "interactive" },
+      }),
+    ]);
+
+    expect(store.getState().messages.bySession[SESSION][0].metadata?.permission_presentation).toBe(
+      "interactive",
+    );
+  });
+});
+
 describe("mergeMessages — prompt_index reconciliation", () => {
   it("treats a newly present prompt_index as a change even when updated_at is unchanged", () => {
     const store = makeStore();

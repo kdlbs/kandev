@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import type { ExportReview } from "@/lib/api/domains/canvas-distribution-api";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 // i18n-exempt: registry discriminator in the copyable example, not user-facing prose.
 const REGISTRY_CANVAS_KIND = "canvas";
@@ -25,20 +26,7 @@ export function CanvasShareHelp({ review }: { review: ExportReview | null }) {
   );
 
   const copy = async () => {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(example);
-    } else {
-      const textarea = document.createElement("textarea");
-      textarea.value = example;
-      textarea.setAttribute("readonly", "true");
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      textarea.remove();
-    }
-    setCopied(true);
+    setCopied(await copyToClipboard(example));
   };
 
   return (

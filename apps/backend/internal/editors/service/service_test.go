@@ -2,6 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
+	"os/exec"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	editormodels "github.com/kandev/kandev/internal/editors/models"
@@ -484,43 +488,129 @@ func TestBuildLocalArgs(t *testing.T) {
 	}
 }
 
-func TestExpandCommandPlaceholders(t *testing.T) {
-	tests := []struct {
-		name         string
-		template     string
-		worktreePath string
-		absPath      string
-		line         int
-		column       int
-		expected     string
-	}{
-		{
-			name:         "all placeholders",
-			template:     "code {cwd} {file} {rel} {line} {column}",
-			worktreePath: "/workspace",
-			absPath:      "/workspace/src/main.go",
-			line:         10,
-			column:       5,
-			expected:     "code /workspace /workspace/src/main.go src/main.go 10 5",
-		},
-		{
-			name:         "no placeholders",
-			template:     "code --new-window",
-			worktreePath: "/workspace",
-			absPath:      "/workspace/file.txt",
-			line:         0,
-			column:       0,
-			expected:     "code --new-window",
-		},
+func TestLaunchCommandKeepsPlaceholderInsideOneArgument(t *testing.T) {
+	worktreePath := t.TempDir()
+	absPath := filepath.Join(worktreePath, `a" --evil "b`)
+	previous := startProcess
+	defer func() { startProcess = previous }()
+	var got []string
+	startProcess = func(cmd *exec.Cmd) error {
+		got = append([]string(nil), cmd.Args...)
+		return nil
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := expandCommandPlaceholders(tt.template, tt.worktreePath, tt.absPath, tt.line, tt.column)
-			if result != tt.expected {
-				t.Errorf("expected %s, got %s", tt.expected, result)
+	if _, err := launchCommand(`code "{file}"`, worktreePath, absPath, 0, 0); err != nil {
+		t.Fatalf("launchCommand() error = %v, want nil", err)
+	}
+	want := []string{"code", absPath}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("launch arguments = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildCommandArgs(t *testing.T) {
+	worktreePath := filepath.Join(t.TempDir(), "workspace with 'quotes")
+	line, column := 10, 5
+	templates := []struct {
+		name       string
+		template   string
+		tokenCount int
+		want       func(string) []string
+	}{
+		{"unquoted file", `code {file}`, 2, func(file string) []string { return []string{"code", file} }},
+		{"double quoted file", `code "{file}"`, 2, func(file string) []string { return []string{"code", file} }},
+		{"single quoted file", `code '{file}'`, 2, func(file string) []string { return []string{"code", file} }},
+		{"combined placeholders", `code --goto {file}:{line}:{column}`, 3, func(file string) []string { return []string{"code", "--goto", file + ":10:5"} }},
+		{"quoted option value", `code --goto="{file}"`, 2, func(file string) []string { return []string{"code", "--goto=" + file} }},
+	}
+	filenames := []string{
+		"space name.go", `double"quote.go`, "single'quote.go", `back\slash.go`,
+		"$(id).go", "`id`.go", "semi;colon.go", "pipe|name.go", "and&name.go", `a" --evil "b`,
+	}
+
+	for _, template := range templates {
+		for _, filename := range filenames {
+			t.Run(template.name+"/"+filename, func(t *testing.T) {
+				file := filepath.Join(worktreePath, filename)
+				got, err := buildCommandArgs(template.template, worktreePath, file, line, column)
+				if err != nil {
+					t.Fatalf("buildCommandArgs() error = %v, want nil", err)
+				}
+				if len(got) != template.tokenCount {
+					t.Fatalf("argument count = %d, want template token count %d: %#v", len(got), template.tokenCount, got)
+				}
+				if want := template.want(file); !reflect.DeepEqual(got, want) {
+					t.Fatalf("arguments = %#v, want %#v", got, want)
+				}
+			})
+		}
+	}
+}
+
+func TestBuildCommandArgsWorktreeAndRelativePlaceholders(t *testing.T) {
+	worktreePath := filepath.Join(t.TempDir(), "workspace with 'quotes")
+	file := filepath.Join(worktreePath, "src", "main.go")
+	for _, template := range []string{`code {cwd}`, `code "{cwd}"`, `code '{cwd}'`} {
+		got, err := buildCommandArgs(template, worktreePath, file, 10, 5)
+		if err != nil {
+			t.Fatalf("buildCommandArgs(%q) error = %v, want nil", template, err)
+		}
+		if want := []string{"code", worktreePath}; !reflect.DeepEqual(got, want) {
+			t.Errorf("arguments for %q = %#v, want %#v", template, got, want)
+		}
+	}
+
+	got, err := buildCommandArgs(`code "{cwd}" '{file}' {rel} {line} {column}`, worktreePath, file, 10, 5)
+	if err != nil {
+		t.Fatalf("buildCommandArgs(all placeholders) error = %v, want nil", err)
+	}
+	want := []string{"code", worktreePath, file, filepath.Join("src", "main.go"), "10", "5"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("all placeholder arguments = %#v, want %#v", got, want)
+	}
+
+	got, err = buildCommandArgs("code --new-window", worktreePath, file, 0, 0)
+	if err != nil {
+		t.Fatalf("buildCommandArgs(no placeholders) error = %v, want nil", err)
+	}
+	if want := []string{"code", "--new-window"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("no-placeholder arguments = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildCommandArgsRejectsInvalidTemplate(t *testing.T) {
+	for _, template := range []string{`code "{file}`, `code "é`, `code "escaped\"`, "", "   "} {
+		t.Run(template, func(t *testing.T) {
+			got, err := buildCommandArgs(template, "/workspace", "/workspace/main.go", 0, 0)
+			if !errors.Is(err, ErrEditorConfigInvalid) {
+				t.Fatalf("buildCommandArgs() error = %v, want ErrEditorConfigInvalid", err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("arguments = %#v, want none", got)
 			}
 		})
+	}
+}
+
+// @covers AC-WORKSPACES-EDITOR-COMMAND-001.4
+func TestLaunchCommandRejectsInvalidTemplateWithoutStarting(t *testing.T) {
+	previous := startProcess
+	defer func() { startProcess = previous }()
+	starts := 0
+	startProcess = func(*exec.Cmd) error {
+		starts++
+		return nil
+	}
+	for _, template := range []string{`code "{file}`, `code "é`, `code "escaped\"`, ""} {
+		t.Run(template, func(t *testing.T) {
+			_, err := launchCommand(template, "/workspace", "/workspace/main.go", 0, 0)
+			if !errors.Is(err, ErrEditorConfigInvalid) {
+				t.Fatalf("launchCommand() error = %v, want ErrEditorConfigInvalid", err)
+			}
+		})
+	}
+	if starts != 0 {
+		t.Fatalf("process starts = %d, want 0", starts)
 	}
 }
 

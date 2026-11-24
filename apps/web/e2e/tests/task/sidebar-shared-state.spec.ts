@@ -5,6 +5,7 @@ test("desktop renders first-time sidebar views from shared homepage state while 
   testPage,
   apiClient,
   seedData,
+  backend,
 }) => {
-  await exerciseSharedSidebarState(testPage, apiClient, seedData, false);
+  await exerciseSharedSidebarState(testPage, apiClient, seedData, false, backend.tmpDir);
 });

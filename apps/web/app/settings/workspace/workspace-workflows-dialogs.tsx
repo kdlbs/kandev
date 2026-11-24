@@ -41,6 +41,17 @@ type ImportWorkflowsDialogProps = {
   retryPreview: () => void | Promise<void>;
 };
 
+// A preview with no profile steps, warnings, or conflicts has nothing to
+// review, so its auto-submit keeps the YAML dialog in its importing state.
+function hasReviewContent(
+  preview: WorkflowImportPreview,
+  profileConflicts: WorkflowImportProfileConflict[],
+): boolean {
+  return (
+    preview.steps.length > 0 || (preview.warnings?.length ?? 0) > 0 || profileConflicts.length > 0
+  );
+}
+
 export function ImportWorkflowsDialog({
   open,
   onOpenChange,
@@ -61,7 +72,7 @@ export function ImportWorkflowsDialog({
   retryPreview,
 }: ImportWorkflowsDialogProps) {
   const { t } = useTranslation();
-  if (preview && importPhase !== "editing") {
+  if (preview && importPhase !== "editing" && hasReviewContent(preview, profileConflicts)) {
     return (
       <WorkflowImportProfileSelection
         open={open}
@@ -159,7 +170,7 @@ function TemplateRadioItem({
           <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
             {template.default_steps.map((step, i) => (
               <div key={i} className="flex items-center gap-1">
-                {i > 0 && <span className="text-muted-foreground/40 text-xs">&rarr;</span>}
+                {i > 0 && <span className="text-muted-foreground/40 text-xs">→</span>}
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <div className={cn("w-2 h-2 rounded-full", step.color ?? "bg-slate-500")} />
                   {step.name}

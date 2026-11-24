@@ -28,6 +28,38 @@ export type SidebarViewApi = {
   group_indent?: boolean;
   collapsed_groups: string[];
   task_row?: SidebarTaskRowPresentationApi | null;
+  generated_plugin_grouping?: { reference: `plugin:${string}:${string}`; name: string };
+};
+
+export type SidebarViewUpdateApi = Partial<
+  Omit<SidebarViewApi, "id" | "collapsed_groups" | "generated_plugin_grouping">
+> & {
+  id: string;
+  generated_plugin_grouping?: SidebarViewApi["generated_plugin_grouping"] | null;
+  disclosure?: {
+    group: string;
+    add?: string[];
+    remove?: string[];
+    replace?: string[];
+    canonicalize?: boolean;
+  };
+};
+
+export type SidebarDraftUpdateApi = Omit<
+  SidebarViewUpdateApi,
+  "id" | "name" | "generated_plugin_grouping"
+> & {
+  base_view_id: string;
+  expected_group: string;
+  clear?: boolean;
+  require_existing?: boolean;
+};
+
+export type SidebarDraftSaveApi = {
+  base_view_id: string;
+  expected_group: string;
+  target_view_id: string;
+  name?: string;
 };
 
 export type SidebarViewDraftApi = {
@@ -41,6 +73,7 @@ export type SidebarViewDraftApi = {
   };
   group: string;
   group_indent?: boolean;
+  collapsed_groups?: string[];
   task_row?: SidebarTaskRowPresentationApi | null;
 };
 
@@ -207,6 +240,7 @@ export type UserSettings = {
   preferred_shell?: string;
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
+  escape_cancels_agent?: boolean;
   chat_submit_key?: "enter" | "cmd_enter";
   show_anchored_prompt_bar?: boolean;
   show_scroll_to_last_prompt?: boolean;
@@ -219,7 +253,10 @@ export type UserSettings = {
   confirm_task_archive?: boolean;
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
+  unread_task_dot?: boolean;
+  unread_task_dot_hide_delay_seconds?: number;
   agent_generated_task_titles?: boolean;
+  prompt_suggestions?: boolean;
   auto_focus_new_tasks?: boolean;
   agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
@@ -228,6 +265,7 @@ export type UserSettings = {
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
   lsp_server_configs?: Record<string, Record<string, unknown>>;
+  markdown_preview_by_default?: boolean;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
   sidebar_views_by_workspace?: Record<string, SidebarWorkspaceStateApi>;
@@ -248,7 +286,6 @@ export type UserSettings = {
   github_saved_presets?: unknown;
   github_default_query_presets?: unknown;
   gitlab_saved_presets?: unknown;
-  azure_devops_browse_preferences?: unknown;
   default_utility_agent_id?: string;
   default_utility_model?: string;
   default_utility_agent_profile_id?: string;
@@ -293,6 +330,7 @@ export type UserSettingsUpdatePayload = {
   preferred_shell?: string;
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
+  escape_cancels_agent?: boolean;
   chat_submit_key?: "enter" | "cmd_enter";
   show_anchored_prompt_bar?: boolean;
   show_scroll_to_last_prompt?: boolean;
@@ -305,7 +343,10 @@ export type UserSettingsUpdatePayload = {
   confirm_task_archive?: boolean;
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
+  unread_task_dot?: boolean;
+  unread_task_dot_hide_delay_seconds?: number;
   agent_generated_task_titles?: boolean;
+  prompt_suggestions?: boolean;
   auto_focus_new_tasks?: boolean;
   agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
@@ -314,6 +355,7 @@ export type UserSettingsUpdatePayload = {
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
   lsp_server_configs?: Record<string, Record<string, unknown>>;
+  markdown_preview_by_default?: boolean;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
   sidebar_layout_state?: {
@@ -324,8 +366,17 @@ export type UserSettingsUpdatePayload = {
   sidebar_view_state?: {
     workspace_id: string;
     views?: SidebarViewApi[];
+    views_create?: SidebarViewApi[];
+    views_upsert?: SidebarViewApi[];
+    views_update?: SidebarViewUpdateApi[];
+    view_ids_delete?: string[];
+    view_order?: string[];
+    view_order_base?: string[];
     active_view_id?: string;
     draft?: SidebarViewDraftApi | null;
+    draft_update?: SidebarDraftUpdateApi;
+    select_plugin_grouping?: SidebarViewApi;
+    save_draft?: SidebarDraftSaveApi;
   };
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
@@ -343,7 +394,6 @@ export type UserSettingsUpdatePayload = {
   github_saved_presets?: unknown[] | null;
   github_default_query_presets?: object | null;
   gitlab_saved_presets?: unknown[] | null;
-  azure_devops_browse_preferences?: object | null;
   default_utility_agent_id?: string;
   default_utility_model?: string;
   default_utility_agent_profile_id?: string;

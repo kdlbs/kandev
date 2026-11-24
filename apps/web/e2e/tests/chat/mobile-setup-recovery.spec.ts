@@ -63,9 +63,12 @@ test.describe("Setup recovery UX (mobile)", () => {
         return;
       }
       await route.fulfill({
-        status: 500,
+        status: 400,
         contentType: "application/json",
-        body: JSON.stringify({ error: "Invalid mobile repository configuration" }),
+        body: JSON.stringify({
+          error: "Invalid mobile repository configuration",
+          error_code: "quick_chat_creation_rejected",
+        }),
       });
     });
 

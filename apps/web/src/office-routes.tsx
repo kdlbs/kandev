@@ -13,6 +13,7 @@ import { InboxPageClient } from "@/app/office/inbox/inbox-page-client";
 import { OfficePageClient } from "@/app/office/page-client";
 import { ProjectsPageClient } from "@/app/office/projects/projects-page-client";
 import { SetupWizard } from "@/app/office/setup/setup-wizard";
+import { isTaskIdentifierParam } from "@/app/office/tasks/[id]/task-identifier-redirect";
 import { loadSetupRouteData } from "@/app/office/setup/setup-route-data";
 import type { SetupWizardRouteProps } from "@/app/office/setup/setup-route-data";
 import ProviderRoutingPage from "@/app/office/workspace/routing/page";
@@ -63,7 +64,11 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
   "/office/workspace/activity": () => <ActivityPageClient initialActivity={[]} />,
   "/office/workspace/costs": () => <CostsPageClient initialCostSummary={null} />,
   "/office/workspace/skills": () => <SkillsPageClient initialSkills={[]} />,
-  "/office/workspace/routing": () => <ProviderRoutingPage />,
+  "/office/workspace/routing": () => (
+    <SettingsSaveProvider placement="content">
+      <ProviderRoutingPage />
+    </SettingsSaveProvider>
+  ),
   "/office/workspace/settings": () => (
     <SettingsSaveProvider placement="content">
       <SettingsPage />
@@ -103,6 +108,7 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
 
   if (
     setupRedirectHref ||
+    shouldHoldTaskIdentifierRouteForBootstrap(normalizedPathname, bootstrap.complete) ||
     shouldHoldOfficeHomeForBootstrap(normalizedPathname, bootstrap.complete, workspaces)
   ) {
     return <OfficeRouteLoading />;
@@ -392,6 +398,14 @@ function shouldHoldOfficeHomeForBootstrap(
     !bootstrapComplete &&
     (!hasOfficeWorkspace(workspaces.items) || !workspaces.activeId)
   );
+}
+
+export function shouldHoldTaskIdentifierRouteForBootstrap(
+  pathname: string,
+  bootstrapComplete: boolean,
+): boolean {
+  const taskId = matchSingle(pathname, /^\/office\/tasks\/([^/]+)$/);
+  return !bootstrapComplete && taskId !== null && isTaskIdentifierParam(taskId);
 }
 
 function hasOfficeWorkspace(workspaceItems: WorkspaceState["items"]): boolean {

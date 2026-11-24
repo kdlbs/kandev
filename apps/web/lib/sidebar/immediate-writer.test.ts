@@ -4,6 +4,15 @@ import { defaultSidebarLayout, type SidebarLayout } from "./layout-types";
 import { toggleNodeVisibility, moveSection } from "./layout-operations";
 
 describe("immediate sidebar writes", () => {
+  it("does not save unchanged or invalid scoped moves", async () => {
+    const saved = defaultSidebarLayout();
+    const write = vi.fn();
+    const writer = createSidebarWriter({ read: () => saved, write });
+    await writer("a", (layout) => layout);
+    expect(write).not.toHaveBeenCalled();
+    await writer("a", (layout) => toggleNodeVisibility(layout, "home", false));
+    expect(write).toHaveBeenCalledOnce();
+  });
   it("serializes edits using each acknowledged revision and isolates workspaces", async () => {
     const layouts: Record<string, SidebarLayout> = {
       a: defaultSidebarLayout(),

@@ -224,6 +224,54 @@ func TestPromptUsesCurrentSessionModel(t *testing.T) {
 	}
 }
 
+func TestConfigurationCommandFeedbackPrompt(t *testing.T) {
+	updater := newCapturingUpdater()
+	agent := &mockAgent{
+		model:           modelFast,
+		conn:            updater,
+		sessions:        make(map[acp.SessionId]bool),
+		promptCancels:   make(map[acp.SessionId]context.CancelFunc),
+		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+	session, err := agent.NewSession(context.Background(), acp.NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	response, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionId: session.SessionId,
+		Prompt:    []acp.ContentBlock{acp.TextBlock("/model " + modelSmart)},
+	})
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if response.StopReason != acp.StopReasonEndTurn {
+		t.Fatalf("stop reason = %q, want end_turn", response.StopReason)
+	}
+	if len(updater.textMessages()) != 0 {
+		t.Fatalf("command emitted text output: %v", updater.textMessages())
+	}
+
+	updater.mu.Lock()
+	notifications := append([]acp.SessionNotification(nil), updater.notes...)
+	updater.mu.Unlock()
+	var observedModel string
+	for _, note := range notifications {
+		if note.Update.ConfigOptionUpdate == nil {
+			continue
+		}
+		for _, option := range note.Update.ConfigOptionUpdate.ConfigOptions {
+			if option.Select != nil && option.Select.Id == modelConfigID {
+				observedModel = string(option.Select.CurrentValue)
+			}
+		}
+	}
+	if observedModel != modelSmart {
+		t.Fatalf("reported model = %q, want %q", observedModel, modelSmart)
+	}
+}
+
 func TestSessionConfigIsIsolatedAcrossNewSessions(t *testing.T) {
 	agent := &mockAgent{
 		sessions:        make(map[acp.SessionId]bool),

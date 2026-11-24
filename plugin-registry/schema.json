@@ -32,7 +32,7 @@
           },
           "categories": {
             "type": "array",
-            "description": "Curation-only category tags used for filtering in the catalog.",
+            "description": "Extra curation category tags added to the release manifest categories.",
             "items": {
               "type": "string"
             }

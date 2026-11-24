@@ -151,10 +151,9 @@ precedents followed are in the paired system design.
   time-based expiry to suppress it. Any consuming transition in between removes
   or replaces the token per -001.2 and -001.3.
 - **AC-TASKS-SIGNAL-PAYLOAD-DELIVERY-001.13:** The completion handoff and
-  blockers a transition carries shall be those of the first completion signal
-  accepted for that step. When a second `step_complete_kandev` call is rejected
-  as a duplicate, its handoff and blockers shall not be recorded, delivered,
-  merged, or allowed to overwrite the accepted signal's.
+  blockers shall come from the signal that owns completion at commit, per
+  [source-specific completion](workflow-completion-outcomes.md).
+  A duplicate from that source turn shall not replace or merge its payload.
 
 ### REQ-TASKS-SIGNAL-PAYLOAD-DELIVERY-002: A signal's blockers are retrievable after the transition
 
@@ -187,7 +186,7 @@ precedents followed are in the paired system design.
   A consumer shall treat `signal_blockers` and `signal_handoff` as
   absent-by-default.
 - **AC-TASKS-SIGNAL-PAYLOAD-DELIVERY-002.8:** The values recorded shall be those
-  of the first signal accepted for the step, per -001.13. A duplicate signal
+  of the signal consumed at commit, per -001.13. A duplicate signal
   shall neither append a second audit record nor amend the existing one.
 
 ### REQ-TASKS-SIGNAL-PAYLOAD-DELIVERY-003: Neither argument can grow without bound
@@ -223,7 +222,7 @@ precedents followed are in the paired system design.
   was truncated the system shall omit both fields, so a result omitting them means
   every submitted value was stored whole.
 - **AC-TASKS-SIGNAL-PAYLOAD-DELIVERY-003.5a:** When a call is rejected as a
-  duplicate for the step, its result shall keep its existing rejection shape and
+  duplicate, its result shall retain `accepted:false` and `reason:already_signaled` and
   report no truncation, none of that call's values having been stored. Bounding
   shall never convert a rejected duplicate into an accepted signal.
 - **AC-TASKS-SIGNAL-PAYLOAD-DELIVERY-003.6:** The ceiling shall be a fixed value

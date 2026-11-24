@@ -11,15 +11,17 @@ import (
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
+	"sort"
 )
 
 type output struct {
-	License string `json:"license,omitempty"`
-	Kind    string `json:"kind"`
-	ID      string `json:"id"`
-	Version string `json:"version"`
-	SHA256  string `json:"sha256"`
-	Signed  bool   `json:"signed"`
+	License        string   `json:"license,omitempty"`
+	Kind           string   `json:"kind"`
+	FileExtensions []string `json:"file_extensions,omitempty"`
+	ID             string   `json:"id"`
+	Version        string   `json:"version"`
+	SHA256         string   `json:"sha256"`
+	Signed         bool     `json:"signed"`
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
@@ -78,12 +80,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if err := json.NewEncoder(stdout).Encode(output{
-		Kind:    kind,
-		License: packageLicense(verified.Manifest),
-		ID:      verified.Manifest.ID,
-		Version: verified.Manifest.Version,
-		SHA256:  digest,
-		Signed:  verified.Signed,
+		Kind:           kind,
+		License:        packageLicense(verified.Manifest),
+		ID:             verified.Manifest.ID,
+		Version:        verified.Manifest.Version,
+		SHA256:         digest,
+		Signed:         verified.Signed,
+		FileExtensions: manifestFileExtensions(verified.Manifest.UI.FileViewers),
 	}); err != nil {
 		writeError(stderr, "encode result: %v\n", err)
 		return 1
@@ -117,4 +120,19 @@ func fileSHA256(archivePath string) (string, error) {
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func manifestFileExtensions(viewers []manifest.FileViewer) []string {
+	seen := map[string]bool{}
+	for _, viewer := range viewers {
+		for _, extension := range viewer.Extensions {
+			seen[extension] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for extension := range seen {
+		out = append(out, extension)
+	}
+	sort.Strings(out)
+	return out
 }

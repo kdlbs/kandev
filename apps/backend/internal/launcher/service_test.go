@@ -388,22 +388,22 @@ func TestBuildJournalArgs(t *testing.T) {
 	}{
 		{
 			name: "user logs",
-			args: serviceArgs{Action: actionLogs},
+			args: serviceArgs{Action: actionLogs, Lines: defaultServiceLogLines},
 			want: []string{"--user-unit", "kandev.service", "-n", "200", "--no-pager"},
 		},
 		{
 			name: "user logs follow keeps line count",
-			args: serviceArgs{Action: actionLogs, Follow: true},
+			args: serviceArgs{Action: actionLogs, Lines: defaultServiceLogLines, Follow: true},
 			want: []string{"--user-unit", "kandev.service", "-n", "200", "-f"},
 		},
 		{
 			name: "system logs",
-			args: serviceArgs{Action: actionLogs, System: true},
+			args: serviceArgs{Action: actionLogs, Lines: defaultServiceLogLines, System: true},
 			want: []string{"-u", "kandev.service", "-n", "200", "--no-pager"},
 		},
 		{
 			name: "system logs follow keeps line count",
-			args: serviceArgs{Action: actionLogs, System: true, Follow: true},
+			args: serviceArgs{Action: actionLogs, Lines: defaultServiceLogLines, System: true, Follow: true},
 			want: []string{"-u", "kandev.service", "-n", "200", "-f"},
 		},
 	}

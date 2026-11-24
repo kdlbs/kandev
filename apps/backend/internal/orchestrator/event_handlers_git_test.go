@@ -836,7 +836,7 @@ func TestContextWindowCompactionCountIsPublishedWithWindowUpdate(t *testing.T) {
 
 	persisted, err := svc.persistAndPublishContextWindowUpdate(ctx, "t1", "s1", generation, map[string]interface{}{
 		"size": int64(200000), "used": int64(80000),
-	})
+	}, false)
 	require.NoError(t, err)
 	require.True(t, persisted)
 	require.Len(t, eventBus.events, 1)
@@ -847,6 +847,7 @@ func TestContextWindowCompactionCountIsPublishedWithWindowUpdate(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, int64(1), metadata[models.SessionMetaKeyContextCompactionCount])
 	require.NotNil(t, metadata[models.SessionMetaKeyContextWindow])
+	require.NotEmpty(t, payload["updated_at"])
 }
 
 func TestContextWindowResetDropsStaleBroadcast(t *testing.T) {
@@ -862,7 +863,7 @@ func TestContextWindowResetDropsStaleBroadcast(t *testing.T) {
 
 	persisted, err := svc.persistAndPublishContextWindowUpdate(ctx, "t1", "s1", staleGeneration, map[string]interface{}{
 		"size": int64(200000), "used": int64(195000),
-	})
+	}, false)
 	require.NoError(t, err)
 	require.False(t, persisted)
 	require.Empty(t, eventBus.events)

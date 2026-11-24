@@ -1,13 +1,60 @@
 import fs from "node:fs";
 import path from "node:path";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import type { WsWatcher } from "../../helpers/causal-waits";
 
 export const RICH_OUTPUT_FILE = "rich-output-report.txt";
 export const RICH_OUTPUT_FILE_CONTENT = "RICH_OUTPUT_FILE_PREVIEW\nchecks=38\nfailures=0\n";
+export const RICH_OUTPUT_FILE_UPDATED_CONTENT =
+  "RICH_OUTPUT_FILE_PREVIEW_UPDATED\nchecks=99\nfailures=0\n";
 export const RICH_OUTPUT_IMAGE = "rich-output-image.PNG";
+
+export async function reopenRichOutputPreviewWithCurrentContents({
+  card,
+  repositoryPath,
+  watcher,
+  touch,
+}: {
+  card: Locator;
+  repositoryPath: string;
+  watcher: WsWatcher;
+  touch: boolean;
+}): Promise<void> {
+  const filePath = path.join(repositoryPath, RICH_OUTPUT_FILE);
+  const originalContent = fs.readFileSync(filePath, "utf8");
+  const toggle = card.getByTestId("rich-output-file-preview-toggle");
+  const activate = () => (touch ? toggle.tap() : toggle.click());
+
+  try {
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await Promise.all([
+      watcher.waitForResponse("workspace.file.get", {
+        requestWhere: (payload) => payload.path === RICH_OUTPUT_FILE,
+      }),
+      activate(),
+    ]);
+    await expect(card).toContainText(RICH_OUTPUT_FILE_CONTENT.trim());
+
+    await activate();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(card).not.toContainText(RICH_OUTPUT_FILE_CONTENT.trim());
+    fs.writeFileSync(filePath, RICH_OUTPUT_FILE_UPDATED_CONTENT);
+
+    await Promise.all([
+      watcher.waitForResponse("workspace.file.get", {
+        requestWhere: (payload) => payload.path === RICH_OUTPUT_FILE,
+      }),
+      activate(),
+    ]);
+    await expect(card).toContainText(RICH_OUTPUT_FILE_UPDATED_CONTENT.trim());
+    await expect(card).not.toContainText(RICH_OUTPUT_FILE_CONTENT.trim());
+  } finally {
+    fs.writeFileSync(filePath, originalContent);
+  }
+}
 
 export function seedRichOutputImage(repositoryPath: string) {
   fs.copyFileSync(
@@ -119,7 +166,7 @@ function richOutputScript(): string {
     },
   };
   return [
-    `e2e:mcp:kandev:show_rich_output_kandev(${JSON.stringify(payload)})`,
+    `e2e:mcp:kandev-rich-output:show_rich_output_kandev(${JSON.stringify(payload)})`,
     'e2e:message("Rich output complete.")',
   ].join("\n");
 }
@@ -130,6 +177,7 @@ export async function seedRichOutputTask({
   seedData,
   title,
   historical = false,
+  failureRetry = false,
   payload,
 }: {
   page: Page;
@@ -137,13 +185,15 @@ export async function seedRichOutputTask({
   seedData: SeedData;
   title: string;
   historical?: boolean;
+  failureRetry?: boolean;
   payload?: unknown;
 }): Promise<SessionPage> {
   fs.writeFileSync(path.join(seedData.repositoryPath, RICH_OUTPUT_FILE), RICH_OUTPUT_FILE_CONTENT);
   fs.writeFileSync(path.join(seedData.repositoryPath, RICH_OUTPUT_CSV), RICH_OUTPUT_CSV_CONTENT);
   let description = richOutputScript();
+  if (failureRetry) description = 'e2e:message("Rich output retry fixture ready.")';
   if (payload)
-    description = `e2e:mcp:kandev:show_rich_output_kandev(${JSON.stringify(payload)})\ne2e:message("Rich output complete.")`;
+    description = `e2e:mcp:kandev-rich-output:show_rich_output_kandev(${JSON.stringify(payload)})\ne2e:message("Rich output complete.")`;
   if (historical) description = 'e2e:message("Historical replay fixture.")';
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -225,5 +275,117 @@ export async function seedRichOutputTask({
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  if (failureRetry) {
+    await seedRichOutputFailureMessage(
+      apiClient,
+      task.session_id,
+      'StatusList item "Build" has unsupported status "success".',
+    );
+    await seedRichOutputSuccessMessage(apiClient, task.session_id);
+  }
   return session;
+}
+
+export async function seedRichOutputFailureMessage(
+  apiClient: ApiClient,
+  sessionId: string,
+  diagnostic: string,
+): Promise<void> {
+  const toolName = "mcp__kandev__show_rich_output_kandev";
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "tool_call",
+    content: toolName,
+    authorType: "agent",
+    newTurn: true,
+    turnStartedAt: new Date().toISOString(),
+    turnCompletedAt: new Date().toISOString(),
+    metadata: {
+      tool_call_id: `rich-output-failure-${Date.now()}`,
+      title: toolName,
+      status: "error",
+      normalized: {
+        kind: "generic",
+        generic: {
+          name: "other",
+          input: { kind: "other", raw_input: { secret: "never display submitted arguments" } },
+          output: {
+            structuredContent: null,
+            content: [{ type: "text", text: JSON.stringify({ message: diagnostic }) }],
+          },
+        },
+      },
+    },
+  });
+}
+
+export async function seedRichOutputSuccessMessage(
+  apiClient: ApiClient,
+  sessionId: string,
+): Promise<void> {
+  const toolName = "mcp__kandev__show_rich_output_kandev";
+  const payload = {
+    version: 2,
+    catalog_version: 1,
+    title: "Release health",
+    spec: {
+      root: "report",
+      elements: {
+        report: {
+          type: "Stack",
+          props: { direction: "vertical" },
+          children: ["checks", "chart", "evidence"],
+        },
+        checks: {
+          type: "StatusList",
+          props: {
+            items: [
+              {
+                label: "Corrected verification",
+                status: "passed",
+                detail: "The corrected report remains available.",
+              },
+            ],
+          },
+          children: [],
+        },
+        chart: {
+          type: "Chart",
+          props: {
+            chart_type: "bar",
+            title: "Build results",
+            summary: "Completed and failed checks in this report.",
+            labels: ["Passed", "Failed"],
+            series: [
+              { label: "Checks", values: [38, 0] },
+              { label: "Retries", values: [2, 0] },
+            ],
+          },
+          children: [],
+        },
+        evidence: {
+          type: "FilePreview",
+          props: { path: RICH_OUTPUT_FILE, title: "Raw verification report" },
+          children: [],
+        },
+      },
+    },
+  };
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "tool_call",
+    content: toolName,
+    authorType: "agent",
+    metadata: {
+      tool_call_id: "rich-output-retry-success",
+      title: toolName,
+      status: "complete",
+      normalized: {
+        kind: "generic",
+        generic: {
+          name: "other",
+          input: { kind: "other", raw_input: payload },
+          output: { content: "Rich output accepted." },
+        },
+      },
+    },
+  });
 }

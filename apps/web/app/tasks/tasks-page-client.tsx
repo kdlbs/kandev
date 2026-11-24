@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
 import { deleteTask, unarchiveTask, updateUserSettings } from "@/lib/api";
@@ -272,6 +272,10 @@ function useTasksListPreferenceSync({
   const router = useRouter();
   const searchParams = useSearchParams();
   const store = useAppStoreApi();
+  // Preference snapshots must reach the server in selection order; a
+  // fire-and-forget write can otherwise land after a newer one and restore the
+  // previous sort/group pair.
+  const pendingWrite = useRef<Promise<unknown>>(Promise.resolve());
 
   const persistPreferences = useCallback(
     (sort: TasksListSortPreference, group: TasksListGroupPreference) => {
@@ -286,13 +290,18 @@ function useTasksListPreferenceSync({
         tasksListGroup: group,
         loaded: true,
       });
-      updateUserSettings(
-        {
-          tasks_list_sort: sort,
-          tasks_list_group: group,
-        },
-        { cache: "no-store" },
-      ).catch(() => {});
+      pendingWrite.current = pendingWrite.current
+        .catch(() => undefined)
+        .then(() =>
+          updateUserSettings(
+            {
+              tasks_list_sort: sort,
+              tasks_list_group: group,
+            },
+            { cache: "no-store" },
+          ),
+        )
+        .catch(() => undefined);
     },
     [store],
   );

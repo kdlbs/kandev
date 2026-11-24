@@ -7,6 +7,7 @@ import {
   IconKey,
   IconLayoutGrid,
   IconPlugConnected,
+  IconServer,
 } from "@tabler/icons-react";
 
 import { CoordinatorIcon } from "@/lib/coordinator/icon";
@@ -31,6 +32,7 @@ export type WorkspaceSettingsTab =
   | "integrations"
   | "automations"
   | "secrets"
+  | "mcp-servers"
   | "coordinators";
 
 export function workspaceSettingsHref(workspaceId: string, tab: WorkspaceSettingsTab): string {
@@ -58,6 +60,7 @@ export const WORKSPACE_SETTINGS_TABS: ReadonlyArray<WorkspaceTabSpec> = [
   { tab: "integrations", labelKey: "common:integrations", icon: IconPlugConnected },
   { tab: "automations", labelKey: "common:automations", icon: IconBolt },
   { tab: "secrets", labelKey: "settings:secrets", icon: IconKey },
+  { tab: "mcp-servers", labelKey: "settings:mcpServers", icon: IconServer },
   { tab: "coordinators", labelKey: "coordinator:coordinators", icon: CoordinatorIcon },
 ];
 

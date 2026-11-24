@@ -149,9 +149,13 @@ The rule cannot prove all architectural ownership.
 
 ## Registration and verification
 
-The rule is registered as an error only for the four owner paths. The wiring
-suite uses ESLint's actual config and API. For each guarded path, it asserts
-that `calculateConfigForFile` resolves the rule to error severity, then calls
+The rule is registered as an error only for the four owner paths. Normal web
+lint loads it as a first-party Oxlint JS plugin, and
+`apps/web/scripts/lib/native-lint-wiring.test.ts` executes the required CLI
+against an isolated project using the checked-in configuration and the exact
+production filenames. The retained ESLint wiring suite uses ESLint's actual
+config and API for the adapter host. For each guarded path, it asserts that
+`calculateConfigForFile` resolves the rule to error severity, then calls
 `lintText` with that exact production `filePath` and a TypeScript fixture that
 reproduces that file's supported owner structure. It asserts the emitted
 finding's rule ID, error severity, source line, resource name, and replacement
@@ -188,20 +192,20 @@ and template text. They also cover harmless formatting.
 No baseline, rule exemption, broad suppression, or test-only registration is
 introduced.
 
-The existing web pre-commit hook runs ESLint only on changed `.ts`, `.tsx`,
-`.js`, and `.jsx` paths. It covers edits to guarded TypeScript owner files; it
-does not select the `.mjs` rule or `eslint.config.mjs` paths. The existing
-`prettier-format` hook does include `.mjs`. The wiring test must run in the
-normal web test suite, and the rule/config must run in normal web lint. CI's
+The existing web pre-commit hook runs Oxlint on changed `.ts`, `.tsx`, `.js`,
+and `.jsx` paths with the required configuration. It covers edits to guarded
+TypeScript owner files; it does not select the `.mjs` config paths. The
+existing `prettier-format` hook does include `.mjs`. The wiring test runs in the
+normal web test suite, and the rule/config run in normal web lint. CI's
 `Frontend Tests Passed` gate runs full web lint, typecheck, and tests. The
 Python architecture hook and `make lint-architecture` do not run this rule.
 No wider pre-commit hook change is needed.
 
 For a red/green check at the production boundary, temporarily add a supported
 retired field to the real `defaultSystemState.system` object in
-`system-slice.ts`, run targeted ESLint on that file, confirm the
+`system-slice.ts`, run targeted native lint on that file, confirm the
 resource-specific diagnostic, restore the exact file contents, and confirm
-targeted ESLint passes. This complements the real-config `lintText` matrix for
+targeted native lint passes. This complements the real-config `lintText` matrix for
 all four production filenames; standalone RuleTester strings alone are not
 sufficient wiring evidence.
 

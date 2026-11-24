@@ -10,7 +10,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("sendPtyInput", () => {
   it("applies and consumes a phone Ctrl latch on the local PTY socket", () => {
-    const socket = { readyState: 1, send: vi.fn() };
+    const socket = { readyState: 1 as const, send: vi.fn() };
     useShellModifiersStore.getState().toggleCtrl();
     sendPtyInput(socket, "c", true);
     expect(new TextDecoder().decode(socket.send.mock.calls[0][0])).toBe("\x03");
@@ -18,7 +18,7 @@ describe("sendPtyInput", () => {
   });
 
   it("keeps modifiers armed while the socket is unavailable", () => {
-    const socket = { readyState: 3, send: vi.fn() };
+    const socket = { readyState: 3 as const, send: vi.fn() };
     useShellModifiersStore.getState().toggleCtrl();
     sendPtyInput(socket, "c", true);
     sendPtyInput(null, "c", true);
@@ -27,7 +27,7 @@ describe("sendPtyInput", () => {
   });
 
   it("sends reverse tab and keeps sticky Shift enabled", () => {
-    const socket = { readyState: 1, send: vi.fn() };
+    const socket = { readyState: 1 as const, send: vi.fn() };
     useShellModifiersStore.getState().toggleShift();
     useShellModifiersStore.getState().toggleShift();
     sendPtyInput(socket, "\t", true);
@@ -36,7 +36,7 @@ describe("sendPtyInput", () => {
   });
 
   it("leaves standard PTY input and modifiers unchanged", () => {
-    const socket = { readyState: 1, send: vi.fn() };
+    const socket = { readyState: 1 as const, send: vi.fn() };
     useShellModifiersStore.getState().toggleCtrl();
     sendPtyInput(socket, "c", false);
     expect(new TextDecoder().decode(socket.send.mock.calls[0][0])).toBe("c");

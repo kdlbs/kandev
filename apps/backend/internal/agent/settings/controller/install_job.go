@@ -29,12 +29,13 @@ import (
 // pick up the final state on reload before they evict.
 
 const (
-	jobOutputRingSize  = 64 * 1024
-	jobRetention       = 5 * time.Minute
-	jobMaxParallel     = 4
-	jobHardTimeout     = 5 * time.Minute
-	outputFlushPeriod  = 50 * time.Millisecond
-	outputFlushMaxSize = 4 * 1024
+	jobOutputRingSize     = 64 * 1024
+	jobRetention          = 5 * time.Minute
+	jobMaxParallel        = 4
+	jobHardTimeout        = 5 * time.Minute
+	installJobHardTimeout = 20 * time.Minute
+	outputFlushPeriod     = 50 * time.Millisecond
+	outputFlushMaxSize    = 4 * 1024
 )
 
 // InstallJob tracks a single install attempt.
@@ -151,10 +152,24 @@ func NewJobStore(
 	}
 }
 
+// InstallAction is a server-owned installation step. It receives the job
+// context and an output callback; it never receives request-supplied URLs,
+// versions, or shell text.
+type InstallAction func(ctx context.Context, onChunk func(string)) error
+
 // Enqueue starts (or returns an existing) install job for the named agent
 // running the given hard-coded script. The script is supplied by the agent
 // type, not by the request — no user-supplied shell input.
 func (s *JobStore) Enqueue(agentName, script string) (*InstallJob, error) {
+	action := func(ctx context.Context, onChunk func(string)) error {
+		return streamingInstallRunner(ctx, script, onChunk)
+	}
+	return s.EnqueueAction(agentName, action)
+}
+
+// EnqueueAction starts (or returns an existing) install job for the named
+// agent running a server-owned Go action.
+func (s *JobStore) EnqueueAction(agentName string, action InstallAction) (*InstallJob, error) {
 	s.mu.Lock()
 	// Idempotent: a running/queued job for this agent reuses the same job_id.
 	if existing, ok := s.activeByAgt[agentName]; ok {
@@ -187,7 +202,7 @@ func (s *JobStore) Enqueue(agentName, script string) (*InstallJob, error) {
 	s.mu.Unlock()
 
 	s.broadcast(ws.ActionAgentInstallStarted, job.snapshot())
-	go s.run(job, script, ref)
+	go s.run(job, action, ref)
 	return job, nil
 }
 
@@ -214,12 +229,12 @@ func (s *JobStore) ListAll() []dto.InstallJobDTO {
 	return out
 }
 
-func (s *JobStore) run(job *InstallJob, script string, ref MaintenanceJobRef) {
+func (s *JobStore) run(job *InstallJob, action InstallAction, ref MaintenanceJobRef) {
 	// Bound parallel installs: queued jobs wait here until a slot frees up.
 	s.semaphore <- struct{}{}
 	defer func() { <-s.semaphore }()
 
-	ctx, cancel := context.WithTimeout(context.Background(), jobHardTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), installJobHardTimeout)
 	s.mu.Lock()
 	job.cancel = cancel
 	job.Status = dto.InstallJobStatusRunning
@@ -232,7 +247,7 @@ func (s *JobStore) run(job *InstallJob, script string, ref MaintenanceJobRef) {
 	flusher := newOutputFlusher(s, job)
 	defer flusher.flush()
 
-	err := streamingInstallRunner(ctx, script, flusher.append)
+	err := action(ctx, flusher.append)
 	flusher.flush()
 
 	s.mu.Lock()
@@ -285,7 +300,7 @@ func (s *JobStore) broadcast(action string, payload dto.InstallJobDTO) {
 
 func formatJobError(ctx context.Context, err error) string {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("install timed out after %s", jobHardTimeout)
+		return fmt.Sprintf("install timed out after %s", installJobHardTimeout)
 	}
 	return err.Error()
 }

@@ -1,0 +1,16 @@
+[
+  "message",
+  "content",
+  "tool_call",
+  "tool_read",
+  "tool_edit",
+  "tool_execute",
+  "tool_search",
+  "progress",
+  "status",
+  "error",
+  "thinking",
+  "todo",
+  "script_execution",
+  "agent_plan"
+]

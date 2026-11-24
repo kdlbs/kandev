@@ -21,6 +21,10 @@ type remoteRecoverySnapshotProvider interface {
 	GetRemoteRecoverySnapshot(context.Context, string) (*agentruntime.RemoteRecoverySnapshot, error)
 }
 
+type remoteRecoveryAbsenceSnapshotProvider interface {
+	GetRemoteRecoveryAbsenceSnapshot(context.Context, *models.ExecutorRunning) (*agentruntime.RemoteRecoverySnapshot, error)
+}
+
 func (r staleRemoteRecoverySessionReader) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
 	session, err := r.Repository.GetTaskSession(ctx, sessionID)
 	if err == nil && sessionID == r.sessionID {
@@ -85,6 +89,24 @@ func TestServiceProvidesReadOnlyRemoteRecoverySnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "owner-before", workspace.OwnerID, "snapshot reads must not reassign workspace ownership")
 	require.Equal(t, "org-before", workspace.OrgID)
+
+	absenceProvider, ok := any(svc).(remoteRecoveryAbsenceSnapshotProvider)
+	require.True(t, ok, "task service must expose a current owner snapshot when the executor row is absent")
+	oldOwner := &models.ExecutorRunning{
+		SessionID: "session-remote-recovery", TaskID: "task-remote-recovery",
+		AgentExecutionID: "execution-remote-recovery", Runtime: "ssh",
+	}
+	require.NoError(t, repo.DeleteExecutorRunningBySessionID(ctx, oldOwner.SessionID))
+	absentSnapshot, err := absenceProvider.GetRemoteRecoveryAbsenceSnapshot(ctx, oldOwner)
+	require.NoError(t, err)
+	require.Equal(t, snapshot, absentSnapshot)
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "running-remote-recovery", SessionID: oldOwner.SessionID, TaskID: oldOwner.TaskID,
+		AgentExecutionID: oldOwner.AgentExecutionID, Runtime: oldOwner.Runtime,
+		ExecutorID: "executor-remote-recovery", Status: models.ExecutorRunningStatusReady,
+	}))
+	_, err = absenceProvider.GetRemoteRecoveryAbsenceSnapshot(ctx, oldOwner)
+	require.Error(t, err, "absence validation must reject a reappeared executor row")
 
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID: "session-remote-recovery-drift", TaskID: "task-remote-recovery", TaskEnvironmentID: "env-remote-recovery",

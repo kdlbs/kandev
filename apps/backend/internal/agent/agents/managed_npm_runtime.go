@@ -88,9 +88,7 @@ func (s ManagedNPMRuntimeSpec) ACPCommand(version string) Command {
 
 // InteractiveCommand starts the selected package's CLI without ACP mode.
 func (s ManagedNPMRuntimeSpec) InteractiveCommand(version string) Command {
-	args := []string{"npx", "--yes", "--prefer-offline"}
-	args = append(args, managedruntime.NPMProjectPrefixArgs()...)
-	args = append(args, s.PackageSpec(version))
+	args := managedruntime.ManagedNPMCommand(s.PackageSpec(version), false)
 	return NewCommand(args...)
 }
 
@@ -108,15 +106,21 @@ func (s ManagedNPMRuntimeSpec) RuntimeCommand(version string) Command {
 }
 
 func (s ManagedNPMRuntimeSpec) runtimeCommandWithNpmPreference(version string, preferOnline bool) Command {
-	preference := "--prefer-offline"
-	if preferOnline {
-		preference = "--prefer-online"
-	}
-	args := []string{"npx", "--yes", preference}
-	args = append(args, managedruntime.NPMProjectPrefixArgs()...)
-	args = append(args, s.PackageSpec(version))
+	args := managedruntime.ManagedNPMCommand(s.PackageSpec(version), preferOnline)
 	args = append(args, s.runtimeArgs()...)
 	return NewCommand(args...)
+}
+
+// MatchRuntimeCommand recognizes the registered direct managed-npm launcher
+// and separates its required runtime arguments from authorized agent
+// arguments. Full-argv equality is not required because profiles may append
+// valid CLI flags.
+func (s ManagedNPMRuntimeSpec) MatchRuntimeCommand(command []string) (managedruntime.ManagedNPMInvocation, bool) {
+	invocation, err := managedruntime.ParseManagedNPMInvocation(command, s.Package, s.runtimeArgs())
+	if err != nil {
+		return managedruntime.ManagedNPMInvocation{}, false
+	}
+	return invocation, true
 }
 
 // CachedACPCommand returns the default exact-version launch command.
@@ -202,4 +206,76 @@ func firstVersion(versions []string) string {
 func isBuiltInManagedNPMRuntimePackage(packageName string) bool {
 	_, err := DefaultManagedNPMRuntimeVersion(packageName)
 	return err == nil
+}
+
+// BuiltinManagedNPMRuntime returns the trusted managed runtime descriptor for
+// a registered built-in agent that supports npm runtimes.
+func BuiltinManagedNPMRuntime(agentID string) (ManagedNPMRuntimeSpec, bool) {
+	switch agentID {
+	case NewClaudeACP().ID():
+		return NewClaudeACP().ManagedNPMRuntime(), true
+	case NewCodexACP().ID():
+		return NewCodexACP().ManagedNPMRuntime(), true
+	case NewCodexAppServer(true).ID():
+		return NewCodexAppServer(true).ManagedNPMRuntime(), true
+	case CopilotACPAgentID:
+		return NewCopilotACP().ManagedNPMRuntime(), true
+	case "gemini":
+		return NewGemini().ManagedNPMRuntime(), true
+	case OpenCodeACPAgentID:
+		return NewOpenCodeACP().ManagedNPMRuntime(), true
+	case "pi-acp":
+		return NewPiACP().ManagedNPMRuntime(), true
+	case "muse-acp":
+		return NewMuseACP().ManagedNPMRuntime(), true
+	default:
+		return ManagedNPMRuntimeSpec{}, false
+	}
+}
+
+// MatchBuiltinManagedNPMRuntime recognizes a registered direct managed-npm
+// launcher, including both supported OpenCode families. Required runtime
+// arguments and authorized agent arguments are separated structurally.
+func MatchBuiltinManagedNPMRuntime(
+	agentID string,
+	command []string,
+) (ManagedNPMRuntimeSpec, managedruntime.ManagedNPMInvocation, bool) {
+	if agentID == OpenCodeACPAgentID {
+		for _, family := range []managedruntime.OpenCodeFamily{
+			managedruntime.OpenCodeFamilyV1,
+			managedruntime.OpenCodeFamilyV2,
+		} {
+			spec, err := NewOpenCodeACP().ManagedNPMRuntimeForFamily(family)
+			if err != nil {
+				continue
+			}
+			if invocation, ok := spec.MatchRuntimeCommand(command); ok {
+				return spec, invocation, true
+			}
+		}
+		return ManagedNPMRuntimeSpec{}, managedruntime.ManagedNPMInvocation{}, false
+	}
+	spec, ok := BuiltinManagedNPMRuntime(agentID)
+	if !ok {
+		return ManagedNPMRuntimeSpec{}, managedruntime.ManagedNPMInvocation{}, false
+	}
+	invocation, ok := spec.MatchRuntimeCommand(command)
+	return spec, invocation, ok
+}
+
+// BuiltinManagedNPMRuntimeForPackage resolves a registered distribution for an
+// exact package selection, including both supported OpenCode families.
+func BuiltinManagedNPMRuntimeForPackage(agentID, packageSpec string) (ManagedNPMRuntimeSpec, bool) {
+	spec, ok := BuiltinManagedNPMRuntime(agentID)
+	if !ok {
+		return ManagedNPMRuntimeSpec{}, false
+	}
+	if agentID == OpenCodeACPAgentID && strings.HasPrefix(packageSpec, managedruntime.OpenCodeV2Package+"@") {
+		var err error
+		spec, err = NewOpenCodeACP().ManagedNPMRuntimeForFamily(managedruntime.OpenCodeFamilyV2)
+		if err != nil {
+			return ManagedNPMRuntimeSpec{}, false
+		}
+	}
+	return spec, strings.HasPrefix(packageSpec, spec.Package+"@")
 }

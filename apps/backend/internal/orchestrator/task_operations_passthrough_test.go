@@ -99,7 +99,7 @@ func TestStartSessionForWorkflowStepRejectsPassthroughProfileMismatchBeforePromp
 		isAgentRunning: true,
 	}
 	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	err = svc.StartSessionForWorkflowStep(ctx, "task1", "session1", "step2")
 	if err == nil || !strings.Contains(err.Error(), "profile mismatch") {
@@ -138,7 +138,7 @@ func TestPromptTask_PassthroughRoutesToPTYStdin(t *testing.T) {
 		isAgentRunning: true,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
@@ -185,7 +185,7 @@ func TestPromptTask_PassthroughEmptyPromptSurfacesError(t *testing.T) {
 		isAgentRunning: true,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
@@ -223,7 +223,7 @@ func TestPromptTask_PassthroughWriteFailureRevertsSession(t *testing.T) {
 		passthroughStdinErr: errors.New("interactive runner not available"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
@@ -267,7 +267,7 @@ func TestPromptTask_PassthroughWriteFailureRevertsSessionAfterCallerCancellation
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")

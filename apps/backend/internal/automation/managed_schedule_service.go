@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func (s *Service) ListManagedConversationSchedules(ctx context.Context, installationID, workspaceID string) ([]pluginsdk.ManagedConversationSchedule, error) {

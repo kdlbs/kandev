@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,28 +63,78 @@ type Terminal struct {
 }
 
 type Coordinator struct {
-	repository repository.TurnChangesRepository
-	turns      TurnReader
-	policies   PolicyResolver
-	content    *ContentService
-	now        func() time.Time
-	overlapMu  sync.Mutex
-	logger     *zap.Logger
+	repository              repository.TurnChangesRepository
+	turns                   TurnReader
+	policies                PolicyResolver
+	content                 *ContentService
+	now                     func() time.Time
+	logger                  *zap.Logger
+	boundaryGuard           TurnChangeOperationGuard
+	exportLimiter           *ExportLimiter
+	startCaptureLimiter     *startCaptureLimiter
+	summaryPublisher        TurnChangeExportSummaryPublisher
+	admissionTimeout        time.Duration
+	startPersistenceReserve time.Duration
+}
+
+// TurnChangeOperationState reports whether the exact runtime ownership can
+// still write. Unknown fails closed and is retried.
+type TurnChangeOperationState string
+
+const (
+	TurnChangeOperationInactive TurnChangeOperationState = "inactive"
+	TurnChangeOperationActive   TurnChangeOperationState = "active"
+	TurnChangeOperationUnknown  TurnChangeOperationState = "unknown"
+)
+
+type TurnChangeOperationGuard interface {
+	TurnChangeCaptureOperation(ctx context.Context, executionID string, promptGeneration int64) TurnChangeOperationState
+}
+
+// SetTurnChangeOperationGuard installs the narrow runtime ownership probe used
+// before an orphan capture may be settled.
+func (c *Coordinator) SetTurnChangeOperationGuard(guard TurnChangeOperationGuard) {
+	if c != nil {
+		c.boundaryGuard = guard
+	}
+}
+
+// SetSummaryPublisher publishes revised summaries after recovery or overlap
+// reconciliation.
+func (c *Coordinator) SetSummaryPublisher(publisher TurnChangeExportSummaryPublisher) {
+	if c != nil {
+		c.summaryPublisher = publisher
+	}
 }
 
 const turnChangePersistenceTimeout = 3 * time.Second
+const turnChangeExportPageCeiling = 15 * time.Second
+const turnChangeReconcilePageSize = 100
+const turnChangeReconcilePages = 10
 const turnChangeAdmissionTimeout = 10 * time.Second
 const turnChangeCleanupTimeout = 5 * time.Second
 
 func turnChangePersistenceContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), turnChangePersistenceTimeout)
+	return turnChangePersistenceContextWith(context.Background())
+}
+
+// turnChangePersistenceContextWith keeps an existing stop deadline absolute
+// instead of granting every helper a fresh background budget.
+func turnChangePersistenceContextWith(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, turnChangePersistenceTimeout)
 }
 
 func NewCoordinator(repo repository.TurnChangesRepository, turns TurnReader, policies PolicyResolver, content *ContentService, now func() time.Time) *Coordinator {
 	if now == nil {
 		now = time.Now
 	}
-	return &Coordinator{repository: repo, turns: turns, policies: policies, content: content, now: now, logger: zap.NewNop()}
+	return &Coordinator{
+		repository: repo, turns: turns, policies: policies, content: content, now: now,
+		logger: zap.NewNop(), startCaptureLimiter: newStartCaptureLimiter(),
+	}
 }
 
 // SetLogger configures structured logging for coordinator diagnostics.
@@ -103,7 +152,11 @@ func (c *Coordinator) Admit(ctx context.Context, admission Admission, client Che
 	if !c.configuredForAdmission() {
 		return errors.New("turn change coordinator is not configured")
 	}
-	ctx, cancel := context.WithTimeout(ctx, turnChangeAdmissionTimeout)
+	admissionTimeout := c.admissionTimeout
+	if admissionTimeout <= 0 {
+		admissionTimeout = turnChangeAdmissionTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, admissionTimeout)
 	defer cancel()
 	turn, admission, err := c.prepareTurnChangeAdmission(ctx, admission, client)
 	if err != nil || turn == nil {
@@ -268,67 +321,6 @@ func (c *Coordinator) handleTurnChangeIdentityConflict(
 	return c.captureStart(ctx, admission, client, existing)
 }
 
-func (c *Coordinator) captureStart(ctx context.Context, admission Admission, client CheckpointClient, changeSet *models.TurnChangeSet) error {
-	if client == nil {
-		return errors.Join(errors.New("turn change checkpoint client is unavailable"),
-			c.acceptUnavailableStart(ctx, admission, changeSet, nil, turnchanges.ReasonUnsupportedExecutor))
-	}
-	scopes, err := client.TurnCheckpointRepositoryScopes(ctx)
-	if err != nil {
-		return errors.Join(fmt.Errorf("load turn change repository scopes: %w", err),
-			c.acceptUnavailableStart(ctx, admission, changeSet, nil, turnchanges.ReasonCheckoutUnavailable))
-	}
-	scopeSet := make(map[string]struct{}, len(scopes))
-	for _, scope := range scopes {
-		scopeSet[scope] = struct{}{}
-	}
-	repositories := make([]models.TurnRepositoryChangeSet, 0, len(admission.Checkouts))
-	var captureFailures []error
-	for _, checkout := range admission.Checkouts {
-		row := c.repositoryStartRow(changeSet.ID, checkout)
-		scope, ok := checkoutScope(checkout, len(admission.Checkouts), scopeSet)
-		if !ok {
-			row.Availability = models.TurnChangeAvailabilityUnavailable
-			row.Reason = models.TurnChangeReasonCheckoutUnavailable
-			captureFailures = append(captureFailures, fmt.Errorf("checkout %q is absent from registered repository scopes", checkout.ID))
-			repositories = append(repositories, row)
-			continue
-		}
-		row.RepositorySubpath = scope
-		captured, captureErr := client.CaptureTurnCheckpoint(ctx, turnchanges.CheckpointRequest{
-			ChangeSetID: changeSet.ID, CheckoutID: checkout.ID, Repo: scope, Boundary: turnchanges.CheckpointStart,
-		})
-		if captureErr != nil || !validCheckpoint(captured, changeSet.ID, checkout.ID, turnchanges.CheckpointStart) {
-			row.Availability = models.TurnChangeAvailabilityUnavailable
-			row.Reason = checkpointReason(captureErr, turnchanges.ReasonCaptureFailed)
-			if captureErr == nil {
-				captureErr = errors.New("checkpoint response did not match the admitted start boundary")
-			}
-			captureFailures = append(captureFailures, fmt.Errorf("capture start for checkout %q: %w", checkout.ID, captureErr))
-			repositories = append(repositories, row)
-			continue
-		}
-		row.StartCommitOID = captured.CommitOID
-		row.StartTreeOID = captured.TreeOID
-		row.HashAlgorithm = captured.HashAlgorithm
-		row.StartReachabilityRef = captured.ReachabilityRef
-		row.CleanupPending = captured.ReachabilityRef != ""
-		capturedAt := captured.CapturedAt.UTC()
-		row.StartCapturedAt = &capturedAt
-		row.Availability = models.TurnChangeAvailabilityPending
-		repositories = append(repositories, row)
-	}
-	accepted, err := c.repository.AcceptTurnChangeSetStart(ctx, changeSet.ID, changeSet.Revision, repositories)
-	if err != nil {
-		return fmt.Errorf("persist turn change start endpoints: %w", err)
-	}
-	if !accepted {
-		return nil
-	}
-	overlapErr := c.recordAdmittedOverlaps(changeSet.ID)
-	return errors.Join(errors.Join(captureFailures...), overlapErr)
-}
-
 func (c *Coordinator) acceptUnavailableStart(ctx context.Context, admission Admission, changeSet *models.TurnChangeSet, rows []models.TurnRepositoryChangeSet, reason turnchanges.ReasonCode) error {
 	if len(rows) == 0 {
 		for _, checkout := range admission.Checkouts {
@@ -386,6 +378,7 @@ func (c *Coordinator) finalizeUnavailable(
 		row.Availability = models.TurnChangeAvailabilityUnavailable
 		row.Reason = reason
 		row.ContentComplete = false
+		row.ExportState, row.ExportReason = models.TurnChangeExportUnavailable, reason
 		finalizedRepositories = append(finalizedRepositories, *row)
 	}
 	finalization := models.TurnChangeSetFinalization{
@@ -425,6 +418,16 @@ func (c *Coordinator) finalizeUnavailable(
 	if len(clients) > 0 {
 		_ = c.cleanupRepositoryCheckpointRefs(ctx, finalizedRepositories, clients[0])
 	}
+	reconciled := *changeSet
+	if reconciled.TerminalCaptureStartedAt == nil {
+		at := finalization.TerminalAt.UTC()
+		reconciled.TerminalCaptureStartedAt = &at
+	}
+	reconciled.OverlapIntervals = finalization.OverlapIntervals
+	if err := c.reconcileWriterOverlaps(ctx, &reconciled); err != nil {
+		c.logger.Warn("failed to reconcile unavailable turn-change overlaps",
+			zap.String("change_set_id", changeSet.ID), zap.Error(err))
+	}
 	return nil
 }
 
@@ -439,7 +442,17 @@ func (c *Coordinator) cleanupRepositoryCheckpointRefs(ctx context.Context, rows 
 		if ctx.Err() != nil {
 			return errors.Join(append(failures, ctx.Err())...)
 		}
-		if !row.CleanupPending {
+		if !row.CleanupPending || !turnChangeRefsSettled(row) {
+			continue
+		}
+		// A pending preservation still needs the executor-owned refs to retry
+		// against the accepted endpoint pair.
+		if row.PreservationState == models.TurnChangePreservationPending {
+			continue
+		}
+		// Common Git checkpoints are root commits. Keep their refs until the
+		// shared compaction owner explicitly expires the interval.
+		if row.ContentSource == models.TurnChangeSourceGitCommon {
 			continue
 		}
 		cleanupFailed := false
@@ -479,6 +492,14 @@ func (c *Coordinator) cleanupRepositoryCheckpointRefs(ctx context.Context, rows 
 	return errors.Join(failures...)
 }
 
+func turnChangeRefsSettled(row models.TurnRepositoryChangeSet) bool {
+	if row.PreservationState == models.TurnChangePreservationReady ||
+		row.PreservationState == models.TurnChangePreservationUnavailable {
+		return true
+	}
+	return row.ExportState == models.TurnChangeExportComplete || row.ExportState == models.TurnChangeExportUnavailable
+}
+
 func (c *Coordinator) drainSessionCheckpointRefs(ctx context.Context, taskID, sessionID string, client CheckpointClient) error {
 	if client == nil {
 		return nil
@@ -515,49 +536,8 @@ func (c *Coordinator) drainSessionCheckpointRefs(ctx context.Context, taskID, se
 	return errors.Join(failures...)
 }
 
-func (c *Coordinator) recordAdmittedOverlaps(currentID string) error {
-	c.overlapMu.Lock()
-	defer c.overlapMu.Unlock()
-	ctx, cancel := turnChangePersistenceContext()
-	defer cancel()
-	sets, err := c.repository.ListUnfinishedTurnChangeSets(ctx, 500)
-	if err != nil {
-		return err
-	}
-	byID := indexUnfinishedTurnChangeSets(sets)
-	current := byID[currentID]
-	if current == nil {
-		return nil
-	}
-	rowsBySet, err := c.loadUnfinishedRepositoryRows(ctx, sets)
-	if err != nil {
-		return err
-	}
-	changed := map[string]bool{}
-	for _, currentRow := range rowsBySet[currentID] {
-		if currentRow == nil || currentRow.StartCapturedAt == nil {
-			continue
-		}
-		recordOverlapsForCurrentRow(currentRow, sets, rowsBySet, current, currentID, changed)
-	}
-	for id := range changed {
-		if err := c.repository.UpdateTurnChangeSetOverlaps(ctx, id, byID[id].OverlapIntervals); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func indexUnfinishedTurnChangeSets(sets []*models.TurnChangeSet) map[string]*models.TurnChangeSet {
-	byID := make(map[string]*models.TurnChangeSet, len(sets))
-	for _, set := range sets {
-		if set != nil {
-			byID[set.ID] = set
-		}
-	}
-	return byID
-}
-
+// loadUnfinishedRepositoryRows batches repository-row reads for admission-time
+// diagnostics and tests without per-set queries.
 func (c *Coordinator) loadUnfinishedRepositoryRows(
 	ctx context.Context,
 	sets []*models.TurnChangeSet,
@@ -576,141 +556,102 @@ func (c *Coordinator) loadUnfinishedRepositoryRows(
 	return c.repository.ListTurnRepositoryChangesForSets(ctx, ids)
 }
 
-func recordOverlapsForCurrentRow(
-	currentRow *models.TurnRepositoryChangeSet,
-	sets []*models.TurnChangeSet,
-	rowsBySet map[string][]*models.TurnRepositoryChangeSet,
-	current *models.TurnChangeSet,
-	currentID string,
-	changed map[string]bool,
-) {
-	for _, otherSet := range sets {
-		if otherSet == nil || otherSet.ID == currentID || otherSet.TerminalAt != nil {
-			continue
-		}
-		for _, otherRow := range rowsBySet[otherSet.ID] {
-			if otherRow == nil || otherRow.StartCapturedAt == nil || !sameTurnChangeCheckoutIdentity(*currentRow, *otherRow) {
-				continue
-			}
-			recordTurnChangeOverlapPair(current, currentID, currentRow, otherSet, otherRow)
-			changed[currentID], changed[otherSet.ID] = true, true
-		}
-	}
-}
-
-func recordTurnChangeOverlapPair(
-	current *models.TurnChangeSet,
-	currentID string,
-	currentRow *models.TurnRepositoryChangeSet,
-	otherSet *models.TurnChangeSet,
-	otherRow *models.TurnRepositoryChangeSet,
-) {
-	startedAt := currentRow.StartCapturedAt.UTC()
-	if otherRow.StartCapturedAt.After(startedAt) {
-		startedAt = otherRow.StartCapturedAt.UTC()
-	}
-	current.OverlapIntervals = mergeTurnChangeOverlap(current.OverlapIntervals, models.TurnChangeOverlap{
-		ChangeSetID: otherSet.ID, CheckoutID: otherRow.CheckoutID, StartedAt: startedAt,
-	})
-	otherSet.OverlapIntervals = mergeTurnChangeOverlap(otherSet.OverlapIntervals, models.TurnChangeOverlap{
-		ChangeSetID: currentID, CheckoutID: currentRow.CheckoutID, StartedAt: startedAt,
-	})
-}
-
-func (c *Coordinator) closeAdmittedOverlaps(currentID string, endedAt time.Time) ([]models.TurnChangeOverlap, error) {
-	c.overlapMu.Lock()
-	defer c.overlapMu.Unlock()
-	ctx, cancel := turnChangePersistenceContext()
-	defer cancel()
-	sets, err := c.repository.ListUnfinishedTurnChangeSets(ctx, 500)
-	if err != nil {
-		return nil, err
-	}
-	byID := make(map[string]*models.TurnChangeSet, len(sets))
-	for _, set := range sets {
-		if set != nil {
-			byID[set.ID] = set
-		}
-	}
-	current := byID[currentID]
-	if current == nil {
-		return nil, nil
-	}
-	changed := map[string]bool{}
-	for _, set := range sets {
-		if set == nil {
-			continue
-		}
-		for index := range set.OverlapIntervals {
-			overlap := &set.OverlapIntervals[index]
-			if overlap.EndedAt == nil && (set.ID == currentID || overlap.ChangeSetID == currentID) {
-				at := endedAt.UTC()
-				overlap.EndedAt = &at
-				changed[set.ID] = true
-			}
-		}
-	}
-	for id := range changed {
-		if err := c.repository.UpdateTurnChangeSetOverlaps(ctx, id, byID[id].OverlapIntervals); err != nil {
-			return current.OverlapIntervals, err
-		}
-	}
-	return current.OverlapIntervals, nil
-}
-
-func sameTurnChangeCheckoutIdentity(left, right models.TurnRepositoryChangeSet) bool {
-	if left.WorktreeID != "" && right.WorktreeID != "" {
-		return left.WorktreeID == right.WorktreeID
-	}
-	if left.TaskEnvironmentRepoID != "" && right.TaskEnvironmentRepoID != "" {
-		return left.TaskEnvironmentRepoID == right.TaskEnvironmentRepoID
-	}
-	return left.CheckoutID != "" && left.CheckoutID == right.CheckoutID
-}
-
-func mergeTurnChangeOverlap(overlaps []models.TurnChangeOverlap, incoming models.TurnChangeOverlap) []models.TurnChangeOverlap {
-	for _, current := range overlaps {
-		if current.ChangeSetID == incoming.ChangeSetID && current.CheckoutID == incoming.CheckoutID {
-			return overlaps
-		}
-	}
-	return append(overlaps, incoming)
-}
-
-// ReconcileUnfinished settles rows left by a process restart. It never calls an
-// executor: a new process cannot prove that the old checkout boundary survived.
+// ReconcileUnfinished settles rows whose canonical turn has completed while
+// their capture processing remained unfinished. It never calls an executor and
+// never substitutes reconciliation time for a known terminal boundary.
 func (c *Coordinator) ReconcileUnfinished(ctx context.Context) error {
 	if c == nil || c.repository == nil {
 		return errors.New("turn change coordinator is not configured")
 	}
-	readCtx, readCancel := turnChangePersistenceContext()
-	changeSets, err := c.repository.ListUnfinishedTurnChangeSets(readCtx, 500)
-	readCancel()
-	if err != nil {
-		return fmt.Errorf("list unfinished turn change sets: %w", err)
-	}
 	var failures []error
-	for _, changeSet := range changeSets {
-		if changeSet == nil || changeSet.TerminalAt != nil {
-			continue
+	afterID := ""
+	for page := 0; page < turnChangeReconcilePages; page++ {
+		readCtx, readCancel := turnChangePersistenceContext()
+		changeSets, err := c.repository.ListUnfinishedTurnChangeSetsAfter(readCtx, afterID, turnChangeReconcilePageSize)
+		readCancel()
+		if err != nil {
+			return fmt.Errorf("list unfinished turn change sets: %w", err)
 		}
-		terminalAt := c.now().UTC()
-		terminal := Terminal{Admission: Admission{
-			TaskID: changeSet.TaskID, SessionID: changeSet.TaskSessionID,
-			TaskEnvironmentID: changeSet.TaskEnvironmentID, TurnID: changeSet.TurnID,
-			ExecutionID: changeSet.RuntimeExecutionID, StartupAttemptID: changeSet.StartupAttemptID,
-			PromptGeneration: uint64(changeSet.PromptGeneration),
-		}, At: terminalAt, Outcome: "restart_unavailable"}
-		if changeSet.TerminalCaptureStartedAt != nil {
-			terminal.At = *changeSet.TerminalCaptureStartedAt
-			terminal.Outcome = changeSet.TerminalCaptureOutcome
-			terminal.FinalAssistantMessageID = changeSet.TerminalCaptureFinalMessageID
+		for _, changeSet := range changeSets {
+			if reconcileCandidateSkipped(changeSet) {
+				continue
+			}
+			if err := c.reconcileUnfinishedChangeSet(ctx, changeSet); err != nil {
+				failures = append(failures, fmt.Errorf("reconcile turn change set %q: %w", changeSet.ID, err))
+			}
+			afterID = changeSet.ID
 		}
-		if err := c.finalizeUnavailable(ctx, changeSet, terminal, models.TurnChangeReasonCheckoutUnavailable); err != nil {
-			failures = append(failures, fmt.Errorf("reconcile turn change set %q: %w", changeSet.ID, err))
+		if len(changeSets) < turnChangeReconcilePageSize {
+			break
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func reconcileCandidateSkipped(changeSet *models.TurnChangeSet) bool {
+	return changeSet == nil || changeSet.TerminalAt != nil
+}
+
+func (c *Coordinator) reconcileUnfinishedChangeSet(ctx context.Context, changeSet *models.TurnChangeSet) error {
+	rows, err := c.repository.ListTurnRepositoryChanges(ctx, changeSet.ID)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row != nil && row.EndCommitOID != "" {
+			return nil
+		}
+	}
+	terminalAt, ok := c.reconcilableTurnTerminal(ctx, changeSet)
+	if !ok {
+		return nil
+	}
+	terminal := Terminal{Admission: Admission{
+		TaskID: changeSet.TaskID, SessionID: changeSet.TaskSessionID,
+		TaskEnvironmentID: changeSet.TaskEnvironmentID, TurnID: changeSet.TurnID,
+		ExecutionID: changeSet.RuntimeExecutionID, StartupAttemptID: changeSet.StartupAttemptID,
+		PromptGeneration: uint64(changeSet.PromptGeneration),
+	}, At: terminalAt, Outcome: "restart_unavailable"}
+	if changeSet.TerminalCaptureStartedAt != nil {
+		terminal.At = changeSet.TerminalCaptureStartedAt.UTC()
+		terminal.Outcome = changeSet.TerminalCaptureOutcome
+		terminal.FinalAssistantMessageID = changeSet.TerminalCaptureFinalMessageID
+	}
+	reason := models.TurnChangeReasonHistoryProvenanceMissing
+	if !changeSet.StartAccepted {
+		reason = models.TurnChangeReasonCheckoutUnavailable
+	}
+	if err := c.finalizeUnavailable(ctx, changeSet, terminal, reason); err != nil {
+		return err
+	}
+	latest, err := c.readTerminalTurnChangeSet(Terminal{Admission: terminal.Admission})
+	if err != nil {
+		return nil
+	}
+	return c.reconcileWriterOverlaps(ctx, latest)
+}
+
+// reconcilableTurnTerminal requires canonical completion and provable absence
+// of an active capture operation before an unfinished row may be settled.
+func (c *Coordinator) reconcilableTurnTerminal(ctx context.Context, changeSet *models.TurnChangeSet) (time.Time, bool) {
+	if c.turns == nil {
+		return time.Time{}, false
+	}
+	turn, err := c.turns.GetTurn(ctx, changeSet.TurnID)
+	if err != nil || turn == nil || turn.CompletedAt == nil {
+		return time.Time{}, false
+	}
+	if c.boundaryGuard != nil {
+		state := c.boundaryGuard.TurnChangeCaptureOperation(ctx, changeSet.RuntimeExecutionID, changeSet.PromptGeneration)
+		if state != TurnChangeOperationInactive {
+			return time.Time{}, false
+		}
+	}
+	terminalAt := turn.CompletedAt.UTC()
+	if changeSet.TerminalCaptureStartedAt != nil && changeSet.TerminalCaptureStartedAt.Before(terminalAt) {
+		terminalAt = changeSet.TerminalCaptureStartedAt.UTC()
+	}
+	return terminalAt, true
 }
 
 func sameTurnChangeOwnership(changeSet *models.TurnChangeSet, admission Admission) bool {
@@ -801,9 +742,17 @@ func checkoutScope(checkout Checkout, manifestCount int, scopes map[string]struc
 }
 
 func validCheckpoint(result *turnchanges.CheckpointResult, changeSetID, checkoutID string, boundary turnchanges.CheckpointBoundary) bool {
-	return result != nil && result.ChangeSetID == changeSetID && result.CheckoutID == checkoutID &&
-		result.Boundary == boundary && result.CommitOID != "" && result.TreeOID != "" &&
-		result.HashAlgorithm != "" && result.ReachabilityRef != ""
+	if result == nil || result.ChangeSetID != changeSetID || result.CheckoutID != checkoutID ||
+		result.Boundary != boundary || result.CommitOID == "" || result.TreeOID == "" ||
+		result.HashAlgorithm == "" || result.ReachabilityRef == "" {
+		return false
+	}
+	if result.Provenance == nil {
+		return true
+	}
+	return result.Provenance.Valid() && result.Provenance.ChangeSetID == changeSetID &&
+		result.Provenance.CheckoutID == checkoutID && result.Provenance.Boundary == boundary &&
+		result.Provenance.HashAlgorithm == result.HashAlgorithm
 }
 
 func checkpointReason(err error, fallback turnchanges.ReasonCode) turnchanges.ReasonCode {

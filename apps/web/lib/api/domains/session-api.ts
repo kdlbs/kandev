@@ -263,22 +263,62 @@ export async function openSessionFolder(
   });
 }
 
+export type SessionConfigurationResult = {
+  status?: "applied" | "unconfirmed" | "saved_for_launch" | "rejected" | "persistence_failed";
+  config_id?: string;
+  requested?: string;
+  effective?: string;
+  confirmed?: boolean;
+  execution_id?: string;
+};
+
+export type SetSessionConfigurationResponse = {
+  ok: boolean;
+  configuration_result?: SessionConfigurationResult;
+};
+
 export async function setSessionMode(sessionId: string, modeId: string) {
-  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-mode`, {
+  return fetchJson<SetSessionConfigurationResponse>(`/api/v1/task-sessions/${sessionId}/set-mode`, {
     init: { method: "POST", body: JSON.stringify({ mode_id: modeId }) },
   });
 }
 
 export async function setSessionModel(sessionId: string, modelId: string) {
-  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-model`, {
-    init: { method: "POST", body: JSON.stringify({ model_id: modelId }) },
-  });
+  return fetchJson<SetSessionConfigurationResponse>(
+    `/api/v1/task-sessions/${sessionId}/set-model`,
+    { init: { method: "POST", body: JSON.stringify({ model_id: modelId }) } },
+  );
 }
 
-export async function setSessionConfigOption(sessionId: string, configId: string, value: string) {
-  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-config-option`, {
-    init: { method: "POST", body: JSON.stringify({ config_id: configId, value }) },
-  });
+export async function resolveSessionModelConfig(
+  sessionId: string,
+  request: { model: string; mode?: string; config_options?: Record<string, string> },
+): Promise<import("@/lib/types/http").AgentModelConfigResponse> {
+  return fetchJson<import("@/lib/types/http").AgentModelConfigResponse>(
+    `/api/v1/task-sessions/${sessionId}/resolve-model-config`,
+    { init: { method: "POST", body: JSON.stringify(request) } },
+  );
+}
+
+export async function setSessionConfigOption(
+  sessionId: string,
+  configId: string,
+  value: string,
+  expectedModelId?: string,
+) {
+  return fetchJson<SetSessionConfigurationResponse>(
+    `/api/v1/task-sessions/${sessionId}/set-config-option`,
+    {
+      init: {
+        method: "POST",
+        body: JSON.stringify({
+          config_id: configId,
+          value,
+          ...(expectedModelId ? { expected_model_id: expectedModelId } : {}),
+        }),
+      },
+    },
+  );
 }
 
 export async function authenticateSession(sessionId: string, methodId: string) {

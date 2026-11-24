@@ -14,6 +14,7 @@ import (
 
 // MergeMRRequest is the JSON body for accepting an MR.
 type MergeMRRequest struct {
+	SHA                      string `json:"sha"`
 	MergeCommitMessage       string `json:"merge_commit_message,omitempty"`
 	SquashCommitMessage      string `json:"squash_commit_message,omitempty"`
 	Squash                   bool   `json:"squash,omitempty"`
@@ -24,8 +25,25 @@ type MergeMRRequest struct {
 // (merge, rebase_merge, ff); the caller picks one and the project must allow
 // it. Passing squash=true performs a squash merge regardless of method.
 func (c *PATClient) MergeMR(ctx context.Context, projectPath string, iid int, squash bool, squashCommitMessage string) (*MR, error) {
-	endpoint := fmt.Sprintf("/projects/%s/merge_requests/%d/merge", projectRef(projectPath), iid)
+	mrEndpoint := fmt.Sprintf("/projects/%s/merge_requests/%d", projectRef(projectPath), iid)
+	var head struct {
+		SHA                 string `json:"sha"`
+		Draft               bool   `json:"draft"`
+		WorkInProgress      bool   `json:"work_in_progress"`
+		DetailedMergeStatus string `json:"detailed_merge_status"`
+	}
+	if err := c.get(ctx, mrEndpoint, &head); err != nil {
+		return nil, fmt.Errorf("get merge head for MR !%d: %w", iid, err)
+	}
+	if isDraftMR(head.Draft || head.WorkInProgress, head.DetailedMergeStatus) {
+		return nil, ErrMRIsDraft
+	}
+	if strings.TrimSpace(head.SHA) == "" {
+		return nil, fmt.Errorf("get merge head for MR !%d: source SHA is empty", iid)
+	}
+	endpoint := mrEndpoint + "/merge"
 	body, err := json.Marshal(MergeMRRequest{
+		SHA:                      head.SHA,
 		Squash:                   squash,
 		SquashCommitMessage:      squashCommitMessage,
 		ShouldRemoveSourceBranch: false,
@@ -35,7 +53,7 @@ func (c *PATClient) MergeMR(ctx context.Context, projectPath string, iid int, sq
 	}
 	var raw rawMR
 	if err := c.doWrite(ctx, "PUT", endpoint, body, &raw); err != nil {
-		return nil, fmt.Errorf("merge MR !%d: %w", iid, err)
+		return nil, fmt.Errorf("merge MR !%d: %w", iid, wrapMergeRefusal(err))
 	}
 	return convertRawMR(&raw), nil
 }

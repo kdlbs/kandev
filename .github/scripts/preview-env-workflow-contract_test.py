@@ -21,6 +21,14 @@ def workflow_job(workflow: str, name: str) -> str:
 
 
 class PreviewEnvironmentWorkflowContractTest(unittest.TestCase):
+    def test_fork_artifact_preserves_standalone_sdk_layout(self) -> None:
+        workflow = WORKFLOW.read_text()
+        build = workflow_job(workflow, "build-fork-preview")
+        package = workflow_job(workflow, "package-fork-preview")
+        self.assertIn("            pluginsdk\n", build)
+        self.assertIn("fork-preview-input/apps/backend", package)
+
+
     def test_safe_to_review_and_allowlists_authorize_fork_preview_deployment(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         _, separator, deploy_job = workflow.partition("  build-fork-preview:")

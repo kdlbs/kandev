@@ -3,6 +3,8 @@ import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { setSettingsMenuMode } from "../../helpers/settings-menu";
 
+test.use({ trace: "retain-on-failure" });
+
 const INITIAL_IMAGE_TAG = "kandev/e2e:routing-initial";
 const EDITED_IMAGE_TAG = "kandev/e2e:routing-edited";
 const DRAFT_IMAGE_TAG = "kandev/e2e:routing-draft";

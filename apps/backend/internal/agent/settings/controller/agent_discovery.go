@@ -27,19 +27,22 @@ func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryRespo
 	payload := make([]dto.AgentDiscoveryDTO, 0, len(results))
 	for _, result := range results {
 		var loginCmd *dto.LoginCommandDTO
+		localInstall := false
 		if ag, ok := c.agentRegistry.Get(result.Name); ok {
 			loginCmd = buildLoginCommandDTO(ag)
+			localInstall = supportsLocalInstall(ag)
 		}
 		payload = append(payload, dto.AgentDiscoveryDTO{
-			Name:              result.Name,
-			SupportsMCP:       result.SupportsMCP,
-			MCPConfigPath:     result.MCPConfigPath,
-			InstallationPaths: result.InstallationPaths,
-			Available:         result.Available,
-			MatchedPath:       result.MatchedPath,
-			LoginCommand:      loginCmd,
-			CLIVersion:        result.CLIVersion,
-			CLIVersionError:   result.CLIVersionError,
+			Name:                 result.Name,
+			SupportsMCP:          result.SupportsMCP,
+			SupportsLocalInstall: localInstall,
+			MCPConfigPath:        result.MCPConfigPath,
+			InstallationPaths:    result.InstallationPaths,
+			Available:            result.Available,
+			MatchedPath:          result.MatchedPath,
+			LoginCommand:         loginCmd,
+			CLIVersion:           result.CLIVersion,
+			CLIVersionError:      result.CLIVersionError,
 		})
 	}
 	return &dto.ListDiscoveryResponse{Agents: payload, Total: len(payload)}, nil
@@ -143,23 +146,29 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 
 	return dto.AvailableAgentDTO{
-		Name:               ag.ID(),
-		DisplayName:        displayName,
-		Description:        ag.Description(),
-		InstallScript:      installScript,
-		SupportsMCP:        availability.SupportsMCP,
-		MCPConfigPath:      availability.MCPConfigPath,
-		InstallationPaths:  availability.InstallationPaths,
-		Available:          availability.Available,
-		MatchedPath:        availability.MatchedPath,
-		Capabilities:       capabilities,
-		ModelConfig:        modelConfig,
-		PermissionSettings: permissionSettings,
-		PassthroughConfig:  passthroughConfig,
-		LoginCommand:       loginCommand,
-		RuntimeUpdate:      runtimeUpdate,
-		UpdatedAt:          now,
+		Name:                 ag.ID(),
+		DisplayName:          displayName,
+		Description:          ag.Description(),
+		InstallScript:        installScript,
+		SupportsLocalInstall: supportsLocalInstall(ag),
+		SupportsMCP:          availability.SupportsMCP,
+		MCPConfigPath:        availability.MCPConfigPath,
+		InstallationPaths:    availability.InstallationPaths,
+		Available:            availability.Available,
+		MatchedPath:          availability.MatchedPath,
+		Capabilities:         capabilities,
+		ModelConfig:          modelConfig,
+		PermissionSettings:   permissionSettings,
+		PassthroughConfig:    passthroughConfig,
+		LoginCommand:         loginCommand,
+		RuntimeUpdate:        runtimeUpdate,
+		UpdatedAt:            now,
 	}
+}
+
+func supportsLocalInstall(ag agents.Agent) bool {
+	installer, ok := ag.(agents.LocalInstallAgent)
+	return ok && installer.SupportsLocalInstall()
 }
 
 func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent, available bool) *dto.RuntimeUpdateDTO {
@@ -294,8 +303,10 @@ func buildLoginCommandDTO(ag agents.Agent) *dto.LoginCommandDTO {
 func (c *Controller) buildModelConfigFromHostUtility(ctx context.Context, agentID string) dto.ModelConfigDTO {
 	// Always initialize slices so JSON marshals as [] not null — the
 	// frontend uses .some()/.find() on these without null checks.
+	currentVariant := c.localRuntimeVariant(ctx, agentID)
 	cfg := dto.ModelConfigDTO{
 		SupportsDynamicModels: c.agentSupportsDynamicModelConfig(agentID),
+		RuntimeVariant:        currentVariant,
 		AvailableModels:       []dto.ModelEntryDTO{},
 		AvailableModes:        []dto.ModeEntryDTO{},
 	}
@@ -309,6 +320,17 @@ func (c *Controller) buildModelConfigFromHostUtility(ctx context.Context, agentI
 		cfg.Status = "not_configured"
 		cfg.AvailableModels, cfg.Discovery = c.hostCLIModelProjection(ctx, agentID, cfg.AvailableModels, false)
 		return cfg
+	}
+	if agentID == agents.AntigravityACPAgentID {
+		if currentVariant == "" {
+			cfg.Status = string(hostutility.StatusNotInstalled)
+			return cfg
+		}
+		if caps.RuntimeVariant != currentVariant {
+			cfg.Status = string(hostutility.StatusProbing)
+			return cfg
+		}
+		cfg.RuntimeVariant = caps.RuntimeVariant
 	}
 	cfg.SupportsDynamicModels = true
 	cfg.Status = string(caps.Status)
@@ -342,6 +364,25 @@ func (c *Controller) buildModelConfigFromHostUtility(ctx context.Context, agentI
 	}
 	cfg.AvailableModels, cfg.Discovery = c.hostCLIModelProjection(ctx, agentID, cfg.AvailableModels, false)
 	return cfg
+}
+
+func (c *Controller) localRuntimeVariant(ctx context.Context, agentID string) string {
+	if c.agentRegistry == nil {
+		return ""
+	}
+	ag, ok := c.agentRegistry.Get(agentID)
+	if !ok {
+		return ""
+	}
+	resolver, ok := ag.(agents.LocalRuntimeAgent)
+	if !ok {
+		return ""
+	}
+	selection, err := resolver.ResolveLocalRuntime(ctx)
+	if err != nil {
+		return ""
+	}
+	return selection.Variant
 }
 
 func (c *Controller) agentSupportsDynamicModelConfig(agentID string) bool {
@@ -382,6 +423,7 @@ func configOptionDTOs(options []hostutility.ConfigOption) []dto.ConfigOptionDTO 
 			CurrentValue: opt.CurrentValue,
 			Category:     opt.Category,
 			Options:      choices,
+			Catalog:      opt.Catalog,
 		})
 	}
 	return out
@@ -501,7 +543,7 @@ func (c *Controller) syncAgentFromDiscovery(ctx context.Context, result discover
 	if hadProfiles {
 		return nil
 	}
-	return c.createDefaultProfile(ctx, agent.ID, p)
+	return c.createDefaultProfile(ctx, agent.ID, agentConfig, p)
 }
 
 // resolveDisplayName returns the display name for an agent config, falling back to its
@@ -538,15 +580,23 @@ func (c *Controller) buildProfileSyncParams(
 // createDefaultProfile creates the initial agent profile when none exist for an agent.
 // The model may be empty — the profile reconciler fills it from the host
 // utility capability cache on boot.
-func (c *Controller) createDefaultProfile(ctx context.Context, agentID string, p profileSyncParams) error {
+func (c *Controller) createDefaultProfile(
+	ctx context.Context,
+	agentID string,
+	agentConfig agents.Agent,
+	p profileSyncParams,
+) error {
 	profileName := p.displayName
 	if !p.isPassthrough && p.defaultModel != "" {
 		profileName = p.defaultModel
 	}
+	mode, envVars := devinProfilePermissionDefaults(agentConfig.ID(), "", nil, true)
 	defaultProfile := &models.AgentProfile{
 		AgentID:                    agentID,
 		Name:                       profileName,
 		Model:                      p.defaultModel,
+		Mode:                       mode,
+		EnvVars:                    envVarsFromDTO(envVars),
 		AgentDisplayName:           p.displayName,
 		AutoApprove:                p.autoApprove,
 		AllowIndexing:              p.allowIndexing,

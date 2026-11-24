@@ -592,6 +592,17 @@ type mcpResultCaptureAdapter struct{ mcpCaptureAdapter }
 
 func (*mcpResultCaptureAdapter) PublishesMCPAttachmentResults() bool { return true }
 
+type resumeErrorAdapter struct {
+	mcpCaptureAdapter
+	resumeErr error
+}
+
+func (*resumeErrorAdapter) SupportsSessionResume() bool { return true }
+func (*resumeErrorAdapter) SupportsSessionLoad() bool   { return true }
+func (a *resumeErrorAdapter) ResumeSession(context.Context, string, []types.McpServer) error {
+	return a.resumeErr
+}
+
 type newSessionDeadlineCaptureAdapter struct {
 	promptErrorAdapter
 	remaining time.Duration
@@ -637,6 +648,26 @@ func TestPublishMCPAttachmentResultDoesNotDuplicateAdapterFilteredEvidence(t *te
 	case event := <-s.procMgr.GetUpdates():
 		t.Fatalf("unexpected generic attachment result: %+v", event)
 	default:
+	}
+}
+
+func TestHandleWSResumeSessionSanitizesAdapterError(t *testing.T) {
+	s := newTestServer(t)
+	s.procMgr.SetAdapterForTest(&resumeErrorAdapter{resumeErr: errors.New("provider details should stay server-side")})
+	msg, err := ws.NewRequest("req-resume", "agent.session.resume", ResumeSessionRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp := s.handleWSResumeSession(context.Background(), msg)
+	if resp.Type != ws.MessageTypeError {
+		t.Fatalf("response type = %q, want error", resp.Type)
+	}
+	var payload ws.ErrorPayload
+	if err := resp.ParsePayload(&payload); err != nil {
+		t.Fatalf("ParsePayload: %v", err)
+	}
+	if payload.Message != "session resume failed" {
+		t.Fatalf("error message = %q, want sanitized message", payload.Message)
 	}
 }
 
@@ -1173,7 +1204,10 @@ func TestAgentStreamWS_MalformedMessage(t *testing.T) {
 func TestInjectKandevMcpServers_HttpFirst(t *testing.T) {
 	srv := newTestServer(t)
 
-	got := srv.injectKandevMcpServers(nil)
+	got, err := srv.injectKandevMcpServers(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 kandev entries, got %d: %+v", len(got), got)
 	}
@@ -1192,7 +1226,10 @@ func TestInjectKandevMcpServers_HttpFirst(t *testing.T) {
 		{Name: "other", Type: "stdio", Command: "x"},
 		{Name: kandevMcpServerName, Type: mcpTransportSSE, URL: "http://stale/sse"},
 	}
-	got = srv.injectKandevMcpServers(upstream)
+	got, err = srv.injectKandevMcpServers(upstream)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 3 {
 		t.Fatalf("expected 3 entries (http+sse+other), got %d: %+v", len(got), got)
 	}

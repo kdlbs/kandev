@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ func (s *Service) reconcileExistingSummary(
 	authoritativeActivity time.Time,
 	activityObserved bool,
 	runningSessions runningSessionObservation,
+	unread summaryUnreadValue,
 	launchQueueValues ...*statussummary.LaunchQueueSummary,
 ) (*statussummary.TaskStatusSummary, error) {
 	if err := ctx.Err(); err != nil {
@@ -35,7 +37,7 @@ func (s *Service) reconcileExistingSummary(
 	}
 	return s.reconcileExistingSummaryWithGateObservation(
 		ctx, task, current, pendingAction, authoritativeActivity, activityObserved,
-		runningSessions, completionGateSummaryObservation{summary: completionGate, observed: completionGateObserved}, launchQueueValues...,
+		runningSessions, completionGateSummaryObservation{summary: completionGate, observed: completionGateObserved}, unread, launchQueueValues...,
 	)
 }
 
@@ -48,6 +50,7 @@ func (s *Service) reconcileExistingSummaryWithGateObservation(
 	activityObserved bool,
 	runningSessions runningSessionObservation,
 	gateObservation completionGateSummaryObservation,
+	unread summaryUnreadValue,
 	launchQueueValues ...*statussummary.LaunchQueueSummary,
 ) (*statussummary.TaskStatusSummary, error) {
 	completionGate, completionGateObserved, err := completionGateObservationValue(ctx, gateObservation)
@@ -56,17 +59,29 @@ func (s *Service) reconcileExistingSummaryWithGateObservation(
 	}
 
 	launchQueue, launchQueueObserved := summaryReconcileLaunchQueue(task, current, launchQueueValues)
+	// Read turn-error metadata after the summary revision used for repair, not
+	// from the caller's older task-list snapshot. A dismissal can land between
+	// that snapshot and the summary map; reading the row now prevents writing
+	// the pre-dismissal error back at the next revision.
+	turnErrorTask := task
+	if s.tasks != nil {
+		if loaded, loadErr := s.tasks.GetTask(ctx, task.ID); loadErr == nil && loaded != nil {
+			turnErrorTask = loaded
+		}
+	}
+	turnError := taskTurnErrorSummary(turnErrorTask)
+	turnErrorObserved := turnErrorTask.Metadata != nil
 	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, runningSessions, launchQueue, launchQueueObserved, completionGate, completionGateObserved) {
+		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, runningSessions, launchQueue, launchQueueObserved, completionGate, completionGateObserved, turnError, turnErrorObserved, unread) {
 			return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 		}
 		if err := prepareSummaryReconcileAttempt(ctx, attempt, current.Revision); err != nil {
 			return nil, err
 		}
-		next, err := nextReconciledSummary(current, pendingAction, runningSessions, authoritativeActivity, activityObserved, launchQueue, completionGate, completionGateObserved)
+		next, err := nextReconciledSummary(current, pendingAction, runningSessions, authoritativeActivity, activityObserved, launchQueue, completionGate, completionGateObserved, turnError, turnErrorObserved, unread)
 		if err != nil {
 			return nil, err
 		}
@@ -87,6 +102,12 @@ func (s *Service) reconcileExistingSummaryWithGateObservation(
 		if current == nil {
 			return nil, nil
 		}
+		if s.tasks != nil {
+			if reloadedTask, reloadErr := s.tasks.GetTask(ctx, task.ID); reloadErr == nil && reloadedTask != nil {
+				turnError = taskTurnErrorSummary(reloadedTask)
+				turnErrorObserved = reloadedTask.Metadata != nil
+			}
+		}
 		completionGate, completionGateObserved, err = s.completionGateSummary(ctx, task.ID)
 		if err != nil {
 			return nil, fmt.Errorf("reload completion gate: %w", err)
@@ -94,9 +115,13 @@ func (s *Service) reconcileExistingSummaryWithGateObservation(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		unread, err = s.reloadTaskUnread(ctx, task.ID, unread)
+		if err != nil {
+			return nil, fmt.Errorf("reload unread state: %w", err)
+		}
 	}
 	return s.finishSummaryReconcile(ctx, task.ID, current, pendingAction, authoritativeActivity, activityObserved,
-		runningSessions, launchQueue, launchQueueObserved, completionGate, completionGateObserved)
+		runningSessions, launchQueue, launchQueueObserved, completionGate, completionGateObserved, turnError, turnErrorObserved, unread)
 }
 
 // overlayLaunchQueueObservation returns a response-only copy when the live
@@ -131,6 +156,9 @@ func summaryNeedsReconcile(
 	launchQueueObserved bool,
 	completionGate *statussummary.CompletionGateSummary,
 	completionGateObserved bool,
+	turnError *statussummary.TurnErrorSummary,
+	turnErrorObserved bool,
+	unread summaryUnreadValue,
 ) bool {
 	if current == nil {
 		return false
@@ -147,8 +175,22 @@ func summaryNeedsReconcile(
 	if completionGateObserved && !equalCompletionGateSummary(current.CompletionGate, completionGate) {
 		return true
 	}
+	if turnErrorObserved && !statussummary.EqualTurnErrorSummary(current.TurnError, turnError) {
+		return true
+	}
+	if unread.observed && !slices.Equal(current.UnreadSessionIDs, unread.sessionIDs) {
+		return true
+	}
 	return activityObserved && authoritativeActivity.After(time.Time{}) &&
 		(current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt))
+}
+
+func cloneTurnErrorForService(value *statussummary.TurnErrorSummary) *statussummary.TurnErrorSummary {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func cloneCompletionGateForService(gate *statussummary.CompletionGateSummary) *statussummary.CompletionGateSummary {
@@ -461,6 +503,13 @@ func (s *Service) loadSummaryGit(
 	return byEnvironment, true
 }
 
+func taskTurnErrorSummary(task *models.Task) *statussummary.TurnErrorSummary {
+	if task == nil {
+		return nil
+	}
+	return statussummary.TurnErrorSummaryFromMetadata(task.Metadata)
+}
+
 func taskLaunchErrorSummary(task *models.Task) *statussummary.ActiveErrorSummary {
 	if task == nil {
 		return nil
@@ -567,7 +616,7 @@ func maxInt(value, minimum int) int {
 	return value
 }
 
-func nextReconciledSummary(current *statussummary.TaskStatusSummary, pendingAction string, runningSessions runningSessionObservation, authoritativeActivity time.Time, activityObserved bool, launchQueue *statussummary.LaunchQueueSummary, completionGate *statussummary.CompletionGateSummary, completionGateObserved bool) (statussummary.TaskStatusSummary, error) {
+func nextReconciledSummary(current *statussummary.TaskStatusSummary, pendingAction string, runningSessions runningSessionObservation, authoritativeActivity time.Time, activityObserved bool, launchQueue *statussummary.LaunchQueueSummary, completionGate *statussummary.CompletionGateSummary, completionGateObserved bool, turnError *statussummary.TurnErrorSummary, turnErrorObserved bool, unread summaryUnreadValue) (statussummary.TaskStatusSummary, error) {
 	next := *current
 	next.PendingAction = pendingAction
 	if runningSessions.observed {
@@ -580,6 +629,12 @@ func nextReconciledSummary(current *statussummary.TaskStatusSummary, pendingActi
 	next.LaunchQueue = cloneLaunchQueueForService(launchQueue)
 	if completionGateObserved {
 		next.CompletionGate = cloneCompletionGateForService(completionGate)
+	}
+	if turnErrorObserved {
+		next.TurnError = cloneTurnErrorForService(turnError)
+	}
+	if unread.observed {
+		next.UnreadSessionIDs = slices.Clone(unread.sessionIDs)
 	}
 	next.Revision = current.Revision + 1
 	next.UpdatedAt = advancedSummaryTime(current.UpdatedAt, time.Now().UTC())
@@ -655,11 +710,14 @@ func (s *Service) finishSummaryReconcile(
 	launchQueueObserved bool,
 	completionGate *statussummary.CompletionGateSummary,
 	completionGateObserved bool,
+	turnError *statussummary.TurnErrorSummary,
+	turnErrorObserved bool,
+	unread summaryUnreadValue,
 ) (*statussummary.TaskStatusSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, runningSessions, launchQueue, launchQueueObserved, completionGate, completionGateObserved) {
+	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, runningSessions, launchQueue, launchQueueObserved, completionGate, completionGateObserved, turnError, turnErrorObserved, unread) {
 		return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 	}
 	s.logSummaryReconcileExhaustion(taskID, current)

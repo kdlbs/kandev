@@ -82,6 +82,30 @@ the agent follows the instructions that I selected.
   The stored message and dispatched prompt shall contain the same saved definitions without duplicate expansion blocks.
 - **AC-TASKS-SAVED-PROMPT-DELIVERY-001.14:** Only callers with `org.config.manage` shall create, update, or delete shared saved prompts. Org members shall retain read and reference-use access to saved prompts.
 
+#### One-time move instructions
+
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.15:** The one-time instructions field
+  shall offer saved-prompt matches when the user types an `@` query. The
+  field shall highlight selected references and exact known references.
+  This applies to the composer next-step action and the task Move menu,
+  including their touch equivalents.
+  Desktop suggestions shall open above the field without resizing the move
+  form.
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.16:** When the user chooses a match
+  with a keyboard, mouse, or touch, the field shall insert the reference
+  at the query and preserve adjacent text. The user shall be able to
+  continue editing before submitting the move. Escape shall close the
+  active suggestion list and keep the draft open.
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.17:** When a structured workflow
+  session receives one-time instructions, typed and selected references
+  shall resolve from current saved records through the existing trust
+  rules. This applies to a reused session, a fresh session, and queued
+  instructions. The move shall apply the instructions once.
+- **AC-TASKS-SAVED-PROMPT-DELIVERY-001.18:** Unknown references and
+  references that fail lookup shall remain usable as text. Passthrough
+  sessions shall receive literal text. The move shall preserve the saved
+  prompt, workflow defaults, and task description.
+
 ## Out of scope
 
 - Changes to saved-prompt content validation, naming, or storage.

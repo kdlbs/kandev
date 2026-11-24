@@ -3,10 +3,12 @@ package hostutility
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -18,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -29,6 +32,10 @@ func TestManagerProfileProbeAndModelResolutionUseScopedLaunchContext(t *testing.
 	var mu sync.Mutex
 	var requests []agentctlutil.ProbeRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/identity" {
+			_, _ = w.Write([]byte(`{"capabilities":["launch-wrapper.v1"]}`))
+			return
+		}
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -120,12 +127,298 @@ func TestManagerProfileProbeAndModelResolutionUseScopedLaunchContext(t *testing.
 		if !request.ProfileContext || request.InferenceConfig.Env["CODEX_PATH"] != "/profile/codex" ||
 			request.InferenceConfig.Env["TOKEN"] != wantToken ||
 			!slices.Equal(request.InferenceConfig.CLIFlags, profileContext.CLIFlags) ||
-			!slices.Equal(request.InferenceConfig.CommandPrefix, profileContext.CommandPrefix) {
+			!slices.Equal(request.InferenceConfig.LaunchWrapper.Argv, profileContext.CommandPrefix) || request.InferenceConfig.LaunchWrapper.Version != 1 || len(request.InferenceConfig.CommandPrefix) != 0 {
 			t.Fatalf("request %d omitted profile launch context: %#v", i, request)
 		}
 	}
 	if requests[1].Model != "codex" {
 		t.Fatalf("model probe selected %q, want codex", requests[1].Model)
+	}
+}
+
+func TestProfileManagedRuntimeCacheRecoveryPreservesScopedContext(t *testing.T) {
+	for _, protocol := range []struct {
+		name  string
+		agent agents.Agent
+	}{
+		{name: "managed ACP", agent: agents.NewClaudeACP()},
+		{name: "managed native Codex app-server", agent: agents.NewCodexAppServer(true)},
+	} {
+		for _, test := range []struct {
+			name       string
+			modelProbe bool
+			customWrap bool
+		}{
+			{name: "baseline capability probe"},
+			{name: "model options probe", modelProbe: true},
+			{name: "custom launch wrapper is ineligible", customWrap: true},
+		} {
+			t.Run(protocol.name+"/"+test.name, func(t *testing.T) {
+				const version = "2.1.3"
+				agent := protocol.agent
+				managedAgent, ok := agent.(agents.ManagedNPMRuntimeAgent)
+				if !ok {
+					t.Fatal("test agent does not expose managed npm runtime metadata")
+				}
+				managedRuntime := managedAgent.ManagedNPMRuntime()
+				packageSpec := managedRuntime.PackageSpec(version)
+				profileContext := ProfileProbeContext{
+					Scope: "user-1:profile-1",
+					Env:   map[string]string{"PROFILE_SENTINEL": "profile-only-secret"},
+				}
+				if test.customWrap {
+					profileContext.CommandPrefix = []string{"custom-wrapper", "--"}
+				}
+				var requests []agentctlutil.ProbeRequest
+				manager, _ := newProfileProbeTestManagerWithCapabilities(
+					t,
+					agent,
+					managedRuntimeSelectionReader{
+						selection: managedruntime.Selection{Package: managedRuntime.Package, Version: version},
+						found:     true,
+					},
+					[]string{"launch-wrapper.v1", agentctltypes.ManagedRuntimePrivatePreparationCapability},
+					func(w http.ResponseWriter, request agentctlutil.ProbeRequest) {
+						requests = append(requests, request)
+						if len(requests) == 1 {
+							data, _ := json.Marshal(agentctlutil.ProbeResponse{
+								Success: false, Error: "verified npm execution root is incomplete",
+								FailureCode: agentctlutil.ProbeFailureManagedRuntimeCacheIncomplete,
+								CacheEvidence: &agentctltypes.ManagedRuntimeCacheEvidence{
+									Condition:   agentctltypes.ManagedRuntimeCacheRootManifestMissing,
+									PackageSpec: packageSpec, ProbeAttemptID: "opaque-profile-attempt-1",
+								},
+							})
+							_, _ = w.Write(data)
+							return
+						}
+						response := agentctlutil.ProbeResponse{
+							Success: true,
+							Models:  []agentctlutil.ProbeModel{{ID: "claude-sonnet", Name: "Claude Sonnet"}},
+						}
+						if request.Model != "" {
+							response.ConfigOptions = []agentctlutil.ProbeConfigOption{{
+								ID: "reasoning_effort", CurrentValue: "high",
+							}}
+						}
+						data, _ := json.Marshal(response)
+						_, _ = w.Write(data)
+					},
+				)
+
+				switch {
+				case test.modelProbe:
+					resolution, err := manager.ResolveModelConfig(context.Background(), agent.ID(), ModelConfigResolutionRequest{
+						Model: "claude-sonnet", ProfileContext: &profileContext, Refresh: true,
+					})
+					if err != nil {
+						t.Fatalf("ResolveModelConfig: %v", err)
+					}
+					if resolution.Status != StatusOK || len(resolution.ConfigOptions) != 1 {
+						t.Fatalf("model resolution = %#v, want recovered config options", resolution)
+					}
+				default:
+					result, err := manager.ProbeProfileCapabilities(context.Background(), agent.ID(), ProfileCapabilityRequest{
+						Context: profileContext, Refresh: true,
+					})
+					if err != nil {
+						t.Fatalf("ProbeProfileCapabilities: %v", err)
+					}
+					expectedStatus := StatusOK
+					if test.customWrap {
+						expectedStatus = StatusFailed
+					}
+					if result.Capabilities.Status != expectedStatus {
+						t.Fatalf("profile status = %q, want %q", result.Capabilities.Status, expectedStatus)
+					}
+					if !test.customWrap && len(result.Capabilities.Models) != 1 {
+						t.Fatalf("profile capabilities = %#v, want recovered models", result.Capabilities)
+					}
+				}
+				wantRequests := 2
+				if test.customWrap {
+					wantRequests = 1
+				}
+				if len(requests) != wantRequests {
+					t.Fatalf("probe requests = %d, want %d", len(requests), wantRequests)
+				}
+				wantCommand := managedRuntime.ACPCommandWithNpmPreference(version, false).Args()
+				for index, request := range requests {
+					if !request.ProfileContext || !equalStrings(request.InferenceConfig.Command, wantCommand) ||
+						request.InferenceConfig.Env["PROFILE_SENTINEL"] != "profile-only-secret" {
+						t.Fatalf("probe request %d lost scoped launch context: %#v", index, request)
+					}
+				}
+				if test.customWrap {
+					if requests[0].Preparation != nil || len(requests[0].InferenceConfig.LaunchWrapper.Argv) == 0 {
+						t.Fatalf("custom wrapper request unexpectedly prepared privately: %#v", requests[0])
+					}
+					if _, found := manager.Get(agent.ID()); found {
+						t.Fatal("ineligible wrapper failure published into shared capability cache")
+					}
+					return
+				}
+				if requests[1].Preparation == nil ||
+					requests[1].Preparation.Condition != agentctltypes.ManagedRuntimeCacheRootManifestMissing ||
+					requests[1].Preparation.PackageSpec != packageSpec ||
+					requests[1].Preparation.ProbeAttemptID != "opaque-profile-attempt-1" {
+					t.Fatalf("private preparation directive = %#v", requests[1].Preparation)
+				}
+				retryWithoutDirective := requests[1]
+				retryWithoutDirective.Preparation = nil
+				if !reflect.DeepEqual(retryWithoutDirective, requests[0]) {
+					t.Fatalf("retry changed profile request beyond the preparation directive:\ninitial=%#v\nretry=%#v", requests[0], retryWithoutDirective)
+				}
+				if _, found := manager.Get(agent.ID()); found {
+					t.Fatal("profile recovery published into the shared agent capability cache")
+				}
+			})
+		}
+	}
+}
+
+func TestProfileManagedRuntimeCacheRecoveryCancelsSupersededFlight(t *testing.T) {
+	const version = "2.1.3"
+	agent := agents.NewClaudeACP()
+	packageSpec := agent.ManagedNPMRuntime().PackageSpec(version)
+	preparationStarted := make(chan struct{})
+	recoveryCancelled := make(chan struct{})
+	forceRecoveryRelease := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(forceRecoveryRelease) })
+	var probeCalls atomic.Int32
+	manager, server := newProfileProbeTestManagerWithRequestHandler(
+		t,
+		agent,
+		managedRuntimeSelectionReader{
+			selection: managedruntime.Selection{Package: agent.ManagedNPMRuntime().Package, Version: version},
+			found:     true,
+		},
+		[]string{"managed_runtime_private_preparation_v1"},
+		func(w http.ResponseWriter, r *http.Request, req agentctlutil.ProbeRequest) {
+			call := probeCalls.Add(1)
+			if call == 1 {
+				data, _ := json.Marshal(agentctlutil.ProbeResponse{
+					Success: false, Error: "verified npm execution root is incomplete",
+					FailureCode: agentctlutil.ProbeFailureManagedRuntimeCacheIncomplete,
+					CacheEvidence: &agentctltypes.ManagedRuntimeCacheEvidence{
+						Condition:   agentctltypes.ManagedRuntimeCacheRootManifestMissing,
+						PackageSpec: packageSpec, ProbeAttemptID: "opaque-superseded-attempt",
+					},
+				})
+				_, _ = w.Write(data)
+				return
+			}
+			if req.Preparation != nil {
+				close(preparationStarted)
+				select {
+				case <-r.Context().Done():
+					close(recoveryCancelled)
+					return
+				case <-forceRecoveryRelease:
+				}
+			}
+			data, _ := json.Marshal(agentctlutil.ProbeResponse{Success: true, Models: []agentctlutil.ProbeModel{{ID: "claude-sonnet"}}})
+			_, _ = w.Write(data)
+		},
+	)
+	defer server.Close()
+	_ = manager
+	oldContext := ProfileProbeContext{Scope: "user-1:profile-1", Env: map[string]string{"PROFILE": "old"}}
+	oldResult := make(chan error, 1)
+	go func() {
+		_, err := manager.ProbeProfileCapabilities(context.Background(), agent.ID(), ProfileCapabilityRequest{
+			Context: oldContext, Refresh: true,
+		})
+		oldResult <- err
+	}()
+	select {
+	case <-preparationStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("old profile did not enter private preparation")
+	}
+	newResult := make(chan error, 1)
+	go func() {
+		result, err := manager.ProbeProfileCapabilities(context.Background(), agent.ID(), ProfileCapabilityRequest{
+			Context: ProfileProbeContext{Scope: oldContext.Scope, Env: map[string]string{"PROFILE": "new"}}, Refresh: true,
+		})
+		if err == nil && result.Capabilities.Status != StatusOK {
+			err = errors.New("new profile probe did not publish successful capabilities")
+		}
+		newResult <- err
+	}()
+	select {
+	case <-recoveryCancelled:
+	case <-time.After(time.Second):
+		releaseOnce.Do(func() { close(forceRecoveryRelease) })
+		<-oldResult
+		<-newResult
+		t.Fatal("superseded private preparation continued after the scoped profile changed")
+	}
+	select {
+	case err := <-oldResult:
+		if !errors.Is(err, errProfileContextChanged) {
+			t.Fatalf("old profile result = %v, want superseded-context result", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("superseded profile flight did not finish")
+	}
+	select {
+	case err := <-newResult:
+		if err != nil {
+			t.Fatalf("current profile result: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("current profile flight did not finish after superseded preparation canceled")
+	}
+}
+
+func TestProfileManagedRuntimeProbeWaiterCancellationDoesNotCancelFlight(t *testing.T) {
+	probeStarted := make(chan struct{})
+	releaseProbe := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseProbe) })
+	var requests atomic.Int32
+	manager, server := newProfileProbeTestManager(t, agents.NewClaudeACP(), nil, func(w http.ResponseWriter, _ agentctlutil.ProbeRequest) {
+		if requests.Add(1) == 1 {
+			close(probeStarted)
+			<-releaseProbe
+		}
+		data, _ := json.Marshal(agentctlutil.ProbeResponse{Success: true, Models: []agentctlutil.ProbeModel{{ID: "claude-sonnet"}}})
+		_, _ = w.Write(data)
+	})
+	defer server.Close()
+	profileContext := ProfileProbeContext{Scope: "user-1:profile-1", Env: map[string]string{"PROFILE": "same"}}
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	firstResult := make(chan error, 1)
+	go func() {
+		_, err := manager.ProbeProfileCapabilities(firstCtx, "claude-acp", ProfileCapabilityRequest{Context: profileContext})
+		firstResult <- err
+	}()
+	select {
+	case <-probeStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("profile probe did not start")
+	}
+	secondResult := make(chan error, 1)
+	go func() {
+		_, err := manager.ProbeProfileCapabilities(context.Background(), "claude-acp", ProfileCapabilityRequest{Context: profileContext})
+		secondResult <- err
+	}()
+	cancelFirst()
+	releaseOnce.Do(func() { close(releaseProbe) })
+	for _, result := range []<-chan error{firstResult, secondResult} {
+		select {
+		case err := <-result:
+			if err != nil {
+				t.Fatalf("single-flight waiter result: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("single-flight waiter did not finish")
+		}
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("provider probes = %d, want one shared flight", got)
 	}
 }
 
@@ -317,12 +610,44 @@ func newProfileProbeTestManager(
 	selectionReader managedruntime.SelectionReader,
 	handleProbe func(http.ResponseWriter, agentctlutil.ProbeRequest),
 ) (*Manager, *httptest.Server) {
+	return newProfileProbeTestManagerWithCapabilities(
+		t, agent, selectionReader, []string{"launch-wrapper.v1"}, handleProbe,
+	)
+}
+
+func newProfileProbeTestManagerWithCapabilities(
+	t *testing.T,
+	agent agents.Agent,
+	selectionReader managedruntime.SelectionReader,
+	capabilities []string,
+	handleProbe func(http.ResponseWriter, agentctlutil.ProbeRequest),
+) (*Manager, *httptest.Server) {
+	return newProfileProbeTestManagerWithRequestHandler(
+		t, agent, selectionReader, capabilities,
+		func(w http.ResponseWriter, _ *http.Request, request agentctlutil.ProbeRequest) {
+			handleProbe(w, request)
+		},
+	)
+}
+
+func newProfileProbeTestManagerWithRequestHandler(
+	t *testing.T,
+	agent agents.Agent,
+	selectionReader managedruntime.SelectionReader,
+	capabilities []string,
+	handleProbe func(http.ResponseWriter, *http.Request, agentctlutil.ProbeRequest),
+) (*Manager, *httptest.Server) {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/identity" {
+			data, _ := json.Marshal(map[string]any{"capabilities": capabilities})
+			_, _ = w.Write(data)
+			return
+		}
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -338,7 +663,7 @@ func newProfileProbeTestManager(
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		handleProbe(w, req)
+		handleProbe(w, r, req)
 	}))
 	t.Cleanup(server.Close)
 	host, portText, err := net.SplitHostPort(server.Listener.Addr().String())

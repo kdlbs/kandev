@@ -16,6 +16,7 @@ import {
   type SessionRecoveryActions,
 } from "@/hooks/domains/session/use-session-recovery-actions";
 import { ManagedCloneRelocationConfirmation } from "./managed-clone-relocation-confirmation";
+import { addHistoryContinuationChoice } from "./messages/action-message-recovery";
 
 export type SessionStoppedBannerMode = "recoverable" | "completed";
 export type SessionStoppedBannerProps = {
@@ -55,10 +56,25 @@ function managedCloneRecoveryChoice(onRelocateRequested: () => void, t: Recovery
 
 function uncertainDeliveryRecoveryChoices(
   props: StoppedRecoveryProps,
+  profileExists: boolean,
   t: RecoveryTranslator,
 ): RecoveryChoice[] {
   if (!props.taskId || !props.sessionId) return [];
   const choices: RecoveryChoice[] = [];
+  const relocationRequired =
+    props.actions.managedCloneRecoveryStamp || props.actions.workspaceRecoveryMatchesCurrentFailure;
+  addHistoryContinuationChoice(
+    choices,
+    Boolean(props.actions.continuationDetails) &&
+      !relocationRequired &&
+      props.actions.recoveryNoticeKind !== "inspection_busy",
+    () => void props.actions.handleContinueFromHistory(),
+    t("task:continueFromHistory"),
+    {
+      disclosure: t("task:continueFromHistoryDisclosure"),
+      disabled: !profileExists,
+    },
+  );
   if (props.actions.deliveryHistoryGap || props.actions.deliveryResumeAvailable) {
     choices.push({
       kind: "resume",
@@ -155,7 +171,7 @@ function useStoppedRecoveryChoices(
 ): RecoveryChoice[] {
   const { t } = useTranslation();
   if (props.uncertainDelivery && props.mode !== "completed") {
-    return uncertainDeliveryRecoveryChoices(props, t);
+    return uncertainDeliveryRecoveryChoices(props, profileExists, t);
   }
 
   if (props.actions.recoveryNoticeKind === "inspection_busy") {
@@ -219,6 +235,11 @@ function UncertainDeliveryActions({
         busy={busyAction !== null}
         busyAction={busyAction}
         blocked={blocked}
+        preferred={
+          actions.some((action) => action.kind === "continue_from_history")
+            ? "continue_from_history"
+            : undefined
+        }
         trailingActions={
           <Button
             type="button"

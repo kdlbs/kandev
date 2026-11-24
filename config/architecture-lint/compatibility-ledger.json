@@ -24,6 +24,19 @@
       "introduced_on": "2026-05-25",
       "removal_condition": "All callers use PlanPassthroughStdinChunks and preserve per-chunk delays where required.",
       "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "plugin-sdk-legacy-task-labels",
+      "locator": {
+        "path": "pluginsdk/data_types.go",
+        "declaration": "field:Task.Labels#1",
+        "marker": "Deprecated:"
+      },
+      "reason": "The standalone SDK retains the pre-existing deprecated Task.Labels field and wire mapping for existing plugin consumers. Moving its source cannot add a new legacy baseline entry.",
+      "owner": "plugin SDK maintainers",
+      "introduced_on": "2026-10-19",
+      "removal_condition": "Review at the 1.0.0 host checkpoint. Remove only after supported plugin consumers use plugin-owned task state and a separately reviewed compatibility change permits removing this field. SDK extraction does not remove it.",
+      "target_removal_version": "1.0.0"
     }
   ]
 }

@@ -55,6 +55,19 @@ function pickFlags(raw: RawProfile): CLIFlag[] {
   return Array.isArray(value) ? (value as CLIFlag[]) : [];
 }
 
+function pickStringList(raw: RawProfile, camel: string, snake: string): string[] {
+  const value = raw[camel] ?? raw[snake];
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.trim() === "" || seen.has(entry)) continue;
+    seen.add(entry);
+    result.push(entry);
+  }
+  return result;
+}
+
 function pickEnvVars(raw: RawProfile): ProfileEnvVar[] {
   const value = raw.envVars ?? raw.env_vars;
   return Array.isArray(value) ? (value as ProfileEnvVar[]) : [];
@@ -298,6 +311,11 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
       true,
     ),
     ...mcpSelection,
+    copilotSelectedPlugins: pickStringList(
+      profile,
+      "copilotSelectedPlugins",
+      "copilot_selected_plugins",
+    ).sort(),
     // Absent on legacy payloads → enabled by default.
     enabled: pickBool(profile, "enabled", "enabled", true),
     workspaceId: (() => {
@@ -360,8 +378,16 @@ export function toAgentProfilePayload(
   setPayloadField(payload, "env_vars", profile.envVars);
   setPayloadField(payload, "cli_passthrough", profile.cliPassthrough);
   setPayloadField(payload, "cursor_mcp_auth_enabled", profile.cursorMcpAuthEnabled);
+  setPayloadField(payload, "cursor_plugins_mcp_enabled", profile.cursorPluginsMcpEnabled);
   setPayloadField(payload, "mcp_selection_mode", profile.mcpSelectionMode);
   setPayloadField(payload, "mcp_selected_servers", profile.mcpSelectedServers);
+  setPayloadField(
+    payload,
+    "copilot_selected_plugins",
+    profile.copilotSelectedPlugins === undefined
+      ? undefined
+      : [...profile.copilotSelectedPlugins].sort(),
+  );
   setPayloadField(payload, "enabled", profile.enabled);
   setPayloadField(payload, "user_modified", profile.userModified);
   setPayloadField(payload, "created_at", profile.createdAt);

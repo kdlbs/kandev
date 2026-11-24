@@ -13,8 +13,8 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
-// StuckParentCandidate is a parent task whose non-archived children are
-// all terminal but which may not yet have received its
+// StuckParentCandidate is a parent task whose counted direct children are
+// all completed successfully but which may not yet have received its
 // task_children_completed wake (or received it for a since-changed child
 // set). ChildSetKey is the deterministic "id:state" concatenation compared
 // directly against the last-delivered receipt — no hashing, SQLite has no
@@ -36,11 +36,10 @@ type StuckParentCandidate struct {
 	NewestChildUpdatedAt string `db:"newest_child_updated_at"`
 }
 
-// ListStuckParents finds parent tasks that look done from their children's
-// perspective — not archived, not ephemeral, not already terminal, with at
-// least one non-archived child, and with no non-archived child left in a
-// non-terminal state — and that have not yet had a task_children_completed
-// wake delivered for their current child set, by anyone.
+// ListStuckParents finds non-archived, non-ephemeral, non-terminal parent
+// tasks with at least one counted direct child, where every counted child is
+// COMPLETED, and whose current child set has not received a
+// task_children_completed wake.
 //
 // The p.archived_at/is_ephemeral/state filters run over every task row
 // regardless of Office adoption; taskrepo.IsFromOfficePredicate narrows
@@ -65,6 +64,10 @@ type StuckParentCandidate struct {
 //
 // Every remaining filter runs in SQL, ahead of LIMIT, not in the caller
 // afterward:
+//   - the wave-member state gate mirrors ListWaveMembers and removes a parent
+//     if any counted child is not COMPLETED. A later Go-side rejection cannot
+//     write a receipt and would let the same blocked parents consume every
+//     bounded candidate slot on each sweep.
 //   - the LEFT JOIN against parent_child_wake_receipts drops a candidate
 //     whose stored receipt already matches its current child set and whose
 //     delivery evidence still exists. A receipt created by the workflow
@@ -146,11 +149,10 @@ type StuckParentCandidate struct {
 // redundant closing of that race window, not the primary filter).
 func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit int) ([]StuckParentCandidate, error) {
 	driver := r.ro.DriverName()
-	// Shared with the wave-member EXISTS gate below, which spells it
-	// literally with a "c." alias (matching the system design's worked
-	// SQL) — this unaliased form is what OrderedIDConcat's own
-	// "SELECT id FROM tasks WHERE <where>" subquery needs.
+	// These mirror ListWaveMembers' membership filter. Keep the unaliased form
+	// for OrderedIDConcat's subquery and the aliased form for state checks.
 	waveMemberPredicate := "parent_id = p.id AND archived_at IS NULL AND is_ephemeral = 0 AND COALESCE(origin, '') != 'automation_run'"
+	waveMemberPredicateAliased := "c.parent_id = p.id AND c.archived_at IS NULL AND c.is_ephemeral = 0 AND COALESCE(c.origin, '') != 'automation_run'"
 	newestChildUpdatedAtText := dialect.SecondPrecisionText(driver, "MAX(c.updated_at)")
 	requestedAtText := dialect.SecondPrecisionText(driver, "w.requested_at")
 	var rows []StuckParentCandidate
@@ -183,17 +185,12 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 			      WHERE c.parent_id = p.id AND c.archived_at IS NULL
 			  )
 			  AND EXISTS (
-			      SELECT 1 FROM tasks c
-			      WHERE c.parent_id = p.id
-			        AND c.archived_at IS NULL
-			        AND c.is_ephemeral = 0
-			        AND COALESCE(c.origin, '') != 'automation_run'
+			      SELECT 1 FROM tasks c WHERE `+waveMemberPredicateAliased+`
 			  )
 			  AND NOT EXISTS (
 			      SELECT 1 FROM tasks c
-			      WHERE c.parent_id = p.id
-			        AND c.archived_at IS NULL
-			        AND c.state NOT IN ('COMPLETED', 'CANCELLED')
+			      WHERE `+waveMemberPredicateAliased+`
+			        AND COALESCE(c.state, '') != 'COMPLETED'
 			  )
 		)
 		SELECT s.parent_task_id, s.assignee_agent_profile_id, s.workflow_step_id, s.child_set_key,
@@ -354,6 +351,77 @@ func (r *Repository) GetChildSetKeyAndGeneration(ctx context.Context, parentTask
 	}
 
 	return row.ChildSetKey, row.ChildGeneration, nil
+}
+
+// RecordWorkflowChildrenCompletedWake stores a receipt for the state path's
+// committed child-completion operation. It records only the exact child
+// snapshot that the workflow engine evaluated.
+func (r *Repository) RecordWorkflowChildrenCompletedWake(
+	ctx context.Context,
+	parentTaskID, childSetKey, childGeneration, operationID string,
+) error {
+	if parentTaskID == "" || childSetKey == "" || childGeneration == "" || operationID == "" {
+		return errors.New("parent child-completion receipt identity is incomplete")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var current workflowCompletionWakeIdentityRow
+	if err := tx.GetContext(ctx, &current, tx.Rebind(workflowCompletionWakeIdentityQuery(r.db.DriverName())), parentTaskID); err != nil {
+		return err
+	}
+	if current.WaveSetKey != childSetKey || current.WaveGeneration != childGeneration {
+		return nil
+	}
+	if err := r.UpsertWakeReceiptTx(
+		ctx, tx, parentTaskID, current.ChildSetKey, "", operationID, current.ChildGeneration, time.Now().UTC(),
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+type workflowCompletionWakeIdentityRow struct {
+	WaveSetKey      string `db:"wave_set_key"`
+	WaveGeneration  string `db:"wave_generation"`
+	ChildSetKey     string `db:"child_set_key"`
+	ChildGeneration string `db:"child_generation"`
+}
+
+// workflowCompletionWakeIdentityQuery validates the wave observed by the
+// orchestrator and returns the broader child snapshot ListStuckParents uses
+// for its receipt. Both identities come from one database statement.
+func workflowCompletionWakeIdentityQuery(driver string) string {
+	waveAggregate := `STRING_AGG(CASE
+			WHEN c.is_ephemeral = 0 AND COALESCE(c.origin, '') != 'automation_run'
+			THEN c.id || ':' || c.state
+		END, ',' ORDER BY c.id)`
+	if !dialect.IsPostgres(driver) {
+		waveAggregate = `GROUP_CONCAT(CASE
+			WHEN c.is_ephemeral = 0 AND COALESCE(c.origin, '') != 'automation_run'
+			THEN c.id || ':' || c.state
+		END, ',')`
+	}
+	waveGeneration := dialect.SecondPrecisionText(
+		driver,
+		`MAX(CASE WHEN c.is_ephemeral = 0 AND COALESCE(c.origin, '') != 'automation_run' THEN c.updated_at END)`,
+	)
+	childGeneration := dialect.SecondPrecisionText(driver, "MAX(c.updated_at)")
+	return `
+		SELECT
+			COALESCE(` + waveAggregate + `, '') AS wave_set_key,
+			COALESCE(` + waveGeneration + `, '') AS wave_generation,
+			COALESCE(` + childSetKeyAggregate(driver) + `, '') AS child_set_key,
+			COALESCE(` + childGeneration + `, '') AS child_generation
+		FROM (
+			SELECT id, state, updated_at, is_ephemeral, origin
+			FROM tasks
+			WHERE parent_id = ? AND archived_at IS NULL
+			ORDER BY id
+		) c
+	`
 }
 
 // GetChildSetKeyTx is the transaction-scoped counterpart to GetChildSetKey.

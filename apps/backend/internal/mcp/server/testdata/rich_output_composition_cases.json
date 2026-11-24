@@ -3775,6 +3775,32 @@
     "valid": false
   },
   {
+    "name": "StatusList rejects success alias",
+    "input": {
+      "version": 2,
+      "catalog_version": 1,
+      "title": "Checks",
+      "spec": {
+        "root": "checks",
+        "elements": {
+          "checks": {
+            "type": "StatusList",
+            "props": {
+              "items": [
+                {
+                  "label": "Check",
+                  "status": "success"
+                }
+              ]
+            },
+            "children": []
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
     "name": "StatusList too many items",
     "input": {
       "version": 2,

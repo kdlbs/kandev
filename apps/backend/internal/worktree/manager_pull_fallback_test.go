@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/repoclone"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // initGitRepoWithOriginAheadLocal builds the shape that matters here: a normal
@@ -232,16 +233,17 @@ func TestCreateWorktree_ManagedRefreshMissingBaseUsesConfiguredFallback(t *testi
 	mgr := newRecreateTestManager(t)
 
 	wt, err := mgr.Create(context.Background(), CreateRequest{
-		TaskID:             "task-managed-missing-base",
-		SessionID:          "session-managed-missing-base",
-		RepositoryID:       "repo-managed-missing-base",
-		RepositoryPath:     repoPath,
-		BaseBranch:         "feature/deleted-parent",
-		FallbackBaseBranch: "main",
-		PullBeforeWorktree: true,
-		RemoteSyncHandled:  true,
-		TaskDirName:        "task-managed-missing-base",
-		RepoName:           "repo",
+		TaskID:                   "task-managed-missing-base",
+		SessionID:                "session-managed-missing-base",
+		RepositoryID:             "repo-managed-missing-base",
+		RepositoryPath:           repoPath,
+		BaseBranch:               "feature/deleted-parent",
+		FallbackBaseBranch:       "main",
+		BaseBranchFallbackPolicy: models.BaseBranchFallbackPolicyRepositoryDefault,
+		PullBeforeWorktree:       true,
+		RemoteSyncHandled:        true,
+		TaskDirName:              "task-managed-missing-base",
+		RepoName:                 "repo",
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)

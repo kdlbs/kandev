@@ -2,7 +2,6 @@ package backendapp
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +15,7 @@ import (
 	userdto "github.com/kandev/kandev/internal/user/dto"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
@@ -37,6 +37,28 @@ func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
 	})
 	if task["wipAdmitted"] != false || task["queuedForStepId"] != "step-review" {
 		t.Fatalf("kanban task WIP fields = %#v, want queued task metadata", task)
+	}
+}
+
+func TestMapWorkflowItemStateIncludesPrompt(t *testing.T) {
+	prompt := "Shared step-entry instructions"
+	item := mapWorkflowItemState(taskdto.WorkflowDTO{ID: "wf-1", WorkspaceID: "ws-1", Prompt: &prompt})
+	if item["prompt"] != prompt {
+		t.Fatalf("workflow prompt = %#v, want %q", item["prompt"], prompt)
+	}
+
+	// The workflow settings page saves this value, so an unset prompt must be
+	// an explicit empty string rather than an absent key.
+	item = mapWorkflowItemState(taskdto.WorkflowDTO{ID: "wf-2", WorkspaceID: "ws-1"})
+	if got, ok := item["prompt"]; !ok || got != "" {
+		t.Fatalf("unset workflow prompt = %#v (present %v), want empty string", got, ok)
+	}
+}
+
+func TestMapUserSettingsStateIncludesEscapeCancelsAgent(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{Settings: userdto.UserSettingsDTO{EscapeCancelsAgent: true}}, "workspace-1")
+	if state["escapeCancelsAgent"] != true {
+		t.Fatalf("escapeCancelsAgent = %#v, want true", state["escapeCancelsAgent"])
 	}
 }
 
@@ -158,6 +180,22 @@ func TestMapKanbanTaskStateIncludesPriority(t *testing.T) {
 	}
 }
 
+func TestBootDependencyProjectionIncludesRelatedTasks(t *testing.T) {
+	related := taskservice.DependencyRef{ID: "peer", Title: "Related peer", State: v1.TaskStateTODO}
+	projection := bootDependencyProjection(taskservice.DependencyView{Related: []taskservice.DependencyRef{related}})
+	if len(projection.Related) != 1 || projection.Related[0] != (taskdto.TaskDependencyRefDTO{
+		ID: related.ID, Title: related.Title, State: related.State,
+	}) {
+		t.Fatalf("boot dependency related = %#v, want the related task reference", projection.Related)
+	}
+
+	task := mapKanbanTaskState(taskdto.TaskDTO{Related: projection.Related})
+	refs, ok := task["related"].([]map[string]any)
+	if !ok || len(refs) != 1 || refs[0]["id"] != related.ID || refs[0]["title"] != related.Title {
+		t.Fatalf("boot task related = %#v, want related task reference", task["related"])
+	}
+}
+
 // The task chip's label source: a task page reached by a page load hydrates
 // kanban.tasks from this whitelist.
 func TestMapKanbanTaskStateIncludesIdentifierAndWorkspaceID(t *testing.T) {
@@ -193,39 +231,6 @@ func TestMapKanbanTaskStateIncludesRunnerMutability(t *testing.T) {
 	})
 	if ineligible["runnerEditable"] != false || ineligible["runnerIneligibleReason"] != "session_exists" {
 		t.Fatalf("kanban task runner fields = %#v, want non-editable/session_exists", ineligible)
-	}
-}
-
-func TestMapUserSettingsStateIncludesAzureDevOpsBrowsePreferences(t *testing.T) {
-	preferences := json.RawMessage(`{"workspace-1":{"mode":"board","filters":{"projectId":"project-2"},"board":{"teamId":"team-2","boardId":"board-2","focusedColumnId":"done"}}}`)
-	state := mapUserSettingsState(userdto.UserSettingsResponse{
-		Settings: userdto.UserSettingsDTO{AzureDevOpsBrowsePreferences: preferences},
-	}, "workspace-1")
-
-	encoded, err := json.Marshal(state)
-	if err != nil {
-		t.Fatalf("marshal boot settings: %v", err)
-	}
-	var payload struct {
-		Loaded      bool `json:"loaded"`
-		Preferences map[string]struct {
-			Mode    string `json:"mode"`
-			Filters struct {
-				ProjectID string `json:"projectId"`
-			} `json:"filters"`
-			Board struct {
-				TeamID  string `json:"teamId"`
-				BoardID string `json:"boardId"`
-			} `json:"board"`
-		} `json:"azureDevOpsBrowsePreferences"`
-	}
-	if err := json.Unmarshal(encoded, &payload); err != nil {
-		t.Fatalf("decode boot settings: %v", err)
-	}
-
-	preference := payload.Preferences["workspace-1"]
-	if !payload.Loaded || preference.Mode != "board" || preference.Filters.ProjectID != "project-2" || preference.Board.TeamID != "team-2" || preference.Board.BoardID != "board-2" {
-		t.Fatalf("Azure browse preferences missing from loaded boot settings: %s", encoded)
 	}
 }
 

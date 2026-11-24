@@ -117,8 +117,12 @@ func (r *Repository) GetTaskWorkflowID(ctx context.Context, taskID string) (stri
 // AC-OFFICE-SEAT-READ-SCOPE-001.1's single-snapshot requirement. Returns ""
 // for either value with no error when the task or its columns are unset.
 func (r *Repository) taskWorkflowContext(ctx context.Context, taskID string) (workflowID, stepID string, err error) {
+	return r.taskWorkflowContextWith(ctx, r.ro, taskID)
+}
+
+func (r *Repository) taskWorkflowContextWith(ctx context.Context, q TaskParticipantQuery, taskID string) (workflowID, stepID string, err error) {
 	var wf, step sql.NullString
-	scanErr := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+	scanErr := q.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT workflow_id, workflow_step_id FROM tasks WHERE id = ?`,
 	), taskID).Scan(&wf, &step)
 	if errors.Is(scanErr, sql.ErrNoRows) {
@@ -163,17 +167,9 @@ func (r *Repository) GetWorkflowStepStageType(ctx context.Context, stepID string
 // role slate.
 type ParticipantWriteOutcome string
 
-// IsTaskWorkflowStepTerminal reports whether a task's current workflow step
-// is the last step, by position, in its workflow, and whether the task has
-// a resolvable step at all. Unlike orchestrator.workflowStepIsTerminal,
-// terminal does not additionally require the step name to match
-// models.IsTerminalStepName: a workflow's final column is terminal
-// regardless of what its author named it, so this gate never locks a task
-// out of completion just because the last step isn't named
-// done/complete/completed/approved.
-// workflowStepIsTerminal keeps the name test because it decides whether a
-// step *move* should auto-complete — a different decision from "may this
-// task be marked done".
+// IsTaskOnFinalStep reports whether a task's current workflow step is final by
+// position, and whether the task has a resolvable step. Finality does not
+// depend on the step name or its completion policy.
 // Returns (false, false, nil) when the task has no resolvable step — a
 // task with no workflow step at all is not the same fact as a task sitting
 // on a genuine non-terminal step, and callers must not conflate the two.
@@ -185,7 +181,7 @@ type ParticipantWriteOutcome string
 // as "no step" either — treating it as hasStep=false would let a task whose
 // step vanished out from under it bypass the position gate entirely, so this
 // case returns an error instead and lets the caller fail closed.
-func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error) {
+func (r *Repository) IsTaskOnFinalStep(ctx context.Context, taskID string) (final, hasStep bool, err error) {
 	var stepID sql.NullString
 	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT workflow_step_id FROM tasks WHERE id = ?
@@ -201,10 +197,9 @@ func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID stri
 	}
 
 	var workflowID string
-	var position int
 	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT workflow_id, position FROM workflow_steps WHERE id = ?
-	`), stepID.String).Scan(&workflowID, &position)
+		SELECT workflow_id FROM workflow_steps WHERE id = ?
+	`), stepID.String).Scan(&workflowID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, false, fmt.Errorf(
 			"workflow step %q referenced by task %q no longer exists", stepID.String, taskID)
@@ -213,14 +208,13 @@ func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID stri
 		return false, false, err
 	}
 
-	var hasNext bool
-	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT EXISTS(SELECT 1 FROM workflow_steps WHERE workflow_id = ? AND position > ?)
-	`), workflowID, position).Scan(&hasNext)
+	var isFinal bool
+	query := `SELECT ` + models.FinalStepSQL("s") + ` FROM workflow_steps s WHERE s.workflow_id = ? AND s.id = ?`
+	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), workflowID, stepID.String).Scan(&isFinal)
 	if err != nil {
 		return false, false, err
 	}
-	return !hasNext, true, nil
+	return isFinal, true, nil
 }
 
 const (
@@ -287,11 +281,18 @@ func (r *Repository) AddTaskParticipant(ctx context.Context, taskID, agentID, ro
 		return ParticipantWriteResult{}, ErrEmptyAgentProfileID
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.participantScopeTxOptions())
 	if err != nil {
 		return ParticipantWriteResult{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	exists, err := r.lockParticipantTaskScope(ctx, tx, taskID)
+	if err != nil {
+		return ParticipantWriteResult{}, err
+	}
+	if !exists {
+		return commitParticipantWrite(tx, ParticipantWriteResult{Outcome: ParticipantWriteOutcomeUnchanged})
+	}
 
 	if err := r.lockParticipantRoleSeat(ctx, tx, taskID, role); err != nil {
 		return ParticipantWriteResult{}, err
@@ -697,11 +698,22 @@ func (r *Repository) claimAutoSeat(ctx context.Context, tx *sqlx.Tx, seatID, age
 // error. Removes per-task rows only — template-level rows (task_id = ”)
 // are untouched.
 func (r *Repository) RemoveTaskParticipant(ctx context.Context, taskID, agentID, role string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, r.participantScopeTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := r.lockParticipantTaskScope(ctx, tx, taskID); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM workflow_step_participants
 		WHERE task_id = ? AND agent_profile_id = ? AND role = ?
 	`), taskID, agentID, role)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ListTaskParticipants returns all participants for a task filtered by role,
@@ -807,19 +819,42 @@ type officeSeatRow struct {
 // workflow. ListTaskParticipantsAtCurrentStep deliberately does NOT use this
 // helper — see its own doc comment.
 func (r *Repository) listWorkflowScopedSeats(ctx context.Context, taskID, roleFilter string) ([]Participant, error) {
-	workflowID, stepID, err := r.taskWorkflowContext(ctx, taskID)
+	return r.listWorkflowScopedSeatsAt(ctx, taskID, "", roleFilter)
+}
+
+// ListTaskParticipantsAtStep returns the task's seats as they would read with
+// the task standing at stepID: per-task rows across the destination workflow
+// plus the template rows of stepID. An empty stepID means the current step.
+func (r *Repository) ListTaskParticipantsAtStep(ctx context.Context, taskID, stepID, role string) ([]Participant, error) {
+	return r.listWorkflowScopedSeatsAt(ctx, taskID, stepID, role)
+}
+
+func (r *Repository) listWorkflowScopedSeatsAt(ctx context.Context, taskID, atStepID, roleFilter string) ([]Participant, error) {
+	return r.listWorkflowScopedSeatsAtWith(ctx, r.ro, taskID, atStepID, roleFilter)
+}
+
+func (r *Repository) listWorkflowScopedSeatsAtWith(ctx context.Context, q TaskParticipantQuery, taskID, atStepID, roleFilter string) ([]Participant, error) {
+	workflowID, stepID, err := r.taskWorkflowContextWith(ctx, q, taskID)
 	if err != nil {
 		return nil, err
+	}
+	if atStepID != "" {
+		stepID = atStepID
+		if err := q.QueryRowContext(ctx, r.ro.Rebind(
+			`SELECT workflow_id FROM workflow_steps WHERE id = ?`,
+		), stepID).Scan(&workflowID); err != nil {
+			return nil, err
+		}
 	}
 	if stepID == "" {
 		return []Participant{}, nil
 	}
 
-	perTask, err := r.listPerTaskSeatsForWorkflow(ctx, taskID, workflowID, roleFilter)
+	perTask, err := r.listPerTaskSeatsForWorkflowWith(ctx, q, taskID, workflowID, roleFilter)
 	if err != nil {
 		return nil, err
 	}
-	template, err := r.listTemplateSeatsAtStep(ctx, stepID, roleFilter)
+	template, err := r.listTemplateSeatsAtStepWith(ctx, q, stepID, roleFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -847,6 +882,10 @@ func (r *Repository) listWorkflowScopedSeats(ctx context.Context, taskID, roleFi
 // of step, mirroring gatherParticipantSlate's fallback when the engine has
 // no WorkflowScopedParticipantStore or no workflowID.
 func (r *Repository) listPerTaskSeatsForWorkflow(ctx context.Context, taskID, workflowID, roleFilter string) ([]officeSeatRow, error) {
+	return r.listPerTaskSeatsForWorkflowWith(ctx, r.ro, taskID, workflowID, roleFilter)
+}
+
+func (r *Repository) listPerTaskSeatsForWorkflowWith(ctx context.Context, q TaskParticipantQuery, taskID, workflowID, roleFilter string) ([]officeSeatRow, error) {
 	query := `
 		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position
 		FROM workflow_step_participants p`
@@ -866,7 +905,7 @@ func (r *Repository) listPerTaskSeatsForWorkflow(ctx context.Context, taskID, wo
 		args = append(args, roleFilter)
 	}
 	query += ` ORDER BY p.position ASC, p.agent_profile_id ASC, p.id ASC`
-	return r.queryOfficeSeatRows(ctx, query, args...)
+	return r.queryOfficeSeatRowsWith(ctx, q, query, args...)
 }
 
 // listTemplateSeatsAtStep returns template-level rows (task_id = ”) at
@@ -874,6 +913,10 @@ func (r *Repository) listPerTaskSeatsForWorkflow(ctx context.Context, taskID, wo
 // engine's own ListStepParticipants(stepID, "") call in
 // gatherParticipantSlate.
 func (r *Repository) listTemplateSeatsAtStep(ctx context.Context, stepID, roleFilter string) ([]officeSeatRow, error) {
+	return r.listTemplateSeatsAtStepWith(ctx, r.ro, stepID, roleFilter)
+}
+
+func (r *Repository) listTemplateSeatsAtStepWith(ctx context.Context, q TaskParticipantQuery, stepID, roleFilter string) ([]officeSeatRow, error) {
 	query := `
 		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position
 		FROM workflow_step_participants
@@ -884,11 +927,15 @@ func (r *Repository) listTemplateSeatsAtStep(ctx context.Context, stepID, roleFi
 		args = append(args, roleFilter)
 	}
 	query += ` ORDER BY position ASC, agent_profile_id ASC, id ASC`
-	return r.queryOfficeSeatRows(ctx, query, args...)
+	return r.queryOfficeSeatRowsWith(ctx, q, query, args...)
 }
 
 func (r *Repository) queryOfficeSeatRows(ctx context.Context, query string, args ...any) ([]officeSeatRow, error) {
-	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
+	return r.queryOfficeSeatRowsWith(ctx, r.ro, query, args...)
+}
+
+func (r *Repository) queryOfficeSeatRowsWith(ctx context.Context, q TaskParticipantQuery, query string, args ...any) ([]officeSeatRow, error) {
+	rows, err := q.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1080,4 +1127,21 @@ func (r *Repository) CancelDisplacedParticipantRun(
 	)
 	return r.CancelRunsWhere(ctx, displacedRunCancelReason, selector,
 		agentProfileID, fanOutRunReason, taskID, stepID)
+}
+
+// TaskParticipantQuery keeps canonical seat projection inside a caller-owned
+// transaction or read pool.
+type TaskParticipantQuery interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (r *Repository) ListTaskParticipantsAtStepWithQuery(
+	ctx context.Context, q TaskParticipantQuery, taskID, stepID, role string,
+) ([]Participant, error) {
+	return r.listWorkflowScopedSeatsAtWith(ctx, q, taskID, stepID, role)
+}
+
+func (r *Repository) ListTaskParticipantsAtStepTx(ctx context.Context, tx *sql.Tx, taskID, stepID, role string) ([]Participant, error) {
+	return r.ListTaskParticipantsAtStepWithQuery(ctx, tx, taskID, stepID, role)
 }

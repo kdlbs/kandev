@@ -34,7 +34,7 @@ import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
  */
 export function PluginsSettings() {
   const { t } = useTranslation();
-  const searchParams = useSearchParams();
+  const tab = useSearchParams().get("tab");
   const canManage = useIsAdmin();
   const canvasesEnabled = useFeature("canvases");
   const { isFinePointer } = useResponsiveBreakpoint();
@@ -67,7 +67,7 @@ export function PluginsSettings() {
       contentFrame="none"
     >
       <Tabs
-        defaultValue={searchParams.get("tab") === "themes" ? "themes" : "installed"}
+        defaultValue={tab === "themes" || tab === "browse" ? tab : "installed"}
         className="space-y-4"
       >
         <TabsList className="group-data-horizontal/tabs:h-auto max-w-full flex-wrap justify-start [&>[role=tab]]:h-7 [&>[role=tab]]:text-foreground/80 [&>[role=tab][data-state=active]]:bg-background [&>[role=tab][data-state=active]]:text-foreground max-md:[&>[role=tab]]:h-11 [@media(pointer:coarse)]:[&>[role=tab]]:h-11">

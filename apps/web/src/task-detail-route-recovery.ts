@@ -85,4 +85,33 @@ export function useTaskDetailRouteRecovery(args: TaskDetailRouteRecoveryArgs) {
     taskId,
     hydrationEpochsAtRequestStartRef,
   ]);
+
+  useEffect(() => {
+    if (
+      readState.phase !== "failed" ||
+      readState.temporary ||
+      readState.cycle <= appliedRecoveryCycleRef.current.cycle ||
+      !isTaskNavigationCurrent(store, navigationContext)
+    ) {
+      return;
+    }
+    appliedRecoveryCycleRef.current.cycle = readState.cycle;
+    previousLoadedRouteRef.current = null;
+    setRouteState((current) =>
+      current.routeKey === routeKey && current.status === "error" && !current.temporary
+        ? current
+        : { routeKey, status: "error", data: null, temporary: false },
+    );
+  }, [
+    appliedRecoveryCycleRef,
+    navigationContext,
+    previousLoadedRouteRef,
+    readState.cycle,
+    readState.phase,
+    readState.revision,
+    readState.temporary,
+    routeKey,
+    setRouteState,
+    store,
+  ]);
 }

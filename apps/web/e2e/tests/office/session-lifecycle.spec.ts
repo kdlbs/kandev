@@ -6,19 +6,10 @@ import { test, expect } from "../../fixtures/office-fixture";
  * participation removal). Spec:
  *   docs/specs/office/requirements/tasks.md
  *
- * Harness limitations:
- *  - The /api/v1/_test/task-sessions route only INSERTS new rows; it does
- *    not update an existing row's state. Tests work around this by:
- *      a) seeding a session with the desired state directly, OR
- *      b) using the real reactivity endpoints (assignee change, reviewer
- *         removal) and asserting the row's final state via the public
- *         `/api/v1/tasks/:id/sessions` endpoint.
- *  - IDLE-from-RUNNING transition for a single seeded row is not directly
- *    expressible — the harness has no UPDATE path. The fire-and-forget
- *    test asserts spinner visibility on a freshly-seeded RUNNING row, and
- *    then verifies a freshly-seeded IDLE row does NOT light the spinner.
- *    Both observations validate the same selector contract
- *    (`selectLiveSessionForTask` only treats RUNNING as live for office).
+ * The harness seeds durable session rows without launching executors. Cases
+ * that invoke real assignment reactivity must keep assignment wakes from
+ * adopting those artificial rows. Reassignment pauses the original agent
+ * while seeding, then exercises the real PATCH and public session reads.
  */
 
 test.describe("Office task session lifecycle", () => {
@@ -169,47 +160,59 @@ test.describe("Office task session lifecycle", () => {
     const newAssigneeId = newAssignee.id as string;
     expect(newAssigneeId).toBeTruthy();
 
-    const task = await apiClient.createTask(officeSeed.workspaceId, "Lifecycle Reassignment Task", {
-      workflow_id: officeSeed.workflowId,
-    });
-
-    // Make CEO the formal assignee so the upcoming PATCH counts as a
-    // *reassignment* (prevAssignee non-empty) rather than a first-time
-    // assign — the reactivity pipeline only fires session-termination
-    // when there is a prior assignee to displace.
-    const assignRes = await apiClient.rawRequest("PATCH", `/api/v1/office/tasks/${task.id}`, {
-      assignee_agent_profile_id: officeSeed.agentId,
-    });
-    expect(assignRes.ok).toBe(true);
-
-    // Seed a RUNNING session for the original assignee (CEO from seed).
-    const startedAt = new Date(Date.now() - 30_000).toISOString();
-    const { session_id: originalSessionId } = await apiClient.seedTaskSession(task.id, {
-      state: "RUNNING",
-      agentProfileId: officeSeed.agentId,
-      startedAt,
-    });
-
-    // Reassign the task to the new agent via the office task PATCH.
-    const patchRes = await apiClient.rawRequest("PATCH", `/api/v1/office/tasks/${task.id}`, {
-      assignee_agent_profile_id: newAssigneeId,
-    });
-    expect(patchRes.ok).toBe(true);
-
-    // Verify (via the public listTaskSessions endpoint) that the original
-    // session is no longer in a non-terminal state. Per the spec, the
-    // reactivity pipeline + participants update terminate the prior
-    // assignee's session.
-    await expect
-      .poll(
-        async () => {
-          const list = await apiClient.listTaskSessions(task.id);
-          const original = list.sessions.find((s) => s.id === originalSessionId);
-          return original?.state ?? "missing";
+    // This case seeds a session row without an executor. Keep assignment wakes
+    // from launching an executor that can concurrently adopt or replace it.
+    await officeApi.updateAgentStatus(officeSeed.agentId, "paused");
+    try {
+      const task = await apiClient.createTask(
+        officeSeed.workspaceId,
+        "Lifecycle Reassignment Task",
+        {
+          workflow_id: officeSeed.workflowId,
         },
-        { timeout: 10_000, intervals: [500, 1000] },
-      )
-      .toMatch(/^(COMPLETED|CANCELLED|FAILED)$/);
+      );
+
+      // Make CEO the formal assignee so the upcoming PATCH counts as a
+      // *reassignment* (prevAssignee non-empty) rather than a first-time
+      // assign — the reactivity pipeline only fires session-termination
+      // when there is a prior assignee to displace.
+      const assignRes = await apiClient.rawRequest("PATCH", `/api/v1/office/tasks/${task.id}`, {
+        assignee_agent_profile_id: officeSeed.agentId,
+      });
+      expect(assignRes.ok).toBe(true);
+      expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(0);
+
+      // Seed a RUNNING session for the original assignee (CEO from seed).
+      const startedAt = new Date(Date.now() - 30_000).toISOString();
+      const { session_id: originalSessionId } = await apiClient.seedTaskSession(task.id, {
+        state: "RUNNING",
+        agentProfileId: officeSeed.agentId,
+        startedAt,
+      });
+
+      // Reassign the task to the new agent via the office task PATCH.
+      const patchRes = await apiClient.rawRequest("PATCH", `/api/v1/office/tasks/${task.id}`, {
+        assignee_agent_profile_id: newAssigneeId,
+      });
+      expect(patchRes.ok).toBe(true);
+
+      // Verify (via the public listTaskSessions endpoint) that the original
+      // session is no longer in a non-terminal state. Per the spec, the
+      // reactivity pipeline + participants update terminate the prior
+      // assignee's session.
+      await expect
+        .poll(
+          async () => {
+            const list = await apiClient.listTaskSessions(task.id);
+            const original = list.sessions.find((s) => s.id === originalSessionId);
+            return original?.state ?? "missing";
+          },
+          { timeout: 10_000, intervals: [500, 1000] },
+        )
+        .toMatch(/^(COMPLETED|CANCELLED|FAILED)$/);
+    } finally {
+      await officeApi.updateAgentStatus(officeSeed.agentId, "idle");
+    }
   });
 
   test("reviewer removal terminates the reviewer's session", async ({

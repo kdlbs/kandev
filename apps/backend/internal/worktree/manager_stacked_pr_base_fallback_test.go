@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13
@@ -18,19 +20,20 @@ func TestCreateWorktree_MissingRemoteBaseUsesRefreshedFallback(t *testing.T) {
 	var events []SyncProgressEvent
 
 	wt, err := mgr.Create(context.Background(), CreateRequest{
-		TaskID:             "task-stacked-pr",
-		SessionID:          "session-stacked-pr",
-		TaskTitle:          "Review stacked PR",
-		RepositoryID:       "repo-1",
-		RepositoryPath:     repoPath,
-		BaseBranch:         "feature/deleted-parent",
-		FallbackBaseBranch: "main",
-		CheckoutBranch:     "feature/pr-branch",
-		PRNumber:           42,
-		PullBeforeWorktree: true,
-		TaskDirName:        "task-stacked-pr",
-		RepoName:           "repo-1",
-		OnSyncProgress:     captureSyncProgress(&events),
+		TaskID:                   "task-stacked-pr",
+		SessionID:                "session-stacked-pr",
+		TaskTitle:                "Review stacked PR",
+		RepositoryID:             "repo-1",
+		RepositoryPath:           repoPath,
+		BaseBranch:               "feature/deleted-parent",
+		FallbackBaseBranch:       "main",
+		BaseBranchFallbackPolicy: models.BaseBranchFallbackPolicyRepositoryDefault,
+		CheckoutBranch:           "feature/pr-branch",
+		PRNumber:                 42,
+		PullBeforeWorktree:       true,
+		TaskDirName:              "task-stacked-pr",
+		RepoName:                 "repo-1",
+		OnSyncProgress:           captureSyncProgress(&events),
 	})
 	if err != nil {
 		t.Fatalf("Create() unexpected error: %v", err)
@@ -102,17 +105,18 @@ func TestCreateWorktree_MissingRemoteBaseAndFallbackReportsMissingRef(t *testing
 	}
 
 	_, err = mgr.Create(context.Background(), CreateRequest{
-		TaskID:             "task-stacked-pr",
-		SessionID:          "session-stacked-pr",
-		RepositoryID:       "repo-1",
-		RepositoryPath:     repoPath,
-		BaseBranch:         "feature/deleted-parent",
-		FallbackBaseBranch: "feature/deleted-fallback",
-		CheckoutBranch:     "feature/pr-branch",
-		PRNumber:           42,
-		PullBeforeWorktree: true,
-		TaskDirName:        "task-stacked-pr",
-		RepoName:           "repo-1",
+		TaskID:                   "task-stacked-pr",
+		SessionID:                "session-stacked-pr",
+		RepositoryID:             "repo-1",
+		RepositoryPath:           repoPath,
+		BaseBranch:               "feature/deleted-parent",
+		FallbackBaseBranch:       "feature/deleted-fallback",
+		BaseBranchFallbackPolicy: models.BaseBranchFallbackPolicyRepositoryDefault,
+		CheckoutBranch:           "feature/pr-branch",
+		PRNumber:                 42,
+		PullBeforeWorktree:       true,
+		TaskDirName:              "task-stacked-pr",
+		RepoName:                 "repo-1",
 	})
 	if err == nil {
 		t.Fatal("Create() succeeded with a missing fallback")

@@ -124,8 +124,7 @@ type Repository interface {
 	// GetAutoMergeOverride returns nil while the exact session inherits globally.
 	GetAutoMergeOverride(ctx context.Context, identity QueueSessionIdentity) (*AutoMergeOverride, error)
 
-	// SetAutoMergeOverride writes an explicit value and advances its session revision.
-	SetAutoMergeOverride(ctx context.Context, identity QueueSessionIdentity, enabled bool) (AutoMergeOverride, error)
+	SetSessionPolicyAndCompact(ctx context.Context, identity QueueSessionIdentity, change SessionPolicyChange, global AutoMergePolicy, globalErr error) (SessionPolicyResult, error)
 
 	// PauseAutoRunIfPending atomically persists OFF only when at least one
 	// visible pending entry remains. Reserved lifecycle rows do not count.
@@ -158,6 +157,14 @@ type Repository interface {
 		ctx context.Context,
 		identity QueueSessionIdentity,
 		messages []QueuedMessage,
+	) error
+	// ClearDeliveryAttemptForSession atomically revokes the at-most-once marker
+	// of still-reserved durable receipts whose prompt provably never reached
+	// transport. Reservations and transcript markers are kept.
+	ClearDeliveryAttemptForSession(
+		ctx context.Context,
+		identity QueueSessionIdentity,
+		reserved []QueuedMessage,
 	) error
 	// ReleaseDeliveryReservationForSession makes an unaccepted retained entry
 	// visible again without changing its FIFO position.
@@ -193,6 +200,17 @@ type Repository interface {
 	// AcknowledgeSendNowClaim removes every durable source after the replacement
 	// prompt has been accepted. Ordinary sources were already removed by claim.
 	AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowClaim) error
+
+	// CanReleaseSendNowClaim reports whether the exact claim still owns its
+	// session and no successor owns a surviving source. A false result means the
+	// caller must not mark the message not delivered; callers check this before
+	// writing the status so the claim remains available for retry.
+	CanReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error)
+
+	// ReleaseSendNowClaim removes the exact open claim and every source row it
+	// still owns, so FIFO cannot deliver a message already reported as
+	// undelivered.
+	ReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error)
 
 	// UpdateContent replaces the content/attachments of an entry. The session
 	// scope (`AND session_id = ?`) is mandatory so a caller can't update an

@@ -4,6 +4,7 @@ import {
   type TaskLaunchRecoveryAction,
 } from "@/lib/types/task-launch-error";
 import type { AgentErrorCause } from "@/lib/types/task-status-summary";
+import { normalizeAgentErrorStorage, storageEvidenceToWire } from "@/lib/session-delivery-storage";
 
 export type LastAgentError = {
   message: string;
@@ -186,7 +187,51 @@ function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
     ...(boundedString(record.code, 64) ? { code: boundedString(record.code, 64) } : {}),
     ...(boundedString(record.detail, 1024) ? { detail: boundedString(record.detail, 1024) } : {}),
   };
+  if (cause.code === "plugin_preparation_failed") return readPluginPreparationCause(cause, record);
+  if (cause.code === "process_exited") return readProcessExitCause(cause, record);
   readCleanupPromptEvidence(cause, record);
+  const storage = readStorageCauseValue(record.storage);
+  if (storage) cause.storage = storage;
+  return readSelectionCause(cause, record);
+}
+
+function readPluginPreparationCause(
+  cause: AgentErrorCause,
+  record: Record<string, unknown>,
+): AgentErrorCause {
+  // i18n-exempt: mirrors the safe persisted backend detail; the UI renders localized guidance.
+  cause.detail = "The selected Copilot plugins could not be prepared.";
+  const reason = typeof record.reason === "string" ? record.reason : "";
+  if (!isKnownPluginPreparationReason(reason)) return cause;
+  cause.reason = reason;
+  const runtimeVersion = safeAgentErrorRuntimeVersion(record.runtime_version);
+  if (runtimeVersion) cause.runtime_version = runtimeVersion;
+  return cause;
+}
+
+function readProcessExitCause(
+  cause: AgentErrorCause,
+  record: Record<string, unknown>,
+): AgentErrorCause {
+  // i18n-exempt: mirrors the safe persisted backend detail; the UI renders localized guidance.
+  cause.detail = "The agent exited before startup completed.";
+  cause.reason =
+    record.reason === "mise_config_untrusted" ? "mise_config_untrusted" : "unclassified";
+  const exitCode = readProcessExitCode(record.exit_code);
+  if (exitCode !== undefined) cause.exit_code = exitCode;
+  return cause;
+}
+
+function readProcessExitCode(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
+  if (value < 0 || value > 4294967295) return undefined;
+  return value;
+}
+
+function readSelectionCause(
+  cause: AgentErrorCause,
+  record: Record<string, unknown>,
+): AgentErrorCause {
   const reason = typeof record.reason === "string" ? record.reason : "";
   if (!isKnownSelectionReason(cause.code, reason)) return cause;
   cause.reason = reason;
@@ -197,6 +242,12 @@ function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
     if (requested) cause.requested_model = requested;
     if (effective) cause.effective_model = effective;
     if (attempted) cause.attempted_model = attempted;
+  } else if (cause.code?.startsWith("thinking_level_")) {
+    cause.requested_setting = safeAgentErrorSelector(record.requested_setting);
+    cause.effective_setting = safeAgentErrorSelector(record.effective_setting);
+    cause.setting_config_id = safeAgentErrorSelector(record.setting_config_id);
+    if (record.setting_source === "agent_profile" || record.setting_source === "session_override")
+      cause.setting_source = record.setting_source;
   } else {
     const requested = safeAgentErrorSelector(record.requested_mode);
     const effective = safeAgentErrorSelector(record.effective_mode);
@@ -209,12 +260,50 @@ function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
   return cause;
 }
 
+function isKnownPluginPreparationReason(reason: string): boolean {
+  return [
+    "cli_unavailable",
+    "timeout",
+    "cancelled",
+    "output_limit",
+    "invalid_inventory",
+    "legacy_errors",
+    "runtime_unsupported",
+    "plugin_loading_unsupported",
+    "unsupported_launch_context",
+    "metadata_unavailable",
+    "ambiguous_identity",
+    "missing_root",
+    "manifest_mismatch",
+    "unsafe_root",
+    "builtin_not_mountable",
+    "external_not_mountable",
+    "unsupported_source",
+    "manual_mount_conflict",
+    "policy_unverified",
+  ].includes(reason);
+}
+
+function safeAgentErrorRuntimeVersion(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 256) return undefined;
+  if (new TextEncoder().encode(value).length > 256) return undefined;
+  const stableSemver =
+    /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+  return stableSemver.test(value) ? value : undefined;
+}
+
+function readStorageCauseValue(value: unknown): AgentErrorCause["storage"] | undefined {
+  const storage = normalizeAgentErrorStorage(value);
+  return storage ? storageEvidenceToWire(storage) : undefined;
+}
+
 function boundedString(value: unknown, maxLength: number): string | undefined {
   return typeof value === "string" && value.length > 0 ? value.slice(0, maxLength) : undefined;
 }
 
 function isKnownSelectionReason(code: string | undefined, reason: string): boolean {
   switch (code) {
+    case "thinking_level_unavailable":
     case "model_unavailable":
       return reason === "requested_not_advertised";
     case "model_selection_failed":
@@ -224,10 +313,13 @@ function isKnownSelectionReason(code: string | undefined, reason: string): boole
         "application_failed",
         "selection_missing",
       ].includes(reason);
+    case "thinking_level_failed":
     case "permission_mode_failed":
       return reason === "client_unavailable" || reason === "application_failed";
+    case "thinking_level_unconfirmed":
     case "permission_mode_unconfirmed":
       return reason === "confirmation_missing";
+    case "thinking_level_mismatch":
     case "permission_mode_mismatch":
       return reason === "effective_mismatch";
     default:

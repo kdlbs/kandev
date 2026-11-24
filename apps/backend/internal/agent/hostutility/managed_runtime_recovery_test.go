@@ -16,7 +16,139 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
+
+func TestManagedRuntimeCacheProbeRecoveryUsesVerifiedAttempt(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	const version = "1.18.29"
+	agent := agents.NewOpenCodeACP()
+	packageSpec := agent.ManagedNPMRuntime().PackageSpec(version)
+	var requests []agentctlutil.ProbeRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/identity":
+			_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": []string{agentctltypes.ManagedRuntimePrivatePreparationCapability}})
+		case "/api/v1/inference/probe":
+			var request agentctlutil.ProbeRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			requests = append(requests, request)
+			if len(requests) == 1 {
+				_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+					Success: false, Error: "verified npm execution root is incomplete",
+					FailureCode: agentctlutil.ProbeFailureManagedRuntimeCacheIncomplete,
+					CacheEvidence: &agentctltypes.ManagedRuntimeCacheEvidence{
+						Condition:   agentctltypes.ManagedRuntimeCacheRootManifestMissing,
+						PackageSpec: packageSpec, ProbeAttemptID: "opaque-probe-attempt-1",
+					},
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+				Success: true, AgentVersion: version,
+				Models: []agentctlutil.ProbeModel{{ID: "opencode/model", Name: "Recovered model"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	host, port := serverHostPort(t, server)
+	manager := &Manager{
+		log: newTestLogger(t),
+		managedRuntimeSelections: managedRuntimeSelectionReader{
+			selection: managedruntime.Selection{Package: agent.ManagedNPMRuntime().Package, Version: version},
+			found:     true,
+		},
+	}
+	inst := &instance{
+		agentType: agent.ID(), workDir: t.TempDir(),
+		client: agentctlclient.NewClient(host, port, manager.log),
+	}
+
+	caps := manager.probe(context.Background(), inst, agent, true)
+	if caps.Status != StatusOK {
+		t.Fatalf("probe status = %q, want %q (error: %s)", caps.Status, StatusOK, caps.Error)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("probe requests = %d, want the failed attempt and one private retry", len(requests))
+	}
+	wantCommand := agent.ManagedNPMRuntime().ACPCommandWithNpmPreference(version, false).Args()
+	if !equalStrings(requests[0].InferenceConfig.Command, wantCommand) || !equalStrings(requests[1].InferenceConfig.Command, wantCommand) {
+		t.Fatalf("probe commands = %#v, want unchanged selected command %#v", []any{requests[0].InferenceConfig.Command, requests[1].InferenceConfig.Command}, wantCommand)
+	}
+	wantDirective := &agentctltypes.ManagedRuntimePreparationDirective{
+		Condition:      agentctltypes.ManagedRuntimeCacheRootManifestMissing,
+		PackageSpec:    packageSpec,
+		ProbeAttemptID: "opaque-probe-attempt-1",
+	}
+	if requests[1].Preparation == nil || *requests[1].Preparation != *wantDirective {
+		t.Fatalf("private preparation directive = %#v, want %#v", requests[1].Preparation, wantDirective)
+	}
+}
+
+func TestManagedRuntimeCacheNativeCodexProbeRecoveryUsesVerifiedAttempt(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	const version = "0.154.0"
+	agent := agents.NewCodexAppServer(true)
+	packageSpec := agent.ManagedNPMRuntime().PackageSpec(version)
+	var requests []agentctlutil.ProbeRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/identity":
+			_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": []string{agentctltypes.ManagedRuntimePrivatePreparationCapability}})
+		case "/api/v1/inference/probe":
+			var request agentctlutil.ProbeRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			requests = append(requests, request)
+			if len(requests) == 1 {
+				_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+					Success: false, Error: "verified npm execution root is incomplete",
+					FailureCode: agentctlutil.ProbeFailureManagedRuntimeCacheIncomplete,
+					CacheEvidence: &agentctltypes.ManagedRuntimeCacheEvidence{
+						Condition:   agentctltypes.ManagedRuntimeCacheRootManifestMissing,
+						PackageSpec: packageSpec, ProbeAttemptID: "opaque-codex-attempt-1",
+					},
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{Success: true, AgentVersion: version})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	host, port := serverHostPort(t, server)
+	manager := &Manager{
+		log: newTestLogger(t),
+		managedRuntimeSelections: managedRuntimeSelectionReader{
+			selection: managedruntime.Selection{Package: agent.ManagedNPMRuntime().Package, Version: version}, found: true,
+		},
+	}
+	inst := &instance{agentType: agent.ID(), workDir: t.TempDir(), client: agentctlclient.NewClient(host, port, manager.log)}
+
+	caps := manager.probe(context.Background(), inst, agent, true)
+	if caps.Status != StatusOK || len(requests) != 2 {
+		t.Fatalf("native Codex probe = status %q after %d requests, want one recovered success", caps.Status, len(requests))
+	}
+	wantCommand := agent.ManagedNPMRuntime().RuntimeCommand(version).Args()
+	if !equalStrings(requests[0].InferenceConfig.Command, wantCommand) ||
+		!equalStrings(requests[1].InferenceConfig.Command, wantCommand) {
+		t.Fatalf("native Codex probe commands = %#v, want unchanged command %#v", []any{requests[0].InferenceConfig.Command, requests[1].InferenceConfig.Command}, wantCommand)
+	}
+	if requests[1].Preparation == nil || requests[1].Preparation.PackageSpec != packageSpec ||
+		requests[1].Preparation.ProbeAttemptID != "opaque-codex-attempt-1" {
+		t.Fatalf("native Codex private preparation = %#v", requests[1].Preparation)
+	}
+}
 
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.6
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-001.8

@@ -273,15 +273,26 @@ func classifyWorkflowAttentionWithJobs(
 			continue
 		}
 		attempt := run.RunAttempt
-		if attempt <= 0 {
-			attempt = 1
+		jobAttempt := attempt
+		if jobAttempt <= 0 {
+			jobAttempt = 1
 		}
-		jobs, jobsErr := readJobs(ctx, run.ID, attempt)
 		reason := workflowAttentionActionRequiredReason
-		if jobsErr == nil && isForkWorkflowRun(run, owner, repo) &&
+		// Only a completed fork pull_request suite can be the jobless approval
+		// gate. Every other action_required suite keeps the generic reason
+		// without needing job evidence.
+		if isForkWorkflowRun(run, owner, repo) &&
 			strings.EqualFold(run.Event, workflowEventPullRequest) &&
-			strings.EqualFold(run.Status, workflowStatusCompleted) && len(jobs) == 0 {
-			reason = workflowAttentionApprovalRequiredReason
+			strings.EqualFold(run.Status, workflowStatusCompleted) {
+			jobs, jobsErr := readJobs(ctx, run.ID, jobAttempt)
+			if jobsErr != nil {
+				// Missing job evidence cannot distinguish the jobless approval
+				// gate from an unexplained action_required run. Claim neither.
+				return workflowAttentionUnknown(pr.HeadSHA)
+			}
+			if len(jobs) == 0 {
+				reason = workflowAttentionApprovalRequiredReason
+			}
 		}
 		attention.Runs = append(attention.Runs, WorkflowAttentionRun{
 			RunID:      run.ID,

@@ -204,6 +204,7 @@ func TestStartupMCPReadyBeforeRecoveryAndLaunch(t *testing.T) {
 		services, agentSettingsCtrl, lifecycleMgr, eventBus, orchestratorSvc,
 		nil, nil, nil, nil, nil,
 		func(fn func() error) { t.Cleanup(func() { _ = fn() }) },
+		nil,
 		nil, systemSvc, nil, nil, dbPool, nil, nil, nil, nil,
 	)
 	require.NoError(t, err)
@@ -313,6 +314,7 @@ func TestStartupOfficeDisabled_MountsStorageAndRetention(t *testing.T) {
 		services, agentSettingsCtrl, lifecycleMgr, eventBus, orchestratorSvc,
 		nil, nil, nil, nil, nil,
 		func(fn func() error) { t.Cleanup(func() { _ = fn() }) },
+		nil,
 		nil, systemSvc, nil, nil, dbPool, nil, nil, nil, nil,
 	)
 	require.NoError(t, err)

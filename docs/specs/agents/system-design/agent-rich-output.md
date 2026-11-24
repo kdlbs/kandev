@@ -10,9 +10,8 @@ requirements:
 
 ## Purpose and boundaries
 
-The replacement baseline and structured evidence extension are implemented.
-The 2026-10-10 evidence package adds Table, StatusList and Callout while
-preserving existing component and historical contracts.
+The implemented evidence extension adds Table, StatusList and Callout and
+preserves existing component and historical contracts.
 
 Replace the fixed rich-output composition engine with json-render and expose
 catalog composition to agents through `show_rich_output_kandev`. Agents owns
@@ -282,17 +281,18 @@ legend filtering, formatting helpers, deferred plot mounting, and motion
 preferences. Library tree composition must not insert wrappers inside the
 Recharts plot's discovery boundary.
 
-Within the FilePreview registry adapter, key the native FilePreview component by
-the serialized `(sessionId, repo, path)` tuple. Its element identity separates
-two cards referencing the same target. A tuple change unmounts only that card;
-`useWorkspaceFilePreview` invalidates the old request's settlement. Stable
-identity/target preserves disclosure, success caching, and explicit failed-read
-retry through title changes, unrelated rerenders, and viewport changes.
+Key `FilePreview` by view, session, repository, and path within its registry
+element. Each element owns its preview state. A target change unmounts that
+card and invalidates its read. Rerenders preserve disclosure and preview state.
 
-Do not key the whole presentation or registry by viewport/session/file target.
-That would reset unrelated chart/filter/file state. Native controls keep their
-existing translated accessible names and callbacks; json-render event wiring is
-not needed for these local controls.
+Start one native non-image read before publishing explicit expansion. The idle
+effect loads cards that mount expanded. The generation in
+`useWorkspaceFilePreview` accepts only the latest settlement. Image cards reuse
+successful reads and retry errors on reopening. Plugin cards use the
+permission-aware viewer.
+
+Keep the presentation and registry stable across file targets and viewport
+changes. Native controls use localized names and host callbacks.
 
 ## Provider identity
 
@@ -332,17 +332,17 @@ expanded-file preview may scroll locally. File open and preview controls, and
 interactive legend buttons, use 48px nominal phone/coarse-pointer targets so
 pressed scaling still leaves at least 44px, without enlarging ordinary
 fine-pointer desktop controls. Do not add viewport
-fixed overlays or additional safe-area ownership. Keyboard focus, semantic
+fixed overlays for successful cards. Failed-call disclosure follows the
+[failure design](agent-rich-output-failures.md). Keyboard focus, semantic
 headings, plain-text chart summaries, and translated host states remain available.
 
 ## Failure and recovery
 
-Validation errors fail the tool before CSV access. Pending arguments never
-render a partial spec. Failed tools retain normal errors. Unknown envelope or
-catalog versions, malformed stored inputs/results, and invalid compatibility
-payloads produce the outer localized unavailable state with no side effects.
-Individual file-read failure remains local and retryable by explicit expansion.
-No automatic re-generation, remote import, or migration repairs historical data.
+Validation fails before CSV access. Pending calls never render partial specs.
+The [failure design](agent-rich-output-failures.md) owns failed-call disclosure
+and enum discovery. Malformed completed presentations remain unavailable.
+File-read errors remain local and explicitly retryable. History is never repaired
+or regenerated automatically.
 
 ## Verification and delivery
 
@@ -513,6 +513,8 @@ information. These components have no controls, external links, callbacks,
 animations, polling, or agent-selected styles. Local interactions in existing
 components retain their authorization and identity semantics.
 
+Guidance requires the [Rich Output binding](builtin-mcp-management.md).
+
 Schema examples in `lib/rich-output/examples.ts` cover inline and CSV Table,
 StatusList and Callout, including a composed report. Descriptions tell agents:
 use Table for multi-row/structured comparisons, StatusList for reported checks,
@@ -565,6 +567,8 @@ The published APIs include `defineCatalog`, `catalog.validate`,
 - [Original native trust and persistence boundary](../../../decisions/2026-08-14-kandev-native-agent-rich-output.md)
 
 ## Implementation records
+
+- [Copilot rich-output identity repair](../../../plans/copilot-rich-output-identity/plan.md)
 
 - [CSV header BOM repair](../../../plans/rich-output-csv-header-bom/plan.md)
 - [Structured evidence extension](../../../plans/rich-output-evidence-components/plan.md)

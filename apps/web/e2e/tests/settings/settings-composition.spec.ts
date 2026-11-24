@@ -95,7 +95,39 @@ test.describe("Settings composition", () => {
     const notificationsContent = testPage.locator('[data-settings-page-content="true"]');
     await expect(notificationsContent).toBeVisible();
     await expect(notificationsContent.locator(':scope > [data-slot="card"]')).toHaveCount(0);
-    await expect(notificationsContent.locator('[data-settings-group="true"]')).toHaveCount(4);
+    // Permission and sound stay compact rows. Provider settings, event subscriptions,
+    // and the opt-in content formatter each own one expanded shared frame.
+    const notificationGroupTitles = [
+      "Push Notifications",
+      "External Providers",
+      "Webhooks",
+      "Notification Events",
+      "Notification content",
+    ];
+    const notificationGroups = notificationsContent.locator('[data-settings-group="true"]');
+    await expect(notificationGroups).toHaveCount(notificationGroupTitles.length);
+    for (const title of notificationGroupTitles) {
+      const group = notificationGroups.filter({
+        has: testPage.getByRole("heading", { name: title, exact: true }),
+      });
+      await expect(group).toHaveCount(1);
+      await expect(group.getByRole("heading", { name: title, exact: true })).toBeVisible();
+      await expect(group.locator(':scope > [data-settings-group-card="true"]')).toHaveCount(1);
+      await expect(group.locator('[data-settings-group="true"]')).toHaveCount(0);
+      await expect(group.locator("details")).toHaveCount(0);
+    }
+    await expect(
+      notificationsContent.getByRole("combobox", { name: "Notification content" }).first(),
+    ).toBeEnabled();
+    await expect(testPage.getByTestId("notification-permission-group")).toHaveAttribute(
+      "data-notification-preference-row",
+      "true",
+    );
+    await expect(testPage.getByTestId("notification-sound-group")).toHaveAttribute(
+      "data-notification-preference-row",
+      "true",
+    );
+    await expect(notificationsContent.getByTestId("web-push-status")).toBeVisible();
 
     await testPage.goto("/settings/preferences/terminal-editors");
     const editorContent = testPage.locator('[data-settings-page-content="true"]').last();

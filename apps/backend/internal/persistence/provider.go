@@ -64,7 +64,7 @@ func provideSQLite(ctx context.Context, cfg *config.Config, log *logger.Logger, 
 	writer := sqlx.NewDb(writerConn, "sqlite3")
 
 	// Reader: multiple read-only connections for concurrent SELECTs.
-	readerConn, err := db.OpenSQLiteReader(dbPath)
+	readerConn, err := db.OpenSQLiteReaderWithConns(dbPath, cfg.Database.SQLiteReaderConns)
 	if err != nil {
 		_ = writer.Close()
 		return nil, nil, fmt.Errorf("failed to open sqlite reader: %w", err)

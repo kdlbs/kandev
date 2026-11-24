@@ -4,7 +4,8 @@ requirements:
 system_design:
   - ../../specs/tasks/system-design/task-dependencies.md
 created: 2026-08-09
-status: not_started
+status: done
+legacy_specs: []
 ---
 
 # Implementation Plan: Task Dependencies and Auto-Start Chains
@@ -122,9 +123,9 @@ install has them:
   `blocked_by` and `list_related_tasks_kandev` work in Kanban mode.
 - Edge cleanup on task **delete** is explicit repository work, not a SQLite
   `ON DELETE CASCADE`, because the table predates the foreign key and must
-  behave identically on PostgreSQL. **Archive** deliberately keeps the edges:
-  an archived predecessor reads as `pending`, so dropping them would silently
-  unblock the chain.
+  behave identically on PostgreSQL. **Archive** preserves the edges and the
+  predecessor's persisted outcome: completed resolves, failed/cancelled fail,
+  and unfinished work stays pending.
 
 ### Derived blocked state
 
@@ -135,7 +136,7 @@ predecessor:
 - resolved — `state = COMPLETED`, or resident in a final step whose name passes
   `IsTerminalStepName`;
 - failed — `state` is `FAILED` or `CANCELLED`;
-- pending — anything else, including archived.
+- pending — unfinished work, whether archived or not.
 
 `blocked` and `blocked_reason` are computed from that verdict on every read and
 are never stored. Batch it: the Kanban board reads a whole workflow at once, so
@@ -246,8 +247,9 @@ launcher.
   duplicate edge is idempotent; validator is shared by the task-scoped and
   Office routes.
 - Derived state: pending / resolved-by-state / resolved-by-terminal-step /
-  failed / cancelled / archived predecessors produce the right `blocked` and
-  `blocked_reason`; batch helper matches the per-task result.
+  failed / cancelled predecessors produce the right `blocked` and
+  `blocked_reason`, including when those predecessors are archived; batch helper
+  matches the per-task result.
 - Gate: a blocked task is not launched by `task.moved`, by
   `task.queue_promoted`, or by dependency resolution; a predecessor-lookup
   error skips the launch; manual start is unaffected.

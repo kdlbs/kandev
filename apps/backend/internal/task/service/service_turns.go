@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -466,6 +467,24 @@ func (s *Service) ListTurnsBySession(ctx context.Context, sessionID string) ([]*
 
 // CompleteTurn marks a turn as completed and publishes the turn.completed event.
 func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
+	return s.completeTurn(ctx, turnID, nil)
+}
+
+// CompleteTurnWithConfigurationResult publishes an ephemeral command receipt
+// beside the live completion without adding it to turn storage.
+func (s *Service) CompleteTurnWithConfigurationResult(
+	ctx context.Context,
+	turnID string,
+	result *streams.ConfigurationCommandResult,
+) error {
+	return s.completeTurn(ctx, turnID, result)
+}
+
+func (s *Service) completeTurn(
+	ctx context.Context,
+	turnID string,
+	configurationResult *streams.ConfigurationCommandResult,
+) error {
 	if turnID == "" {
 		return nil // No active turn to complete
 	}
@@ -484,8 +503,13 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil
 	}
 
-	hadOutput := s.turnHadOutput(ctx, turn)
-	_ = s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput, receipt)
+	hadOutput, userMessage := s.turnCompletionFacts(ctx, turn, configurationResult != nil)
+	if configurationResult != nil && !isConfigurationCommandMessage(userMessage, configurationResult) {
+		configurationResult = nil
+	}
+	_ = s.publishTurnEventWithConfigurationResult(
+		events.TurnCompleted, turn, &hadOutput, configurationResult, receipt,
+	)
 
 	s.logger.Debug("completed turn",
 		zap.String("turn_id", turnID),
@@ -655,6 +679,16 @@ func (s *Service) PublishTurnStarted(ctx context.Context, turn *models.Turn) err
 // notice). Pass nil for turn.started so the field is omitted entirely rather
 // than carrying a misleading "false" on a turn that has not completed.
 func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool, receipts ...*models.ConversationMutationReceipt) error {
+	return s.publishTurnEventWithConfigurationResult(eventType, turn, hadOutput, nil, receipts...)
+}
+
+func (s *Service) publishTurnEventWithConfigurationResult(
+	eventType string,
+	turn *models.Turn,
+	hadOutput *bool,
+	configurationResult *streams.ConfigurationCommandResult,
+	receipts ...*models.ConversationMutationReceipt,
+) error {
 	if s.eventBus == nil {
 		return errors.New("turn event bus is unavailable")
 	}
@@ -683,6 +717,9 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 	if hadOutput != nil {
 		payload["had_output"] = *hadOutput
 	}
+	if configurationResult != nil {
+		payload["configuration_result"] = configurationResult
+	}
 	if len(receipts) > 0 && receipts[0] != nil {
 		projectedReceipt := projectConversationReceipt(receipts[0])
 		if hadOutput != nil {
@@ -693,6 +730,10 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 				}
 				output := *hadOutput
 				operation.HadOutput = &output
+				if configurationResult != nil {
+					result := *configurationResult
+					operation.ConfigurationCommandResult = &result
+				}
 				break
 			}
 		}
@@ -715,20 +756,64 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 // events). A read failure defaults to true so a transient DB error never
 // produces a spurious "empty turn" notice.
 func (s *Service) turnHadOutput(ctx context.Context, turn *models.Turn) bool {
+	hadOutput, _ := s.turnCompletionFacts(ctx, turn, false)
+	return hadOutput
+}
+
+func (s *Service) turnCompletionFacts(
+	ctx context.Context,
+	turn *models.Turn,
+	checkUserMessage bool,
+) (bool, *models.Message) {
+	if turn == nil {
+		return true, nil
+	}
 	// A turn terminated by a recoverable agent failure carries its error entry
 	// as the turn's outcome, so it counts as output even though the
 	// status/recovery message itself is not in the agent-output allowlist.
-	if errorTerminated, _ := turn.Metadata[models.TurnMetaKeyErrorTerminated].(bool); errorTerminated {
-		return true
+	errorTerminated, _ := turn.Metadata[models.TurnMetaKeyErrorTerminated].(bool)
+	if errorTerminated && !checkUserMessage {
+		return true, nil
 	}
 	msgs, err := s.messages.ListMessagesByTurnID(ctx, turn.ID)
 	if err != nil {
 		s.logger.Debug("failed to list messages for had_output; assuming output",
 			zap.String("turn_id", turn.ID),
 			zap.Error(err))
-		return true
+		return true, nil
 	}
-	return turnHadAgentOutput(msgs, turn.ID)
+	var userMessage *models.Message
+	if checkUserMessage {
+		userMessage = turnUserMessage(msgs, turn.ID)
+	}
+	return errorTerminated || turnHadAgentOutput(msgs, turn.ID), userMessage
+}
+
+func turnUserMessage(msgs []*models.Message, turnID string) *models.Message {
+	for _, message := range msgs {
+		if message != nil && message.TurnID == turnID && message.AuthorType == models.MessageAuthorUser {
+			return message
+		}
+	}
+	return nil
+}
+
+func isConfigurationCommandMessage(
+	message *models.Message,
+	result *streams.ConfigurationCommandResult,
+) bool {
+	if message == nil || result == nil || message.AuthorType != models.MessageAuthorUser ||
+		strings.TrimSpace(result.ConfigID) == "" || strings.TrimSpace(result.Requested) == "" {
+		return false
+	}
+	parts := strings.Fields(strings.TrimSpace(message.Content))
+	if len(parts) == 0 || len(parts[0]) < 2 || !strings.HasPrefix(parts[0], "/") {
+		return false
+	}
+	if strings.EqualFold(strings.TrimPrefix(parts[0], "/"), "model") {
+		return strings.TrimSpace(result.ConfigID) != ""
+	}
+	return true
 }
 
 // turnHadAgentOutput returns true when any message belonging to turnID is
@@ -903,6 +988,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 
 	info := &lifecycle.WorkspaceInfo{
 		TaskID:                  taskID,
+		OwnerUserID:             s.workspaceOwnerUserIDForTask(ctx, taskID),
 		SessionID:               sessionID,
 		TaskEnvironmentID:       session.TaskEnvironmentID,
 		WorkspacePath:           workspacePath,
@@ -1006,6 +1092,12 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		info.RuntimeName = running.Runtime
 		info.AgentExecutionID = running.AgentExecutionID
 		mergePersistentWorkspaceMetadata(info, running.Metadata)
+		// A retained helper's built-in binding is execution authority, not a
+		// generic persistent launch preference. Carry it separately so only an
+		// adopted peer can restore it; fresh helpers still start unbound.
+		if value, bound := running.Metadata[mcpprofile.BuiltinBindingMetadataKey]; bound {
+			ensureWorkspaceMetadata(info)[mcpprofile.BuiltinBindingMetadataKey] = value
+		}
 		if officeProfileID, ok := running.Metadata[lifecycle.MetadataKeyOfficeAgentProfileID].(string); ok && strings.TrimSpace(officeProfileID) != "" {
 			info.AgentProfileID = officeProfileID
 		}
@@ -1167,6 +1259,7 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 	if err := s.populateWorkspaceTaskMetadata(ctx, taskID, info); err != nil {
 		return nil, err
 	}
+	info.DetachedWorkspaceRoots = detachedEnvironmentRepoPaths(sessionWorktrees)
 	worktreesByIdentity := indexWorkspaceWorktrees(sessionWorktrees)
 	worktreesByRepository := indexUniqueWorkspaceWorktreesByRepository(sessionWorktrees)
 	projections, err := s.workspaceRepositoryProjections(ctx, taskID)
@@ -1197,6 +1290,16 @@ func (s *Service) populateWorkspaceTaskMetadata(ctx context.Context, taskID stri
 		info.TaskArchived = task.ArchivedAt != nil
 	}
 	return nil
+}
+
+func detachedEnvironmentRepoPaths(rows []*models.TaskEnvironmentRepo) []string {
+	paths := make([]string, 0)
+	for _, row := range rows {
+		if row != nil && row.Status == models.TaskEnvironmentRepoStatusDetached && row.WorktreePath != "" {
+			paths = append(paths, row.WorktreePath)
+		}
+	}
+	return paths
 }
 
 func indexWorkspaceWorktrees(sessionWorktrees []*models.TaskEnvironmentRepo) map[workspaceWorktreeKey]*models.TaskEnvironmentRepo {
@@ -1256,7 +1359,11 @@ func (s *Service) workspaceRepositorySpec(
 		RepositorySubpath: projection.repoName, RepositorySubpathKnown: projection.repoName != "",
 		CloneRelocation:       cloneRelocation,
 		WorkspaceRelativePath: taskRepository.WorkspaceRelativePath,
-		BaseBranch:            taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
+		BaseBranch:            taskRepository.BaseBranch,
+		BaseBranchFallbackPolicy: models.ResolveAttachmentBaseBranchFallbackPolicy(
+			taskRepository.Metadata, taskRepository.BaseBranch,
+		),
+		DefaultBranch:  repository.DefaultBranch,
 		CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 	}
@@ -1349,7 +1456,7 @@ func taskRepositoryPRNumber(metadata map[string]interface{}) int {
 	if metadata == nil {
 		return 0
 	}
-	switch number := metadata["pr_number"].(type) {
+	switch number := metadata[models.TaskRepositoryPRNumberMetadataKey].(type) {
 	case float64:
 		if number > 0 {
 			return int(number)

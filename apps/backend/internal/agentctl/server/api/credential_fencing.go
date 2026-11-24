@@ -41,19 +41,25 @@ func closeOnCredentialInvalidation(c *gin.Context, conn *websocket.Conn) func() 
 	return func() { close(done) }
 }
 
-// credentialScopedRequest returns c.Request bound to a context that is
-// cancelled once the credential it authenticated under is superseded.
+// credentialScopedRequest projects a request for an application proxy, removing
+// consumed control authorization without changing the authenticated request.
+// Its context is cancelled once the accepted credential is superseded.
 // httputil.ReverseProxy closes the upstream connection when the inbound
 // request's context is cancelled, including for a connection it has upgraded,
 // so a proxied socket terminates with the credential that opened it. The
 // returned function releases the watcher and must be called when the handler
 // returns.
 func credentialScopedRequest(c *gin.Context) (*http.Request, func()) {
+	request := c.Request
+	if c.GetBool(controlAuthorizationConsumedContextKey) {
+		request = request.Clone(request.Context())
+		request.Header.Del("Authorization")
+	}
 	invalidated := credentialInvalidatedFromContext(c)
 	if invalidated == nil {
-		return c.Request, func() {}
+		return request, func() {}
 	}
-	ctx, cancel := context.WithCancel(c.Request.Context())
+	ctx, cancel := context.WithCancel(request.Context())
 	go func() {
 		select {
 		case <-invalidated:
@@ -61,5 +67,5 @@ func credentialScopedRequest(c *gin.Context) (*http.Request, func()) {
 		case <-ctx.Done():
 		}
 	}()
-	return c.Request.WithContext(ctx), cancel
+	return request.WithContext(ctx), cancel
 }

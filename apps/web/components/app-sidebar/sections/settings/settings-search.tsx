@@ -199,6 +199,7 @@ function SettingsSearchResult({
     <Link
       href={item.href}
       onClick={handleClick}
+      data-testid={`settings-search-result-${item.id}`}
       data-settings-search-motion-key={`item:${item.id}`}
       className="flex min-h-11 min-w-0 cursor-pointer flex-col justify-center rounded-md px-2.5 py-1.5 outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
     >

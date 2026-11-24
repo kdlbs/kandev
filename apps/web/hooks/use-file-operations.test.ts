@@ -87,3 +87,19 @@ describe("downloadFileContent", () => {
     expect(triggerFileDownloadMock).not.toHaveBeenCalled();
   });
 });
+
+it("downloads from the selected repository when filenames collide", async () => {
+  requestFileContentMock.mockResolvedValueOnce({ content: "AA==", is_binary: true });
+  await downloadFileContent(FAKE_CLIENT, SESSION_ID, "model.stl", UNKNOWN_ERROR, "second-repo");
+  expect(requestFileContentMock).toHaveBeenCalledWith(
+    FAKE_CLIENT,
+    SESSION_ID,
+    "model.stl",
+    "second-repo",
+  );
+  expect(triggerFileDownloadMock).toHaveBeenCalledWith({
+    fileName: "model.stl",
+    content: "AA==",
+    isBinary: true,
+  });
+});
