@@ -88,8 +88,8 @@ The table keeps retired identifiers and identifies their replacements.
 - **AC-AGENTS-ANTIGRAVITY-ACP-003.11:** The agent shall retain graceful shutdown rather than always requesting immediate kill.
 - **AC-AGENTS-ANTIGRAVITY-ACP-003.12:** One-shot inference shall remain supported.
 - **AC-AGENTS-ANTIGRAVITY-ACP-003.13:** Shared profile flags and sandbox prefixes shall retain their behavior after base construction.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.14:** When the host has an ACP-capable `agy`, local command previews, model discovery, inference, and new local or worktree sessions shall use `agy acp`.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.15:** When the CLI is absent or predates ACP, local operations shall select the standalone server.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.14:** A qualified `agy` shall serve local previews, model discovery, inference, and new local or worktree sessions.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.15:** If no CLI qualifies, new local operations shall select the complete standalone server.
   A failure from the selected runtime shall report that runtime's error.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-004: Config root, sessions, and skills
@@ -136,6 +136,7 @@ The table keeps retired identifiers and identifies their replacements.
 - **AC-AGENTS-ANTIGRAVITY-ACP-006.2:** The agent shall add no assumed HTTP or SSE MCP capability override.
 - **AC-AGENTS-ANTIGRAVITY-ACP-006.3:** MCP servers shall pass through session creation without a project-local MCP strategy.
 - **AC-AGENTS-ANTIGRAVITY-ACP-006.4:** The agent shall add no assumed server namespace for MCP tool names.
+- **AC-AGENTS-ANTIGRAVITY-ACP-006.5:** At the next process start, all local CLI profiles and models shall receive required MCP servers without profile edits.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-007: No automated remote provisioning
 
@@ -164,7 +165,7 @@ The table keeps retired identifiers and identifies their replacements.
 #### Acceptance criteria
 
 - **AC-AGENTS-ANTIGRAVITY-ACP-009.1:** Settings shall identify the standalone install and install both executables from a reviewed release.
-  An available ACP-capable CLI already satisfies local installation.
+  A qualified CLI satisfies local installation.
 - **AC-AGENTS-ANTIGRAVITY-ACP-009.2:** Installation shall verify trusted digest and bounded size, reject unsafe archive entries, and activate only a complete bundle.
   Failure or cancellation shall preserve the previous usable installation. Launch and discovery shall never download implicitly.
 - **AC-AGENTS-ANTIGRAVITY-ACP-009.3:** Standalone operations shall resolve the same complete managed bundle, otherwise a complete manual PATH install.

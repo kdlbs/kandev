@@ -196,6 +196,7 @@ func (a *Adapter) handleACPUpdate(
 	startupWarningOwned := !a.closed &&
 		((isLoading && a.loadingSessionID == sessionID) || (!isLoading && a.sessionID == sessionID))
 	a.mu.Unlock()
+	copilotNotice := a.observeCopilotInterruptionUpdate(sessionID, n.Update, promptGeneration)
 	if isStartupWarning && !startupWarningOwned {
 		startupWarning = nil
 		if !isLoading {
@@ -277,6 +278,12 @@ func (a *Adapter) handleACPUpdate(
 	var claudeResumeUpdate *AgentEvent
 	if !suppressed {
 		event = a.convertNotificationForGeneration(n, promptGeneration)
+		if copilotNotice != "" && event != nil {
+			if event.Data == nil {
+				event.Data = make(map[string]any)
+			}
+			event.Data[streams.AgentEventDataCopilotInterruptionNotice] = copilotNotice
+		}
 		if a.copilotNativeActive.Load() && n.Update.UsageUpdate != nil &&
 			event != nil && event.Type == streams.EventTypeContextWindow {
 			// The native usage_info stream owns the Copilot gauge. The ordinary

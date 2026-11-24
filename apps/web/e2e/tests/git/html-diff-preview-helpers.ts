@@ -1,4 +1,5 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { realpathSync } from "node:fs";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
@@ -102,9 +103,9 @@ export async function createHtmlDiffTask({
   await session.waitForChatIdle({ timeout: 45_000 });
 
   const workspacePath = await waitForWorkspacePath(apiClient, task.id, task.session_id);
-  if (workspacePath === seedData.repositoryPath) {
-    throw new Error("HTML diff preview requires a separate task worktree");
-  }
+  expect(realpathSync(workspacePath), "HTML preview fixture must use its own worktree").not.toBe(
+    realpathSync(seedData.repositoryPath),
+  );
   const git = new GitHelper(workspacePath, makeGitEnv(backend.tmpDir));
   git.createFile(`${HTML_PREVIEW_ROOT}/assets/preview.css`, PREVIEW_CSS);
   git.createFile(`${HTML_PREVIEW_ROOT}/assets/preview.js`, PREVIEW_SCRIPT);

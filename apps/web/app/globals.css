@@ -295,11 +295,9 @@
 }
 
 /* WebKit can leave a fixed dialog's transform animation on a separate layer,
-   which makes the Create Task surface look soft or briefly sit below its
-   overlay. Keep the workaround scoped to the dialog opt-in and the engine
-   marker so Chromium keeps the existing motion and geometry. The task's own
-   overlay is one level lower so a nested confirmation can reuse the shared
-   modal level and still paint above the task form. */
+   which can soften text or briefly place it below its overlay. Keep the
+   workaround scoped to opted-in surfaces and the engine marker so Chromium
+   keeps the existing motion and geometry. */
 @keyframes kandev-dialog-webkit-enter {
   from {
     opacity: 0;
@@ -319,6 +317,14 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"] {
   z-index: 50;
 }
 
+html[data-rendering-engine="webkit"] .quick-chat-dialog {
+  inset: 0;
+  margin: auto;
+  translate: none !important;
+  transform: none;
+  z-index: 50;
+}
+
 html[data-rendering-engine="webkit"] .create-task-dialog-overlay {
   z-index: 49;
 }
@@ -332,11 +338,13 @@ html[data-rendering-engine="webkit"] [data-webkit-modal-layer="discard-confirmat
   height: fit-content;
 }
 
-html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state="open"] {
+html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state="open"],
+html[data-rendering-engine="webkit"] .quick-chat-dialog[data-state="open"] {
   animation-name: kandev-dialog-webkit-enter;
 }
 
-html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state="closed"] {
+html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state="closed"],
+html[data-rendering-engine="webkit"] .quick-chat-dialog[data-state="closed"] {
   animation-name: kandev-dialog-webkit-exit;
 }
 

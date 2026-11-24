@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -69,19 +70,19 @@ func TestAntigravityLocalLaunchUsesCLIAndPreservesProfileArgs(t *testing.T) {
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	dir := t.TempDir()
 	cliPath := filepath.Join(dir, "agy")
-	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.5.15'\n"), 0o755); err != nil {
+	if err := os.WriteFile(cliPath, []byte(lifecycleAntigravityCLIScript("1.5.15")), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	writeLifecycleAntigravityStandalone(t, dir)
 	t.Setenv("PATH", dir)
 	base := agents.NewAntigravityACP().Runtime().Cmd.Args()
-	args := append(append([]string(nil), base...), "--profile-flag", "profile-value")
+	args := append(append([]string(nil), base...), "--profile-flag", "value with spaces", "--process-per-session=false", "--", "after-delimiter")
 	policy, _, resolved, _, err := (&Manager{}).applyLocalRuntimeCommand(context.Background(), nil,
 		agents.NewAntigravityACP(), agentruntime.RuntimeStandalone, args, nil, "", false)
 	if err != nil {
 		t.Fatalf("applyLocalRuntimeCommand: %v", err)
 	}
-	want := []string{cliPath, "acp", "--profile-flag", "profile-value"}
+	want := []string{cliPath, "acp", "--process-per-session", "--profile-flag", "value with spaces", "--process-per-session=false", "--process-per-session", "--", "after-delimiter"}
 	if len(resolved) != len(want) {
 		t.Fatalf("command = %v, want %v", resolved, want)
 	}
@@ -103,7 +104,7 @@ func TestAntigravityTaskCommandSelectsCLIWithoutStandaloneBundle(t *testing.T) {
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	binDir := t.TempDir()
 	cliPath := filepath.Join(binDir, "agy")
-	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.5.15'\n"), 0o755); err != nil {
+	if err := os.WriteFile(cliPath, []byte(lifecycleAntigravityCLIScript("1.5.15")), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir)
@@ -122,7 +123,7 @@ func TestAntigravityTaskCommandSelectsCLIWithoutStandaloneBundle(t *testing.T) {
 
 	// The request keeps the selected CLI through a later command build even if
 	// the candidate's qualification changes after instance creation.
-	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.4.9'\n"), 0o755); err != nil {
+	if err := os.WriteFile(cliPath, []byte(lifecycleAntigravityCLIScript("1.4.9")), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	promoted, err := manager.buildAgentCommandWithContext(
@@ -156,7 +157,7 @@ func TestAntigravityResumeUsesSavedRuntime(t *testing.T) {
 			t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 			dir := t.TempDir()
 			cliPath := filepath.Join(dir, "agy")
-			if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.5.15'\n"), 0o755); err != nil {
+			if err := os.WriteFile(cliPath, []byte(lifecycleAntigravityCLIScript("1.5.15")), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			writeLifecycleAntigravityStandalone(t, dir)
@@ -171,8 +172,11 @@ func TestAntigravityResumeUsesSavedRuntime(t *testing.T) {
 			if policy == nil || policy.RuntimeVariant != tt.wantVariant || filepath.Base(resolved[0]) != tt.wantCommand {
 				t.Fatalf("selection = policy %+v, command %v", policy, resolved)
 			}
-			if resolved[len(resolved)-1] != "--profile-flag" {
+			if !slices.Contains(resolved, "--profile-flag") {
 				t.Fatalf("profile arguments lost: %v", resolved)
+			}
+			if tt.wantVariant == acpcompat.AntigravityRuntimeCLI && resolved[len(resolved)-1] != "--process-per-session" {
+				t.Fatalf("saved CLI command does not end with worker mode: %v", resolved)
 			}
 		})
 	}
@@ -250,7 +254,7 @@ func TestAntigravityTaskResumeCommandUsesSavedRuntimeAfterRestart(t *testing.T) 
 			dir := t.TempDir()
 			if tt.cliVersion != "" {
 				cliPath := filepath.Join(dir, "agy")
-				if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy "+tt.cliVersion+"'\n"), 0o755); err != nil {
+				if err := os.WriteFile(cliPath, []byte(lifecycleAntigravityCLIScript(tt.cliVersion)), 0o755); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -274,6 +278,9 @@ func TestAntigravityTaskResumeCommandUsesSavedRuntimeAfterRestart(t *testing.T) 
 			}
 			if filepath.Base(commands.args[0]) != tt.wantCommand || request.AuthPolicy == nil || request.AuthPolicy.RuntimeVariant != tt.wantVariant {
 				t.Fatalf("resume selection = command %#v, policy %+v; want %s", commands.args, request.AuthPolicy, tt.wantVariant)
+			}
+			if tt.wantVariant == acpcompat.AntigravityRuntimeCLI && !slices.Contains(commands.args, "--process-per-session") {
+				t.Fatalf("saved CLI resume command lacks worker mode: %#v", commands.args)
 			}
 		})
 	}
@@ -321,4 +328,9 @@ func writeLifecycleAntigravityStandalone(t *testing.T, dir string) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func lifecycleAntigravityCLIScript(version string) string {
+	return "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'agy " + version + "'; exit 0; fi\n" +
+		"if [ \"$1\" = \"acp\" ] && [ \"$2\" = \"--help\" ]; then printf 'Usage: agy acp [flags]\\n\\nFlags:\\n  --process-per-session  Serve each session from an isolated worker process\\n'; exit 0; fi\nexit 0\n"
 }
