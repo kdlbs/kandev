@@ -56,6 +56,8 @@ regression on macOS.
 (cd apps/desktop/src-tauri && cargo test --locked --lib desktop_nvm_)
 (cd apps/desktop/src-tauri && cargo test --locked --lib desktop_environment_preserves_path_and_adds_gui_paths)
 node scripts/validate-public-docs.mjs
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
 git diff --check -- apps/desktop docs
 ```
 
@@ -126,5 +128,8 @@ Sequential.
   `cargo +1.90 build --locked --features desktop-runtime` passed on Linux.
   The targeted PATH preservation test, public documentation validation, Rust
   formatting, and whitespace checks also passed.
+- `python3 scripts/list-docs.py validate` and
+  `python3 scripts/lint-spec-files.py --all` passed after the specification
+  changes.
 - The packaged Finder smoke test was not run because the current host runs
   Linux. Run it on a macOS host before closing the work order.
