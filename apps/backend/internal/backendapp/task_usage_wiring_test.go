@@ -1,98 +1,53 @@
 package backendapp
 
 import (
-	"context"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-type taskUsageWiringRepo struct {
-	recorded chan *models.TaskUsageEvent
-}
+func TestConstructOfficeServices_RecordsUsageWhenOfficeDisabled(t *testing.T) {
+	ctx := t.Context()
+	harness := newBootStateTestHarness(t)
+	task := &models.Task{ID: "task-usage", Title: "Record usage"}
+	require.NoError(t, harness.taskRepo.CreateTask(ctx, task))
+	session := &models.TaskSession{ID: "session-usage", TaskID: task.ID}
+	require.NoError(t, harness.taskRepo.CreateTaskSession(ctx, session))
 
-func (r *taskUsageWiringRepo) CreateTaskUsageEvent(_ context.Context, event *models.TaskUsageEvent) error {
-	r.recorded <- event
-	return nil
-}
+	log := newTestLogger()
+	eventBus := bus.NewMemoryEventBus(log)
+	t.Cleanup(eventBus.Close)
+	cfg := &config.Config{HomeDir: t.TempDir(), Features: config.FeaturesConfig{Office: false}}
+	_, ok := constructOfficeServices(
+		ctx, cfg, log, &Repositories{Task: harness.taskRepo}, &Services{Task: harness.taskSvc},
+		nil, eventBus, "", func(cleanup func() error) {
+			t.Cleanup(func() { assert.NoError(t, cleanup()) })
+		}, nil, nil,
+	)
+	require.True(t, ok)
 
-func TestInitOfficeServicesUsesTaskUsageWiringHelper(t *testing.T) {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "main.go", nil, 0)
-	if err != nil {
-		t.Fatalf("parse main.go: %v", err)
-	}
-
-	var initOffice *ast.FuncDecl
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Name.Name == "constructOfficeServices" {
-			initOffice = fn
-			break
-		}
-	}
-	if initOffice == nil {
-		t.Fatal("constructOfficeServices not found in main.go")
-	}
-
-	var helperCalls int
-	ast.Inspect(initOffice, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		if name, ok := call.Fun.(*ast.Ident); ok && name.Name == "startTaskUsageWriter" {
-			helperCalls++
-		}
-		return true
-	})
-	if helperCalls != 1 {
-		t.Fatalf("startTaskUsageWriter calls = %d, want exactly one composition call", helperCalls)
-	}
-}
-
-func TestStartTaskUsageWriter_PublishesIntoRepository(t *testing.T) {
-	repo := &taskUsageWiringRepo{recorded: make(chan *models.TaskUsageEvent, 1)}
-	eventBus := bus.NewMemoryEventBus(logger.Default())
-	var cleanups []func() error
-	addCleanup := func(cleanup func() error) {
-		cleanups = append(cleanups, cleanup)
-	}
-	if w, err := startTaskUsageWriter(repo, nil, eventBus, nil, addCleanup); err != nil || w == nil {
-		t.Fatalf("startTaskUsageWriter: writer=%v err=%v", w, err)
-	}
-	t.Cleanup(func() {
-		for i := len(cleanups) - 1; i >= 0; i-- {
-			if err := cleanups[i](); err != nil {
-				t.Errorf("cleanup: %v", err)
-			}
-		}
-	})
-
-	if err := eventBus.Publish(context.Background(), events.BuildSessionPromptUsageSubject("session-1"), &bus.Event{
+	const eventID = "evt-wiring"
+	require.NoError(t, eventBus.Publish(ctx, events.BuildSessionPromptUsageSubject(session.ID), &bus.Event{
 		Data: map[string]any{
-			"task_id":        "task-1",
-			"session_id":     "session-1",
-			"usage_event_id": "evt-wiring",
+			"task_id":        task.ID,
+			"session_id":     session.ID,
+			"usage_event_id": eventID,
 			"usage":          map[string]any{"input_tokens": int64(7)},
 		},
-	}); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
+	}))
 
-	select {
-	case event := <-repo.recorded:
-		if event.UsageEventID != "evt-wiring" || event.TokensIn != 7 {
-			t.Fatalf("recorded event = %+v, want usage event evt-wiring with 7 input tokens", event)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("task usage writer did not receive the published event")
-	}
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		var tokensIn int64
+		require.NoError(collect, harness.db.GetContext(ctx, &tokensIn, `
+			SELECT tokens_in FROM task_usage_events WHERE usage_event_id = ? AND task_id = ? AND session_id = ?
+		`, eventID, task.ID, session.ID))
+		assert.Equal(collect, int64(7), tokensIn)
+	}, 3*time.Second, 10*time.Millisecond, "usage event %q was not recorded", eventID)
 }

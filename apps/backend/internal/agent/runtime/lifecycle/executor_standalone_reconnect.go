@@ -241,6 +241,7 @@ func (r *StandaloneExecutor) buildAdoptedStandaloneInstance(
 	if client == nil {
 		return nil, standaloneOwnerBlocked(fmt.Errorf("agent instance %q has no authenticated client", info.ID))
 	}
+	client.SetACPProtocolVersion(info.ACPProtocolVersion)
 	metadata := buildStandaloneInstanceMetadata(req, info.Port)
 	metadata[MetadataKeyReuseExistingProcess] = true
 	if req.RetainedBuiltinBinding != nil {

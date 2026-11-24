@@ -21,6 +21,9 @@ and replay remain owned by [queue admission](queue-admission.md).
 | .1, .2   | `messagequeue.Service.WithSessionAdmission` and session gate      |
 | .3       | Queued-dispatch error handling, queue handlers, queue API mapping |
 | .4       | Existing handler attachment-cleanup obligation and recovery       |
+| .5       | Orchestrator focus refresh and idle-suspension revalidation       |
+| .6       | `messagequeue` admission entry holder record and timeout logging  |
+| .7       | MCP deferred-move handler error mapping                           |
 
 ## Acquisition and callback lifetime
 
@@ -79,6 +82,30 @@ coordination, and attachment-transfer handling retain their current behavior.
 Waiting for an active edit lease, including a lease discovered after admission,
 does not spend a cleanup attempt. Keep the existing wake path until actual
 cleanup or acknowledgement can run.
+
+## Lock order inside admitted callbacks
+
+Session admission is acquired before the per-session lifecycle lock. An
+admitted callback must not wait for the lifecycle lock without a bound,
+because the admission gate stays held for as long as the callback blocks.
+Opportunistic callbacks use the existing `tryAcquireSessionLifecycleLock`.
+When the lock is busy, the callback returns without side effects: the focus
+refresh records no focus marker, and the reaper leaves the candidate for a
+later scan.
+
+## Holder diagnostics
+
+Each admission entry records when its current holder acquired the gate and
+clears that time on release. A timed-out waiter logs one warning with the
+session ID and how long the holder has held the gate. Callback timing and
+errors are unchanged.
+
+## Deferred MCP move
+
+`SetPendingMove` returns `ErrSessionAdmissionTimeout` unchanged. The MCP
+deferred-move handler maps that sentinel to `UNAVAILABLE` with a message
+saying that the session is busy and the move can be retried. Other persistence
+failures remain `INTERNAL_ERROR`.
 
 ## Scope and verification
 

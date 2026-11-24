@@ -336,6 +336,9 @@ type AgentEvent struct {
 	// It is distinct from the Kandev message record ID used by downstream streaming.
 	ProtocolMessageID string `json:"protocol_message_id,omitempty"`
 
+	// ReplaceMessageContent applies this snapshot to the same protocol message.
+	ReplaceMessageContent bool `json:"replace_message_content,omitempty"`
+
 	// RetractedMessageIDs identifies Kandev transcript records owned by an
 	// abandoned response attempt. It is populated only on response-attempt resets.
 	RetractedMessageIDs []string `json:"retracted_message_ids,omitempty"`

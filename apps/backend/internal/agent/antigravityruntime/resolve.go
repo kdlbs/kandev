@@ -48,6 +48,7 @@ type ResolveOptions struct {
 	Env          map[string]string
 	LookPath     func(string) (string, error)
 	VersionProbe func(context.Context, string) (string, error)
+	ACPHelpProbe func(context.Context, string) (string, error)
 }
 
 // DefaultHomeDir resolves the Kandev home used for managed bundles.

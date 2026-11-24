@@ -228,7 +228,8 @@ func cancelClaudeWithQueuedLaunchUpdate(
 	}
 	releaseWorker()
 	require.True(t, <-workerDone)
-	require.Eventually(t, func() bool { return activeClaudeToolCallCount(a) == 2 }, 2*time.Second, time.Millisecond,
+	require.True(t, a.syncNotifQueue(), "cancellation notifications must be sent before draining events")
+	require.Equal(t, 2, activeClaudeToolCallCount(a),
 		"queued completion must be processed before the cancellation sweep")
 	var events []AgentEvent
 	cancelled := 0

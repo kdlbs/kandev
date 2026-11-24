@@ -88,6 +88,7 @@ Shared flags:
   --verbose        mirror frames to stderr
   --stderr         capture child stderr into the JSONL
   --exec "CMD"     spawn an arbitrary command instead of a registered agent
+  --protocol-version 1|2      request an ACP wire version (default 1)
   --client-capabilities JSON  merge client capabilities into initialize
   --air-capabilities LIST     advertise comma-separated AIR capabilities
 
@@ -98,13 +99,14 @@ as asyncTasks during a probe or agent-matrix run.`)
 }
 
 type sharedFlags struct {
-	out     string
-	file    string
-	timeout time.Duration
-	workdir string
-	verbose bool
-	stderr  bool
-	exec    string
+	out             string
+	file            string
+	timeout         time.Duration
+	workdir         string
+	verbose         bool
+	stderr          bool
+	exec            string
+	protocolVersion int
 	// airCapabilities lists AIR extension capabilities to advertise in the
 	// initialize clientCapabilities._meta block.
 	airCapabilities    string
@@ -132,7 +134,7 @@ func (f clientCapabilitiesFlag) Set(value string) error {
 }
 
 func registerShared(fs *flag.FlagSet) *sharedFlags {
-	f := &sharedFlags{}
+	f := &sharedFlags{protocolVersion: 1}
 	fs.StringVar(&f.out, "out", "./acp-debug", "output directory for JSONL files")
 	fs.StringVar(&f.file, "file", "", "exact JSONL output path (overrides --out)")
 	fs.DurationVar(&f.timeout, "timeout", defaultTimeout, "overall run timeout")
@@ -140,6 +142,17 @@ func registerShared(fs *flag.FlagSet) *sharedFlags {
 	fs.BoolVar(&f.verbose, "verbose", false, "mirror frames to stderr")
 	fs.BoolVar(&f.stderr, "stderr", false, "capture child stderr into the JSONL")
 	fs.StringVar(&f.exec, "exec", "", "spawn an arbitrary command instead of a registered agent")
+	fs.Func("protocol-version", "requested ACP wire version (1 or 2, default 1)", func(value string) error {
+		switch value {
+		case "1":
+			f.protocolVersion = 1
+		case "2":
+			f.protocolVersion = 2
+		default:
+			return errors.New("protocol version must be 1 or 2")
+		}
+		return nil
+	})
 	fs.StringVar(&f.airCapabilities, "air-capabilities", "",
 		"comma-separated AIR extension capabilities to advertise (e.g. asyncTasks)")
 	fs.Var(clientCapabilitiesFlag{target: &f.clientCapabilities}, "client-capabilities",
@@ -503,6 +516,7 @@ func probeRunConfig(shared *sharedFlags, spec acpdbg.AgentSpec) acpdbg.RunConfig
 		Command:            spec.Command,
 		Env:                spec.Env,
 		Workdir:            shared.workdir,
+		ProtocolVersion:    shared.protocolVersion,
 		CaptureStderr:      shared.stderr,
 		ClientCapabilities: shared.clientCapabilities,
 		AIRCapabilities:    splitCapabilities(shared.airCapabilities),
@@ -514,6 +528,7 @@ func probeRunConfig(shared *sharedFlags, spec acpdbg.AgentSpec) acpdbg.RunConfig
 func resolveRunConfig(fs *flag.FlagSet, shared *sharedFlags, _ string) (acpdbg.RunConfig, error) {
 	cfg := acpdbg.RunConfig{
 		Workdir:            shared.workdir,
+		ProtocolVersion:    shared.protocolVersion,
 		CaptureStderr:      shared.stderr,
 		ClientCapabilities: shared.clientCapabilities,
 		AIRCapabilities:    splitCapabilities(shared.airCapabilities),
@@ -567,6 +582,7 @@ func printProbeSummary(agentID, jsonlPath string, r *acpdbg.ProbeResult) {
 	fmt.Printf("jsonl:            %s\n", jsonlPath)
 	fmt.Printf("agent_name:       %s\n", r.AgentName)
 	fmt.Printf("agent_version:    %s\n", r.AgentVersion)
+	fmt.Printf("requested_version: %d\n", r.RequestedVersion)
 	fmt.Printf("protocol_version: %d\n", r.ProtocolVersion)
 	fmt.Printf("session_id:       %s\n", r.SessionID)
 	fmt.Printf("auth_methods:     %s\n", strings.Join(r.AuthMethods, ", "))

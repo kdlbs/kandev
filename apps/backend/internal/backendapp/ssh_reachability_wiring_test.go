@@ -37,11 +37,6 @@ func (r *sshReachabilityWiringRepo) ResetExecutorReachability(context.Context, s
 	return nil
 }
 
-// TestStartAgentInfrastructureUsesSSHReachabilityPollerWiringHelper mirrors
-// TestInitOfficeServicesUsesTaskUsageWiringHelper: the composition root
-// (startAgentInfrastructure, too large to exercise directly in a unit test)
-// must delegate to the narrow, independently-testable wiring helper exactly
-// once rather than inlining the poller construction.
 func TestStartAgentInfrastructureUsesSSHReachabilityPollerWiringHelper(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "main.go", nil, 0)
