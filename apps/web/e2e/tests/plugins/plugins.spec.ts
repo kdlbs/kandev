@@ -455,6 +455,8 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await uploadPackage(testPage, PACKAGE_PATH);
     const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
     await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+    await expect(pluginRow).toHaveCSS("padding-inline-start", "12px");
+    await expect(pluginRow).toHaveCSS("padding-inline-end", "12px");
 
     await pluginRow.getByRole("button", { name: "Uninstall" }).click();
     const rowConfirmation = testPage.getByTestId("plugin-uninstall-confirm-popover");
