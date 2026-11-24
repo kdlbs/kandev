@@ -146,6 +146,9 @@ the backend build passed, and changed-file Go lint reported zero issues.
 Desktop and mobile Monitor lifecycle E2E each passed one test, with the host
 backend and web assets built by the E2E runner. Changed-file Go lint passed
 with an extended timeout after package loading exceeded the wrapper's default.
+After rebasing onto `8aab9447b35f`, the ACP, lifecycle, and orchestrator race
+suites and backend build passed again; the package-level Go lint also reported
+zero issues on that base.
 Public docs validation passed all 63 tests and validated 56 published pages;
 spec validation passed for 464 decisions and 2,110 specifications, and all
 spec-file lint checks passed. `git diff --check` passed.

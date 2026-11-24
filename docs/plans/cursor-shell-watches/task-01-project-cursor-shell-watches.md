@@ -132,7 +132,7 @@ bash scripts/lint-go-changed \
 (cd apps/backend && GOMEMLIMIT=3GiB GOMAXPROCS=2 GOFLAGS=-p=2 golangci-lint run \
   ./internal/agentctl/server/adapter/transport/acp \
   ./internal/agent/runtime/lifecycle ./internal/orchestrator \
-  --new-from-rev=cd9311560732ff4f744e1c65df273ba5d71ade41 \
+  --new-from-rev=8aab9447b35f1137485105bf06c8c27d0e0ef426 \
   --timeout=15m --concurrency=2)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
@@ -205,9 +205,10 @@ retirement while preserving the setup cap.
 - The shared Background Work viewer suite passed all 27 tests.
 - Desktop Chromium and mobile Chromium Monitor lifecycle E2E each passed one
   test. Both E2E runs built the host backend and web assets successfully.
-- The changed-file lint wrapper previously timed out while loading the packages
-  at its five-minute limit. The equivalent `golangci-lint` invocation with a
-  15-minute timeout completed with zero issues after these fixes.
+- After rebasing onto `8aab9447b35f`, the ACP, lifecycle, and orchestrator race
+  suites and backend build passed. The changed-file lint wrapper reported zero
+  issues but exceeded its five-minute limit; the package-level `golangci-lint`
+  invocation with a 15-minute timeout passed with zero issues.
 - The complete lifecycle package passed with the race detector after the reset
   buffer fix. Changed-file Go lint passed with zero issues.
 - `make -C apps/backend build` passed after the reset buffer fix.
