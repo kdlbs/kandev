@@ -79,10 +79,9 @@ func (e *AgentExecution) beginContextReset() error {
 	return nil
 }
 
-// drainContextResetEvents returns only setup
-// events for the session that the caller just committed. Events from the old
-// session can be queued while session/new is waiting and must never be replayed
-// into the replacement conversation.
+// drainContextResetEvents returns buffered events accepted for the session that
+// the caller just committed. Events from the old session can arrive while
+// session/new is waiting and must not replay into the replacement conversation.
 func (e *AgentExecution) drainContextResetEvents(newSessionID string) []agentctl.AgentEvent {
 	e.contextResetMu.Lock()
 	defer e.contextResetMu.Unlock()
@@ -100,7 +99,7 @@ func (e *AgentExecution) drainContextResetEvents(newSessionID string) []agentctl
 	return accepted
 }
 
-// finishContextReset closes the reset boundary and returns setup events that
+// finishContextReset closes the reset boundary and returns accepted events that
 // arrived after the last explicit drain. The transition and snapshot are one
 // critical section: an event handler that observed the in-flight boundary is
 // either included in the returned batch or, after the transition, proceeds
@@ -186,10 +185,18 @@ func (e *AgentExecution) bufferOrDropContextResetEvent(event agentctl.AgentEvent
 	if !e.contextResetInFlight {
 		return false
 	}
-	if isContextResetSetupEvent(event) && len(e.contextResetEvents) < maxContextResetEvents {
+	if (isContextResetSetupEvent(event) || isContextResetRetiredWatchProjection(event)) &&
+		len(e.contextResetEvents) < maxContextResetEvents {
 		e.contextResetEvents = append(e.contextResetEvents, event)
 	}
 	return true
+}
+
+func isContextResetRetiredWatchProjection(event agentctl.AgentEvent) bool {
+	work := event.BackgroundWork
+	return event.Type == streams.EventTypeBackgroundWorkUpdated && event.SessionID != "" &&
+		work != nil && work.Kind == streams.WorkloadKindMonitor && work.State == streams.RunStateUnknown &&
+		work.WorkID != "" && work.RunID != "" && work.SourceCallID != ""
 }
 
 func isContextResetSetupEvent(event agentctl.AgentEvent) bool {

@@ -83,3 +83,30 @@ func TestFinishContextResetReturnsEventsBufferedDuringFinalization(t *testing.T)
 		SessionID: "new-session",
 	}))
 }
+
+// @covers AC-AGENTS-BACKGROUND-WORK-011.8
+func TestContextResetAcceptsRetiredWatchProjectionForCommittedSession(t *testing.T) {
+	execution := &AgentExecution{}
+	require.NoError(t, execution.beginContextReset())
+	retired := agentctl.AgentEvent{
+		Type:      streams.EventTypeBackgroundWorkUpdated,
+		SessionID: "new-session",
+		BackgroundWork: &streams.WorkloadRunObservation{
+			WorkID: "watch-work", RunID: "watch-run", Kind: streams.WorkloadKindMonitor,
+			State: streams.RunStateUnknown, SourceCallID: "watch-call",
+		},
+	}
+	stale := retired
+	stale.SessionID = "old-session"
+	stale.BackgroundWork = &streams.WorkloadRunObservation{
+		WorkID: "stale-watch-work", RunID: "stale-watch-run", Kind: streams.WorkloadKindMonitor,
+		State: streams.RunStateUnknown, SourceCallID: "watch-call",
+	}
+	require.True(t, execution.bufferOrDropContextResetEvent(retired))
+	require.True(t, execution.bufferOrDropContextResetEvent(stale))
+
+	accepted := execution.drainContextResetEvents("new-session")
+	require.Equal(t, []agentctl.AgentEvent{retired}, accepted,
+		"the reset commit accepts the retirement update and excludes stale old-session events")
+	execution.finishContextReset("new-session")
+}
