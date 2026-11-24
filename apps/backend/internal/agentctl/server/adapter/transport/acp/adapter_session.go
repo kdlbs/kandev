@@ -301,7 +301,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 
 	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 	a.mu.Lock()
-	a.advanceNativeGenerationLocked()
+	retiredWatches := a.advanceNativeGenerationLocked(sessionID)
 	a.sessionSettingsPolicy = ""
 	a.configGeneration++
 	clear(a.contextSamples)
@@ -334,6 +334,9 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 			barrierErr = context.Canceled
 		}
 		return "", fmt.Errorf("failed to bind new session notifications: %w", barrierErr)
+	}
+	for _, event := range retiredWatches {
+		a.sendUpdate(event)
 	}
 	a.resetClaudeMonitorReadersForSessionTransition(priorSessionID, sessionID)
 	a.attachMgr.SetSessionID(sessionID)
@@ -795,7 +798,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.syncNotifQueue()
 
 	a.mu.Lock()
-	a.advanceNativeGenerationLocked()
+	retiredWatches := a.advanceNativeGenerationLocked(sessionID)
 	a.sessionSettingsPolicy = providerRestoredPolicy(settingsPolicy)
 	a.configGeneration++
 	clear(a.contextSamples)
@@ -823,6 +826,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	}
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.installNativeBindingBarrier(sessionID, true, a.copilotNativeSessionEvents)
+	for _, event := range retiredWatches {
+		a.sendUpdate(event)
+	}
 	a.resetClaudeMonitorReadersForSessionTransition(priorSessionID, sessionID)
 	a.attachMgr.SetSessionID(sessionID)
 
@@ -935,11 +941,14 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	}
 	clear(a.contextSamples)
 	clear(a.nativeGaugeMaxSize)
-	a.advanceNativeGenerationLocked()
+	retiredWatches := a.advanceNativeGenerationLocked(sessionID)
 	a.rebindClaudeMonitorReaderGenerationLocked(sessionID, a.nativeGeneration)
 	a.configGeneration++
 	a.mu.Unlock()
 	a.installNativeBindingBarrier(sessionID, false, a.copilotNativeSessionEvents)
+	for _, event := range retiredWatches {
+		a.sendUpdate(event)
+	}
 	a.attachMgr.SetSessionID(sessionID)
 	span.SetAttributes(attribute.String("session_id", sessionID))
 	a.logger.Info("resumed session", zap.String("session_id", sessionID))

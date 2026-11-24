@@ -1471,10 +1471,10 @@ func (m *Manager) handleAgentEventWithAttempt(
 	m.handleAgentEventAtContextResetBoundary(execution, event, true, attemptID)
 }
 
-// handleAgentEventAfterContextReset replays setup events after the lifecycle
-// manager has committed the replacement session while the exclusive reset
-// lease is still held. The event has already crossed the reset boundary and
-// must not be buffered again.
+// handleAgentEventAfterContextReset replays accepted reset events after the
+// lifecycle manager commits the replacement session while the exclusive reset
+// lease is held. The event has already crossed the reset boundary and must not
+// be buffered again.
 func (m *Manager) handleAgentEventAfterContextReset(execution *AgentExecution, event agentctl.AgentEvent) {
 	startupGeneration := execution.startupAttemptSnapshot()
 	execution.withStartupAttempt(startupGeneration, func(attemptID string) {
@@ -1765,6 +1765,10 @@ func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentct
 			} else {
 				event.TurnID = execution.promptTurnIDForEvent(event)
 			}
+		}
+	case streams.EventTypeBackgroundWorkUpdated:
+		if event.BackgroundWork != nil && event.BackgroundWork.OriginTurnID == "" {
+			event.BackgroundWork.OriginTurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
 		}
 	case "tool_call":
 		// ACP tool_call events do not carry the lifecycle prompt generation
