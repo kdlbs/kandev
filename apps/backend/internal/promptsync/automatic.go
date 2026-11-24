@@ -38,7 +38,7 @@ func (s *Service) SyncIfDue(ctx context.Context) {
 	}
 	defer run.cancel()
 	fetched := s.fetchRun(run.ctx, syncAutomatic, run.cfg, s.automaticAdmissionWait(run))
-	if run.ctx.Err() != nil {
+	if run.ctx.Err() != nil || errors.Is(fetched.err, errAutomaticCredentialChanged) {
 		s.logSuperseded(ctx, run)
 		return
 	}

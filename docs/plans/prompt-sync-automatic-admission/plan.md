@@ -96,8 +96,10 @@ Workflow Sync equivalent is AC-INTEGRATIONS-GITHUB-RATE-003.7.
   accepts the result only if the run context is live, the row exists, and
   the live fingerprint is unchanged, including a change to empty. A
   cancelled or discarded run records nothing. Each admission wait is bounded
-  by `PollInterval` and then rechecks the live fingerprint. A GitHub commit
-  fence that rejects an automatic apply before its callback runs records
+  by `PollInterval` and then rechecks the live fingerprint. A confirmed
+  change ends the run as `errAutomaticCredentialChanged`, which is discarded
+  without a second lookup. An automatic apply rejected by the GitHub commit
+  fence with `ErrGitHubHostMismatch` before its callback runs records
   nothing. Removal supersedes only after authorization succeeds.
 - `promptsync/service.go`: split `syncLocked` into `fetchRun` and
   `applyRun`. Manual and automatic runs share both. The automatic fetch keeps

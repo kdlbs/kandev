@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -336,7 +337,7 @@ func (s *Service) applyRun(
 	} else {
 		err = apply(ctx)
 	}
-	if err != nil && mode == syncAutomatic && run.useGitHub && !entered {
+	if mode == syncAutomatic && !entered && errors.Is(err, github.ErrGitHubHostMismatch) {
 		s.logger.Info("prompt sync automatic result superseded", zap.String("provider", cfg.Provider))
 		return nil, err
 	}

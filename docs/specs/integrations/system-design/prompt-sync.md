@@ -339,8 +339,8 @@ dropped deferral recurs after the run's own listing every tick.
    including a change to empty. A discarded run records nothing and logs
    `prompt sync automatic result superseded`.
 4. The run records a fetch error through the failure policy, or applies the
-   files inside `CommitWorkspaceGitHubHost` and records success. A fence
-   rejection before the apply callback is discarded.
+   files inside `CommitWorkspaceGitHubHost` and records success. An
+   `ErrGitHubHostMismatch` before the apply callback is discarded.
 
 `Poller.Stop` cancels the run, which records nothing. Only the poller
 starts automatic runs, so one runs at a time.

@@ -3,6 +3,7 @@ package promptsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -37,6 +38,8 @@ type pacedGitHub struct {
 	rejectCommit bool
 	// unpaced admits every read.
 	unpaced bool
+	// revertFingerprint, when set, replaces fingerprint after one lookup.
+	revertFingerprint string
 }
 
 // gateClosed reports whether a gate is set and admission has not opened.
@@ -71,7 +74,7 @@ func (p *pacedGitHub) CommitWorkspaceGitHubHost(ctx context.Context, _ string, f
 	reject := p.rejectCommit
 	p.mu.Unlock()
 	if reject {
-		return errors.New("github connection replaced")
+		return fmt.Errorf("commit fence: %w", github.ErrGitHubHostMismatch)
 	}
 	return fn(ctx)
 }
@@ -109,12 +112,17 @@ func (p *pacedGitHub) GetRepoFileContentForWorkspace(_ context.Context, _, _, _,
 func (p *pacedGitHub) WorkspaceConnectionFingerprint(context.Context, string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.fingerprint, nil
+	fingerprint := p.fingerprint
+	if p.revertFingerprint != "" {
+		p.fingerprint, p.revertFingerprint = p.revertFingerprint, ""
+	}
+	return fingerprint, nil
 }
 
-func (p *pacedGitHub) setFingerprint(fingerprint string) {
+// flashFingerprint reports fingerprint once, then the current value again.
+func (p *pacedGitHub) flashFingerprint(fingerprint string) {
 	p.mu.Lock()
-	p.fingerprint = fingerprint
+	p.revertFingerprint, p.fingerprint = p.fingerprint, fingerprint
 	p.mu.Unlock()
 }
 
@@ -287,7 +295,7 @@ func TestAutomaticSyncDiscardsResultAfterCredentialChange(t *testing.T) {
 			svc.refreshCredentialFingerprint(ctx, mustConfig(t, svc))
 			done := startWaitingAutomaticSync(t, ctx, svc, gh)
 
-			gh.setFingerprint(fingerprint)
+			gh.flashFingerprint(fingerprint)
 			waitForRun(t, done)
 
 			_, commits, _ := gh.counts()
