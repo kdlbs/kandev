@@ -98,17 +98,32 @@ provider-specific UI branching:
      `restoreSessionRuntimeConfigWithClient`) skips sending `SetConfigOption`
      for synthesized `context_tier` when the running Copilot subprocess already
      launched at that tier.
-   - `manager_interaction.go` (`applySessionConfigOption` and Copilot reload
-     helpers) handles live `context_tier` mutations on `copilot-acp`:
+   - `manager_interaction.go`, `manager_events.go`, and `copilot_context_tier.go`
+     handle live `context_tier` mutations on `copilot-acp`:
      - If Copilot natively advertised `context_tier` on the wire (detected when
        the option is native rather than synthesized), delegates directly to
        `client.SetConfigOptionWithResult`.
-     - Otherwise validates `value` (`default` | `long_context`), returns an
-       immediate confirmed result when the running execution's active CLI tier
-       already matches `value`, rejects with a readable
-       `SessionConfigurationRejectedError` when a turn or reset holds the
-       execution admission lock, and performs an idle conversation-preserving
-       subprocess reload when idle.
+     - Otherwise validates `value` (`default` | `long_context`), rejects with a
+       readable `SessionConfigurationRejectedError` when a turn or reset holds
+       admission, runs `preflightCopilotContextReload` (`prepareAgentRestart` +
+       `ValidateLaunchWrapper`) when `value` differs from the running
+       subprocess's startup `--context` flag, stages
+       `context_tier.currentValue = value` in `execution.ModelState`, publishes
+       `EventTypeSessionModels`, and returns `Confirmed: true, Effective: value`
+       immediately without stopping the idle subprocess.
+     - `preserveStagedCopilotContextTier` in `manager_events.go` overlays any
+       staged synthesized `context_tier` onto incoming `session_models` events
+       emitted by the still-running old subprocess (such as after live `SetModel`
+       or `SetConfigOption("reasoning_effort", ...)`), preventing UI flicker.
+     - `reconcileCopilotContextTierBeforePrompt` runs before prompt dispatch in
+       both `PromptAgentWithDispatchCallbackAndSubmissionID` and
+       `PromptAgentWithAdmissionCallbackAndSubmissionID`, performing at most one
+       conversation-preserving subprocess reload (`session/load`, or
+       `session/new` on 0-turn session-not-found) when the effective
+       `context_tier` differs from the running subprocess's startup `--context`
+       flag. `ResetAgentContext` falls back to `RestartAgentProcess` when a
+       `context_tier` change is staged so the reset process launches with the
+       staged `--context` flag.
 
 ## Data and contracts
 
@@ -221,53 +236,59 @@ already persist `map[string]string` JSON maps.
    `execution`'s active `context_tier` already equals `"long_context"` and skip
    redundant `SetConfigOption("context_tier", ...)` RPC calls.
 
-### 3. Live Task Chat idle reload (`SetSessionConfigOptionWithResult`)
+### 3. Live Task Chat lazy staging and pre-prompt reload
 
 1. User selects `Long Context` (optionally together with a new `model` and
-   `reasoning_effort`) in Task Chat and clicks `Apply`.
+   `reasoning_effort`) in Task Chat while Copilot is idle.
 2. `applyModelConfiguration` (`apps/web/lib/apply-model-configuration.ts`)
-   executes sequentially:
+   executes sequentially without blocking on any subprocess restart:
    - `applyBaseModel(model)` -> confirms new `model` on the current process.
-   - `applyOption("context_tier", "long_context")` (alphabetically before
-     `"reasoning_effort"`):
-     a. Lifecycle acquires `remoteInstanceLifecycleMu` then
-        `sessionConfigurationMu`, verifies `expectedModelID` when supplied, and
-        validates `value` (`default` | `long_context`).
-     b. If the running execution's active CLI `context_tier` already equals
-        `value` (and `currentValue` in `ModelState` matches), returns
-        `SessionConfigurationResult{ConfigID: "context_tier", Requested: value, Effective: value, Confirmed: true, ExecutionID: execution.ID}`
-        with zero process churn.
-     c. Attempts non-blocking `contextResetAdmissionMu.TryLock()` and verifies
-        no prompt turn is active (`execution.Status != AgentStatusRunning`). If
-        busy, releases locks and returns `SessionConfigurationRejectedError`
-        (`"set config option failed: cannot change Copilot context window while a turn is running"`).
-     d. Snapshots `priorACPSessionID := execution.ACPSessionID` and captures
-        `runtimeConfig := m.captureSessionRuntimeConfigForReset(ctx, execution)`
-        with `runtimeConfig.ConfigOptions["context_tier"] = value`.
-     e. Runs `prepareAgentRestart(ctx, execution, &runtimeConfig)` and
-        `client.ValidateLaunchWrapper(...)` **before** stopping the running
-        process. Any plugin or wrapper preflight error aborts cleanly while the
-        existing process stays live.
-     f. Closes update/workspace streams (`CloseUpdatesStream`,
-        `CloseWorkspaceStream`), stops only the child Copilot subprocess via
-        `client.Stop(ctx)`, updates execution command metadata, and starts the
-        replacement `copilot --acp --context <value>` subprocess via `agentctl`.
-     g. Reconnects streams and restores the ACP session:
-        - Calls `LoadSession(ctx, priorACPSessionID, workingDir, mcpServers)`
-          when `priorACPSessionID != ""`.
-        - If `LoadSession` fails because Copilot never persisted a 0-turn
-          transcript (`isSessionNotFoundError`), falls back to
-          `NewSession(ctx, workingDir, mcpServers)` and updates
-          `execution.ACPSessionID`.
-     h. Restores `runtimeConfig.Model`, `runtimeConfig.Mode`, and non-`context_tier`
-        `runtimeConfig.ConfigOptions` on the reloaded subprocess, marks
-        `AgentStatusReady`, publishes `AgentBootReady` (without
-        `AgentContextReset`), and returns `Confirmed: true, Effective: value`.
-   - `applyOption("reasoning_effort", ...)` runs against the newly reloaded
-     subprocess and confirms cleanly.
+   - `applyOption("context_tier", "long_context")`:
+     a. `applySynthesizedCopilotContextTier` acquires `sessionConfigurationMu`
+        then `acquireContextResetOperation` (matching `SetSessionModel` lock
+        order), verifies `expectedModelID` when supplied, and validates `value`
+        (`default` | `long_context`).
+     b. Verifies the execution is initialized and idle (`AgentStatusReady` or
+        `AgentStatusCompleted`, no pending dispatched prompt, active tool, or
+        tracked turn activity). If busy, returns
+        `SessionConfigurationRejectedError`
+        (`"set config option failed: cannot change Copilot context length while a turn is running"`).
+     c. When `value` differs from `launchedExecutionCopilotContextTier(execution)`,
+        runs `preflightCopilotContextReload` (`prepareAgentRestart` +
+        `client.ValidateLaunchWrapper` + `prepareCursorMCPAuth`) **before**
+        accepting the change so broken wrapper/plugin flags fail immediately.
+     d. Stages `context_tier.currentValue = value` in `execution.ModelState` via
+        `stageCopilotContextTierState`, publishes `EventTypeSessionModels`, and
+        returns `Confirmed: true, Effective: value` in `< 1ms` while leaving the
+        idle subprocess untouched.
+   - `applyOption("reasoning_effort", ...)` runs directly against the still-live
+     subprocess; `preserveStagedCopilotContextTier` in `manager_events.go`
+     preserves the staged `context_tier` on the resulting `session_models`
+     stream snapshot.
 3. `httpSetSessionConfigOption` persists `task_sessions.config_options["context_tier"] = value`
    and returns `status: "applied"`, producing the muted Task Chat confirmation
-   message.
+   message immediately. If the user toggles `Long Context -> Default` back to
+   the running subprocess's startup tier before sending a message, zero
+   subprocess restarts occur.
+4. When the next prompt turn begins (`PromptAgentWithDispatchCallbackAndSubmissionID`
+   or `PromptAgentWithAdmissionCallbackAndSubmissionID`),
+   `reconcileCopilotContextTierBeforePrompt` checks `needsCopilotContextTierReload`:
+   - Fast path: returns `nil` immediately when the execution is not `copilot-acp`
+     or its effective `context_tier` already matches `execution.AgentArgs` and
+     the ACP session is initialized.
+   - Slow path: acquires `remoteInstanceLifecycleMu` ->
+     `acquireContextResetExclusive` (same lock order as `RestartAgentProcess`),
+     re-checks idle state and `needsCopilotContextTierReload`, closes
+     update/workspace streams (`CloseUpdatesStream`, `CloseWorkspaceStream`),
+     stops only the child Copilot subprocess via `client.Stop(ctx)`, starts the
+     replacement `copilot --acp --context <value>` subprocess via `agentctl`
+     (checking `client.Health` before `WaitForReady` to avoid unnecessary poll
+     delays), reconnects streams under a new `deliveryStartupAttempt`
+     generation, restores the conversation via `LoadSession` (falling back to
+     `NewSession` only on 0-turn session-not-found), restores `Model`, `Mode`,
+     and remaining `ConfigOptions`, and marks `AgentStatusReady` without
+     publishing `AgentBootReady` (preserving orchestrator `RUNNING` state) or
+     `AgentContextReset` before dispatching the prompt.
 
 ## UI and mobile composition
 
@@ -301,9 +322,11 @@ No new route, drawer, or bespoke Copilot control is introduced:
   first turn; when `LoadSession` reports session-not-found on a 0-turn session,
   Kandev falls back to `NewSession` transparently since no turn history exists
   yet.
-- **Post-stop subprocess or `LoadSession` failure (non-not-found):** Surfaces an
-  execution error and returns an error from `SetSessionConfigOptionWithResult`
-  without persisting the unapplied `context_tier` or claiming confirmation.
+- **Post-stop subprocess or `LoadSession` failure (non-not-found):** Restores
+  the previous `ACPSessionID` and `ModelState` on the execution, surfaces an
+  execution error, and aborts prompt dispatch before `beforeAdmission` runs so a
+  subsequent prompt retry detects `!execution.isSessionInitialized()` and
+  recovers cleanly via `session/load`.
 
 ## Persistence
 

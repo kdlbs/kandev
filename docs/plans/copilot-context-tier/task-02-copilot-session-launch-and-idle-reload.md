@@ -29,10 +29,12 @@ system_design:
 Propagate profile and persisted session runtime `ConfigOptions` into lifecycle
 Copilot command construction on launch, context reset, and process restart, skip
 redundant startup `SetConfigOption("context_tier", ...)` RPCs when the launched
-subprocess already matches, and reload idle live Copilot ACP subprocesses via
-`agentctl` + `session/load` (with 0-turn `session/new` fallback and active-turn
-rejection) when `context_tier` changes. Extend `mock-agent`'s Copilot native
-wire fixture and verify desktop and phone (`mobile-chrome`) flows end to end.
+subprocess already matches, stage idle live Copilot `context_tier` changes
+immediately without stopping the subprocess, and reconcile the Copilot ACP
+subprocess once before the next prompt via `agentctl` + `session/load` (with
+0-turn `session/new` fallback and active-turn rejection). Extend `mock-agent`'s
+Copilot native wire fixture and verify desktop and phone (`mobile-chrome`) flows
+end to end.
 
 ## In scope
 
@@ -46,23 +48,24 @@ wire fixture and verify desktop and phone (`mobile-chrome`) flows end to end.
   `restoreSessionRuntimeConfigWithClient` (`session.go`) when a synthesized
   Copilot `context_tier` already matches the running execution's `--context`
   launch value.
-- Implement live synthesized `context_tier` handling for `copilot-acp` in
-  `applySessionConfigOption` (`manager_interaction.go`):
+- Implement lazy staging and pre-prompt reconciliation for synthesized
+  `context_tier` on `copilot-acp` (`copilot_context_tier.go`,
+  `manager_interaction.go`, `manager_events.go`):
   - Validate `default` | `long_context` (rejecting invalid values with
     `SessionConfigurationRejectedError`).
-  - Confirm immediately as a no-op when the running execution's active tier
-    already equals the requested value.
   - Reject with `SessionConfigurationRejectedError` (`status: "rejected"`) when
-    a prompt turn or context reset is active (`contextResetAdmissionMu.TryLock()`
-    or `execution.Status == AgentStatusRunning`), leaving the active turn and
-    SQLite `task_sessions.config_options` untouched.
-  - When idle, run `prepareAgentRestart` + `ValidateLaunchWrapper` before
-    stopping the child Copilot subprocess, replace the child subprocess via
-    `agentctl`, restore the conversation via `LoadSession` (falling back to
-    `NewSession` only when Copilot reports session-not-found on a 0-turn
-    session), re-apply `model`, `mode`, and remaining `config_options`, and
-    return a confirmed `SessionConfigurationResult` without publishing
-    `AgentContextReset`.
+    a prompt turn or context reset is active, leaving the active turn and SQLite
+    `task_sessions.config_options` untouched.
+  - When idle, run `prepareAgentRestart` + `ValidateLaunchWrapper` whenever the
+    selected tier differs from the running subprocess's `--context` flag, stage
+    `context_tier` in `ModelState` immediately without stopping the subprocess,
+    and preserve staged `context_tier` across `session_models` stream events.
+  - Before dispatching the next prompt turn, replace the child subprocess once
+    via `agentctl` when the staged `context_tier` differs from the running
+    subprocess's `--context` flag, restore the conversation via `LoadSession`
+    (falling back to `NewSession` only when Copilot reports session-not-found on
+    a 0-turn session), and re-apply `model`, `mode`, and remaining
+    `config_options` without publishing `AgentBootReady` or `AgentContextReset`.
 - Extend `apps/backend/cmd/mock-agent/` (`copilot_native_wire.go` / `handler.go`)
   when `KANDEV_MOCK_COPILOT_NATIVE=true` to record `--context <tier>`, reject
   `session/set_config_option("context_tier", ...)` like real Copilot, support
@@ -85,8 +88,11 @@ wire fixture and verify desktop and phone (`mobile-chrome`) flows end to end.
 - Pre-launch, profile-configured, context-reset, and process-restarted Copilot
   ACP sessions launch with the effective `--context <tier>` and complete session
   initialization without `-32602` config-option errors.
-- Changing `Context Window` in an idle Copilot Task Chat session reloads only
-  the child Copilot subprocess with the new `--context <tier>`, preserves prior
+- Changing `Context Window` in an idle Copilot Task Chat session stages
+  immediately without blocking on subprocess restart, coalesces intermediate
+  switches before the next prompt (performing zero restarts if toggled back to
+  the active startup tier), reloads only the child Copilot subprocess once
+  before the next prompt with the new `--context <tier>`, preserves prior
   conversation turns via `session/load` (or succeeds via `session/new` at 0
   turns), preserves composed `model` and `reasoning_effort` selections, leaves
   the live process untouched on plugin preflight failure, and rejects cleanly
@@ -181,21 +187,21 @@ git diff --check
 
 Completed with strict Red-Green-Refactor TDD across backend lifecycle, HTTP handlers, `mock-agent`, and desktop/mobile Playwright E2E:
 
-- Added `apps/backend/internal/agent/runtime/lifecycle/copilot_context_tier.go` and `copilot_context_tier_test.go`, plus integration wiring across `manager_profile.go`, `manager_launch.go`, `manager_passthrough.go`, `manager_interaction.go`, `manager_workspace_rebind.go`, and `session.go`:
+- Added `apps/backend/internal/agent/runtime/lifecycle/copilot_context_tier.go` and `copilot_context_tier_test.go`, plus integration wiring across `manager_profile.go`, `manager_launch.go`, `manager_passthrough.go`, `manager_interaction.go`, `manager_events.go`, `manager_workspace_rebind.go`, and `session.go`:
   - Merged `profileInfo.ConfigOptions` and persisted/override `SessionRuntimeConfig.ConfigOptions` into `agents.CommandOptions.ConfigOptions` and `agents.PassthroughOptions.ConfigOptions` on launch, context reset, workspace rebind, and process restart.
   - Skipped redundant `SetConfigOption("context_tier", ...)` RPCs during `applyProfileSessionLayers`, `applyRuntimeSessionLayers`, and `restoreSessionRuntimeConfigWithClient` when a synthesized Copilot `context_tier` already matches the running execution's `--context` launch flag.
-  - Implemented `applyCopilotContextTierOption`: validates `default` | `long_context`, short-circuits idempotent matches, rejects while a prompt turn or context reset is active (`status: "rejected"`), runs `prepareAgentRestart` + `ValidateLaunchWrapper` before stopping the child Copilot subprocess, restarts the child subprocess via `agentctl`, binds a new `deliveryStartupAttempt` generation before reconnecting reload streams, restores conversation history via `LoadSession` (falling back to `NewSession` only on 0-turn session-not-found), and re-applies `model`, `mode`, and remaining `config_options` without emitting `AgentContextReset`.
-- Added HTTP handler regression `TestHTTPSetSessionConfigOptionCopilotContextTierBusyRejectedWithoutPersisting` in `apps/backend/internal/task/handlers/process_handlers_configuration_feedback_test.go`.
+  - Implemented lazy staging + pre-prompt reconciliation (`applySynthesizedCopilotContextTier`, `preserveStagedCopilotContextTier`, `reconcileCopilotContextTierBeforePrompt`): validates `default` | `long_context`, rejects while a prompt turn or context reset is active (`status: "rejected"`), runs `prepareAgentRestart` + `ValidateLaunchWrapper` before accepting a changed tier, stages `context_tier` in `ModelState` immediately without stopping the idle subprocess, preserves staged `context_tier` across `session_models` stream events, and reloads the child subprocess once via `agentctl` + `LoadSession` (falling back to `NewSession` only on 0-turn session-not-found) right before the next prompt turn without emitting `AgentBootReady` or `AgentContextReset` (and routes `ResetAgentContext` with a staged `context_tier` through `RestartAgentProcess`).
+- Added HTTP handler regression `TestCopilotContextTierActiveTurnRejectionReturnsRejectedWithoutPersisting` in `apps/backend/internal/task/handlers/process_handlers_configuration_feedback_test.go`.
 - Extended `apps/backend/cmd/mock-agent/copilot_native_wire.go` (`copilot_native_wire_test.go`, `main.go`) to parse `--context <tier>`, reject `session/set_config_option("context_tier", ...)` with `-32602`, persist prompt turn state for `session/load` across subprocess reloads (and return `-32602` session-not-found on 0-turn sessions), and support `/e2e:copilot-context-info`.
-- Added desktop (`apps/web/e2e/tests/chat/copilot-context-tier.spec.ts`) and phone (`apps/web/e2e/tests/chat/mobile-copilot-context-tier.spec.ts`) Playwright E2E coverage with shared helpers in `copilot-context-tier-helpers.ts`.
+- Added desktop (`apps/web/e2e/tests/chat/copilot-context-tier.spec.ts`) and phone (`apps/web/e2e/tests/chat/mobile-copilot-context-tier.spec.ts`) Playwright E2E coverage with shared helpers in `copilot-context-tier-helpers.ts`, including rapid multi-toggle coalescing (`loads === 1`) and unchanged-tier zero-restart verification.
 
 ### Lifecycle evidence (`.agents/skills/tdd/references/lifecycle-evidence.md`)
 
 | Scenario | Acceptance Criterion | Observable Invariant | Regression Test | Exact Command | Result |
 | --- | --- | --- | --- | --- | --- |
-| Pause and resume | `AC-AGENTS-COPILOT-CONTEXT-TIER-003.2`, `003.5` | Reloading an idle Copilot subprocess into `long_context` binds a fresh `deliveryStartupAttempt` generation, restores the saved `ACPSessionID` via `session/load`, preserves prior conversation turns and composed `model` / `reasoning_effort`, and completes subsequent `PromptAgent` turns back to `WAITING_FOR_INPUT` without `AgentContextReset`. | `TestCopilotIdleLiveSessionContextTierReload` (`copilot_context_tier_test.go`), `reloads an idle Copilot session into long_context while preserving conversation history` (`copilot-context-tier.spec.ts`) | `TMPDIR=/private/tmp go test -C apps/backend -race -count=1 ./internal/agent/runtime/lifecycle -run TestCopilotIdleLiveSessionContextTierReload` && `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --no-build e2e/tests/chat/copilot-context-tier.spec.ts` | Passed |
-| Restart and recovery | `AC-AGENTS-COPILOT-CONTEXT-TIER-002.4`, `003.2` | Profile + persisted session `config_options.context_tier` merge into fresh launch, context-reset, and process-restart `--context <tier>` argv; startup layer replay skips matching synthesized `context_tier` RPCs; 0-turn idle reloads recover cleanly via `session/new` when Copilot reports session-not-found on `session/load`. | `TestBuildAgentCommandMergesCopilotContextTierWithRuntimePrecedence`, `TestCopilotSessionLayersSkipMatchingSynthesizedContextTier`, `TestCopilotZeroTurnReloadFallsBackToNewSession` (`copilot_context_tier_test.go`) | `TMPDIR=/private/tmp go test -C apps/backend -race -count=1 ./internal/agent/runtime/lifecycle -run 'TestBuildAgentCommandMergesCopilotContextTierWithRuntimePrecedence|TestCopilotSessionLayersSkipMatchingSynthesizedContextTier|TestCopilotZeroTurnReloadFallsBackToNewSession'` | Passed |
-| Duplicate and stale delivery | `AC-AGENTS-COPILOT-CONTEXT-TIER-003.1`, `003.2` | Re-selecting the active `context_tier` returns `Confirmed: true` without restarting the subprocess or calling `SetConfigOption`; after reload, `beginStartupAttemptPreservingIdentity` + `beginDeliveryStartupAttempt` prevent stale pre-reload stream events from stranding follow-up prompt completion. | `TestCopilotContextTierNoOpAndValidation`, `TestCopilotIdleLiveSessionContextTierReload` (`copilot_context_tier_test.go`) | `TMPDIR=/private/tmp go test -C apps/backend -race -count=1 ./internal/agent/runtime/lifecycle -run 'TestCopilotContextTierNoOpAndValidation|TestCopilotIdleLiveSessionContextTierReload'` | Passed |
-| Ownership changes / replacement preflight safety | `AC-AGENTS-COPILOT-CONTEXT-TIER-003.3` | `prepareAgentRestart` + `ValidateLaunchWrapper` run before stopping the live Copilot subprocess; a wrapper/plugin preflight failure aborts replacement cleanly and leaves the existing subprocess, `AgentArgs`, and `ACPSessionID` untouched. | `TestCopilotReloadPreflightFailureLeavesLiveProcessUntouched` (`copilot_context_tier_test.go`) | `TMPDIR=/private/tmp go test -C apps/backend -race -count=1 ./internal/agent/runtime/lifecycle -run TestCopilotReloadPreflightFailureLeavesLiveProcessUntouched` | Passed |
-| Concurrent or merged work | `AC-AGENTS-COPILOT-CONTEXT-TIER-003.4`, `003.5` | Attempting a `context_tier` change while a turn is `RUNNING` rejects immediately (`configuration_result.status: "rejected"`, `confirmed: false`) without calling ACP `SetConfigOption`, leaves persisted `runtime_config.config_options.context_tier` unchanged, lets the active turn finish undisturbed, and succeeds once idle while preserving all completed turns. | `TestCopilotContextTierRejectedWhileTurnActive` (`copilot_context_tier_test.go`), `TestHTTPSetSessionConfigOptionCopilotContextTierBusyRejectedWithoutPersisting` (`process_handlers_configuration_feedback_test.go`), `rejects live context window switch during an active turn without interrupting it, then applies once idle` (`copilot-context-tier.spec.ts`) | `TMPDIR=/private/tmp go test -C apps/backend -race -count=1 ./internal/agent/runtime/lifecycle ./internal/task/handlers -run 'TestCopilotContextTierRejectedWhileTurnActive|TestHTTPSetSessionConfigOptionCopilotContextTierBusyRejectedWithoutPersisting'` && `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --no-build e2e/tests/chat/copilot-context-tier.spec.ts` | Passed |
+| Pause and resume | `AC-AGENTS-COPILOT-CONTEXT-TIER-003.1`, `003.2`, `003.5` | Changing `context_tier` while idle stages immediately without stopping the subprocess, preserves staged `context_tier` across `session_models` updates, and reconciles the Copilot subprocess once before the next prompt (`PromptAgent` and `PromptAgentWithAdmissionCallbackAndSubmissionID`) via `session/load` while preserving prior turns and composed `model` / `reasoning_effort` without `AgentBootReady` or `AgentContextReset`. | `TestCopilotIdleLiveSessionContextTierReload` (`copilot_context_tier_test.go`), `reloads an idle Copilot session into long_context while preserving conversation history` (`copilot-context-tier.spec.ts`) | `TMPDIR=/private/tmp go test -C apps/backend -race -count=1 ./internal/agent/runtime/lifecycle -run TestCopilotIdleLiveSessionContextTierReload` && `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --no-build e2e/tests/chat/copilot-context-tier.spec.ts e2e/tests/chat/copilot-native-compaction.spec.ts -- --workers=1 --retries=0` | Passed |
+| Restart and recovery | `AC-AGENTS-COPILOT-CONTEXT-TIER-002.4`, `003.2` | Profile + persisted session `config_options.context_tier` merge into fresh launch, context-reset (`ResetAgentContext` with staged `context_tier`), and process-restart `--context <tier>` argv; startup layer replay skips matching synthesized `context_tier` RPCs; 0-turn pre-prompt reloads recover via `session/new` while multi-turn `session/load` failures fail closed before `beforeAdmission` and recover on retry. | `TestCopilotLaunchAndRestartCommandsIncludeContextTier`, `TestCopilotStartupAndRebindSkipSynthesizedContextTierRPC`, `TestCopilotIdleLiveSessionContextTierReload` (`copilot_context_tier_test.go`) | `TMPDIR=/private/tmp go test -C apps/backend -race -count=1 ./internal/agent/runtime/lifecycle -run 'TestCopilotLaunchAndRestartCommandsIncludeContextTier|TestCopilotStartupAndRebindSkipSynthesizedContextTierRPC|TestCopilotIdleLiveSessionContextTierReload'` | Passed |
+| Duplicate and stale delivery | `AC-AGENTS-COPILOT-CONTEXT-TIER-003.1`, `003.2` | Toggling `context_tier` away and back to the running subprocess's startup tier before the next prompt performs zero subprocess restarts (`loads` unchanged); pre-prompt reload binds fresh startup and delivery generations before reconnecting streams. | `TestCopilotIdleLiveSessionContextTierReload` (`copilot_context_tier_test.go`), `copilot-context-tier.spec.ts` | `TMPDIR=/private/tmp go test -C apps/backend -race -count=1 ./internal/agent/runtime/lifecycle -run TestCopilotIdleLiveSessionContextTierReload` | Passed |
+| Ownership changes / replacement preflight safety | `AC-AGENTS-COPILOT-CONTEXT-TIER-003.3` | `prepareAgentRestart` + `ValidateLaunchWrapper` run during staging and before stopping the live Copilot subprocess; a wrapper/plugin preflight failure aborts cleanly and leaves the existing subprocess and `ACPSessionID` untouched. | `TestCopilotIdleLiveSessionContextTierReload/preflight_failure_before_stop_leaves_live_subprocess_untouched` (`copilot_context_tier_test.go`) | `TMPDIR=/private/tmp go test -C apps/backend -race -count=1 ./internal/agent/runtime/lifecycle -run TestCopilotIdleLiveSessionContextTierReload/preflight_failure_before_stop_leaves_live_subprocess_untouched` | Passed |
+| Concurrent or merged work | `AC-AGENTS-COPILOT-CONTEXT-TIER-003.4`, `003.5` | Attempting a `context_tier` change while a turn is `RUNNING` rejects immediately (`configuration_result.status: "rejected"`, `confirmed: false`) without calling ACP `SetConfigOption`, leaves persisted `runtime_config.config_options.context_tier` unchanged, lets the active turn finish undisturbed, and succeeds once idle while preserving all completed turns. | `TestCopilotIdleLiveSessionContextTierReload/active_turn_and_invalid_values_are_rejected_without_stopping_process` (`copilot_context_tier_test.go`), `TestCopilotContextTierActiveTurnRejectionReturnsRejectedWithoutPersisting` (`process_handlers_configuration_feedback_test.go`), `rejects live context window switch during an active turn without interrupting it, then applies once idle` (`copilot-context-tier.spec.ts`) | `TMPDIR=/private/tmp go test -C apps/backend -race -count=1 ./internal/agent/runtime/lifecycle ./internal/task/handlers -run 'TestCopilotIdleLiveSessionContextTierReload|TestCopilotContextTierActiveTurnRejectionReturnsRejectedWithoutPersisting'` && `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --no-build e2e/tests/chat/copilot-context-tier.spec.ts` | Passed |
 | Entry paths (Profile Settings, Command Preview, Task Chat desktop & phone) | `AC-AGENTS-COPILOT-CONTEXT-TIER-001.4`, `002.3`, `003.2`, `003.5` | Profile settings, command preview (`--context long_context`), pre-launch/task launch, desktop Popover selector, and phone `ModelConfigSheet` bottom `Drawer` (`>=44px` touch targets, single internal scroll owner, zero horizontal overflow) exercise the same normalized `context_tier` contract end to end. | `command-preview-card.test.tsx`, `copilot-context-tier.spec.ts` (3 tests), `mobile-copilot-context-tier.spec.ts` (1 test) | `(cd apps/web && pnpm exec vitest run app/settings/agents/\\[agentId\\]/profiles/\\[profileId\\]/command-preview-card.test.tsx)` && `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --no-build e2e/tests/chat/copilot-context-tier.spec.ts e2e/tests/chat/copilot-native-compaction.spec.ts -- --workers=1 --retries=0` && `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --no-build --project mobile-chrome e2e/tests/chat/mobile-copilot-context-tier.spec.ts` | Passed |

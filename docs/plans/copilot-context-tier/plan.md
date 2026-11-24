@@ -110,21 +110,27 @@ contracts before Task 02 integrates live subprocess replacement and browser E2E.
   `restoreSessionRuntimeConfigWithClient`, treat a synthesized Copilot
   `context_tier` that already matches the running execution's `--context` launch
   value as satisfied without calling `client.SetConfigOption`.
-- **`apps/backend/internal/agent/runtime/lifecycle/manager_interaction.go`:**
+- **`apps/backend/internal/agent/runtime/lifecycle/manager_interaction.go`, `manager_events.go`, and `copilot_context_tier.go`:**
   Intercept synthesized `context_tier` on `copilot-acp` inside
-  `applySessionConfigOption` (preserving `remoteInstanceLifecycleMu` ->
-  `sessionConfigurationMu` -> `contextResetAdmissionMu` lock ordering):
-  - Reject invalid values via `SessionConfigurationRejectedError`.
-  - Confirm immediately (`Confirmed: true`, `Effective: value`) when the running
-    execution already launched with `value`.
-  - Reject via non-blocking `contextResetAdmissionMu.TryLock()` + active-turn
-    status check when a prompt turn or context reset is running.
-  - Otherwise run `prepareAgentRestart` + `ValidateLaunchWrapper` before
-    stopping the child Copilot process, replace the subprocess through
-    `agentctl`, call `LoadSession(priorACPSessionID, ...)` (falling back to
-    `NewSession` on 0-turn session-not-found), restore `model`, `mode`, and
-    remaining `config_options`, and return `Confirmed: true, Effective: value`
-    without emitting `AgentContextReset`.
+  `applySessionConfigOption`:
+  - Reject invalid values and busy turns (`AgentStatusRunning`, pending
+    dispatched prompt, active tool, or tracked activity) via
+    `SessionConfigurationRejectedError`.
+  - When idle, run `preflightCopilotContextReload` (`prepareAgentRestart` +
+    `ValidateLaunchWrapper`) whenever `value` differs from the running
+    subprocess's startup `--context` flag, stage `context_tier` in `ModelState`
+    (`preserveStagedCopilotContextTier` in `manager_events.go` prevents stale
+    `session_models` flicker), and return `Confirmed: true, Effective: value`
+    immediately without stopping the idle subprocess.
+  - Before dispatching the next prompt turn (`reconcileCopilotContextTierBeforePrompt`
+    in both `PromptAgentWithDispatchCallbackAndSubmissionID` and
+    `PromptAgentWithAdmissionCallbackAndSubmissionID`), replace the child
+    subprocess once through `agentctl` when the effective `context_tier`
+    differs from `execution.AgentArgs`, call `LoadSession(priorACPSessionID, ...)`
+    (falling back to `NewSession` on 0-turn session-not-found), and restore
+    `model`, `mode`, and remaining `config_options` without emitting
+    `AgentBootReady` or `AgentContextReset`. `ResetAgentContext` falls back to
+    `RestartAgentProcess` when a `context_tier` change is staged.
 - **`apps/backend/cmd/mock-agent/`:**
   When `KANDEV_MOCK_COPILOT_NATIVE=true`, parse `--context <tier>` at startup,
   omit native `context_tier` from wire `configOptions` while rejecting

@@ -1665,6 +1665,7 @@ func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentct
 			AvailableModes: event.AvailableModes,
 		})
 	case "session_models":
+		event.ConfigOptions = preserveStagedCopilotContextTier(execution, event.ConfigOptions)
 		baselineCandidate, settled := execution.SetModelStateApplyingSettlement(&CachedModelState{
 			CurrentModelID: event.CurrentModelID,
 			Models:         event.SessionModels,

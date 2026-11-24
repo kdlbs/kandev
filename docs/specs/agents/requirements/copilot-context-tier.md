@@ -35,10 +35,12 @@ and [Session configuration feedback](session-configuration-feedback.md).
 - **Synthesized context-tier option:** The normalized `select` option added by
   Kandev's Copilot compatibility layer when the Copilot ACP runtime omits a
   native context-tier entry from `configOptions`.
-- **Idle conversation-preserving reload:** Stopping only the child Copilot ACP
-  subprocess while no turn is active, starting a replacement Copilot subprocess
-  with the updated `--context` flag, and restoring prior conversation state via
-  ACP `session/load` (or `session/new` when zero turns were persisted).
+- **Lazy conversation-preserving reload:** Staging a validated `context_tier`
+  change immediately while Copilot is idle without stopping the idle subprocess,
+  then stopping only the child Copilot ACP subprocess right before dispatching
+  the next prompt turn, starting a replacement Copilot subprocess with the
+  updated `--context` flag, and restoring prior conversation state via ACP
+  `session/load` (or `session/new` when zero turns were persisted).
 
 ## Confirmation and design boundaries
 
@@ -80,9 +82,10 @@ long-horizon coding and review sessions can use extended model context windows.
   it.
 - **AC-AGENTS-COPILOT-CONTEXT-TIER-001.3:** Authoritative post-mutation
   `configOptions` responses (such as after changing `model` or
-  `reasoning_effort`) and `ConfigOptionUpdate` stream notifications on a Copilot
-  ACP session shall retain `context_tier` with the running subprocess's active
-  `currentValue` (`default` or `long_context`).
+  `reasoning_effort`) and `ConfigOptionUpdate` / `session_models` stream
+  notifications on a Copilot ACP session shall retain `context_tier` with the
+  session's effective staged or launched `currentValue` (`default` or
+  `long_context`).
 - **AC-AGENTS-COPILOT-CONTEXT-TIER-001.4:** Desktop and phone model selectors in
   Agent Profile settings, Workflow session-override editors, pre-launch session
   pickers, and live Task Chat shall expose and apply `context_tier` through the
@@ -126,37 +129,44 @@ configured context window.
   synthesized `context_tier` matching the launched subprocess as satisfied
   without issuing an unsupported `session/set_config_option` RPC.
 
-### REQ-AGENTS-COPILOT-CONTEXT-TIER-003: Idle live-session reload with conversation continuity
+### REQ-AGENTS-COPILOT-CONTEXT-TIER-003: Lazy live-session reload with conversation continuity
 
-**Intent:** Changing Copilot's context tier in an idle live session applies
-immediately by reloading the Copilot subprocess with `--context <value>` while
-preserving conversation history and active session settings.
+**Intent:** Changing Copilot's context tier in an idle live session confirms
+immediately in the UI without blocking on subprocess teardown, then reloads the
+Copilot subprocess once with `--context <value>` before the next prompt turn
+while preserving conversation history and active session settings.
 
 **User story:** As a user in an active Task Chat conversation with Copilot, I
-want switching `Context Window` while Copilot is idle to reload Copilot with the
-new context tier and keep my existing conversation intact, so that I do not lose
-context or have to start a new task session.
+want switching `Context Window` while Copilot is idle to apply immediately with
+zero UI delay and automatically reload Copilot with my existing conversation
+intact on the next turn, so that I do not lose context or wait on idle process
+restarts.
 
 #### Acceptance criteria
 
 - **AC-AGENTS-COPILOT-CONTEXT-TIER-003.1:** When a synthesized `context_tier` is
-  requested on an initialized Copilot ACP session whose running subprocess
-  already uses that tier, Kandev shall confirm `effective: <value>` and
-  `confirmed: true` without restarting the subprocess.
-- **AC-AGENTS-COPILOT-CONTEXT-TIER-003.2:** When a synthesized `context_tier`
-  changes to a valid tier (`default` or `long_context`) on an idle initialized
-  Copilot ACP session, Kandev shall validate replacement launch arguments, stop
-  only the child Copilot subprocess via `agentctl`, launch a replacement
+  requested on an idle initialized Copilot ACP session, Kandev shall validate
+  replacement launch arguments whenever `<value>` differs from the running
+  subprocess's startup `--context` tier, stage `context_tier.currentValue = <value>`
+  in `ModelState`, and return `effective: <value>` and `confirmed: true`
+  immediately without stopping the idle subprocess; toggling away and back to
+  the running subprocess's startup tier before the next prompt turn shall
+  perform zero subprocess restarts.
+- **AC-AGENTS-COPILOT-CONTEXT-TIER-003.2:** Before dispatching the next prompt
+  turn on a Copilot ACP execution whose effective `context_tier` differs from
+  the running subprocess's startup `--context` tier, Kandev shall stop only the
+  child Copilot subprocess via `agentctl`, launch a replacement
   `copilot --acp --context <value>` subprocess, restore prior conversation state
   via `session/load` (or initialize via `session/new` when zero turns were
-  persisted by Copilot), restore effective `model`, `mode`, and remaining
-  `config_options`, persist `context_tier`, and return a confirmed
-  `SessionConfigurationResult` without emitting an `AgentContextReset` event.
+  persisted by Copilot), and restore effective `model`, `mode`, and remaining
+  `config_options` without emitting `AgentBootReady` or `AgentContextReset`; an
+  explicit context reset while a `context_tier` change is staged shall restart
+  the Copilot subprocess with the staged `--context <value>` flag.
 - **AC-AGENTS-COPILOT-CONTEXT-TIER-003.3:** When replacement command validation
-  or explicit Copilot profile-plugin preparation fails before subprocess
-  handoff, Kandev shall abort the reload and leave the existing Copilot
-  subprocess running with its current session identity, conversation, and
-  `context_tier`.
+  or explicit Copilot profile-plugin preparation fails during `context_tier`
+  staging or pre-prompt reload before subprocess handoff, Kandev shall abort and
+  leave the existing Copilot subprocess running with its current session
+  identity, conversation, and `context_tier`.
 - **AC-AGENTS-COPILOT-CONTEXT-TIER-003.4:** When a prompt turn or context-reset
   operation is actively in flight on the Copilot execution, Kandev shall reject
   a live synthesized `context_tier` change with a readable
@@ -165,10 +175,12 @@ context or have to start a new task session.
   `config_options`.
 - **AC-AGENTS-COPILOT-CONTEXT-TIER-003.5:** When a user applies a composed live
   selection (`model`, `context_tier`, and dependent options such as
-  `reasoning_effort`) from Task Chat, Kandev shall preserve the newly confirmed
-  `model` across the `context_tier` subprocess reload and apply subsequent
-  options against the reloaded subprocess, surfacing one coherent confirmation
-  in Task Chat per `REQ-AGENTS-SESSION-CONFIG-FEEDBACK-001`.
+  `reasoning_effort`) from Task Chat while idle, Kandev shall confirm `model`,
+  staged `context_tier`, and dependent options without intermediate subprocess
+  restarts, preserve the staged `context_tier` across `session_models` updates,
+  and carry all confirmed settings onto the single pre-prompt reloaded
+  subprocess on the next turn, surfacing one coherent confirmation in Task Chat
+  per `REQ-AGENTS-SESSION-CONFIG-FEEDBACK-001`.
 
 ## Out of scope
 

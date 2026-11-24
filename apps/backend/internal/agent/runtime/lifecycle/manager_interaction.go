@@ -182,6 +182,11 @@ func (m *Manager) PromptAgentWithDispatchCallbackAndSubmissionID(
 	key := executionActivityKey(executionID)
 	m.trackActivity(key, lease)
 	m.setRuntimeInterest(execution.SessionID, true)
+	if err := m.reconcileCopilotContextTierBeforePrompt(ctx, execution); err != nil {
+		m.releaseActivity(key)
+		m.setRuntimeInterest(execution.SessionID, false)
+		return nil, err
+	}
 	operationRelease, err := execution.acquireContextResetOperation(ctx)
 	if err != nil {
 		m.releaseActivity(key)
@@ -244,6 +249,11 @@ func (m *Manager) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	key := executionActivityKey(executionID)
 	m.trackActivity(key, lease)
 	m.setRuntimeInterest(execution.SessionID, true)
+	if err := m.reconcileCopilotContextTierBeforePrompt(ctx, execution); err != nil {
+		m.releaseActivity(key)
+		m.setRuntimeInterest(execution.SessionID, false)
+		return nil, err
+	}
 	operationRelease, err := execution.acquireContextResetOperation(ctx)
 	if err != nil {
 		m.releaseActivity(key)
@@ -1251,8 +1261,11 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
 
-	// Passthrough agents always need full restart
+	// Passthrough agents and Copilot executions with a staged context_tier change need full restart.
 	if execution.PassthroughProcessID != "" {
+		return m.RestartAgentProcess(ctx, executionID)
+	}
+	if _, needed := m.needsCopilotContextTierReload(ctx, execution); needed {
 		return m.RestartAgentProcess(ctx, executionID)
 	}
 	if err := execution.contextResetAdmissionError(); err != nil {

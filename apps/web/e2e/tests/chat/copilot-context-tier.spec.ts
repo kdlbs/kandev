@@ -116,11 +116,20 @@ test.describe("Copilot context window selection", () => {
 
       const contextTrigger = testPage.getByTestId("config-option-trigger-context_tier");
       await expect(contextTrigger).toBeVisible({ timeout: 10_000 });
-      await contextTrigger.click();
+      const selectOpenContextTier = async (optionName: "Default" | "Long Context") => {
+        await contextTrigger.click();
+        const section = testPage.getByTestId("config-option-section-context_tier");
+        await expect(section).toBeVisible();
+        await section.getByRole("button", { name: optionName, exact: true }).click();
+      };
 
-      const contextSection = testPage.getByTestId("config-option-section-context_tier");
-      await expect(contextSection).toBeVisible();
-      await contextSection.getByRole("button", { name: "Long Context", exact: true }).click();
+      await selectOpenContextTier("Long Context");
+      await expect(trigger).toContainText("Long Context", { timeout: 15_000 });
+      // Rapidly toggle Default -> Long Context while idle: lazy staging must coalesce without
+      // restarting the subprocess on each click (verified via loads === 1 on the next turn).
+      await selectOpenContextTier("Default");
+      await expect(trigger).not.toContainText("Long Context", { timeout: 15_000 });
+      await selectOpenContextTier("Long Context");
       await expect(trigger).toContainText("Long Context", { timeout: 15_000 });
       await testPage.keyboard.press("Escape");
 
@@ -149,6 +158,30 @@ test.describe("Copilot context window selection", () => {
       expect(turns[1].pid).not.toBe(initialInfo.pid);
       expect(turns[1].loads).toBe(1);
       expect(turns[1].priorTurns).toBe(1);
+
+      // Toggling away and back to the running subprocess's tier performs zero restarts on the next turn.
+      await trigger.click();
+      await expect(contextTrigger).toBeVisible({ timeout: 10_000 });
+      await selectOpenContextTier("Default");
+      await expect(trigger).not.toContainText("Long Context", { timeout: 15_000 });
+      await selectOpenContextTier("Long Context");
+      await expect(trigger).toContainText("Long Context", { timeout: 15_000 });
+      await testPage.keyboard.press("Escape");
+
+      await session.sendMessage("/e2e:copilot-context-info third-turn");
+      const threeTurns = await waitForCopilotContextInfoMessages(apiClient, sessionId, 3);
+      await waitForSessionState(apiClient, {
+        taskId,
+        sessionId,
+        expectedState: "WAITING_FOR_INPUT",
+        timeout: 30_000,
+        message: "Unchanged-tier Copilot session must complete the third turn without restarting",
+      });
+      await session.waitForChatIdle({ timeout: 30_000 });
+      expect(threeTurns[2].contextTier).toBe("long_context");
+      expect(threeTurns[2].pid).toBe(turns[1].pid);
+      expect(threeTurns[2].loads).toBe(1);
+      expect(threeTurns[2].priorTurns).toBe(2);
 
       await expect(session.chat).toContainText("Copilot runtime context_tier=default");
       await expect(session.chat).toContainText("Copilot runtime context_tier=long_context");
