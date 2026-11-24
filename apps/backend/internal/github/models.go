@@ -331,6 +331,7 @@ type PR struct {
 	Additions                             int                 `json:"additions"`
 	Deletions                             int                 `json:"deletions"`
 	RequestedReviewers                    []RequestedReviewer `json:"requested_reviewers"`
+	Labels                                []string            `json:"labels,omitempty"`
 	CreatedAt                             time.Time           `json:"created_at"`
 	UpdatedAt                             time.Time           `json:"updated_at"`
 	MergedAt                              *time.Time          `json:"merged_at,omitempty"`

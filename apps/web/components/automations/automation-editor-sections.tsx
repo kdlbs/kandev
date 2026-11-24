@@ -16,6 +16,7 @@ import { RequiredFieldLabel } from "./required-field-label";
 import { TriggersSection } from "./triggers-section";
 import { WebhookCreatedDialog } from "./webhook-created-dialog";
 import { RetryPolicySection } from "./retry-policy-section";
+import { ContinuationPolicySection, FollowUpPromptField } from "./automation-continuation-section";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 
 import { SELECTED_CARD_CLASS_NAME, UNSELECTED_CARD_CLASS_NAME } from "./automation-card-styles";
@@ -122,6 +123,18 @@ export function WhenSection({
   );
 }
 
+const THEN_DIRTY_FIELDS: Array<keyof FormState> = [
+  "taskTitleTemplate",
+  "prompt",
+  "followUpPrompt",
+  "workflowId",
+  "taskMode",
+  "agentProfileId",
+  "executorProfileId",
+  "repositorySelections",
+  "managedDestination",
+];
+
 export function ThenSection({
   form,
   workspaceId,
@@ -139,17 +152,7 @@ export function ThenSection({
 }) {
   const { t } = useTranslation();
   const { inputRef, clampChange } = useTaskTitleSelectionRestore(form.taskTitleTemplate);
-  const dirtyFields: Array<keyof FormState> = [
-    "taskTitleTemplate",
-    "prompt",
-    "workflowId",
-    "taskMode",
-    "agentProfileId",
-    "executorProfileId",
-    "repositorySelections",
-    "managedDestination",
-  ];
-  const isDirty = dirtyFields.some((field) => isAutomationFieldDirty(form, savedForm, field));
+  const isDirty = THEN_DIRTY_FIELDS.some((field) => isAutomationFieldDirty(form, savedForm, field));
   return (
     <div className="space-y-2">
       <div>
@@ -188,6 +191,12 @@ export function ThenSection({
           onChange={(value) => updateField("prompt", value)}
           placeholders={placeholders}
         />
+        <FollowUpPromptField
+          form={form}
+          savedForm={savedForm}
+          updateField={updateField}
+          placeholders={placeholders}
+        />
         <Separator />
         {form.taskMode === "managed_conversation" ? null : (
           <ConfigSection
@@ -206,6 +215,7 @@ export function ThenSection({
             onWorkflowChange={(value) => {
               updateField("workflowId", value);
               updateField("workflowStepId", "");
+              updateField("prContinuationStepId", "");
             }}
             onAgentProfileChange={(value) => updateField("agentProfileId", value)}
             onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
@@ -216,104 +226,6 @@ export function ThenSection({
           />
         )}
       </div>
-    </div>
-  );
-}
-
-function ContinuationPolicySection({
-  form,
-  savedForm,
-  updateField,
-}: {
-  form: FormState;
-  savedForm: FormState;
-  updateField: UpdateField;
-}) {
-  const { t } = useTranslation();
-  const continuationIsDirty = isAutomationFieldDirty(form, savedForm, "continuationPolicy");
-  const reusesThread = form.continuationPolicy === "reuse_thread";
-  const newTaskDescriptionKey =
-    form.taskMode === "normal_task"
-      ? "automations:contextBetweenRunsNewTaskNormalDescription"
-      : "automations:contextBetweenRunsNewTaskDescription";
-  const continuationDescriptionId = "automation-continuation-description";
-
-  return (
-    <div className="space-y-2 border-t pt-3">
-      <div>
-        <h3 id="automation-continuation-heading" className="text-sm font-medium">
-          {t("automations:contextBetweenRunsTitle")}
-        </h3>
-        <p id={continuationDescriptionId} className="text-xs text-muted-foreground">
-          {t("automations:contextBetweenRunsDescription")}
-        </p>
-      </div>
-      <RadioGroup
-        aria-labelledby="automation-continuation-heading"
-        aria-describedby={continuationDescriptionId}
-        value={form.continuationPolicy}
-        onValueChange={(value) => {
-          const policy = value as FormState["continuationPolicy"];
-          updateField("continuationPolicy", policy);
-          if (policy === "reuse_thread") updateField("maxConcurrentRuns", 1);
-        }}
-        data-settings-dirty={continuationIsDirty}
-        className="gap-2"
-      >
-        <Label
-          htmlFor="automation-continuation-new-task"
-          className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
-            !reusesThread ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
-          }`}
-        >
-          <RadioGroupItem
-            id="automation-continuation-new-task"
-            value="new_task"
-            aria-describedby="automation-continuation-new-task-description"
-            className="mt-0.5"
-          />
-          <span className="min-w-0 space-y-1">
-            <span className="block text-sm font-medium">
-              {t("automations:contextBetweenRunsNewTask")}
-            </span>
-            <span
-              id="automation-continuation-new-task-description"
-              className="block whitespace-normal break-words text-xs text-muted-foreground"
-            >
-              {t(newTaskDescriptionKey)}
-            </span>
-          </span>
-        </Label>
-        <Label
-          htmlFor="automation-continuation-reuse-thread"
-          className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
-            reusesThread ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
-          }`}
-        >
-          <RadioGroupItem
-            id="automation-continuation-reuse-thread"
-            value="reuse_thread"
-            aria-describedby="automation-continuation-reuse-thread-description"
-            className="mt-0.5"
-          />
-          <span className="min-w-0 space-y-1">
-            <span className="block text-sm font-medium">
-              {t("automations:contextBetweenRunsReuseThread")}
-            </span>
-            <span
-              id="automation-continuation-reuse-thread-description"
-              className="block whitespace-normal break-words text-xs text-muted-foreground"
-            >
-              {t("automations:contextBetweenRunsReuseThreadDescription")}
-            </span>
-          </span>
-        </Label>
-      </RadioGroup>
-      {reusesThread && (
-        <p className="text-xs text-muted-foreground">
-          {t("automations:contextBetweenRunsConcurrencyLock")}
-        </p>
-      )}
     </div>
   );
 }
@@ -350,7 +262,11 @@ function TargetModeSection({
         aria-labelledby="automation-task-mode-heading"
         aria-describedby={descriptionId}
         value={form.taskMode}
-        onValueChange={(value) => updateField("taskMode", value as FormState["taskMode"])}
+        onValueChange={(value) => {
+          const mode = value as FormState["taskMode"];
+          updateField("taskMode", mode);
+          if (mode !== "normal_task") updateField("prContinuationStepId", "");
+        }}
         data-settings-dirty={targetIsDirty}
         className="gap-2"
       >
@@ -442,11 +358,13 @@ export function SettingsSection({
   savedForm,
   workspaceId,
   updateField,
+  hasPRTrigger,
 }: {
   form: FormState;
   savedForm: FormState;
   workspaceId: string;
   updateField: UpdateField;
+  hasPRTrigger: boolean;
 }) {
   const { t } = useTranslation();
   const enabledIsDirty = isAutomationFieldDirty(form, savedForm, "enabled");
@@ -502,7 +420,12 @@ export function SettingsSection({
         updateField={updateField}
       />
       {form.taskMode === "managed_conversation" ? null : (
-        <ContinuationPolicySection form={form} savedForm={savedForm} updateField={updateField} />
+        <ContinuationPolicySection
+          form={form}
+          savedForm={savedForm}
+          updateField={updateField}
+          hasPRTrigger={hasPRTrigger}
+        />
       )}
       {form.taskMode === "managed_conversation" ? null : (
         <RetryPolicySection

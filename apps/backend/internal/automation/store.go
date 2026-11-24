@@ -362,13 +362,14 @@ const automationColumns = `created_by_user_id, id, workspace_id, name, descripti
 	managed_destination_plugin_id, managed_destination_instance_key, managed_destination_revision,
 	resource_revision, repository_mode, prompt, task_title_template,
 	enabled, max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret,
+	follow_up_prompt, pr_continuation_step_id, pr_merged_action, pr_closed_action,
 	retry_policy, plugin_tools, mcp_selection, mcp_selection_revision, automation_revision, last_triggered_at, created_at, updated_at,
 	execution_mode = 'task' AS legacy_board_card`
 
 // initSchema creates automation tables and applies required migrations for the active database
 // driver.
 func (s *Store) initSchema() error {
-	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL+pluginWebhookTablesSQL+retryLaunchTablesSQL, s.db.DriverName())); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL+pluginWebhookTablesSQL+retryLaunchTablesSQL+prObservationTablesSQL+prContinuationTablesSQL, s.db.DriverName())); err != nil {
 		return err
 	}
 	migrate := db.NewRequiredMigrateLogger(s.db, nil)
@@ -438,6 +439,10 @@ func (s *Store) initSchema() error {
 		{"automation_runs.retry_continuation_snapshot", schemaSQLForDriver(migrateRunRetryContinuationSQL, s.db.DriverName())},
 		{"automation_runs.automation_revision", schemaSQLForDriver(migrateRunRetryAutomationRevisionSQL, s.db.DriverName())},
 		{"automation_runs.trigger_revision", schemaSQLForDriver(migrateRunRetryTriggerRevisionSQL, s.db.DriverName())},
+		{"automations.follow_up_prompt", `ALTER TABLE automations ADD COLUMN follow_up_prompt TEXT NOT NULL DEFAULT ''`},
+		{"automations.pr_continuation_step_id", `ALTER TABLE automations ADD COLUMN pr_continuation_step_id TEXT NOT NULL DEFAULT ''`},
+		{"automations.pr_merged_action", `ALTER TABLE automations ADD COLUMN pr_merged_action TEXT NOT NULL DEFAULT 'keep'`},
+		{"automations.pr_closed_action", `ALTER TABLE automations ADD COLUMN pr_closed_action TEXT NOT NULL DEFAULT 'keep'`},
 	}
 	for _, migration := range migrations {
 		if err := migrate.Apply(migration.name, migration.stmt); err != nil {
@@ -704,6 +709,10 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 		a.MCPSelectionRevision = 1
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE automations SET mcp_selection = ?, mcp_selection_revision = ? WHERE id = ?`), string(selectionJSON), a.MCPSelectionRevision, a.ID); err != nil {
+		return err
+	}
+	a.normalize()
+	if err := writePRContinuationSettings(ctx, tx, a.ID, a.PRContinuationSettings); err != nil {
 		return err
 	}
 	if err := insertAutomationRepositories(ctx, tx, a.ID, a.Repositories); err != nil {
@@ -984,6 +993,9 @@ func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *U
 	if err := writeAutomationUpdateRow(ctx, tx, id, a, automationUpdateCondition{previousMCPRevision, previousTaskMode}); err != nil {
 		return nil, err
 	}
+	if err := writePRContinuationSettings(ctx, tx, id, a.PRContinuationSettings); err != nil {
+		return nil, err
+	}
 	if err := replaceAutomationUpdateRepositories(ctx, tx, id, a, req); err != nil {
 		return nil, err
 	}
@@ -1011,6 +1023,7 @@ func validateAutomationUpdateCondition(a *Automation, req *UpdateAutomationReque
 // the write transaction.
 func prepareAutomationUpdate(a *Automation, req *UpdateAutomationRequest) error {
 	applyAutomationUpdate(a, req)
+	applyPRContinuationUpdate(a, req)
 	selectionJSON, err := json.Marshal(a.MCPSelection)
 	if err != nil {
 		return err
@@ -1062,6 +1075,9 @@ func normalizeAutomationUpdateSettings(a *Automation) error {
 		a.MaxConcurrentRuns = 1
 	}
 	if err := validateContinuationSettings(a.ContinuationPolicy, a.MaxConcurrentRuns); err != nil {
+		return err
+	}
+	if err := validatePRContinuationSettings(a.ContinuationPolicy, a.TaskMode, a.PRContinuationSettings); err != nil {
 		return err
 	}
 	a.UpdatedAt = time.Now().UTC()
@@ -1687,6 +1703,9 @@ func (s *Store) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigger
 
 // DeleteTrigger removes a trigger.
 func (s *Store) DeleteTrigger(ctx context.Context, id string) error {
+	if err := s.deletePRObservationsForTrigger(ctx, id); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automation_triggers WHERE id = ?`), id)
 	return err
 }

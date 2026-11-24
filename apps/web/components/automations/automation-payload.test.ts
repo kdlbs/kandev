@@ -14,6 +14,7 @@ import {
   buildUpdatePayload,
   canonicalPluginTools,
   normalizeRetryPolicyForTaskMode,
+  prContinuationPayload,
   resolveNormalizedRepositoryIds,
   resolveRepositoryIdsForMode,
   resolveRepositoryIds,
@@ -37,6 +38,10 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     enabled: true,
     maxConcurrentRuns: 1,
     continuationPolicy: "new_task",
+    followUpPrompt: "",
+    prContinuationStepId: "",
+    prMergedAction: "keep",
+    prClosedAction: "keep",
     retryPolicy: {
       mode: "disabled",
       max_retries: "0",
@@ -446,4 +451,44 @@ it("carries the editor revision when switching to a managed conversation", () =>
   const payload = buildUpdatePayload(form, [], undefined, undefined, true);
   expect(payload).not.toHaveProperty("mcp_selection");
   expect(payload.expected_mcp_selection_revision).toBe(3);
+});
+
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006.3
+describe("prContinuationPayload", () => {
+  const perPR = {
+    continuationPolicy: "reuse_per_pr" as const,
+    taskMode: "normal_task" as const,
+    followUpPrompt: "Review only new commits",
+    prContinuationStepId: "step-review",
+    prMergedAction: "archive" as const,
+    prClosedAction: "delete" as const,
+  };
+
+  it("saves the per-PR options for reuse_per_pr", () => {
+    const form = baseForm(perPR);
+    const expected = {
+      follow_up_prompt: "Review only new commits",
+      pr_continuation_step_id: "step-review",
+      pr_merged_action: "archive",
+      pr_closed_action: "delete",
+    };
+    expect(buildCreatePayload("ws-1", form, [], [])).toMatchObject({
+      continuation_policy: "reuse_per_pr",
+      ...expected,
+    });
+    expect(buildUpdatePayload(form, [])).toMatchObject(expected);
+  });
+
+  it("clears options that no longer apply before saving", () => {
+    expect(prContinuationPayload(baseForm({ ...perPR, continuationPolicy: "new_task" }))).toEqual({
+      follow_up_prompt: "",
+      pr_continuation_step_id: "",
+      pr_merged_action: "keep",
+      pr_closed_action: "keep",
+    });
+    expect(
+      prContinuationPayload(baseForm({ ...perPR, taskMode: "automation_run" }))
+        .pr_continuation_step_id,
+    ).toBe("");
+  });
 });

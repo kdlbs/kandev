@@ -12,17 +12,30 @@ type PromptSectionProps = {
   isDirty: boolean;
   onChange: (value: string) => void;
   placeholders: PlaceholderInfo[];
+  /** Overrides the default instructions heading. */
+  label?: string;
+  description?: string;
+  testId?: string;
 };
 
-export function PromptSection({ value, isDirty, onChange, placeholders }: PromptSectionProps) {
+export function PromptSection({
+  value,
+  isDirty,
+  onChange,
+  placeholders,
+  label,
+  description,
+  testId = "automation-prompt-editor",
+}: PromptSectionProps) {
   const { t } = useTranslation();
   const scriptPlaceholders = useMemo(() => toScriptPlaceholders(placeholders), [placeholders]);
 
   return (
     <div className="space-y-3">
       <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-        {t("automations:instructionsLabel")}
+        {label ?? t("automations:instructionsLabel")}
       </Label>
+      {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
       <SettingsPromptEditor
         value={value}
         onChange={onChange}
@@ -32,7 +45,7 @@ export function PromptSection({ value, isDirty, onChange, placeholders }: Prompt
         promptReferences
         isDirty={isDirty}
         dirtyLevel="container"
-        testId="automation-prompt-editor"
+        testId={testId}
       />
       {placeholders.length > 0 && (
         <div className="text-xs text-muted-foreground space-y-1">

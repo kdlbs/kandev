@@ -6,6 +6,8 @@ import type {
   AutomationRepository,
   AutomationPluginToolSelection,
   ContinuationPolicy,
+  PRContinuationSettings,
+  PREndAction,
   ManagedConversationDestination,
   RepositoryMode,
   RetryPolicy,
@@ -49,6 +51,10 @@ export type FormState = {
   enabled: boolean;
   maxConcurrentRuns: number;
   continuationPolicy: ContinuationPolicy;
+  followUpPrompt: string;
+  prContinuationStepId: string;
+  prMergedAction: PREndAction;
+  prClosedAction: PREndAction;
   retryPolicy: RetryPolicy;
   pluginTools: AutomationPluginToolSelection[];
 };
@@ -227,6 +233,7 @@ export function buildCreatePayload(
     task_title_template: form.taskTitleTemplate,
     max_concurrent_runs: form.maxConcurrentRuns,
     continuation_policy: form.continuationPolicy,
+    ...prContinuationPayload(form),
     triggers: pending.map((trigger) => ({
       type: trigger.type,
       config: trigger.config,
@@ -277,10 +284,26 @@ export function buildUpdatePayload(
     enabled: form.enabled,
     max_concurrent_runs: form.maxConcurrentRuns,
     continuation_policy: form.continuationPolicy,
+    ...prContinuationPayload(form),
     retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
     ...(pluginTools !== undefined
       ? { plugin_tools: form.taskMode === "automation_run" ? pluginTools : [] }
       : {}),
+  };
+}
+
+/**
+ * Per-PR options for the save boundary. Options that do not apply to the
+ * selected policy or target are sent empty so a stale draft never saves them.
+ */
+export function prContinuationPayload(form: FormState): PRContinuationSettings {
+  const perPR = form.continuationPolicy === "reuse_per_pr";
+  return {
+    follow_up_prompt: perPR ? form.followUpPrompt : "",
+    pr_continuation_step_id:
+      perPR && form.taskMode === "normal_task" ? form.prContinuationStepId : "",
+    pr_merged_action: perPR ? form.prMergedAction : "keep",
+    pr_closed_action: perPR ? form.prClosedAction : "keep",
   };
 }
 

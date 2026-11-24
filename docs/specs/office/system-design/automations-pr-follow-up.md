@@ -1,0 +1,461 @@
+---
+status: current
+system: office
+requirements:
+  - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001
+  - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-002
+  - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-003
+  - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004
+  - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-005
+  - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006
+  - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-007
+  - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-008
+  - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-009
+created: 2026-11-23
+owners:
+  - Kandev
+---
+
+# GitHub PR Follow-up Automation System Design
+
+## Purpose and boundaries
+
+This design covers four additions:
+
+- The `new_commits` and `review_requested` events on the `github_pr` poller.
+- A per-PR continuation policy, with a follow-up prompt and a continuation
+  step.
+- End-of-PR actions on the task.
+
+The office automation subsystem owns trigger evaluation, admission, run
+binding, continuation, and automation task lifecycle, so it owns this design.
+That subsystem is `internal/automation`, the automation handlers in
+`internal/orchestrator`, and `apps/web/components/automations`.
+
+Adjacent contracts used but not owned:
+
+- `internal/github` supplies the workspace-scoped automation client, the `PR`
+  model, and the PR-to-task association. This design adds one read method and
+  PR fields.
+- The workflow engine owns step moves and step auto-start. This design moves a
+  task through the existing task service. It suppresses only the agent start,
+  through the existing automation start-ownership marker.
+- The task service owns archive and delete. This design calls the existing
+  lifecycle methods.
+- The [settings event-selection design](automations-settings-02.md#github-pr-event-selection)
+  owns the `opened` eligibility rule. This design widens it.
+- The [continuity requirements](../requirements/automation-continuity.md) own
+  `new_task`, `reuse_thread`, exact run binding, and coordinator authority.
+  The per-PR policy reuses their binding and dispatch path.
+
+## Requirement mapping
+
+| Requirement | Design section |
+| --- | --- |
+| `REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001` | [PR listing](#pr-listing), [PR observation](#pr-observation), [Evaluator control flow](#evaluator-control-flow), [Persistence](#persistence) |
+| `REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-002` | [PR listing](#pr-listing), [Trigger config, data, and placeholders](#trigger-config-data-and-placeholders) |
+| `REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-003` | [Editor](#editor) |
+| `REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-004` | [Per-PR continuation policy](#per-pr-continuation-policy), [Busy check and admission deferral](#busy-check-and-admission-deferral), [Dispatch](#dispatch), [Export](#export) |
+| `REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-005` | [Continuation step](#continuation-step), [Export](#export) |
+| `REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006` | [Editor](#editor) |
+| `REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-007` | [PR observation](#pr-observation), [Trigger config, data, and placeholders](#trigger-config-data-and-placeholders) |
+| `REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-008` | [Follow-up prompt](#follow-up-prompt), [Export](#export) |
+| `REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-009` | [End-of-PR actions](#end-of-pr-actions), [Export](#export) |
+
+## Components and responsibilities
+
+| Component | Responsibility |
+| --- | --- |
+| `github.Client.ListOpenPRs` | Lists every open PR of one repository with head SHA, base ref, labels, draft state, and requested reviewers and teams. |
+| `github.Service.ListAutomationOpenPRs` and `GetAutomationPR` | Enforce workspace repository scope and resolve the automation client, as `ListAutomationPRs` does today. |
+| `automation.GitHubEvaluator` | Lists PRs once per trigger and repository. Applies filters, compares observations, chooses at most one firing per PR, maintains observations, and runs end-of-PR actions. |
+| `automation.Store` | Persists PR observations, PR-subject continuations, and the new automation fields. |
+| `automation.Service` admission | Defers a per-PR firing whose PR task is busy. |
+| `orchestrator` automation handlers | Resolve, create, or replace the PR task. Choose the prompt, move the task to the continuation step, dispatch the turn, and expose the busy check and end-of-PR task actions. |
+| `GitHubPRConfig` and the automation editor sections | Edit events, the quiet period, reviewers, the policy, the follow-up prompt, the continuation step, and the end-of-PR actions. |
+
+## PR listing
+
+Add `ListOpenPRs(ctx, owner, repo string) (prs []*PR, complete bool, err error)`
+to `github.Client`.
+
+- `PATClient`, and the app and token clients built on it, call
+  `GET /repos/{owner}/{repo}/pulls?state=open&per_page=100`. They follow
+  `Link: rel="next"` until the last page. `complete` is false if a later page
+  fails after earlier pages succeeded.
+- `GHClient` calls `gh pr list --state open --limit 1000` with the needed
+  JSON fields. A result that reaches the limit reports `complete=false`.
+- `MockClient` returns its seeded open PRs ordered by number. `NoopClient`
+  returns `ErrNoClient`, like its other reads.
+
+`github.PR` gains `Labels []string`, copied by the PAT and `gh` conversions.
+The existing `RequestedReviewers` field already carries users and teams. The
+evaluator normalizes them to lowercased logins and `<owner>/<team-slug>` keys,
+where the owner is the repository owner because requested teams belong to the
+repository's organization.
+
+The evaluator replaces `ListAutomationPRs` (issue search) with
+`ListAutomationOpenPRs` for all events. Search results carry no head SHA, base
+ref, labels, or reviewers. That is why base-branch filters never matched and
+label filters were never applied. The request count stays at one listing per
+trigger and repository per poll, plus one request for each extra page of 100
+PRs.
+
+Filters, in order:
+
+1. `ExcludeDraft`.
+2. `matchesBranches(pr.BaseBranch, cfg.Branches)`.
+3. `matchesAuthors`.
+4. A new `matchesLabels(pr.Labels, cfg.Labels)`. It returns true for an empty
+   filter, or when any label in the filter equals a PR label exactly.
+
+## Trigger config, data, and placeholders
+
+`GitHubPRTriggerConfig` gains two fields:
+
+- `QuietPeriodMinutes int` (`quiet_period_minutes`). Validated to 0–1440 in
+  `AddTrigger` and `UpdateTrigger`.
+- `Reviewers []string` (`reviewers`). Logins or `org/team-slug`, compared
+  without case.
+
+The `Events` comment is updated to list `opened`, `new_commits`, and
+`review_requested`. The registry default stays `{"events":["opened"]}`.
+
+`firePRTrigger` adds these keys to the trigger data:
+
+| Key | Value |
+| --- | --- |
+| `head_sha` | The PR's head SHA. |
+| `previous_head_sha` | The observed head before the firing. Empty for `opened`. |
+| `event` | `opened`, `new_commits`, or `review_requested`. |
+| `requested_reviewers` | The newly requested matching reviewers. Empty for other events. |
+| `pr_subject` | `<owner>/<repo>#<number>`. |
+
+`prPlaceholders` in `interpolator.go` maps `pr.head_sha`,
+`pr.previous_head_sha`, `pr.event`, and `pr.requested_reviewers` (joined with
+`, `). `trigger_registry.go` adds these four to the `github_pr` placeholder
+list. The `github_pr_merged` mapping is unchanged.
+
+## PR observation
+
+The table `automation_pr_observations` stores one row per trigger and open PR.
+See [Persistence](#persistence). The evaluator uses it when the trigger selects
+`new_commits` or `review_requested`.
+
+Each row holds:
+
+- `head_sha`.
+- `requested` (sorted JSON list of lowercased logins and team keys).
+- `review_generation`.
+- `pending_head_sha` and `pending_since`, which track the quiet period.
+
+The evaluator computes candidates for each listed PR:
+
+- **No row:** insert a baseline (current head and requested reviewers). No
+  candidate.
+- **`new_commits` candidate:** the event is selected and
+  `pr.HeadSHA != row.head_sha`. With `QuietPeriodMinutes > 0`, the evaluator
+  sets `pending_head_sha`/`pending_since` when the pending head differs from
+  the current head. The candidate becomes ready only when
+  `now - pending_since >= quiet period`.
+- **`review_requested` candidate:** the event is selected and the set of
+  matching reviewers in the current requested set, minus `row.requested`, is
+  not empty.
+- **`opened` candidate:** the existing rule.
+
+The evaluator chooses at most one ready candidate per PR, in the order
+`opened`, `new_commits`, `review_requested` (AC-001.7). It does not fire
+candidates for a PR that misses the filters.
+
+Row updates after the choice:
+
+| Outcome | Row update |
+| --- | --- |
+| Filters missed, or no ready candidate | Store the current `requested` set, so removals are tracked and a later re-request counts as new. Set `head_sha` to the current head only when the filters missed. Otherwise keep any pending quiet-period state. |
+| Firing admitted, `Duplicate`, or capacity `Skipped` | Set `head_sha` and `requested` to current, clear the pending state, and increase `review_generation` when the event is `review_requested`. |
+| `Deferred`, or an error | No change. |
+
+After a complete listing for a repository, delete that trigger's rows for PRs
+that are missing from the listing. Deleting the trigger cascades to its rows.
+
+Dedup keys:
+
+| Event | Key |
+| --- | --- |
+| `opened` | `pr:o/r#n` (unchanged) |
+| `new_commits` | `pr:o/r#n@<head_sha>` |
+| `review_requested` | `pr:o/r#n/review-requested/<review_generation+1>` |
+
+## Evaluator control flow
+
+```text
+for each enabled github_pr trigger
+  decode config; ev = selected events among opened|new_commits|review_requested
+  if ev empty or repos empty -> return
+  for each repo
+    prs, complete = ListAutomationOpenPRs(workspace, owner, repo)
+    for each pr
+      candidate = chooseCandidate(pr, row, ev, filters, now)   // may insert baseline
+      if candidate -> result = fire(candidate)
+      updateObservation(pr, row, candidate, result)
+    if complete
+      pruneObservations(trigger, repo, prs)
+      runEndOfPRActions(automation, repo, prs)   // once per automation+repo per cycle
+```
+
+Split `chooseCandidate`, `updateObservation`, and `runEndOfPRActions` into
+separate functions, in a new `evaluator_pr_observation.go` if needed, so the
+Go complexity limits hold. `opened` still calls `FireTrigger` on every poll for
+each matching PR, so its existing dedup and skipped-run behavior is
+unchanged.
+
+## Per-PR continuation policy
+
+Add `ContinuationPolicyReusePerPR ContinuationPolicy = "reuse_per_pr"`.
+
+Validation in `automation.Service`:
+
+- Accept all three values. `reuse_per_pr` does not constrain
+  `max_concurrent_runs`.
+- Reject `reuse_per_pr` with `task_mode = managed_conversation`.
+- Reject a non-empty `follow_up_prompt` or `pr_continuation_step_id`, and any
+  `pr_merged_action` or `pr_closed_action` other than `keep`, unless the
+  policy is `reuse_per_pr`.
+- Do not require a `github_pr` trigger. Firings without `pr_subject` use
+  `new_task` behavior.
+
+The MCP automation schema in `config_automation_handlers.go` adds the enum
+value and the four new fields. `RetryLaunchConfigSnapshot` copies the four new
+fields. The continuation for a PR subject lives in
+`automation_pr_continuations`, keyed by `(automation_id, pr_subject)`. The
+automation's `continuation_task_id` column is not used by this policy.
+
+## Busy check and admission deferral
+
+`automation.Service` gains an injected `PRTaskController` interface
+(`SetPRTaskController`), implemented by the orchestrator and wired in
+`backendapp`. Its `AutomationPRTaskBusy` returns true when the task's primary
+session is `CREATED`, `STARTING`, or `RUNNING`. The same interface exposes
+`ArchiveAutomationPRTask` and `DeleteAutomationPRTask` for end-of-PR actions.
+
+Inside `admitTriggerLocked`, after the dedup check and before the capacity
+check:
+
+```text
+if policy == reuse_per_pr && triggerType == github_pr && subject != ""
+  taskID = store.GetPRContinuation(automationID, subject)
+  if taskID != "" && (store.HasActiveRunForTask(automationID, taskID) || busy(taskID))
+    return deferred
+```
+
+`HasActiveRunForTask` uses the `CountActiveRuns` predicate: status
+`task_created` and the task still open. An agent waiting for a user answer is
+still inside its turn, so its run is active. `FireResult` gains
+`Deferred bool`. A deferred firing creates no run row, records no skipped run,
+and does not consume the dedup key. A checker error counts as busy, so the
+firing is retried. Log it at warning level.
+
+## Dispatch
+
+`prepareAutomationTask` in `orchestrator/event_handlers_automation.go` gains a
+per-PR branch. It is implemented in a new file,
+`orchestrator/automation_pr_continuation.go`:
+
+```text
+subject = triggerData.pr_subject
+if policy != reuse_per_pr || triggerType != github_pr || subject == ""
+  -> existing new_task path
+taskID = continuations.Get(automationID, subject)
+if taskID == ""                                   -> create, map, action=created
+task = repo.GetTask(taskID)
+if missing / archived / incompatible              -> create, map, action=replaced
+session = primary session
+if session ready (WAITING_FOR_INPUT, IDLE)        -> continue, action=resumed
+if session running or starting                    -> fail run "PR task is busy"
+otherwise (completed, failed, cancelled, none)    -> create, map, action=replaced
+```
+
+The compatibility check reuses `continuationTaskIncompatibility`. For this
+policy only, it matches the workflow ID and not the start step. Repository
+compatibility uses the PR's repository from
+`resolveGitHubPRTriggerRepository`.
+
+Creating a task follows the existing `CreateReviewTask` path:
+`AutomationStartOwned`, `associateAutomationPR`, and auto-start in the
+configured start step (AC-005.5). After creation, the dispatcher upserts the
+mapping. If the upsert fails, it deletes the task and fails the run, as the
+`reuse_thread` path does for `SetContinuationTaskID`. Continuing a task calls
+`dispatchAutomationContinuation`, which binds the run to the exact turn.
+
+## Follow-up prompt
+
+Add `FollowUpPrompt string` (`follow_up_prompt`, column
+`follow_up_prompt TEXT NOT NULL DEFAULT ''`).
+
+`createAutomationTaskLocked` renders the main prompt as it does today, and
+renders the follow-up prompt with `InterpolateAgentPrompt` when it is
+non-empty. The per-PR branch returns the chosen action. When the action is
+`resumed` and the follow-up prompt is non-empty, the dispatcher sends the
+follow-up prompt. Otherwise it sends the main prompt.
+
+The retry snapshot records both resolved prompts. A retry selects between them
+by the same rule (AC-004.9).
+
+## Continuation step
+
+Add `PRContinuationStepID string` (`pr_continuation_step_id`, column
+`pr_continuation_step_id TEXT NOT NULL DEFAULT ''`).
+
+A non-empty value requires `reuse_per_pr`, `task_mode = normal_task`, and a
+step in the automation's workflow, checked with
+`authorizeWorkflowStepOwnership`. An update that leaves a step that no longer
+applies is rejected. The editor clears the field first.
+
+Before `dispatchAutomationContinuation`, when the field is set and the task is
+in another step:
+
+1. Stamp `MetaKeyAutomationStartOwned = runID` through `SetTaskMetadataKey`.
+   `autoStartTaskForLoadedStep` then skips the workflow agent start.
+2. Move the task with the task service `MoveTask`, keeping its workflow.
+3. On an error or a missing step, release the marker, mark the run failed with
+   `continuation step unavailable: <reason>`, and stop.
+4. Dispatch the turn. Release the marker after the run binds or fails, through
+   `releaseAutomationStartOwnership`. Startup reconciliation
+   (`reconcileAutomationStartOwnership`) clears a marker left by a crash.
+
+The step's auto-start prompt, handoff text, and reset-context action do not
+run (AC-005.3).
+
+## End-of-PR actions
+
+Add `PRMergedAction` and `PRClosedAction` (`pr_merged_action`,
+`pr_closed_action`, columns `TEXT NOT NULL DEFAULT 'keep'`), with values
+`keep`, `archive`, and `delete`.
+
+`runEndOfPRActions` runs after a complete listing, once per automation and
+repository per evaluation cycle, for `reuse_per_pr` automations:
+
+```text
+for each mapping (automationID, subject in this repo) whose PR is not in the listing
+  pr = GetAutomationPR(owner, repo, number)        // one read per ended PR
+  if read fails or pr.State == open -> skip (retry next poll)
+  action = merged ? PRMergedAction : PRClosedAction
+  if action != keep
+    if HasActiveRunForTask || busy(task) -> skip (retry next poll)
+    archive: task service ArchiveTask; delete: DeleteTaskWithLifecycleAndReason(reason="automation: PR merged|closed")
+    an already archived or missing task counts as done
+  delete mapping
+```
+
+The orchestrator exposes `ArchiveAutomationPRTask` and
+`DeleteAutomationPRTask` through `PRTaskController`. This keeps
+`internal/automation` free of task-service imports. Archive and delete reuse the task service's
+existing worktree and session teardown.
+
+## Editor
+
+Desktop and phone share one composition. Controls stack vertically, and every
+control uses an existing primitive.
+
+- `GitHubPRConfig.PR_EVENTS` lists `opened`, `new_commits`, and
+  `review_requested`. When `new_commits` is checked, an `Input type=number`
+  (min 0, max 1440) appears for `quiet_period_minutes`. When
+  `review_requested` is checked, an `Input` appears for `reviewers` and is
+  parsed on blur like the authors field.
+- The continuation section renders the third `RadioGroupItem`
+  (`reuse_per_pr`) when the form has a `github_pr` trigger or the saved policy
+  is `reuse_per_pr`. Selecting it does not change `maxConcurrentRuns`.
+- With `reuse_per_pr`, the following appear under the policy cards:
+  - A second `PromptSection` labeled **Follow-up prompt**, with the trigger
+    placeholders.
+  - Two `Select`s for the end-of-PR actions. The delete warning is shown under
+    a select when that select's value is `delete`.
+  - With the normal-task target only, the **Move to step when continuing**
+    `Select`. It lists `listWorkflowSteps(form.workflowId)` plus the
+    `Stay in current step` sentinel, which maps to `""`.
+- The policy, workflow, and target-mode change handlers clear values that no
+  longer apply. `FormState`, `automation-payload.ts`, and
+  `lib/types/automation.ts` carry the new fields.
+- New copy goes in every `src/locales/*/automations.json` catalog.
+
+## Export
+
+- `exportAutomation` gains `FollowUpPrompt *yaml.Node yaml:"follow_up_prompt,omitempty"`
+  after `prompt`, encoded with the prompt node rules.
+- It gains `PRMergedAction` and `PRClosedAction`, emitted only when the
+  policy is `reuse_per_pr`, after `continuation_policy`.
+- `exportWorkflow` gains `ContinuationStep yaml:"continuation_step,omitempty"`
+  after `step`.
+- `continuation_policy` exports `reuse_per_pr` as stored.
+- Trigger config keys export through the existing config node table.
+
+## Failure and recovery
+
+| Condition | Behavior |
+| --- | --- |
+| Listing error for a repository | Log at debug level. No fire, no row change, no prune, no end-of-PR action. Other repositories continue. |
+| Partial listing | Fire for the PRs that were read and update their rows. Skip pruning and end-of-PR actions. |
+| `FireTrigger` error | No row change. The next poll retries. |
+| PR task busy at admission | Defer. The observation is unchanged, so it is retried each poll. |
+| PR task becomes busy before dispatch | The run fails visibly. The observation has already advanced, so the next change fires again. |
+| Continuation step missing or move failure | The run fails without a prompt. The mapping is kept. |
+| End-of-PR read, archive, or delete failure | Keep the mapping and retry on the next complete poll. |
+| Mapping upsert fails after task creation | Delete the new task and fail the run. |
+| Restart | Observations, pending quiet periods, and mappings persist. |
+
+## Persistence
+
+`automation.Store` schema initialization creates the new tables for SQLite and
+Postgres through `schemaSQLForDriver`:
+
+```sql
+CREATE TABLE IF NOT EXISTS automation_pr_observations (
+  trigger_id        TEXT NOT NULL REFERENCES automation_triggers(id) ON DELETE CASCADE,
+  repo_owner        TEXT NOT NULL,
+  repo_name         TEXT NOT NULL,
+  pr_number         INTEGER NOT NULL,
+  head_sha          TEXT NOT NULL,
+  requested         TEXT NOT NULL DEFAULT '[]',
+  review_generation BIGINT NOT NULL DEFAULT 0,
+  pending_head_sha  TEXT NOT NULL DEFAULT '',
+  pending_since     TIMESTAMP NULL,
+  updated_at        TIMESTAMP NOT NULL,
+  PRIMARY KEY (trigger_id, repo_owner, repo_name, pr_number)
+);
+
+CREATE TABLE IF NOT EXISTS automation_pr_continuations (
+  automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+  pr_subject    TEXT NOT NULL,
+  repo_owner    TEXT NOT NULL,
+  repo_name     TEXT NOT NULL,
+  pr_number     INTEGER NOT NULL,
+  task_id       TEXT NOT NULL,
+  created_at    TIMESTAMP NOT NULL,
+  updated_at    TIMESTAMP NOT NULL,
+  PRIMARY KEY (automation_id, pr_subject)
+);
+```
+
+The `automations` columns `follow_up_prompt`, `pr_continuation_step_id`,
+`pr_merged_action`, and `pr_closed_action` are added through the existing
+additive `ALTER TABLE` list. No data migration is needed. Deleting a task does
+not cascade to mappings. A stale mapping is replaced at dispatch, or removed
+by the end-of-PR pass.
+
+## Security
+
+The listing and the single-PR read use the workspace automation identity and
+the existing repository scope check. Head SHAs, labels, and reviewer logins
+are public PR metadata. The continuation step is validated against the
+automation's own workflow. End-of-PR actions only touch tasks in the
+automation's own mapping table, never arbitrary tasks.
+
+## Observability
+
+- Debug log per trigger and repository: PR count, listing completeness,
+  baselines recorded, pending quiet periods, and firings per event.
+- Info log for each deferral and each end-of-PR action, with automation ID, PR
+  subject, task ID, and the action.
+- The run's `thread_action` and `thread_reason` record `created`, `resumed`,
+  or `replaced`. A busy task or a step failure appears as the run's error
+  message.

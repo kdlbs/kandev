@@ -27,6 +27,11 @@ automation's saved trigger choices and firing semantics. The adjacent
 This section extends the existing settings design without changing its legacy
 repository or lifecycle contracts.
 
+The [GitHub PR follow-up design](automations-pr-follow-up.md) widens this
+eligibility rule to `opened`, `new_commits`, or `review_requested`. It also
+replaces the search read with a repository listing, which removes the
+base-branch and label limitations noted below.
+
 ### Config semantics and eligibility
 
 `GitHubPRTriggerConfig.Events` in `internal/automation/models.go` decodes the

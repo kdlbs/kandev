@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +22,7 @@ type GitHubEvaluator struct {
 	svc           *Service
 	githubService *github.Service
 	logger        *logger.Logger
+	now           func() time.Time
 
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -34,6 +35,7 @@ func NewGitHubEvaluator(svc *Service, githubService *github.Service, log *logger
 		svc:           svc,
 		githubService: githubService,
 		logger:        log,
+		now:           time.Now,
 	}
 }
 
@@ -92,26 +94,25 @@ func (e *GitHubEvaluator) evaluatePRTriggers(ctx context.Context) {
 		e.logger.Error("failed to list github_pr triggers", zap.Error(err))
 		return
 	}
+	cycle := prRepoCycle{}
 	for i := range triggers {
 		t := &triggers[i]
-		e.checkPRTrigger(ctx, t)
+		e.checkPRTrigger(ctx, t, cycle)
 	}
 }
 
-func (e *GitHubEvaluator) checkPRTrigger(ctx context.Context, t *AutomationTrigger) {
+func (e *GitHubEvaluator) checkPRTrigger(ctx context.Context, t *AutomationTrigger, cycle prRepoCycle) {
 	var cfg GitHubPRTriggerConfig
 	if err := json.Unmarshal(t.Config, &cfg); err != nil {
 		e.logger.Debug("invalid github_pr trigger config",
 			zap.String("trigger_id", t.ID), zap.Error(err))
 		return
 	}
-
-	if !slices.Contains(cfg.Events, "opened") {
+	sel := selectPREvents(cfg.Events)
+	if !sel.any() {
 		return
 	}
-
-	repos := cfg.Repos
-	if len(repos) == 0 {
+	if len(cfg.Repos) == 0 {
 		return // Cannot poll without specific repos
 	}
 	automation, err := e.svc.GetAutomation(ctx, t.AutomationID)
@@ -120,57 +121,38 @@ func (e *GitHubEvaluator) checkPRTrigger(ctx context.Context, t *AutomationTrigg
 			zap.String("trigger_id", t.ID), zap.Error(err))
 		return
 	}
-
-	for _, repo := range repos {
-		// Use ListReviewRequestedPRs with a custom query scoped to this repo.
-		query := fmt.Sprintf("is:pr is:open repo:%s/%s", repo.Owner, repo.Name)
-		prs, err := e.githubService.ListAutomationPRs(
-			ctx, automation.WorkspaceID, repo.Owner, repo.Name, query,
-		)
-		if err != nil {
-			e.logger.Debug("failed to list PRs for automation trigger",
-				zap.String(automationRepoKey, repo.Owner+"/"+repo.Name),
-				zap.Error(err))
-			continue
-		}
-		for _, pr := range prs {
-			if pr == nil {
-				continue
-			}
-			if cfg.ExcludeDraft && pr.Draft {
-				continue
-			}
-			if !matchesBranches(pr.BaseBranch, cfg.Branches) {
-				continue
-			}
-			if !matchesAuthors(pr.AuthorLogin, cfg.Authors) {
-				continue
-			}
-
-			dedupKey := fmt.Sprintf("pr:%s/%s#%d", repo.Owner, repo.Name, pr.Number)
-			e.firePRTrigger(ctx, t, pr, dedupKey)
-		}
+	for _, repo := range cfg.Repos {
+		e.evaluatePRRepo(ctx, t, automation, &cfg, sel, repo, cycle)
 	}
 }
 
-func (e *GitHubEvaluator) firePRTrigger(ctx context.Context, t *AutomationTrigger, pr *github.PR, dedupKey string) {
+func (e *GitHubEvaluator) firePRTrigger(
+	ctx context.Context, t *AutomationTrigger, pr *github.PR, owner, repo string, firing *prFiring,
+) (FireResult, error) {
 	data, _ := json.Marshal(map[string]interface{}{
-		automationPRNumberKey:    pr.Number,
-		automationTitleKey:       pr.Title,
-		automationHTMLURLKey:     pr.HTMLURL,
-		automationAuthorLoginKey: pr.AuthorLogin,
-		automationRepoKey:        fmt.Sprintf("%s/%s", pr.RepoOwner, pr.RepoName),
-		automationHeadBranchKey:  pr.HeadBranch,
-		automationBaseBranchKey:  pr.BaseBranch,
-		automationBodyKey:        pr.Body,
-		"draft":                  pr.Draft,
-		"state":                  pr.State,
+		automationPRNumberKey:           pr.Number,
+		automationTitleKey:              pr.Title,
+		automationHTMLURLKey:            pr.HTMLURL,
+		automationAuthorLoginKey:        pr.AuthorLogin,
+		automationRepoKey:               fmt.Sprintf("%s/%s", owner, repo),
+		automationHeadBranchKey:         pr.HeadBranch,
+		automationBaseBranchKey:         pr.BaseBranch,
+		automationBodyKey:               pr.Body,
+		automationHeadSHAKey:            pr.HeadSHA,
+		automationPreviousHeadSHAKey:    firing.previousHead,
+		automationPREventKey:            firing.event,
+		automationRequestedReviewersKey: strings.Join(firing.reviewers, ", "),
+		automationPRSubjectKey:          PRSubject(owner, repo, pr.Number),
+		"draft":                         pr.Draft,
+		"state":                         pr.State,
 	})
 
-	if _, err := e.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPR, data, DedupKey(dedupKey)); err != nil {
+	result, err := e.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPR, data, DedupKey(firing.dedupKey))
+	if err != nil {
 		e.logger.Error("failed to fire PR trigger",
-			zap.String("trigger_id", t.ID), zap.Error(err))
+			zap.String("trigger_id", t.ID), zap.String("event", firing.event), zap.Error(err))
 	}
+	return result, err
 }
 
 // matchesBranches checks if a branch matches any of the filter patterns.

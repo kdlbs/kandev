@@ -881,11 +881,26 @@ func (s *Service) SearchUserIssuesForWorkspace(
 	return s.filterPersonalIssuesByAutomation(ctx, workspaceID, filterIssuesByWorkspaceScope(issuesForHost(issues, resolved.host().String()), settings))
 }
 
-// ListAutomationPRs is the background-automation search path. It always uses
-// the workspace automation identity and enforces the configured repo boundary.
-func (s *Service) ListAutomationPRs(
-	ctx context.Context, workspaceID, owner, repo, customQuery string,
-) ([]*PR, error) {
+// ListAutomationOpenPRs lists every open PR in one repository through the
+// workspace automation identity, enforcing the configured repository boundary.
+func (s *Service) ListAutomationOpenPRs(
+	ctx context.Context, workspaceID, owner, repo string,
+) ([]*PR, bool, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, false, err
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
+	if err != nil {
+		return nil, false, err
+	}
+	return resolved.Client.ListOpenPRs(ctx, owner, repo)
+}
+
+// GetAutomationPR reads one PR through the workspace automation identity,
+// enforcing the configured repository boundary.
+func (s *Service) GetAutomationPR(
+	ctx context.Context, workspaceID, owner, repo string, number int,
+) (*PR, error) {
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
 		return nil, err
 	}
@@ -893,7 +908,7 @@ func (s *Service) ListAutomationPRs(
 	if err != nil {
 		return nil, err
 	}
-	return resolved.Client.ListReviewRequestedPRs(ctx, "", "", customQuery)
+	return resolved.Client.GetPR(ctx, owner, repo, number)
 }
 
 // SearchUserPRsPaged is the paginated variant of SearchUserPRs. Results are

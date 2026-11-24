@@ -1,0 +1,148 @@
+package automation
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"time"
+)
+
+// prObservationTablesSQL stores, per github_pr trigger and open pull request,
+// what the evaluator last processed: the head SHA, the requested reviewers,
+// the review-request generation, and a pending quiet-period head.
+const prObservationTablesSQL = `
+	CREATE TABLE IF NOT EXISTS automation_pr_observations (
+		trigger_id TEXT NOT NULL REFERENCES automation_triggers(id) ON DELETE CASCADE,
+		repo_owner TEXT NOT NULL,
+		repo_name TEXT NOT NULL,
+		pr_number INTEGER NOT NULL,
+		head_sha TEXT NOT NULL,
+		requested TEXT NOT NULL DEFAULT '[]',
+		review_generation BIGINT NOT NULL DEFAULT 0,
+		pending_head_sha TEXT NOT NULL DEFAULT '',
+		pending_since {{timestamp}},
+		updated_at {{timestamp}} NOT NULL,
+		PRIMARY KEY (trigger_id, repo_owner, repo_name, pr_number)
+	);
+`
+
+// PRObservation is the evaluator's processed state for one trigger and one
+// open pull request.
+type PRObservation struct {
+	TriggerID        string
+	RepoOwner        string
+	RepoName         string
+	PRNumber         int
+	HeadSHA          string
+	Requested        []string
+	ReviewGeneration int64
+	PendingHeadSHA   string
+	PendingSince     *time.Time
+}
+
+type prObservationRow struct {
+	TriggerID        string       `db:"trigger_id"`
+	RepoOwner        string       `db:"repo_owner"`
+	RepoName         string       `db:"repo_name"`
+	PRNumber         int          `db:"pr_number"`
+	HeadSHA          string       `db:"head_sha"`
+	Requested        string       `db:"requested"`
+	ReviewGeneration int64        `db:"review_generation"`
+	PendingHeadSHA   string       `db:"pending_head_sha"`
+	PendingSince     sql.NullTime `db:"pending_since"`
+}
+
+func (r prObservationRow) toObservation() (*PRObservation, error) {
+	obs := &PRObservation{
+		TriggerID: r.TriggerID, RepoOwner: r.RepoOwner, RepoName: r.RepoName, PRNumber: r.PRNumber,
+		HeadSHA: r.HeadSHA, ReviewGeneration: r.ReviewGeneration, PendingHeadSHA: r.PendingHeadSHA,
+	}
+	if r.PendingSince.Valid {
+		since := r.PendingSince.Time.UTC()
+		obs.PendingSince = &since
+	}
+	if err := json.Unmarshal([]byte(r.Requested), &obs.Requested); err != nil {
+		return nil, fmt.Errorf("decode requested reviewers: %w", err)
+	}
+	return obs, nil
+}
+
+// ListPRObservations returns every stored observation for one trigger and
+// repository, keyed by pull request number.
+func (s *Store) ListPRObservations(ctx context.Context, triggerID, owner, repo string) (map[int]*PRObservation, error) {
+	var rows []prObservationRow
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
+		SELECT trigger_id, repo_owner, repo_name, pr_number, head_sha, requested,
+			review_generation, pending_head_sha, pending_since
+		FROM automation_pr_observations
+		WHERE trigger_id = ? AND repo_owner = ? AND repo_name = ?`), triggerID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[int]*PRObservation, len(rows))
+	for _, row := range rows {
+		obs, err := row.toObservation()
+		if err != nil {
+			return nil, err
+		}
+		result[obs.PRNumber] = obs
+	}
+	return result, nil
+}
+
+// UpsertPRObservation stores the observation, replacing any previous row for
+// the same trigger and pull request.
+func (s *Store) UpsertPRObservation(ctx context.Context, obs *PRObservation) error {
+	if obs == nil {
+		return errors.New("pr observation is required")
+	}
+	requested := append([]string(nil), obs.Requested...)
+	sort.Strings(requested)
+	if requested == nil {
+		requested = []string{}
+	}
+	encoded, err := json.Marshal(requested)
+	if err != nil {
+		return err
+	}
+	var pendingSince interface{}
+	if obs.PendingSince != nil {
+		pendingSince = obs.PendingSince.UTC()
+	}
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
+		INSERT INTO automation_pr_observations (
+			trigger_id, repo_owner, repo_name, pr_number, head_sha, requested,
+			review_generation, pending_head_sha, pending_since, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(trigger_id, repo_owner, repo_name, pr_number) DO UPDATE SET
+			head_sha = excluded.head_sha,
+			requested = excluded.requested,
+			review_generation = excluded.review_generation,
+			pending_head_sha = excluded.pending_head_sha,
+			pending_since = excluded.pending_since,
+			updated_at = excluded.updated_at`),
+		obs.TriggerID, obs.RepoOwner, obs.RepoName, obs.PRNumber, obs.HeadSHA, string(encoded),
+		obs.ReviewGeneration, obs.PendingHeadSHA, pendingSince, time.Now().UTC())
+	return err
+}
+
+// DeletePRObservation removes one observation.
+func (s *Store) DeletePRObservation(ctx context.Context, triggerID, owner, repo string, number int) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		DELETE FROM automation_pr_observations
+		WHERE trigger_id = ? AND repo_owner = ? AND repo_name = ? AND pr_number = ?`),
+		triggerID, owner, repo, number)
+	return err
+}
+
+// deletePRObservationsForTrigger removes every observation of a trigger. The
+// foreign key cascades on PostgreSQL; SQLite connections may run without
+// foreign-key enforcement, so trigger deletion clears them explicitly.
+func (s *Store) deletePRObservationsForTrigger(ctx context.Context, triggerID string) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`DELETE FROM automation_pr_observations WHERE trigger_id = ?`), triggerID)
+	return err
+}

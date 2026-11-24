@@ -275,6 +275,7 @@ type ghPR struct {
 	MergedAt            string                `json:"mergedAt"`
 	ClosedAt            string                `json:"closedAt"`
 	ReviewRequests      []ghRequestedReviewer `json:"reviewRequests"`
+	Labels              []ghLabel             `json:"labels"`
 	MaintainerCanModify bool                  `json:"maintainerCanModify"`
 	HeadRepository      ghRepository          `json:"headRepository"`
 	HeadRepositoryOwner ghRepositoryOwner     `json:"headRepositoryOwner"`
@@ -292,6 +293,10 @@ type ghPR struct {
 	AutoMergeRequest *struct {
 		EnabledAt string `json:"enabledAt"`
 	} `json:"autoMergeRequest"`
+}
+
+type ghLabel struct {
+	Name string `json:"name"`
 }
 
 type ghRepository struct {
@@ -457,6 +462,27 @@ func (c *GHClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*
 		return nil, fmt.Errorf("list authored PRs: %w", err)
 	}
 	return c.parsePRList(out, owner, repo)
+}
+
+// ghOpenPRListLimit bounds `gh pr list`. A result that reaches the limit is
+// reported as incomplete so callers never treat a truncated listing as
+// authoritative.
+const ghOpenPRListLimit = 1000
+
+func (c *GHClient) ListOpenPRs(ctx context.Context, owner, repo string) ([]*PR, bool, error) {
+	out, err := c.run(ctx, "pr", "list",
+		"--repo", fmt.Sprintf("%s/%s", owner, repo),
+		"--state", "open",
+		"--limit", strconv.Itoa(ghOpenPRListLimit),
+		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,labels,reviewRequests,createdAt,updatedAt")
+	if err != nil {
+		return nil, false, fmt.Errorf("list open PRs: %w", err)
+	}
+	prs, err := c.parsePRList(out, owner, repo)
+	if err != nil {
+		return nil, false, err
+	}
+	return prs, len(prs) < ghOpenPRListLimit, nil
 }
 
 func (c *GHClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, customQuery string) ([]*PR, error) {
@@ -1612,6 +1638,19 @@ func (c *GHClient) parseSearchResults(data string) ([]*PR, error) {
 	return prs, nil
 }
 
+func convertGHLabels(raw []ghLabel) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	labels := make([]string, 0, len(raw))
+	for _, label := range raw {
+		if label.Name != "" {
+			labels = append(labels, label.Name)
+		}
+	}
+	return labels
+}
+
 func convertGHPR(raw *ghPR, owner, repo string) *PR {
 	state := strings.ToLower(raw.State)
 	if raw.MergedAt != "" {
@@ -1649,6 +1688,7 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		MergedByLogin:        raw.MergedBy.Login,
 		AutoMergeEnabled:     raw.AutoMergeRequest != nil,
 		RequestedReviewers:   convertGHRequestedReviewers(raw.ReviewRequests),
+		Labels:               convertGHLabels(raw.Labels),
 		CreatedAt:            raw.CreatedAt,
 		UpdatedAt:            raw.UpdatedAt,
 		MergedAt:             parseTimePtr(raw.MergedAt),

@@ -109,6 +109,7 @@ Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace
 6. Choose **Context between runs**:
    - **Start a new task for every run** creates a separate task, conversation, and task environment for each firing. In the hidden destination, those tasks do not appear in Kanban or the sidebar; in the normal-task destination, they do.
    - **Continue the previous session** reuses one task, primary session, conversation, and worktree across firings. The destination and exact repository/base-branch pairs remain part of continuation compatibility.
+   - **Continue one task per pull request** appears when the automation has a GitHub PR condition. Each pull request keeps its own task, so different pull requests can run in parallel. See [Following up on a pull request](#following-up-on-a-pull-request).
 7. Keep the default maximum concurrency of 1 unless parallel work is safe. Reused sessions always use one active run.
 8. Choose a schedule and optional GitHub condition, or switch to webhook mode.
 9. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
@@ -234,16 +235,31 @@ A non-empty schedule must have a next occurrence within the supported five-year 
 
 ### GitHub pull requests
 
-The GitHub evaluator polls every 60 seconds and requires a working GitHub integration. It searches open PRs and supports:
+The GitHub evaluator polls every 60 seconds and requires a working GitHub integration. It lists each selected repository's open PRs and supports:
 
 - an explicit list of repositories;
 - base-branch glob filters, including `*` and a trailing wildcard such as `release/*`;
 - exact author-login filters;
+- label filters (saved through the API, MCP, or YAML; the form does not offer them), which match a PR that has at least one listed label;
 - draft exclusion.
 
-Select at least one repository. Although the UI offers **All repos**, an empty repository list is not evaluated, so it produces no PR runs. The editor exposes only the **Opened** event, which must be selected for PR polling and firing. Clearing that checkbox stops PR polling and firing; a missing, null, or empty event selection also stays inactive. The first evaluation considers every currently open matching PR rather than only PRs opened after the automation was enabled. Each matching PR is then deduplicated once per automation by repository and PR number.
+Select at least one repository. Although the UI offers **All repos**, an empty repository list is not evaluated, so it produces no PR runs. A missing, null, or empty event selection stays inactive. The condition offers three events:
 
-The current evaluator does not apply label filters, and the current form does not offer them.
+- **Opened** (`opened`) fires once per PR. The first evaluation considers every currently open matching PR rather than only PRs opened after the automation was enabled. Each matching PR is deduplicated once per automation by repository and PR number.
+- **New commits** (`new_commits`) fires once for each new head commit of an open PR. The first time a trigger sees a PR, Kandev only records its head, so enabling the event does not review every open PR. Pushes made while a PR does not match the filters do not fire later. **Wait until pushes stop for** (`quiet_period_minutes`, 0 to 1440) fires only after the head stays unchanged that long; a newer push restarts the wait.
+- **Review requested** (`review_requested`) fires when a matching reviewer is newly requested, including **Re-request review** after an earlier review. **Reviewers** (`reviewers`) accepts user logins and `org/team-slug` values; empty matches any reviewer.
+
+Kandev fires at most one of these per PR per poll, in the order above. Every filter applies to every event.
+
+#### Following up on a pull request
+
+With **Continue one task per pull request** (`reuse_per_pr`), the first firing for a PR creates its task, and later firings for the same PR send a new turn to that task's session. A firing without a PR, such as **Run now** or a schedule, starts a new task. If the PR's task is deleted, archived, incompatible, or its session ended, Kandev creates a replacement task and records that on the run.
+
+- **Follow-up prompt** (`follow_up_prompt`) replaces the main prompt when a firing continues the PR's task. Leave it empty to reuse the main prompt.
+- **Move to step when continuing** (`pr_continuation_step_id`, normal tasks only) moves the task to a workflow step, such as a review column, before the follow-up. The step's own auto-start prompt does not run.
+- **When the pull request is merged** and **When the pull request is closed without merging** (`pr_merged_action`, `pr_closed_action`) keep, archive, or delete the PR's task. Kandev applies them directly, without an agent run, within about a minute of the PR ending. Deleting removes the task's conversation and files.
+
+When the PR's task is busy, because a run is open or someone is using its session, Kandev holds new firings and checks again each minute. The next check after the task is free fires once, for the PR's latest state. Maximum concurrent runs still applies to the whole automation.
 
 ### GitHub pull requests merged
 
@@ -314,7 +330,7 @@ A trigger can succeed and still run nothing. A disabled automation, an already-f
 
 Every trigger supports `{{trigger.type}}`, `{{trigger.timestamp}}`, and `{{data.<path>}}`.
 
-GitHub PR runs additionally support `{{pr.number}}`, `{{pr.title}}`, `{{pr.url}}`, `{{pr.author}}`, `{{pr.repo}}`, `{{pr.branch}}`, `{{pr.base_branch}}`, and `{{pr.body}}`.
+GitHub PR runs additionally support `{{pr.number}}`, `{{pr.title}}`, `{{pr.url}}`, `{{pr.author}}`, `{{pr.repo}}`, `{{pr.branch}}`, `{{pr.base_branch}}`, `{{pr.body}}`, `{{pr.head_sha}}`, `{{pr.previous_head_sha}}` (the head the previous firing saw; empty for `opened`), `{{pr.event}}` (`opened`, `new_commits`, or `review_requested`), and `{{pr.requested_reviewers}}` (newly requested reviewers for `review_requested`).
 
 Webhook runs support `{{webhook.body}}` and `{{webhook.<path>}}`. Dot segments traverse nested objects, and a numeric segment indexes an array, for example `{{webhook.commits.0.message}}`. Scalar values are converted to text; objects and arrays become JSON. Missing or unresolved placeholders are removed rather than sent literally.
 

@@ -54,7 +54,18 @@ export type ManagedDeliveryStatus =
   | "uncertain"
   | "unavailable";
 
-export type ContinuationPolicy = "new_task" | "reuse_thread";
+export type ContinuationPolicy = "new_task" | "reuse_thread" | "reuse_per_pr";
+
+/** What happens to a per-PR task when its pull request ends. */
+export type PREndAction = "keep" | "archive" | "delete";
+
+/** reuse_per_pr options; empty or keep for every other policy. */
+export type PRContinuationSettings = {
+  follow_up_prompt?: string;
+  pr_continuation_step_id?: string;
+  pr_merged_action?: PREndAction;
+  pr_closed_action?: PREndAction;
+};
 export type TaskMode = "automation_run" | "normal_task" | "managed_conversation";
 export type RepositoryMode = "workspace_default" | "selected" | "none";
 
@@ -132,6 +143,10 @@ export type Automation = {
   max_concurrent_runs: number;
   /** How later firings get their task and conversation context. */
   continuation_policy?: ContinuationPolicy;
+  follow_up_prompt?: string;
+  pr_continuation_step_id?: string;
+  pr_merged_action?: PREndAction;
+  pr_closed_action?: PREndAction;
   managed_destination?: ManagedConversationDestination;
   retry_policy?: RetryPolicy;
   /** Exact plugin tools approved by the last native editor save. */
@@ -362,6 +377,10 @@ export type CreateAutomationRequest = {
   task_title_template?: string;
   max_concurrent_runs?: number;
   continuation_policy?: ContinuationPolicy;
+  follow_up_prompt?: string;
+  pr_continuation_step_id?: string;
+  pr_merged_action?: PREndAction;
+  pr_closed_action?: PREndAction;
   managed_destination?: ManagedConversationDestination;
   task_mode?: TaskMode;
   repository_mode?: RepositoryMode;
@@ -390,6 +409,10 @@ export type UpdateAutomationRequest = {
   enabled?: boolean;
   max_concurrent_runs?: number;
   continuation_policy?: ContinuationPolicy;
+  follow_up_prompt?: string;
+  pr_continuation_step_id?: string;
+  pr_merged_action?: PREndAction;
+  pr_closed_action?: PREndAction;
   managed_destination?: ManagedConversationDestination;
   task_mode?: TaskMode;
   repository_mode?: RepositoryMode;

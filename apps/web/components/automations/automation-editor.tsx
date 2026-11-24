@@ -78,6 +78,10 @@ const defaultForm: FormState = {
   enabled: true,
   maxConcurrentRuns: 1,
   continuationPolicy: "new_task",
+  followUpPrompt: "",
+  prContinuationStepId: "",
+  prMergedAction: "keep",
+  prClosedAction: "keep",
   taskMode: "automation_run",
   managedDestination: undefined,
   repositoryMode: "none",
@@ -111,10 +115,26 @@ function formFromAutomation(a: Automation): FormState {
     enabled: a.enabled,
     maxConcurrentRuns: a.max_concurrent_runs,
     continuationPolicy: a.continuation_policy ?? "new_task",
+    ...prContinuationFormFields(a),
     retryPolicy: a.retry_policy ?? DEFAULT_RETRY_POLICY,
     pluginTools: a.plugin_tools ?? [],
     mcpSelection: a.mcp_selection,
     mcpSelectionRevision: a.mcp_selection_revision ?? 0,
+  };
+}
+
+/** Initialize per-PR options, defaulting fields an older server omits. */
+function prContinuationFormFields(
+  a: Automation,
+): Pick<
+  FormState,
+  "followUpPrompt" | "prContinuationStepId" | "prMergedAction" | "prClosedAction"
+> {
+  return {
+    followUpPrompt: a.follow_up_prompt ?? "",
+    prContinuationStepId: a.pr_continuation_step_id ?? "",
+    prMergedAction: a.pr_merged_action ?? "keep",
+    prClosedAction: a.pr_closed_action ?? "keep",
   };
 }
 
@@ -513,6 +533,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         savedForm={dirtyBaseline}
         workspaceId={workspaceId}
         updateField={updateField}
+        hasPRTrigger={triggerActions.allTriggers.some((trigger) => trigger.type === "github_pr")}
       />
       <Separator />
       <RunsSection

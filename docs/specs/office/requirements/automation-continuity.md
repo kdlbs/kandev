@@ -25,6 +25,14 @@ only to hidden automation agents.
 It includes Configuration and preserves the Automation principal, hidden-run lifecycle, and Core coordination restrictions.
 Legacy automations retain the fixed catalog. Explicit selections use the linked extension.
 
+## PR continuation extension
+
+[GitHub PR follow-up](automations-pr-follow-up.md) adds a third policy,
+`reuse_per_pr`, which keeps one task per pull request and can archive or
+delete it when the pull request ends. It reuses this
+document's exact run binding and continuation dispatch. The `new_task` and
+`reuse_thread` contracts here are unchanged.
+
 ## Terminology
 
 - **New-task policy:** `new_task`, which creates an isolated hidden task,
