@@ -87,11 +87,15 @@ Workflow Sync equivalent is AC-INTEGRATIONS-GITHUB-RATE-003.7.
 
 ## Technical approach
 
-- `promptsync/automatic.go`: `SyncIfDue` takes a `dueSnapshot` under
-  `TryLock`, fetches without the lock, then locks again and checks
-  `currentAutomaticTarget`. The check compares `UpdatedAt`,
-  `CredentialFingerprint`, the source fields, and the GitHub host. A
-  canceled context or a failed check records nothing.
+- `promptsync/automatic.go`: `SyncIfDue` starts an `automaticRun` under
+  `TryLock`. The run holds the snapshot, the live fingerprint, and a
+  cancelable context, and is stored in `Service.automatic`. The fetch runs
+  without the lock. Manual runs, saves, removal, and `RunExclusive` call
+  `supersedeAutomaticLocked` under the lock. That cancels the run and ends
+  any admission wait. With the lock taken again, `finishAutomaticLocked`
+  accepts the result only if the run context is live, the row exists, and
+  the live fingerprint is unchanged, including a change to empty. A
+  cancelled or discarded run records nothing.
 - `promptsync/service.go`: split `syncLocked` into `fetchRun` and
   `applyRun`. Manual and automatic runs share both. The automatic fetch keeps
   non-blocking background admission and wraps each list and read in
@@ -101,9 +105,12 @@ Workflow Sync equivalent is AC-INTEGRATIONS-GITHUB-RATE-003.7.
   with `retryDeferred`. The coordinator's HTTP client is unexported and rejects
   loopback, so `promptsync` tests cannot drive it. `retryDeferred` has the same
   wait semantics, matches Workflow Sync, and can be tested with deferral fakes.
-  The guard does not re-check that the configuration is due. A credential
-  reset clears due-ness only in memory, and `UpdatedAt` and the fingerprint
-  already cover every write.
+  Review replaced the first `UpdatedAt` guard with cancellation under the
+  lock. A manual apply whose status write failed left `UpdatedAt` unchanged,
+  and a stale automatic result could then overwrite it. A disconnected
+  credential reports an empty fingerprint, which the poll-recovery refresh
+  ignores. GitLab has no fingerprint API, so the requirement covers only
+  credential changes that a provider reports.
 
 ## Tests
 
@@ -115,19 +122,25 @@ fake defers the first read of every file, which models background pacing.
   two attempts per file. It failed before the fix with `prompt "a" is applied
   by the paced automatic run`.
 - `TestAutomaticSyncDoesNotBlockManualWorkWhileWaiting`: **Sync now**
-  completes while the automatic read waits. The automatic result is then
-  discarded.
-- `TestAutomaticSyncDiscardsResultAfterChange`: table-driven over a
-  configuration save, removal, and a credential change during the wait.
+  completes while the automatic read waits. The waiting run then ends with
+  its admission gate still closed and applies nothing.
+- `TestAutomaticSyncSupersededByLocalChangeWakesAndDiscards`: table-driven
+  over a configuration save, removal, and `RunExclusive`. Each case ends the
+  wait without opening the gate.
+- `TestAutomaticSyncDiscardsResultAfterCredentialChange`: covers a
+  fingerprint that is replaced and one that becomes empty during the wait.
+  The run records no failure.
 - `TestAutomaticSyncCancelledDuringFetchRecordsNothing`.
-- `TestAutomaticRunDeferredByGitHubAdmissionIsNotAFailure` now asserts that
-  the run waits without listing again or recording a failure.
+- `TestAutomaticRunDeferredByGitHubAdmissionIsNotAFailure` was removed. It
+  also passed on the old code, and the tests above cover its assertions.
 
 ## E2E tests
 
 None. The repair is a backend scheduling path with no UI or API change. The
 browser fixture cannot reproduce principal-wide pacing reliably. The Go
-regression test uses the real coordinator.
+regression test uses the `pacedGitHub` deferral fake. A live test instance
+covered real pacing: GitHub CLI auth against `kdlbs/kandev` `docs/specs/guide`
+with a 60-second interval.
 
 ## Work orders
 
@@ -137,8 +150,6 @@ regression test uses the real coordinator.
 
 - A configuration may change between the guard and apply. The apply holds the
   mutex, so every writer is serialized behind it.
-- `UpdatedAt` equality depends on the stored timestamp round-trip. Both
-  values come from `store.Get`, so they use the same encoding.
 - An automatic run can wait until a primary quota reset. The poller
   goroutine is dedicated, so ticks pause during that wait and status is
   unchanged. Stop cancels the wait.

@@ -57,9 +57,12 @@ type Service struct {
 	prompts PromptApplier
 	refs    ReferenceSource
 	logger  *logger.Logger
-	// mu serializes sync runs, configuration saves, and removal, held across
-	// fetch and apply so a removal cannot interleave with an in-flight apply.
+	// mu serializes manual runs, automatic apply, configuration saves, and
+	// removal, held across fetch and apply for manual runs.
 	mu sync.Mutex
+	// automatic is the in-flight automatic run, guarded by mu. Every other
+	// locked mutation cancels it so its result can never apply.
+	automatic *automaticRun
 
 	workspaceAuthorizer func(context.Context, string) error
 	workspaceExists     func(context.Context, string) (bool, error)
@@ -97,6 +100,7 @@ func (s *Service) SetWorkspaceExists(exists func(context.Context, string) (bool,
 func (s *Service) RunExclusive(fn func() error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.supersedeAutomaticLocked()
 	return fn()
 }
 
@@ -150,6 +154,7 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*Config
 
 // saveLocked stores a normalized, authorized request. The caller holds s.mu.
 func (s *Service) saveLocked(ctx context.Context, req *SetConfigRequest) (*Config, error) {
+	s.supersedeAutomaticLocked()
 	if req.Provider != reposync.ProviderGitHub || s.github == nil {
 		return s.store.Upsert(ctx, req)
 	}
@@ -184,6 +189,7 @@ func (s *Service) DeleteConfig(ctx context.Context, removal Removal) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.supersedeAutomaticLocked()
 	cfg, err := s.store.Get(ctx)
 	if err != nil {
 		return err
@@ -270,6 +276,7 @@ func (s *Service) fingerprintProvider(provider string) (CredentialFingerprintPro
 func (s *Service) syncLocked(
 	ctx context.Context, mode syncMode, cfg *Config, resolutions map[string]promptservice.ConflictChoice,
 ) (*SyncResult, error) {
+	s.supersedeAutomaticLocked()
 	run := s.fetchRun(ctx, mode, cfg, false)
 	if run.err != nil {
 		s.recordRunError(ctx, cfg, mode, run.err)

@@ -260,8 +260,10 @@ temporary failures and to stop repeating permanent ones.
   paced. Deferral alone shall not record a failure, repeat completed reads,
   or apply partial results. **Sync now**, configuration saves, version
   saves, and removal shall not wait for a deferred automatic sync. A
-  configuration change, credential change, removal, or later manual result
-  during the wait shall discard the automatic result without recording it.
+  configuration save, removal, or manual sync during the wait shall end the
+  wait and discard the automatic result without recording it. So shall a
+  credential replacement or disconnection that the provider reports through
+  its connection fingerprint.
 
 ### REQ-INTEGRATIONS-PROMPT-SYNC-006: Unresolved references in Workflow Sync
 

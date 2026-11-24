@@ -208,46 +208,91 @@ func TestAutomaticSyncDoesNotBlockManualWorkWhileWaiting(t *testing.T) {
 	}
 	_, commitsAfterManual, _ := gh.counts()
 
-	openGateAndWait(t, gh, done)
+	waitForRun(t, done)
 
 	_, commits, _ := gh.counts()
 	assert.Equal(t, commitsAfterManual, commits, "the later manual result supersedes the automatic run")
 }
 
-func TestAutomaticSyncDiscardsResultAfterChange(t *testing.T) {
-	cases := map[string]func(t *testing.T, svc *Service, gh *pacedGitHub){
-		"configuration saved": func(t *testing.T, svc *Service, _ *pacedGitHub) {
+// waitForRun fails the test unless the automatic run ends while its
+// admission gate is still closed.
+func waitForRun(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("superseded automatic sync kept waiting for admission")
+	}
+}
+
+func TestAutomaticSyncSupersededByLocalChangeWakesAndDiscards(t *testing.T) {
+	cases := map[string]func(t *testing.T, svc *Service){
+		"configuration saved": func(t *testing.T, svc *Service) {
 			_, err := svc.SetConfig(context.Background(), &SetConfigRequest{
 				WorkspaceID: "ws-1", Provider: reposync.ProviderGitHub, RepoOwner: "acme", RepoName: "other",
 			})
 			require.NoError(t, err)
 		},
-		"configuration removed": func(t *testing.T, svc *Service, _ *pacedGitHub) {
+		"configuration removed": func(t *testing.T, svc *Service) {
 			require.NoError(t, svc.DeleteConfig(context.Background(), Removal{}))
 		},
-		"credential changed": func(_ *testing.T, _ *Service, gh *pacedGitHub) {
-			gh.setFingerprint("fp-2")
+		"exclusive cleanup": func(t *testing.T, svc *Service) {
+			require.NoError(t, svc.RunExclusive(func() error { return nil }))
 		},
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
 			gh := newPacedGitHub()
 			svc, prompts := newPacedFixture(t, gh)
-			ctx := context.Background()
-			done := startWaitingAutomaticSync(t, ctx, svc, gh)
+			done := startWaitingAutomaticSync(t, context.Background(), svc, gh)
 
-			change(t, svc, gh)
+			change(t, svc)
 			_, commitsBefore, _ := gh.counts()
-			openGateAndWait(t, gh, done)
+			waitForRun(t, done)
 
 			_, commits, _ := gh.counts()
 			assert.Equal(t, commitsBefore, commits, "the superseded result is not applied")
-			list, err := prompts.ListPrompts(ctx)
-			require.NoError(t, err)
-			for _, prompt := range list {
-				assert.NotEqual(t, "sync", prompt.Source, "no prompt is synced by the superseded run")
-			}
+			assertNoSyncedPrompts(t, prompts)
 		})
+	}
+}
+
+func TestAutomaticSyncDiscardsResultAfterCredentialChange(t *testing.T) {
+	for name, fingerprint := range map[string]string{"replaced": "fp-2", "removed": ""} {
+		t.Run(name, func(t *testing.T) {
+			gh := newPacedGitHub()
+			svc, prompts := newPacedFixture(t, gh)
+			ctx := context.Background()
+			svc.refreshCredentialFingerprint(ctx, mustConfig(t, svc))
+			done := startWaitingAutomaticSync(t, ctx, svc, gh)
+
+			gh.setFingerprint(fingerprint)
+			openGateAndWait(t, gh, done)
+
+			_, commits, _ := gh.counts()
+			assert.Equal(t, 1, commits, "only the configuration save committed")
+			assertNoSyncedPrompts(t, prompts)
+			cfg := mustConfig(t, svc)
+			assert.Empty(t, cfg.LastError, "a stale run records no failure")
+			assert.Nil(t, cfg.LastSyncedAt)
+		})
+	}
+}
+
+func mustConfig(t *testing.T, svc *Service) *Config {
+	t.Helper()
+	cfg, err := svc.GetConfig(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	return cfg
+}
+
+func assertNoSyncedPrompts(t *testing.T, prompts *promptservice.Service) {
+	t.Helper()
+	list, err := prompts.ListPrompts(context.Background())
+	require.NoError(t, err)
+	for _, prompt := range list {
+		assert.NotEqual(t, "sync", prompt.Source, "no prompt is synced by the superseded run")
 	}
 }
 

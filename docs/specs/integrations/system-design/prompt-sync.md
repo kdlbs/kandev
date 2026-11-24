@@ -322,25 +322,25 @@ An automatic run fetches outside the service mutex
 so a dropped deferral would recur after the run's own listing every tick.
 
 1. `SyncIfDue` takes the mutex with `TryLock`, refreshes the credential
-   fingerprint, checks suspension and the schedule, and keeps the loaded
-   configuration as the snapshot. It then releases the mutex.
+   fingerprint, and checks suspension and the schedule. It records an
+   `automaticRun` with the snapshot, the live fingerprint, and a cancelable
+   context in `Service.automatic`, then releases the mutex.
 2. The run checks the credential workspace, binds the GitHub host, and
    fetches with non-blocking background admission. On
    `AdmissionDeferredError`, `retryDeferred` calls `Wait` and repeats only
    that read, so completed reads are kept. GitLab uses the same fetch.
-3. The run takes the mutex again, reloads the configuration, and refreshes
-   the credential fingerprint. It continues only when the row still exists
-   and `UpdatedAt`, `CredentialFingerprint`, and the source fields match the
-   snapshot. Saves and recorded results write `UpdatedAt`; removal deletes
-   the row.
-   A failed guard discards the result and logs `prompt sync automatic
-   result superseded`.
-4. With the guard passed, the run records a fetch error through the normal
-   failure policy, or applies the files inside `CommitWorkspaceGitHubHost`
-   and records success.
+3. Every other mutation under the mutex calls `supersedeAutomaticLocked`:
+   manual runs, configuration saves, removal, and `RunExclusive`. That
+   cancels the run context, so a wait ends and the run returns without the
+   lock. Otherwise the run takes the mutex again. It continues only if its
+   context is live, the row exists, and the live fingerprint matches,
+   including a change to empty. A discarded run records nothing and logs
+   `prompt sync automatic result superseded`.
+4. The run records a fetch error through the failure policy, or applies the
+   files inside `CommitWorkspaceGitHubHost` and records success.
 
-`Poller.Stop` cancels the fetch, which then records nothing. The poller
-goroutine owns the run, so no second automatic run starts while one waits.
+`Poller.Stop` cancels the run, which records nothing. Only the poller
+goroutine starts automatic runs, so one runs at a time.
 
 ### Prompt file parsing
 

@@ -23,9 +23,10 @@ if anything changed during the wait.
 
 ## In scope
 
-- `SyncIfDue`: take a snapshot under `TryLock`, then unlock. Fetch and wait
-  out admission deferrals with `retryDeferred`. Lock again, reload and refresh
-  the fingerprint, check `currentAutomaticTarget`, then record or apply.
+- `SyncIfDue`: start a cancelable `automaticRun` under `TryLock`, then unlock.
+  Fetch and wait out admission deferrals with `retryDeferred`. Other locked
+  mutations cancel the run. Lock again and check `finishAutomaticLocked`,
+  then record or apply.
 - Extract the shared apply-and-record tail from `syncLocked` so manual and
   automatic runs call the same function.
 - Discard the result, record nothing, and log `prompt sync automatic result
@@ -99,3 +100,7 @@ Completed.
 - The specification lint and catalog validation passed.
 - The automatic fetch uses `retryDeferred` instead of blocking coordinator
   admission. The [plan](plan.md#technical-approach) records why.
+- Review fixes added cancellation under the lock and live fingerprint checks
+  that include a removed connection. The superseded-wakeup and
+  credential-change tests passed five times in a row under `-race`.
+  Changed-file lint reported 0 issues.
