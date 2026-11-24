@@ -687,9 +687,13 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 	}
 	payloadEvent := event
 	if payloadEvent.TurnID == "" && execution != nil {
-		payloadEvent.TurnID = execution.promptTurnIDForEvent(event)
+		if streams.CopilotInterruptionNoticeType(event.Data) != "" {
+			payloadEvent.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
+		} else {
+			payloadEvent.TurnID = execution.promptTurnIDForEvent(event)
+		}
 	}
-	payloadEvent.CanonicalMessageBaseID = canonicalAgentMessageID(execution, event)
+	payloadEvent.CanonicalMessageBaseID = canonicalAgentMessageID(execution, payloadEvent)
 	payloadEvent.CanonicalMessageID = payloadEvent.CanonicalMessageBaseID
 	payloadEvent.CanonicalProjection = false
 	payloadEvent.CanonicalMessageAppend = false
@@ -749,6 +753,9 @@ func canonicalAgentDeliveryEvent(event agentctl.AgentEvent) bool {
 }
 
 func canonicalMessageType(event agentctl.AgentEvent) string {
+	if event.TurnID != "" && streams.CopilotInterruptionNoticeType(event.Data) != "" {
+		return string(models.MessageTypeStatus)
+	}
 	if event.Type == streams.EventTypeReasoning {
 		return "thinking"
 	}
@@ -756,10 +763,20 @@ func canonicalMessageType(event agentctl.AgentEvent) string {
 }
 
 func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEvent) string {
+	noticeType := ""
+	if event.TurnID != "" {
+		noticeType = streams.CopilotInterruptionNoticeType(event.Data)
+	}
 	if event.CanonicalMessageBaseID != "" {
+		if noticeType != "" {
+			return copilotInterruptionCanonicalMessageID(event.CanonicalMessageBaseID, noticeType)
+		}
 		return event.CanonicalMessageBaseID
 	}
 	if event.CanonicalMessageID != "" {
+		if noticeType != "" {
+			return copilotInterruptionCanonicalMessageID(event.CanonicalMessageID, noticeType)
+		}
 		return event.CanonicalMessageID
 	}
 	streamID := event.DeliveryStreamID
@@ -795,6 +812,15 @@ func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEven
 		// merging unrelated native replies into one stream-wide transcript row.
 		scope = "sequence:" + strconv.FormatUint(event.DeliverySequence, 10)
 	}
-	digest := sha256.Sum256([]byte(streamID + ":" + event.Type + ":" + scope))
+	eventKind := event.Type
+	if noticeType := streams.CopilotInterruptionNoticeType(event.Data); event.TurnID != "" && noticeType != "" {
+		eventKind += ":copilot-interruption:" + noticeType
+	}
+	digest := sha256.Sum256([]byte(streamID + ":" + eventKind + ":" + scope))
 	return "agent-delivery-" + fmt.Sprintf("%x", digest[:16])
+}
+
+func copilotInterruptionCanonicalMessageID(baseID, classification string) string {
+	digest := sha256.Sum256([]byte(baseID + ":copilot-interruption:" + classification))
+	return "copilot-interruption-" + fmt.Sprintf("%x", digest[:16])
 }

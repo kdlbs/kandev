@@ -182,11 +182,15 @@ func (a *Adapter) sendPrompt(
 	wasLoading := a.isLoadingSession
 	a.isLoadingSession = false
 	a.loadingSessionID = ""
+	trackCopilotInterruption := a.activateCopilotInterruptionPromptIfLoadedLocked(sessionID, promptGeneration)
 	a.mu.Unlock()
 
 	if wasLoading {
 		a.logger.Info("cleared session load suppression flag before sending new prompt",
 			zap.String("session_id", sessionID))
+	}
+	if trackCopilotInterruption {
+		defer a.finishCopilotInterruptionPrompt(sessionID, promptGeneration)
 	}
 
 	a.logger.Info("sending prompt",
