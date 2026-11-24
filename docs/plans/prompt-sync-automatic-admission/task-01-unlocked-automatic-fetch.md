@@ -18,24 +18,27 @@ system_design:
 ## Summary
 
 A due automatic Prompt Sync waits for GitHub background admission without
-holding the service lock. It then applies under a guard that drops the result
-if anything changed during the wait.
+holding the service lock. GitHub runs pin the branch to one commit before they
+read prompt files. The run then applies under a guard that drops the result if
+anything changed during the wait.
 
 ## In scope
 
 - `SyncIfDue`: start a cancelable `automaticRun` under `TryLock`, then unlock.
-  Fetch and wait out admission deferrals with `retryDeferred`. Other locked
-  mutations cancel the run. Lock again and check `finishAutomaticLocked`,
-  then record or apply.
+  Resolve the GitHub branch to a commit SHA, then fetch and wait out admission
+  deferrals with `retryDeferred`. List and read at the resolved SHA. Other
+  locked mutations cancel the run. Lock again and check
+  `finishAutomaticLocked`, then record or apply.
 - Extract the shared apply-and-record tail from `syncLocked` so manual and
   automatic runs call the same function.
 - Discard the result, record nothing, and log `prompt sync automatic result
-  superseded` when the guard fails. Record nothing on context cancellation.
+  superseded` when the guard fails. Automatic failure writes use the cancelable
+  run context, so cancellation before the apply callback records nothing.
 
 ## Out of scope
 
 - Manual runs, Save-and-sync, the source check, and the GitHub coordinator.
-- New status fields, UI, metrics, or API changes.
+- No Prompt Sync status fields, UI, or external API changes.
 
 ## Acceptance
 
@@ -45,6 +48,10 @@ if anything changed during the wait.
   manual result, configuration save, removal, or credential change during
   the wait discards the automatic result.
 - Poller stop during the wait returns promptly and records nothing.
+- A branch rename during a deferred file read keeps the listing and all reads
+  on the resolved commit.
+- Cancellation while the GitHub commit fence is waiting before the apply
+  callback records no failure.
 
 ## Verification
 
@@ -104,3 +111,13 @@ Completed.
   that include a removed connection. The superseded-wakeup and
   credential-change tests passed five times in a row under `-race`.
   Changed-file lint reported 0 issues.
+
+## Contributor PR follow-up
+
+- Automatic GitHub Prompt Sync resolves its branch once and uses that commit
+  SHA for the listing and all file reads. `TestAutomaticSyncPinsResolvedCommitAcrossDeferredRead` covers a branch change during a deferred read.
+- `TestAutomaticSyncCancellationDuringCommitFenceDoesNotRecordFailure` covers cancellation before the apply callback. `TestManualSyncCancellationDuringReadStillRecordsFailure` confirms that manual recovery still stores the error.
+- PAT and GitHub CLI ref resolution tests passed.
+- `go test -trimpath -tags fts5 -count=1 ./internal/promptsync ./internal/reposync ./internal/github ./internal/workflowsync` passed.
+- `go test -race -trimpath -tags fts5 -count=1 ./internal/promptsync` passed.
+- Changed Go lint reported 0 issues. Specification validation checked 463 decisions and 2106 specifications. Specification lint passed.

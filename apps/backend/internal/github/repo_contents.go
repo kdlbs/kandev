@@ -1,10 +1,28 @@
 package github
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"unicode"
 )
+
+type repoCommitSHA struct {
+	SHA string `json:"sha"`
+}
+
+func decodeRepoCommitSHA(raw []byte) (string, error) {
+	var commits []repoCommitSHA
+	if err := json.Unmarshal(raw, &commits); err != nil {
+		return "", fmt.Errorf("decode repository commits: %w", err)
+	}
+	if len(commits) == 0 || commits[0].SHA == "" {
+		return "", errors.New("no commit found for repository ref")
+	}
+	return commits[0].SHA, nil
+}
 
 // repoContentsPath returns the URL-escaped path segment used by the
 // `contents` REST/CLI endpoint for dir/path. Each path segment is escaped

@@ -420,6 +420,25 @@ esac
 	}
 }
 
+func TestGHClient_ResolveRepoRefSHA(t *testing.T) {
+	calls := newFakeGH(t, ghResponse{
+		Prefix: "api repos/acme/widget/commits",
+		Stdout: `[{"sha":"0123456789abcdef"}]`,
+	})
+
+	got, err := NewGHClient().ResolveRepoRefSHA(context.Background(), "acme", "widget", "feature/prompt-sync")
+	if err != nil {
+		t.Fatalf("ResolveRepoRefSHA: %v", err)
+	}
+	if got != "0123456789abcdef" {
+		t.Fatalf("SHA = %q, want resolved commit", got)
+	}
+	assertGHArgv(t, calls(t), 0, []string{
+		"api", "repos/acme/widget/commits", "-X", "GET",
+		"-f", "sha=feature/prompt-sync", "-f", "per_page=1",
+	})
+}
+
 func TestGHClient_ListRepoDirectoryOptInInteractiveAdmissionReturnsQuotaRetry(t *testing.T) {
 	logPath := installFakeGH(t, `#!/bin/sh
 printf '%s\n' "$*" >> "$GH_ARGS_LOG"

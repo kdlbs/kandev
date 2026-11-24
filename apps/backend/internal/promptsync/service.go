@@ -298,24 +298,52 @@ type fetchedRun struct {
 }
 
 // fetchRun checks the credential workspace, binds the GitHub connection, and
-// reads the prompt files. With a non-nil wait, a read that GitHub admission
-// defers waits for admission and runs again.
+// reads the prompt files. Automatic GitHub runs resolve one SHA before reading.
+// With a non-nil wait, a deferred read waits for admission and runs again.
 func (s *Service) fetchRun(ctx context.Context, mode syncMode, cfg *Config, wait admissionWait) fetchedRun {
 	run := fetchedRun{ctx: ctx, useGitHub: cfg.Provider != reposync.ProviderGitLab && s.github != nil}
 	if run.err = s.checkWorkspace(ctx, cfg.WorkspaceID); run.err != nil {
 		return run
 	}
 	if run.useGitHub {
-		if mode == syncAutomatic {
-			ctx = github.WithGitHubWorkClass(ctx, github.WorkClassBackground)
-		}
-		ctx = github.WithNonBlockingGitHubAdmission(ctx)
-		if run.ctx, run.err = s.github.BindWorkspaceGitHubHost(ctx, cfg.WorkspaceID, cfg.GitHubHost); run.err != nil {
+		run.ctx, cfg, run.err = s.prepareGitHubSource(ctx, mode, cfg, wait)
+		if run.err != nil {
 			return run
 		}
 	}
 	run.files, run.err = s.fetchWith(run.ctx, cfg, wait)
 	return run
+}
+
+func (s *Service) prepareGitHubSource(
+	ctx context.Context, mode syncMode, cfg *Config, wait admissionWait,
+) (context.Context, *Config, error) {
+	if mode == syncAutomatic {
+		ctx = github.WithGitHubWorkClass(ctx, github.WorkClassBackground)
+	}
+	ctx = github.WithNonBlockingGitHubAdmission(ctx)
+	bound, err := s.github.BindWorkspaceGitHubHost(ctx, cfg.WorkspaceID, cfg.GitHubHost)
+	if err != nil {
+		return ctx, cfg, err
+	}
+	if mode != syncAutomatic {
+		return bound, cfg, nil
+	}
+	resolver, ok := s.github.(reposync.GitHubRefResolver)
+	if !ok {
+		return bound, cfg, errors.New("GitHub repository ref resolver is not configured")
+	}
+	ref, err := retryDeferred(bound, wait, func() (string, error) {
+		return resolver.ResolveRepoRefForWorkspace(
+			bound, cfg.WorkspaceID, cfg.RepoOwner, cfg.RepoName, cfg.Branch,
+		)
+	})
+	if err != nil {
+		return bound, cfg, err
+	}
+	pinned := *cfg
+	pinned.Branch = ref
+	return bound, &pinned, nil
 }
 
 // applyRun applies fetched files and records the result. The caller holds s.mu.

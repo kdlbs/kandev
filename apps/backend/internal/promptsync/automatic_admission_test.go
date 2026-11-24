@@ -36,8 +36,19 @@ type pacedGitHub struct {
 	onDefer chan struct{}
 	// rejectCommit makes the commit fence reject the apply.
 	rejectCommit bool
+	// commitStarted and commitRelease hold the commit fence before it calls
+	// the apply callback.
+	commitStarted chan struct{}
+	commitRelease chan struct{}
 	// unpaced admits every read.
 	unpaced bool
+	// moveBranchOnDefer simulates a branch rename after a file read is deferred.
+	moveBranchOnDefer bool
+	branchMoved       bool
+	resolvedRef       string
+	resolvedRefs      []string
+	resolveCalls      int
+	readRefs          []string
 	// revertFingerprint, when set, replaces fingerprint after one lookup.
 	revertFingerprint string
 }
@@ -59,6 +70,7 @@ func newPacedGitHub() *pacedGitHub {
 	return &pacedGitHub{
 		files:        map[string]string{"a.md": "A", "b.md": "B"},
 		fingerprint:  "fp-1",
+		resolvedRef:  "commit-a",
 		fileAttempts: make(map[string]int),
 		deferred:     make(map[string]bool),
 	}
@@ -72,17 +84,34 @@ func (p *pacedGitHub) CommitWorkspaceGitHubHost(ctx context.Context, _ string, f
 	p.mu.Lock()
 	p.commits++
 	reject := p.rejectCommit
+	started, release := p.commitStarted, p.commitRelease
 	p.mu.Unlock()
 	if reject {
 		return fmt.Errorf("commit fence: %w", github.ErrGitHubHostMismatch)
 	}
+	if started != nil {
+		close(started)
+		<-release
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
 	return fn(ctx)
 }
 
-func (p *pacedGitHub) ListRepoDirectoryForWorkspace(_ context.Context, _, _, _, path, _ string) ([]github.RepoContentEntry, error) {
+func (p *pacedGitHub) ResolveRepoRefForWorkspace(_ context.Context, _, _, _, ref string) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.resolveCalls++
+	p.resolvedRefs = append(p.resolvedRefs, ref)
+	return p.resolvedRef, nil
+}
+
+func (p *pacedGitHub) ListRepoDirectoryForWorkspace(_ context.Context, _, _, _, path, ref string) ([]github.RepoContentEntry, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.lists++
+	p.readRefs = append(p.readRefs, ref)
 	entries := make([]github.RepoContentEntry, 0, len(p.files))
 	for name := range p.files {
 		entries = append(entries, github.RepoContentEntry{Name: name, Path: path + "/" + name, Type: "file"})
@@ -90,12 +119,16 @@ func (p *pacedGitHub) ListRepoDirectoryForWorkspace(_ context.Context, _, _, _, 
 	return entries, nil
 }
 
-func (p *pacedGitHub) GetRepoFileContentForWorkspace(_ context.Context, _, _, _, path, _ string) ([]byte, error) {
+func (p *pacedGitHub) GetRepoFileContentForWorkspace(_ context.Context, _, _, _, path, ref string) ([]byte, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.fileAttempts[path]++
+	p.readRefs = append(p.readRefs, ref)
 	if !p.unpaced && (!p.deferred[path] || p.gateClosed()) {
 		p.deferred[path] = true
+		if p.moveBranchOnDefer {
+			p.branchMoved = true
+		}
 		deferral := &github.AdmissionDeferredError{Delay: time.Millisecond, Reason: "background_pacing"}
 		if p.gate != nil {
 			deferral.Delay, deferral.TrackerChanged = time.Hour, p.gate
@@ -105,6 +138,9 @@ func (p *pacedGitHub) GetRepoFileContentForWorkspace(_ context.Context, _, _, _,
 			p.onDefer = nil
 		}
 		return nil, deferral
+	}
+	if p.branchMoved && ref != p.resolvedRef {
+		return nil, &github.GitHubAPIError{StatusCode: 404}
 	}
 	return []byte(p.files[path[len(DefaultPath)+1:]]), nil
 }
@@ -141,6 +177,12 @@ func (p *pacedGitHub) counts() (lists, commits int, attempts map[string]int) {
 		attempts[path] = n
 	}
 	return p.lists, p.commits, attempts
+}
+
+func (p *pacedGitHub) refs() (reads, resolved []string, calls int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.readRefs...), append([]string(nil), p.resolvedRefs...), p.resolveCalls
 }
 
 func newPacedFixture(t *testing.T, gh *pacedGitHub) (*Service, *promptservice.Service) {
@@ -224,6 +266,63 @@ func TestAutomaticSyncCompletesUnderBackgroundPacing(t *testing.T) {
 	assert.Equal(t, 1, lists, "a deferral does not repeat the listing")
 	assert.Equal(t, 2, attempts[DefaultPath+"/a.md"], "one deferred attempt and one read")
 	assert.Equal(t, 2, attempts[DefaultPath+"/b.md"], "one deferred attempt and one read")
+}
+
+func TestAutomaticSyncPinsResolvedCommitAcrossDeferredRead(t *testing.T) {
+	gh := newPacedGitHub()
+	gh.resolvedRef = "commit-a"
+	gh.moveBranchOnDefer = true
+	svc, _ := newPacedFixture(t, gh)
+
+	done := startWaitingAutomaticSync(t, context.Background(), svc, gh)
+	openGateAndWait(t, gh, done)
+
+	cfg, err := svc.GetConfig(context.Background())
+	require.NoError(t, err)
+	assert.True(t, cfg.LastOk, "a branch rename during admission wait must not turn the pinned file read into a 404")
+	assert.False(t, cfg.PollSuspended)
+	refs, resolvedRefs, resolveCalls := gh.refs()
+	assert.Equal(t, 1, resolveCalls)
+	assert.Equal(t, []string{"main"}, resolvedRefs)
+	assert.NotEmpty(t, refs)
+	for _, ref := range refs {
+		assert.Equal(t, "commit-a", ref, "the listing and every retry must use the resolved commit")
+	}
+}
+
+func TestAutomaticSyncCancellationDuringCommitFenceDoesNotRecordFailure(t *testing.T) {
+	gh := newPacedGitHub()
+	gh.resolvedRef = "commit-a"
+	gh.unpaced = true
+	svc, _ := newPacedFixture(t, gh)
+	gh.commitStarted = make(chan struct{})
+	gh.commitRelease = make(chan struct{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		svc.SyncIfDue(ctx)
+	}()
+	select {
+	case <-gh.commitStarted:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("automatic sync did not reach the GitHub commit fence")
+	}
+	cancel()
+	close(gh.commitRelease)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("automatic sync did not stop after commit fence cancellation")
+	}
+
+	cfg, err := svc.GetConfig(context.Background())
+	require.NoError(t, err)
+	assert.False(t, cfg.LastOk)
+	assert.Equal(t, 0, cfg.ConsecutiveFailures)
+	assert.Empty(t, cfg.LastErrorClass, "shutdown cancellation must not persist a failure")
 }
 
 func TestAutomaticSyncDoesNotBlockManualWorkWhileWaiting(t *testing.T) {
