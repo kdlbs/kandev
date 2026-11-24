@@ -37,8 +37,9 @@ can act without searching backend logs.
   the class on every unknown path, including resume failures without a typed
   bootstrap failure.
 - **AC-AGENTS-UNKNOWN-BOOTSTRAP-CLASS-001.2:** Only an agentctl start rejection
-  may add detail: its HTTP status and agentctl's sanitized error field. Other
-  wrapped errors shall keep the generic detail. The cause code, message,
+  may add detail: its HTTP status and a recognized fixed server request reason.
+  Unclassified agentctl text shall stay in backend logs. Other wrapped errors
+  shall keep the generic detail. The cause code, message,
   recovery actions, and log text shall be unchanged.
 
 ## Exclusions

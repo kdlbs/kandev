@@ -29,8 +29,9 @@ bootstrap failure, and project that class as the persisted cause.
 - `StartRejectedError` in `agentctl/client.go` (AC-001.1).
 - `ClassifyUnknownBootstrapError` and `BootstrapFailure.Class` in
   `lifecycle/bootstrap_failure.go` (AC-001.1).
-- The `cause=<class>` projection and the sanitized agentctl summary in
-  `executor/launch_failure.go` (AC-001.2).
+- Derive the bounded class from the typed cause when an existing bootstrap
+  wrapper has no class. Project `cause=<class>` with HTTP status and a fixed
+  request reason only for recognized agentctl start rejections (AC-001.2).
 
 ## Verification
 

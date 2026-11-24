@@ -1029,9 +1029,8 @@ func (c *Client) StartWithManagedRuntimePreparation(
 }
 
 // StartRejectedError reports that agentctl answered a start request without
-// starting the agent. Its message keeps the agentctl response for logs;
-// durable projections classify it by type and store only the sanitized
-// agentctl error field.
+// starting the agent. The response text is retained for backend logging;
+// durable projections use only bounded evidence.
 type StartRejectedError struct {
 	StatusCode    int
 	AgentctlError string

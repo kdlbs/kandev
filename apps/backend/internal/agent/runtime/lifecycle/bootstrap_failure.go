@@ -65,6 +65,8 @@ func (e *BootstrapFailure) SafeClass() string {
 		return ""
 	}
 	switch e.Class {
+	case "":
+		return ClassifyUnknownBootstrapError(e.Cause)
 	case BootstrapClassAgentctlStartRejected,
 		BootstrapClassAgentctlUnreachable,
 		BootstrapClassPassthroughCLIUnavailable,
@@ -95,15 +97,16 @@ func ClassifyUnknownBootstrapError(err error) string {
 	return BootstrapClassUnclassified
 }
 
-// unknownBootstrapDetail summarizes an unclassified failure. Only agentctl's
-// own start rejection is summarized, with its sanitized error field; provider,
-// plugin, and other wrapped errors keep the generic detail.
+// unknownBootstrapDetail saves only bounded facts from a start rejection.
 func unknownBootstrapDetail(err error) string {
 	var rejected *agentctl.StartRejectedError
 	if errors.As(err, &rejected) && rejected != nil {
 		detail := fmt.Sprintf("agentctl rejected the start request (HTTP %d).", rejected.StatusCode)
-		if reason := routingerr.Sanitize(strings.TrimSpace(rejected.AgentctlError)); reason != "" {
-			detail += " " + reason
+		// Runtime failures can wrap private provider strings. Only fixed
+		// request-handling reasons are safe to include in durable detail.
+		switch rejected.AgentctlError {
+		case "invalid start request", "authenticated control is required for managed runtime preparation":
+			detail += " " + rejected.AgentctlError
 		}
 		return detail
 	}

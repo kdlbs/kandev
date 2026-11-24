@@ -221,9 +221,9 @@ path, including resume failures that never produced a `BootstrapFailure`:
 | `unclassified` | Anything else |
 
 The executor projection writes `cause=<class>`. Only `agentctl_start_rejected`
-adds a summary: the HTTP status and agentctl's own `error` field after
-`routingerr.Sanitize`. Provider, plugin, and other wrapped errors keep the
-generic detail, so arbitrary error text is never stored. The cause code, message,
+adds a summary: the HTTP status and, when present, a recognized fixed server
+request reason. Unclassified agentctl text stays in backend logs. Provider,
+plugin, and other wrapped errors keep the generic detail. The cause code, message,
 recovery actions, and log text are unchanged.
 
 ## Correlation and visible explanations
