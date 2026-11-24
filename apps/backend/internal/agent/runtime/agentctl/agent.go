@@ -71,10 +71,12 @@ type AgentInfo struct {
 
 // InitializeResponse from agentctl
 type InitializeResponse struct {
-	Success         bool                 `json:"success"`
-	AgentInfo       *AgentInfo           `json:"agent_info,omitempty"`
-	DurableDelivery *DurableDeliveryInfo `json:"durable_delivery,omitempty"`
-	Error           string               `json:"error,omitempty"`
+	ACPProtocolVersion uint16               `json:"acp_protocol_version,omitempty"`
+	ProcessGeneration  uint64               `json:"process_generation,omitempty"`
+	Success            bool                 `json:"success"`
+	AgentInfo          *AgentInfo           `json:"agent_info,omitempty"`
+	DurableDelivery    *DurableDeliveryInfo `json:"durable_delivery,omitempty"`
+	Error              string               `json:"error,omitempty"`
 }
 
 // InitializeError preserves bounded process evidence returned by agentctl.
@@ -125,6 +127,12 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 		return nil, fmt.Errorf("initialize failed: %s", result.Error)
 	}
 	c.setSessionCapabilities(result.AgentInfo)
+	c.mu.Lock()
+	c.acpProtocolVersion = result.ACPProtocolVersion
+	if result.ProcessGeneration != 0 {
+		c.processGeneration = result.ProcessGeneration
+	}
+	c.mu.Unlock()
 	return result.AgentInfo, nil
 }
 
@@ -821,6 +829,7 @@ func (c *Client) readUpdatesStream(
 	go c.dispatchAgentEvents(handler, events, workerDone, stage)
 
 	var lastErr error
+	var nativeQuestions nativeQuestionDispatch
 	defer func() {
 		stage.connected.Store(false)
 		// Clean up this connection's pending requests BEFORE draining the worker. On a
@@ -899,7 +908,9 @@ func (c *Client) readUpdatesStream(
 					zap.String("action", wsMsg.Action),
 					zap.String("session_id", sessionID),
 					zap.String("pending_id", pendingID))
-				go c.dispatchMCPRequest(ctx, wsMsg, mcpHandler, writeMessage)
+				nativeQuestions.start(ctx, &wsMsg, func(ctx context.Context) {
+					c.dispatchMCPRequest(ctx, wsMsg, mcpHandler, writeMessage)
+				})
 				continue
 			}
 		}

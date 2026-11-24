@@ -1988,12 +1988,15 @@ func (s *Service) executeQueuedMessageWithReservation(
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	var promptReferenceContext string
 	var preparedPromptContent *string
-	if isQueuedWorkflowAutoStart(queuedMsg) {
+	moveInstructions, _ := queuedMsg.Metadata[metaKeyWorkflowMoveInstructions].(bool)
+	if isQueuedWorkflowAutoStart(queuedMsg) || moveInstructions {
+		passthrough := (s.agentManager != nil && s.agentManager.IsPassthroughSession(promptCtx, queuedMsg.SessionID)) ||
+			s.resolveIsPassthroughForLaunch(promptCtx, queuedMsg.SessionID)
 		// Resolve workflow aliases at the drain boundary, before persistence.
 		// Recovery must carry this exact server-generated context because the
 		// shared saved definition can change while PromptAgent is in flight.
 		promptContent, promptReferenceContext = s.expandPromptReferencesWithContext(
-			promptCtx, promptContent, false,
+			promptCtx, promptContent, passthrough,
 		)
 		preparedPromptContent = &promptContent
 	}
@@ -2698,8 +2701,8 @@ func queuedMessageAttachmentsToV1(attachments []messagequeue.MessageAttachment) 
 	converted := make([]v1.MessageAttachment, len(attachments))
 	for index, attachment := range attachments {
 		converted[index] = v1.MessageAttachment{
-			Type:         attachment.Type,
-			AttachmentID: attachment.AttachmentID,
+			Type:      attachment.Type,
+			CommentID: attachment.CommentID, AttachmentID: attachment.AttachmentID,
 			Data:         attachment.Data,
 			MimeType:     attachment.MimeType,
 			Name:         attachment.Name,

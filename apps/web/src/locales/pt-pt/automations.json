@@ -389,5 +389,8 @@
   "mcpUnavailable": "{{name}} (indisponível)",
   "mcpOptionsFailed": "Não foi possível carregar as opções MCP. As escolhas guardadas mantêm-se.",
   "passthroughOutputNotCapturedTitle": "A saída do CLI passthrough não é capturada na transcrição desta execução.",
-  "passthroughOutputFutureSessionsDescription": "Desative o CLI passthrough no perfil de agente da automação para registar a saída em sessões futuras. Não é possível recuperar aqui a saída anterior do terminal."
+  "passthroughOutputFutureSessionsDescription": "Desative o CLI passthrough no perfil de agente da automação para registar a saída em sessões futuras. Não é possível recuperar aqui a saída anterior do terminal.",
+  "enableScheduleFailed": "Não foi possível ativar o agendamento. Tente novamente.",
+  "enablingSchedule": "A ativar o agendamento...",
+  "turnOnSchedule": "Ativar agendamento"
 }

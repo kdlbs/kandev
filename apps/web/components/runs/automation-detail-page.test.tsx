@@ -1,10 +1,13 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Automation, AutomationRun } from "@/lib/types/automation";
 
 const mockIsMobile = vi.hoisted(() => ({ value: false }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isMobile: mockIsMobile.value }),
+  useResponsiveBreakpoint: () => ({
+    isMobile: mockIsMobile.value,
+    isFinePointer: !mockIsMobile.value,
+  }),
 }));
 
 const AUTOMATION_ID = "automation-1";
@@ -15,6 +18,9 @@ const SESSION_ATTR = "data-session-id";
 const RUN_NOW = "automation-run-now";
 const NEXT_RUN = "automation-next-run";
 const DETAIL_TOGGLE = "run-detail-toggle";
+const ENABLE_SCHEDULE = "enable-schedule-action";
+const SCHEDULE_OFF_STATUS = "Schedule trigger is switched off";
+const AUTOMATION_EDITOR = vi.hoisted(() => "automation-editor");
 const PROMPT = "automation-prompt";
 const SESSION_OLDER = "session-older";
 const SESSION_NEWEST = "session-newest";
@@ -26,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   getAutomationSummary: vi.fn(),
   listAutomationRuns: vi.fn(),
   triggerAutomation: vi.fn(),
+  updateTrigger: vi.fn(),
   stopAutomationRun: vi.fn(),
   push: vi.fn(),
   // The page follows the ACTIVE workspace: an automation belonging to another
@@ -43,6 +50,7 @@ vi.mock("@/lib/api/domains/automation-api", () => ({
   getAutomationSummary: mocks.getAutomationSummary,
   listAutomationRuns: mocks.listAutomationRuns,
   triggerAutomation: mocks.triggerAutomation,
+  updateTrigger: mocks.updateTrigger,
   stopAutomationRun: mocks.stopAutomationRun,
 }));
 
@@ -58,7 +66,7 @@ vi.mock("sonner", () => ({
 // The editor is a settings-shell component with its own data fetching; this
 // page's contract is that it mounts on the Configure tab and nowhere else.
 vi.mock("@/components/automations/automation-editor", () => ({
-  AutomationEditor: () => <div data-testid="automation-editor" />,
+  AutomationEditor: () => <input data-testid={AUTOMATION_EDITOR} defaultValue="Nightly drift" />,
 }));
 
 // The transcript is the task chat stack. This suite is about which run the page
@@ -119,6 +127,24 @@ function run(overrides: Partial<AutomationRun> = {}): AutomationRun {
   } as AutomationRun;
 }
 
+function disabledScheduleAutomation(
+  automation: Automation = AUTOMATION,
+  triggerId = "trigger-1",
+): Automation {
+  return {
+    ...automation,
+    triggers: [
+      {
+        id: triggerId,
+        automation_id: automation.id,
+        type: "scheduled",
+        enabled: false,
+        config: { cron_expression: "0 0 * * *", timezone: "UTC" },
+      },
+    ],
+  } as unknown as Automation;
+}
+
 beforeEach(() => {
   mocks.activeWorkspaceId.current = WORKSPACE_ID;
   mocks.getAutomation.mockResolvedValue(AUTOMATION);
@@ -128,6 +154,7 @@ beforeEach(() => {
   });
   mocks.listAutomationRuns.mockResolvedValue([run()]);
   mocks.triggerAutomation.mockResolvedValue({ triggered: true });
+  mocks.updateTrigger.mockResolvedValue({ updated: true });
   mocks.stopAutomationRun.mockResolvedValue({ run_id: "run-1", status: "failed" });
 });
 
@@ -151,7 +178,7 @@ describe("AutomationDetailPage", () => {
     const transcript = await screen.findByTestId(TRANSCRIPT);
     expect(transcript.getAttribute(SESSION_ATTR)).toBe(SESSION_NEWEST);
     // Configuration is behind Details, never the landing view.
-    expect(screen.queryByTestId("automation-editor")).toBeNull();
+    expect(screen.queryByTestId(AUTOMATION_EDITOR)).toBeNull();
   });
 
   // The rail is a permanent column resized by dragging its edge — a mouse
@@ -204,6 +231,121 @@ describe("AutomationDetailPage", () => {
 
     fireEvent.click(await screen.findByTestId(DETAIL_TOGGLE));
     expect(screen.getByTestId(PROMPT)).toBeTruthy();
+  });
+});
+
+describe("AutomationDetailPage schedule recovery", () => {
+  it("does not let a late schedule write refresh replace the next automation", async () => {
+    const nextAutomation = {
+      ...AUTOMATION,
+      id: "automation-2",
+      name: "Next automation",
+      triggers: [],
+    } as Automation;
+    mocks.getAutomation.mockImplementation((id: string) =>
+      Promise.resolve(id === AUTOMATION_ID ? disabledScheduleAutomation() : nextAutomation),
+    );
+    let resolveUpdate!: (value: { updated: boolean }) => void;
+    const updatePromise = new Promise<{ updated: boolean }>((resolve) => {
+      resolveUpdate = resolve;
+    });
+    mocks.updateTrigger.mockReturnValueOnce(updatePromise);
+
+    const view = render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    fireEvent.click(await screen.findByTestId(DETAIL_TOGGLE));
+    fireEvent.click(screen.getByTestId(ENABLE_SCHEDULE));
+    await waitFor(() => expect(mocks.updateTrigger).toHaveBeenCalledTimes(1));
+
+    view.rerender(<AutomationDetailPage automationId="automation-2" tab="activity" />);
+    await waitFor(() => expect(screen.getByTestId(NEXT_RUN).textContent).toContain("No schedule"));
+    expect(mocks.getAutomation).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveUpdate({ updated: true });
+      await updatePromise;
+    });
+
+    expect(mocks.getAutomation).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId(NEXT_RUN).textContent).toContain("No schedule");
+    expect(screen.getByTestId(RUN_NOW).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("turns on a disabled schedule from Run detail and allows retry after failure", async () => {
+    const disabled = disabledScheduleAutomation();
+    const enabled = {
+      ...disabled,
+      triggers: disabled.triggers.map((trigger) => ({ ...trigger, enabled: true })),
+    };
+    mocks.getAutomation.mockResolvedValueOnce(disabled).mockResolvedValue(enabled);
+    let failFirstUpdate!: (error: Error) => void;
+    mocks.updateTrigger
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            failFirstUpdate = reject;
+          }),
+      )
+      .mockResolvedValue({ updated: true });
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    fireEvent.click(await screen.findByTestId(DETAIL_TOGGLE));
+
+    const nextRun = screen.getByTestId("run-detail-next-run");
+    expect(nextRun.textContent).toContain(SCHEDULE_OFF_STATUS);
+
+    const enable = screen.getByTestId(ENABLE_SCHEDULE);
+    fireEvent.click(enable);
+    await waitFor(() => expect(mocks.updateTrigger).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId(ENABLE_SCHEDULE).hasAttribute("disabled")).toBe(true);
+    failFirstUpdate(new Error("temporary failure"));
+    const error = await screen.findByRole("alert");
+    expect(error.textContent).toBe("Couldn't turn on the schedule. Try again.");
+    expect(mocks.updateTrigger).toHaveBeenNthCalledWith(1, "trigger-1", { enabled: true });
+    expect(screen.getByTestId(ENABLE_SCHEDULE).hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(screen.getByTestId(ENABLE_SCHEDULE));
+    await waitFor(() => expect(mocks.updateTrigger).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.getAutomation).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByTestId("run-detail-next-run").textContent).not.toContain(
+        SCHEDULE_OFF_STATUS,
+      ),
+    );
+    expect(mocks.updateTrigger).toHaveBeenNthCalledWith(2, "trigger-1", { enabled: true });
+    expect(screen.queryByTestId("enable-schedule-error")).toBeNull();
+  });
+});
+
+describe("AutomationDetailPage Configure draft recovery", () => {
+  it("keeps a Configure draft mounted when a pending recovery refresh fails", async () => {
+    mocks.getAutomation
+      .mockResolvedValueOnce(disabledScheduleAutomation())
+      .mockRejectedValueOnce(new Error("activity refresh failed"));
+    let resolveUpdate!: (value: { updated: boolean }) => void;
+    const updatePromise = new Promise<{ updated: boolean }>((resolve) => {
+      resolveUpdate = resolve;
+    });
+    mocks.updateTrigger.mockReturnValueOnce(updatePromise);
+
+    const view = render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    fireEvent.click(await screen.findByTestId(DETAIL_TOGGLE));
+    fireEvent.click(screen.getByTestId(ENABLE_SCHEDULE));
+    await waitFor(() => expect(mocks.updateTrigger).toHaveBeenCalledTimes(1));
+
+    view.rerender(<AutomationDetailPage automationId={AUTOMATION_ID} tab="configure" />);
+    const editor = await screen.findByTestId(AUTOMATION_EDITOR);
+    fireEvent.change(editor, { target: { value: "unsaved automation name" } });
+
+    await act(async () => {
+      resolveUpdate({ updated: true });
+      await updatePromise;
+    });
+
+    await screen.findByTestId("automation-error");
+    expect(screen.getByTestId(AUTOMATION_EDITOR)).toBe(editor);
+    expect((screen.getByTestId(AUTOMATION_EDITOR) as HTMLInputElement).value).toBe(
+      "unsaved automation name",
+    );
   });
 });
 
@@ -278,8 +420,20 @@ describe("AutomationDetailPage run selection", () => {
   it("mounts the editor only when Details asks for it", async () => {
     render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="configure" />);
 
-    await waitFor(() => screen.getByTestId("automation-editor"));
+    await waitFor(() => screen.getByTestId(AUTOMATION_EDITOR));
     expect(screen.queryByTestId(ACTIVITY)).toBeNull();
+  });
+
+  it("does not offer schedule recovery from Configure", async () => {
+    mocks.getAutomation.mockResolvedValue(disabledScheduleAutomation());
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="configure" />);
+
+    await screen.findByTestId(AUTOMATION_EDITOR);
+    fireEvent.click(await screen.findByTestId(DETAIL_TOGGLE));
+
+    expect(screen.getByTestId("run-detail-next-run").textContent).toContain(SCHEDULE_OFF_STATUS);
+    expect(screen.queryByTestId(ENABLE_SCHEDULE)).toBeNull();
+    expect(screen.getByTestId(AUTOMATION_EDITOR)).toBeTruthy();
   });
 
   it("keeps the rail alongside configuration, so runs stay one click away", async () => {

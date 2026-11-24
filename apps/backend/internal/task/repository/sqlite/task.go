@@ -1646,6 +1646,31 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateWithCompletionAd
 	return admitted, err
 }
 
+// UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep is the compare-and-swap
+// form of a cross-step move: the transition commits only while the task's
+// persisted workflow_step_id still equals expectedStepID inside the write
+// transaction. applied=false means the task left that step first and the task
+// row is untouched. The optional admission carries a trusted human completion.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+	ctx context.Context,
+	task *models.Task,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedStepID string,
+	expectedWorkflowID string,
+	admission *completion.Admission,
+) (admitted bool, applied bool, err error) {
+	// The caller-built task carries this move's own lifecycle fields, so the
+	// strict source check must not rebase it from the stored row the way the
+	// expectedStepID transition path does.
+	return r.updateTaskWithWorkflowStepAdmissionExactInner(
+		ctx, task, expectedStepID, targetStepID, limit, admittedState, queueExitPending,
+		"", expectedWorkflowID, nil, nil, nil, nil, nil, false, admission, true,
+	)
+}
+
 // UpdateTaskWithWorkflowStepAdmissionExact couples exact operation identity,
 // resource-version fencing, WIP admission, and the workflow transition commit.
 func (r *Repository) UpdateTaskWithWorkflowStepAdmissionExact(
@@ -2047,7 +2072,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	admission *completion.Admission,
 ) (admitted bool, applied bool, err error) {
 	return r.updateTaskWithWorkflowStepAdmissionExactInner(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending,
-		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect, guardBusinessState, admission)
+		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect, guardBusinessState, admission, false)
 }
 
 type exactTaskMoveOperation struct {
@@ -2075,6 +2100,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 	effect *models.AgentDeliveryEffect,
 	guardBusinessState bool,
 	admission *completion.Admission,
+	strictSource bool,
 ) (admitted bool, applied bool, err error) {
 	currentSourceStepID := sourceStepID
 	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
@@ -2106,7 +2132,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 		if workflowChangeSource != nil {
 			return false, false, repoerrors.ErrWorkflowChangeConflict
 		}
-		if expectedStepID != "" {
+		if expectedStepID != "" || strictSource {
 			// CAS callers preserve their existing applied=false contract when
 			// the task has left the expected step. They must not retry against
 			// the new step and turn a stale transition into a new one.

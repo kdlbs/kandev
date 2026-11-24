@@ -301,12 +301,14 @@ func agentProfileDTOToSDK(p agentsettingsdto.AgentProfileDTO) pluginsdk.AgentPro
 // strips kandev-injected <kandev-system> blocks from content via
 // sysprompt.StripSystemContent — the same sanitization the message.added bus
 // event applies — so a plugin never sees raw system prompts. Type defaults to
-// "message" (matching Message.ToAPI and the repository) when empty.
+// "message" (matching Message.ToAPI and the repository) when empty. Source is
+// the only metadata exposed: the persisted string metadata.source, or empty.
 func messageModelToDTO(m *taskmodels.Message) pluginsdk.Message {
 	msgType := string(m.Type)
 	if msgType == "" {
 		msgType = string(taskmodels.MessageTypeMessage)
 	}
+	source, _ := m.Metadata[taskSourceMetadataKey].(string)
 	return pluginsdk.Message{
 		ID:         m.ID,
 		SessionID:  m.TaskSessionID,
@@ -316,6 +318,7 @@ func messageModelToDTO(m *taskmodels.Message) pluginsdk.Message {
 		Content:    sysprompt.StripSystemContent(m.Content),
 		Type:       msgType,
 		CreatedAt:  m.CreatedAt.UTC().Format(time.RFC3339),
+		Source:     source,
 	}
 }
 

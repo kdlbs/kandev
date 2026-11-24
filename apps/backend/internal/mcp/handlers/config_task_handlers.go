@@ -333,6 +333,10 @@ func (h *Handlers) deferMoveTask(
 		SenderSessionID:      req.SenderSessionID,
 		EntryOptions:         req.EntryOptions,
 	}); err != nil {
+		if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable,
+				"session is busy; retry move_task shortly", nil)
+		}
 		h.logger.Error("move_task: failed to persist deferred move",
 			zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,

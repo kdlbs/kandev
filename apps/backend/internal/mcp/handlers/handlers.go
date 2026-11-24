@@ -692,6 +692,7 @@ func (h *Handlers) registerTaskQuestionHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPForwardQuestion, h.handleForwardQuestion)
 	d.RegisterFunc(ws.ActionMCPWaitForQuestionAnswers, h.handleWaitForQuestionAnswers)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
+	d.RegisterFunc(ws.ActionMCPCancelNativeClarification, h.handleCancelNativeClarification)
 	if h.diagnosticBundles != nil && h.diagnosticMaterializer != nil {
 		d.RegisterFunc(ws.ActionMCPGetDiagnosticBundle, h.handleGetDiagnosticBundle)
 	}

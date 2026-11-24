@@ -3,7 +3,7 @@
 import {
   shouldOpenFilePreview,
   previewFileState,
-  canOfferViewerAfterReadFailure,
+  canFindViewerForFileType,
 } from "@/lib/plugins/file-viewer-selection";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -188,7 +188,7 @@ async function loadRestoredTab(
   } catch {
     if (!isRestoreWriteCurrent(_restoredSessionId, activeSessionId, activeSessionIdRef))
       return false;
-    if (canOfferViewerAfterReadFailure(savedTab.path)) {
+    if (canFindViewerForFileType(savedTab.path)) {
       setFileState(
         buildRepoScopedItemId(savedTab.path, savedTab.repo),
         previewFileState(savedTab.path, savedTab.repo),

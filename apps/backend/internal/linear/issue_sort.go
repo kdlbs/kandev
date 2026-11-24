@@ -8,7 +8,7 @@ import (
 // sortIssues reorders matched issues in place so the highest-priority /
 // most-relevant issues are published (and therefore dispatched) first under
 // the watch's in-flight cap. An empty/unknown sort key leaves the slice in the
-// order Linear returned it (updatedAt asc). Stable so equal-key issues keep
+// order Linear returned it (updatedAt desc). Stable so equal-key issues keep
 // Linear's relative order.
 func sortIssues(issues []*LinearIssue, by IssueSortBy) {
 	switch by {

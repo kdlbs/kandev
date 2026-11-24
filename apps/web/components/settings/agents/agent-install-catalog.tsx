@@ -74,7 +74,23 @@ function InstallGuidance({
     );
   }
   if (agent.supports_local_install) {
-    return <p className="text-xs text-muted-foreground">{t("agents:localInstallHint")}</p>;
+    return (
+      <div className="space-y-1">
+        <p className="text-xs text-muted-foreground">{t("agents:localInstallHint")}</p>
+        {agent.name === "antigravity-acp" && (
+          <a
+            href="https://antigravity.google/docs/cli"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-11 items-center gap-1 text-xs text-primary underline underline-offset-4 cursor-pointer"
+            data-testid="antigravity-cli-setup-guide"
+          >
+            <IconExternalLink className="h-3 w-3" />
+            {t("agents:antigravityCLISetupGuide")}
+          </a>
+        )}
+      </div>
+    );
   }
   return null;
 }

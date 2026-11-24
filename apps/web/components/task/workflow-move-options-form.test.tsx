@@ -1,3 +1,7 @@
+import {
+  readMoveInstructions,
+  setMoveInstructions,
+} from "./workflow-move-instructions-test-helpers";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -12,6 +16,10 @@ const SUBMIT_TEST_ID = "workflow-move-submit";
 
 vi.mock("@/hooks/use-compact-task-chrome", () => ({
   useTouchDrawer: () => touchMocks.enabled,
+}));
+
+vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
+  useCustomPrompts: () => ({ prompts: [], loaded: true, loading: false }),
 }));
 
 afterEach(() => {
@@ -43,20 +51,30 @@ describe("WorkflowMoveOptions", () => {
     expect(screen.getByTestId(INSTRUCTIONS_TEST_ID)).toBeTruthy();
   });
 
+  // @covers AC-TASKS-SAVED-PROMPT-DELIVERY-001.15
+  it("exposes an accessible saved-prompt editor in the drawer", () => {
+    renderOptions();
+
+    const editor = screen.getByRole("textbox", { name: "One-time instructions" });
+    expect(editor.getAttribute("contenteditable")).toBe("true");
+    expect(editor.getAttribute("aria-autocomplete")).toBe("list");
+  });
+
   it("submits the draft payload and keeps values when the move fails", async () => {
     const onSubmit = vi.fn().mockResolvedValue(false);
     renderOptions(onSubmit);
 
-    fireEvent.change(screen.getByTestId(INSTRUCTIONS_TEST_ID), {
-      target: { value: "  create the PR ready for review  " },
-    });
+    setMoveInstructions(
+      screen.getByTestId(INSTRUCTIONS_TEST_ID),
+      "  create the PR ready for review  ",
+    );
     fireEvent.click(screen.getByTestId(SUBMIT_TEST_ID));
     await act(async () => {});
 
     expect(onSubmit).toHaveBeenCalledWith({
       instructions: "create the PR ready for review",
     });
-    expect((screen.getByTestId(INSTRUCTIONS_TEST_ID) as HTMLTextAreaElement).value).toBe(
+    expect(readMoveInstructions(screen.getByTestId(INSTRUCTIONS_TEST_ID))).toBe(
       "  create the PR ready for review  ",
     );
   });

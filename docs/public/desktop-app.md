@@ -206,6 +206,8 @@ Applications started from Finder, Launchpad, desktop menus, or the Windows Start
 - macOS/Linux: `/usr/local/bin`, `/usr/bin`, `/bin`, `/opt/homebrew/bin`, `~/.local/bin`, `~/.bun/bin`, and `~/.opencode/bin` (plus the Linuxbrew prefix on Linux);
 - Windows: the user's roaming npm directory and Scoop shims.
 
+On macOS, Kandev also reads `~/.nvm/alias/default`. It accepts `node` and numeric versions with one to three components, such as `22`, `22.9`, or `v22.9.0`. For `node` or a partial version, Kandev selects the highest matching installed version. An exact version selects its own directory. Kandev appends that version's `bin` directory after other common PATH entries only when it contains executable `node`, `npm`, and `npx`.
+
 If an agent command is still not found:
 
 1. run the executable successfully in a normal terminal;

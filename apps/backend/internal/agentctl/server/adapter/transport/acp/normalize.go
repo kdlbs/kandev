@@ -328,8 +328,8 @@ func isEmptyGenericInputValue(v any) bool {
 func stampBackgroundShellWork(agentID string, payload *streams.NormalizedPayload) {
 	if backgroundlaunch.RecognizesDetachedLaunch(agentID, payload) {
 		payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)
-		// ACP shell producers expose launch identity only: no output stream and
-		// no process controls are available through this transport.
+		// The launch starts with inspection-only capabilities. The adapter may
+		// add a verified output stream when a Claude launch names its task file.
 		payload.SetBackgroundWorkCapabilities(streams.InspectionOnlyWorkloadCapabilities())
 	}
 }

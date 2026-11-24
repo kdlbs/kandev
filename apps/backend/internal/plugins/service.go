@@ -198,6 +198,10 @@ type Service struct {
 	interactionResponder     interactionResponder
 	exactExecutionController exactExecutionController
 	humanInteractionReceipts *humanInteractionResponseReceiptStore
+	// identityLinkCodes holds single-use codes that link an external account
+	// to a Kandev user; linkedUserResolver resolves the linked user.
+	identityLinkCodes  *identityLinkCodeStore
+	linkedUserResolver func(context.Context, string) (LinkedHuman, bool)
 
 	// authLogin establishes an authenticated browser session for an external
 	// identity an auth-capable plugin asserts via its webhook response
@@ -254,6 +258,7 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		conversationTokens:              newConversationTokenManager(),
 		conversationEpoch:               uuid.NewString(),
 		humanInteractionReceipts:        newHumanInteractionResponseReceiptStore(),
+		identityLinkCodes:               newIdentityLinkCodeStore(),
 		executorProviderOps:             make(map[string]*activeExecutorProviderOperation),
 		executorProviderDispatches:      make(map[string]map[uint64]context.CancelFunc),
 		executorProviderAdmissionClosed: make(map[string]bool),

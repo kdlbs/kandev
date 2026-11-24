@@ -9,6 +9,10 @@ export type AgentErrorCause = {
   requested_model?: string;
   effective_model?: string;
   attempted_model?: string;
+  requested_setting?: string;
+  effective_setting?: string;
+  setting_config_id?: string;
+  setting_source?: string;
   requested_mode?: string;
   effective_mode?: string;
   runtime_version?: string;

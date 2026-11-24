@@ -41,11 +41,14 @@ type Manifest struct {
 
 // ResolveOptions supplies deterministic inputs for filesystem discovery.
 type ResolveOptions struct {
-	GOOS     string
-	GOARCH   string
-	HomeDir  string
-	Env      map[string]string
-	LookPath func(string) (string, error)
+	GOOS         string
+	GOARCH       string
+	HomeDir      string
+	UserHomeDir  string
+	Env          map[string]string
+	LookPath     func(string) (string, error)
+	VersionProbe func(context.Context, string) (string, error)
+	ACPHelpProbe func(context.Context, string) (string, error)
 }
 
 // DefaultHomeDir resolves the Kandev home used for managed bundles.

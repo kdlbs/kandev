@@ -255,26 +255,21 @@ func (h *Handlers) httpStart(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
 		return
 	}
-	loginAg, ok := ag.(agents.LoginAgent)
-	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "agent has no login command"})
-		return
-	}
-	lc := loginAg.LoginCommand()
-	if lc == nil || len(lc.Cmd) == 0 {
+	if _, ok := ag.(agents.LoginAgent); !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "agent has no login command"})
 		return
 	}
 
 	var req startRequest
 	_ = c.ShouldBindJSON(&req) // body is optional
-	cmd := lc.Cmd
-	if req.CommandVariant != "" {
-		cmd = lc.Variants[req.CommandVariant]
-		if len(cmd) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_login_variant"})
-			return
-		}
+	lc, cmd, err := resolveLoginCommand(c.Request.Context(), ag, req.CommandVariant)
+	if errors.Is(err, agents.ErrLoginRuntimeChanged) {
+		c.JSON(http.StatusConflict, gin.H{"error": "login_runtime_changed", "error_code": "login_runtime_changed"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	// Wrap the agent's login command so that when the login process exits
@@ -310,6 +305,36 @@ func (h *Handlers) httpStart(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, status)
+}
+
+func resolveLoginCommand(
+	ctx context.Context,
+	ag agents.Agent,
+	variant string,
+) (*agents.LoginCommand, []string, error) {
+	if dynamic, ok := ag.(agents.ContextLoginAgent); ok {
+		command, err := dynamic.ResolveLoginCommand(ctx, variant)
+		if err != nil {
+			return nil, nil, err
+		}
+		if command == nil || len(command.Cmd) == 0 {
+			return nil, nil, errors.New("agent has no login command")
+		}
+		return command, command.Cmd, nil
+	}
+	loginAgent := ag.(agents.LoginAgent)
+	command := loginAgent.LoginCommand()
+	if command == nil || len(command.Cmd) == 0 {
+		return nil, nil, errors.New("agent has no login command")
+	}
+	if variant == "" {
+		return command, command.Cmd, nil
+	}
+	selected := command.Variants[variant]
+	if len(selected) == 0 {
+		return nil, nil, errors.New("invalid_login_variant")
+	}
+	return command, selected, nil
 }
 
 func (h *Handlers) httpStop(c *gin.Context) {

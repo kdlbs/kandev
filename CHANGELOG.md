@@ -2,6 +2,19 @@
 
 All notable changes to Kandev.
 
+## 0.103.1 - 2026-11-23
+
+### Features
+
+- add outside-repository file tree ([#5446](https://github.com/kdlbs/kandev/pull/5446))
+- hold issue watch dispatch until Linear blockers are done ([#4584](https://github.com/kdlbs/kandev/pull/4584)) by @qwent71
+
+### Bug Fixes
+
+- use the selected managed runtime for session inference ([#5441](https://github.com/kdlbs/kandev/pull/5441)) by @mulatta
+- refresh built-in prompts on PostgreSQL ([#5440](https://github.com/kdlbs/kandev/pull/5440))
+- prevent false fork review gating ([#5443](https://github.com/kdlbs/kandev/pull/5443))
+
 ## 0.103.0 - 2026-11-22
 
 ### Features

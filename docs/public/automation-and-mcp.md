@@ -213,6 +213,11 @@ Editing a saved schedule starts the new definition at its first occurrence after
 
 Clearing the expression stops automatic runs. Entering a non-empty expression later starts from that later save.
 
+An automation can be enabled while its schedule trigger is disabled. In Run
+detail, select **Turn on schedule** to enable only the trigger without changing
+its schedule. If the current schedule has a missed occurrence, it can run once
+on the next scheduler check.
+
 <DocsVideo
   webm="./media/feature-guides/scheduled-workflow-automation.webm"
   mp4="./media/feature-guides/scheduled-workflow-automation.mp4"
@@ -470,7 +475,21 @@ Use `manage_task_change_request_kandev` with `operation` set to `link`, `unlink`
 or `replace`. Every mutation needs `task_id`, `provider` (`github` or `gitlab`),
 the canonical `repository_id`, and a positive request number. A number by itself
 is rejected, so a fork and its canonical repository can safely have the same
-number. For example:
+number.
+
+For a new `link`, use the Kandev ID in `repositories[].repository_id` from
+`list_tasks_kandev`. The repository must be attached to the target task. An
+unmatched ID returns a validation error for `repository_id`.
+
+For `unlink`, use the repository ID from the stored association. Unlink can
+remove that association after its repository is detached. The management tool
+is available only in task-mode sessions whose calling task has at least one
+attached GitHub or GitLab repository. If the calling task has none, attach a
+supported repository and start or resume its task session to restore the tool.
+Then unlink the target task's association with its stored provider, repository
+ID, and request number.
+
+For example:
 
 ```json
 {
@@ -808,9 +827,10 @@ preference is saved on this device and applies when a card has no retained
 Show/Hide choice. You can always select **Preview**, then click or tap the
 visible image to open the larger dialog.
 Other files load only after you select
-**Preview**. **Open file** uses the native desktop or mobile viewer. If the
-workspace disappears, the report remains and the file preview reports that it
-is unavailable.
+**Preview**. For a text preview, select **Hide preview**, then **Preview** to
+read the current workspace contents. **Open file** uses the native desktop or
+mobile viewer. If the workspace disappears, the report remains and the file
+preview reports that it is unavailable.
 
 Historical version 1 reports still render, including their stored CSV snapshots.
 New version 1 calls are rejected with guidance to refresh tool discovery and

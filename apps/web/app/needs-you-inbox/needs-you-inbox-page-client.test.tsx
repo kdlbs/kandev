@@ -48,6 +48,7 @@ let historyState: {
 };
 
 vi.mock("@/components/state-provider", () => ({
+  useOptionalAppStoreApi: () => null,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useAppStore: (selector: (s: any) => unknown) =>
     selector({

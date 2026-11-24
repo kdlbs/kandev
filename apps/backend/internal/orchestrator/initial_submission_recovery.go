@@ -272,6 +272,7 @@ func (s *Service) validateInitialSubmissionAttachment(
 		return v1.MessageAttachment{}, ErrInitialSubmissionUnavailable
 	}
 	return v1.MessageAttachment{
+		CommentID:    saved.CommentID,
 		AttachmentID: attachment.ID,
 		Type:         attachment.Kind,
 		Name:         attachment.Name,

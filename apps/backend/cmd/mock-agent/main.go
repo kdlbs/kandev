@@ -109,6 +109,11 @@ func main() {
 	mcpServers = parseMCPConfigFlag()
 	defer closeMCPClients()
 
+	version, input := inspectMockACPVersion(os.Stdin)
+	if version == 2 {
+		runACPPreviewFixture(input, os.Stdout)
+		return
+	}
 	ag := &mockAgent{
 		model:                          model,
 		sessions:                       make(map[acp.SessionId]bool),
@@ -122,7 +127,7 @@ func main() {
 	}
 	rawOut := newSerializedACPWriter(os.Stdout)
 	ag.rawOut = rawOut
-	asc := acp.NewAgentSideConnection(ag, rawOut, os.Stdin)
+	asc := acp.NewAgentSideConnection(ag, rawOut, input)
 	ag.conn = asc
 
 	<-asc.Done()
@@ -266,6 +271,9 @@ func mockSessionConfigOptions() []acp.SessionConfigOption {
 }
 
 func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
+	if os.Getenv("KANDEV_MOCK_PI_THINKING") == "true" {
+		return mockPiThinkingOptions(model)
+	}
 	modelCat := acp.SessionConfigOptionCategoryModel
 	modeCat := acp.SessionConfigOptionCategoryMode
 	thoughtCat := acp.SessionConfigOptionCategoryThoughtLevel

@@ -58,7 +58,28 @@ Hermes launches with `hermes acp`. Install the required `hermes` executable from
 
 Goose launches with `goose acp`. Its **Settings > Agents** card runs only the official `download_cli.sh` installer. Homebrew (`block-goose-cli`) and pip (`pip install goose-ai`) are manual alternatives. Configure your model provider with `goose configure`. Goose currently supports task and workspace sessions.
 
-Antigravity has no automated install: Google distributes `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows) as a signed archive through the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp) rather than npm, so extract both files into one directory and add it to PATH yourself. Kandev fails discovery closed when the harness sibling is missing or not executable, so a partial extraction reports as not installed rather than as a broken session.
+For local and worktree executors, Kandev selects a compatible `agy` CLI when it is available. The CLI must support ACP through `agy acp` at version 1.5.0 or later. Its `agy acp --help` output must advertise `--process-per-session`. Kandev adds this flag to each local CLI launch so HTTP MCP support does not depend on profile edits. Google owns CLI installation and updates; use the [Antigravity CLI setup guide](https://antigravity.google/docs/cli). The CLI uses its own Google sign-in. In **Settings > Agents**, choose **Sign in** to run `agy acp --login` on the Kandev host. This sign-in is separate from the standalone server's credentials.
+
+When a compatible CLI is unavailable, Kandev uses the standalone ACP server. The **Settings > Agents > Browse** install action provisions the pinned `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows). Both files must be executable and stay in the same directory. The standalone server has its own Google sign-in and credential store. Its consent flow opens a browser on the Kandev host. Remote and container executors use their own standalone runtime and sign-in.
+
+## ACP v2 preview
+
+Enable **ACP v2 preview** in **Settings > System > Feature Toggles**, then
+restart Kandev. You can also set `KANDEV_FEATURES_ACP_V2=true` in the process
+environment. The preview starts off in all shipped profiles.
+
+The preview covers structured task chat on local and worktree executors.
+Use a managed Claude ACP 0.109.0 or 0.109.1 bridge, or a managed Codex ACP
+2.8.0 or 2.9.0 bridge. Sign in locally or configure the provider's API key.
+
+To return to ACP v1, disable **ACP v2 preview** in Feature Toggles and restart
+Kandev. If the environment locks the toggle, set `KANDEV_FEATURES_ACP_V2` to
+`false` and restart Kandev. If you remove the variable, restart Kandev to unlock
+the toggle. Disable any saved opt-in and restart again.
+
+If an ACP v2 process survives the restart, you can read its history, answer
+pending requests, and stop it. Reconnect the session to send new prompts over v1.
+Kandev reports a restore error if the agent cannot reopen the saved conversation.
 
 ## Codex app-server (experimental)
 
@@ -264,6 +285,26 @@ ACP runtime selection does not replace the passthrough command.
 4. Open the seeded default profile and review it before selecting the agent in a workflow step or session. Discovery creates one default profile the first time it provisions an agent. If you deliberately delete every profile, later rescans do not recreate one; create a replacement manually.
 
 The status shown on this page is authoritative for the current host. A CLI that works in your interactive shell can still be absent from Kandev when the service has a different `PATH`, home directory, or operating-system user.
+
+### Pi thinking levels
+
+Pi's session mode controls its **thinking level**. It does not control tool permissions.
+The available levels depend on the selected model and the installed Pi provider extension.
+A model can advertise only **off**, even when its name contains “High”.
+
+In **Settings > Agents > Pi**, open the profile and choose **Thinking level**:
+
+- **Use provider default** removes the profile's thinking override. It keeps the model and exact-model setting.
+- A supported level, including **off**, saves an explicit override.
+- An unavailable saved value stays visible until you replace or clear it.
+
+If startup reports an unavailable or unapplied thinking level, no prompt was sent.
+If the level came from the profile, select **Edit profile**, choose a supported level or **Use provider default**, and save.
+If the level came from a session or workflow override, change that override or use the existing session configuration reset when applicable.
+If Kandev cannot identify the source, check both the profile and any overrides.
+Start a fresh session after you correct the setting. Saving a profile does not resend the failed prompt.
+
+Kandev uses the capabilities reported by Pi. Incorrect model metadata in a provider extension must be corrected in that extension.
 
 ### Update Oh My Pi on the Kandev host
 

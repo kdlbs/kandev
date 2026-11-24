@@ -35,8 +35,22 @@ func TestDeliveryRetentionCompleteTerminalOutcomes(t *testing.T) {
 				}
 				before := retentionCanonicalContent(t, repo, terminal.SessionID)
 				advance(26 * time.Hour)
+				runRetentionBatch := func() error {
+					options := models.AgentDeliveryRetentionBatchOptions{}
+					if engine == "Postgres" {
+						// This test checks retained outcomes, not the production work budget.
+						options = normalizeAgentDeliveryRetentionOptions(options)
+						options.WorkTimeout = 5 * time.Second
+						batchCtx, cancelBatch := context.WithTimeout(ctx, options.WorkTimeout)
+						defer cancelBatch()
+						_, err := repo.runAgentDeliveryRetentionBatch(batchCtx, options)
+						return err
+					}
+					_, err := repo.RunAgentDeliveryRetentionBatch(ctx, options)
+					return err
+				}
 				for attempt := 0; attempt < 3; attempt++ {
-					if _, err := repo.RunAgentDeliveryRetentionBatch(ctx, models.AgentDeliveryRetentionBatchOptions{}); err != nil {
+					if err := runRetentionBatch(); err != nil {
 						t.Fatal(err)
 					}
 				}

@@ -363,6 +363,10 @@ function MarkdownPreviewCommentOverlays({
       {commentState.textSelection && (
         <div data-markdown-comment-popover>
           <SelectionCommentSurface
+            key={`${commentState.attachmentTaskId}:${commentState.textSelection.startLine}:${commentState.textSelection.endLine}:${commentState.textSelection.selectedText}`}
+            attachmentOptions={
+              commentState.attachmentTaskId ? { taskId: commentState.attachmentTaskId } : undefined
+            }
             selectedText={commentState.textSelection.selectedText}
             contextLabel={lineRangeLabel(
               commentState.textSelection.startLine,
@@ -377,6 +381,7 @@ function MarkdownPreviewCommentOverlays({
       )}
       {commentState.commentView && (
         <CommentViewPopover
+          taskId={commentState.attachmentTaskId}
           comments={commentState.commentView.comments}
           position={commentState.commentView.position}
           onDelete={commentState.removeComment}

@@ -263,6 +263,7 @@ type ModelEntryDTO struct {
 
 type ModelConfigDTO struct {
 	DefaultModel          string            `json:"default_model"`
+	RuntimeVariant        string            `json:"runtime_variant,omitempty"`
 	AvailableModels       []ModelEntryDTO   `json:"available_models"`
 	CurrentModelID        string            `json:"current_model_id,omitempty"`
 	AvailableModes        []ModeEntryDTO    `json:"available_modes,omitempty"`
@@ -657,6 +658,7 @@ type CommandPreviewResponse struct {
 // Data now comes from the host utility capability cache populated by ACP probes.
 type DynamicModelsResponse struct {
 	AgentName       string              `json:"agent_name"`
+	RuntimeVariant  string              `json:"runtime_variant,omitempty"`
 	Status          string              `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
 	ReasonCode      string              `json:"reason_code,omitempty"`
 	Models          []ModelEntryDTO     `json:"models"`

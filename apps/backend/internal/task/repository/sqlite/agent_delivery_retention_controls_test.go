@@ -121,7 +121,8 @@ func seedRetentionControls(t *testing.T, engine string) (*Repository, []*models.
 	base := time.Date(2025, 4, 5, 6, 7, 8, 0, time.UTC)
 	repo.clockNow = func() time.Time { return base }
 	types := []string{"agent_capabilities", "session_status", "available_commands", "session_mode",
-		"session_models", "session_info", "context_window", "mcp_attachment", "turn_started", "message_chunk"}
+		"session_models", "session_info", "context_window", "mcp_attachment", "turn_started",
+		streams.EventTypeForegroundIdle, "message_chunk"}
 	events := make([]*models.AgentDeliveryEvent, 0, len(types))
 	for index, kind := range types {
 		payload, err := json.Marshal(streams.AgentEvent{Type: kind, SessionID: "controls-session", Text: "preserved output", SupportsImage: true})

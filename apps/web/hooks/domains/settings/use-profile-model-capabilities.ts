@@ -94,6 +94,7 @@ export function useProfileModelCapabilities(
     isConfigResolutionPending: modelOptions.isConfigResolutionPending,
     refreshModelConfig: modelOptions.refreshModelConfig,
     refresh: discovery.refresh,
+    runtimeVariant: capability?.runtime_variant ?? modelConfig.runtime_variant,
     runtimeInfo: discovery.runtimeInfo,
   };
 }
@@ -163,6 +164,7 @@ function buildStaticProfileCapabilities({
     isLoading: discoveryState === "loading" || configIsLoading,
     error,
     refresh,
+    runtimeVariant: modelConfig.runtime_variant,
   };
 }
 
@@ -187,5 +189,6 @@ function buildDynamicProfileCapabilities({
     isLoading: discoveryState === "loading" || configIsLoading,
     error,
     refresh,
+    runtimeVariant: capability?.runtime_variant,
   };
 }

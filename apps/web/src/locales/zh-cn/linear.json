@@ -132,6 +132,8 @@
   "query": "查询",
   "queryHelp": "在标题和描述中做自由文本匹配（可选）。",
   "queryPlaceholder": "身份验证缺陷",
+  "requireBlockersDone": "仅启动阻塞项已完成的议题",
+  "requireBlockersDoneHelp": "每个匹配的议题都会等待，直到阻塞它的所有 Linear 议题都已完成。已取消的阻塞项仍会使其等待。",
   "reEnableItInSettings": "在设置中重新启用",
   "refresh": "刷新",
   "removeConfiguration": "移除配置",

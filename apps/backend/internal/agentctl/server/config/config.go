@@ -261,6 +261,7 @@ type McpServerConfig struct {
 // InstanceConfig holds configuration for a single agent instance.
 // This is passed to the process manager and API server.
 type InstanceConfig struct {
+	PreferACPV2 bool
 	// HomeDir is the resolved Kandev root for this agentctl process. Private
 	// launch files are created beneath it, never inside the workspace.
 	HomeDir string `json:"-"`
