@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -243,9 +242,7 @@ func TestAntigravitySettingsRejectsCapabilitiesFromPreviousRuntime(t *testing.T)
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	binDir := t.TempDir()
 	cliPath := filepath.Join(binDir, "agy")
-	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.5.15'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeAntigravityCLI(t, cliPath, "1.5.15")
 	t.Setenv("PATH", binDir)
 
 	controller, _, ctx, _, _ := newProviderTestController(t)

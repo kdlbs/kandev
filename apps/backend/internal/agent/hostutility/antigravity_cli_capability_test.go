@@ -25,7 +25,7 @@ func TestAntigravityUtilityRequiresCLIHelperCapability(t *testing.T) {
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	binDir := t.TempDir()
 	cliPath := filepath.Join(binDir, "agy")
-	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.5.15'\n"), 0o755); err != nil {
+	if err := os.WriteFile(cliPath, []byte(hostUtilityAntigravityCLIScript("1.5.15")), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir)

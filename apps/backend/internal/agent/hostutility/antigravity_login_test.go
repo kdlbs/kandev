@@ -132,7 +132,7 @@ func TestAntigravityStandaloneLoginWithCLIDefault(t *testing.T) {
 	bin := t.TempDir()
 	cliName, serverName, harnessName := "agy", "agy_acp_server.par", "localharness_external"
 	files := map[string]string{
-		cliName:     "#!/bin/sh\necho 'agy 1.5.15'\n",
+		cliName:     hostUtilityAntigravityCLIScript("1.5.15"),
 		serverName:  "server",
 		harnessName: "harness",
 	}
