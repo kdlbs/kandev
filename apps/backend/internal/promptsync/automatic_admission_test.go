@@ -161,18 +161,28 @@ func newPacedFixture(t *testing.T, gh *pacedGitHub) (*Service, *promptservice.Se
 }
 
 // startWaitingAutomaticSync runs SyncIfDue until its first read is deferred
-// and returns a channel closed when the run ends.
+// and returns a channel closed when the run ends. Cleanup cancels the run and
+// waits for it, so a failed test cannot leave it running past teardown.
 func startWaitingAutomaticSync(t *testing.T, ctx context.Context, svc *Service, gh *pacedGitHub) <-chan struct{} {
 	t.Helper()
 	deferredSignal := make(chan struct{})
 	gh.mu.Lock()
 	gh.gate, gh.onDefer = make(chan struct{}), deferredSignal
 	gh.mu.Unlock()
+	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		svc.SyncIfDue(ctx)
+		svc.SyncIfDue(runCtx)
 	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("automatic sync did not stop after cleanup")
+		}
+	})
 	select {
 	case <-deferredSignal:
 	case <-time.After(2 * time.Second):
