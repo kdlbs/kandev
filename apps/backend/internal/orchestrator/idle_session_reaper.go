@@ -384,7 +384,11 @@ func (s *Service) suspendWorkspaceIdleCandidate(
 	revalidated := false
 	revalidationCtx, cancelRevalidation := context.WithTimeout(ctx, idleSuspensionRevalidationTimeout)
 	suspendErr := s.withSessionPromptAdmission(revalidationCtx, row.SessionID, func(admittedCtx context.Context) error {
-		releaseLifecycleLock := s.acquireSessionLifecycleLock(row.SessionID)
+		// A busy lifecycle lock means the session is not idle; a later scan retries.
+		releaseLifecycleLock, acquired := s.tryAcquireSessionLifecycleLock(row.SessionID)
+		if !acquired {
+			return nil
+		}
 		defer releaseLifecycleLock()
 		current, _, currentOK := s.workspaceIdleCandidate(admittedCtx, row, time.Now().UTC())
 		if !currentOK || current.key != candidate.key || current.identity != candidate.identity {

@@ -21,6 +21,8 @@ and replay remain owned by [queue admission](queue-admission.md).
 | .1, .2   | `messagequeue.Service.WithSessionAdmission` and session gate      |
 | .3       | Queued-dispatch error handling, queue handlers, queue API mapping |
 | .4       | Existing handler attachment-cleanup obligation and recovery       |
+| .3 move  | MCP `move_task` deferred-move error mapping                       |
+| .5       | Focus refresh, idle-suspension revalidation, fresh-start replay   |
 
 ## Acquisition and callback lifetime
 
@@ -39,6 +41,22 @@ Use the acquisition context only at lock acquisition. The admitted callback and
 its token retain the caller context and the existing after-lifecycle-unlock
 callbacks. Convert only an internally budgeted acquisition deadline into
 `ErrSessionAdmissionTimeout`; callback errors are returned unchanged.
+
+## Lock order with session lifecycle
+
+Session locks are taken in one order: route operation lock, then session
+lifecycle lock, then queue admission. Resume and recovery hold the lifecycle
+lock while their continuation reaches prompt admission, so code that already
+holds queue admission must never block on the lifecycle lock. Focus refresh of a
+live session and idle-suspension revalidation acquire the lifecycle lock without
+waiting. When it is busy, a lifecycle operation owns the session, so the session
+is not settled: the attempt is skipped, admission is released, and the next
+focus event or reaper scan retries.
+
+Fresh-start recovery replays the original submission as a dispatch-only prompt.
+The resume continuation, and with it the lifecycle lock, ends at provider
+acceptance, matching ordinary first launch. Turn results and failures arrive
+through the normal agent event path, not the recovery request.
 
 ## Failure and recovery
 
@@ -64,8 +82,8 @@ Each acquisition keeps its own 30-second budget;
 the same live compensation can wait for contention to clear without dropping
 the known-undelivered message.
 
-All queue mutation handlers map this sentinel to the existing retryable
-`UNAVAILABLE` response. Operator mutation wrappers wait 35 seconds and preserve
+All queue mutation handlers, including the MCP `move_task` deferred-move path,
+map this sentinel to the existing retryable `UNAVAILABLE` response. Operator mutation wrappers wait 35 seconds and preserve
 the structured admission error. Queue controls use the existing translated
 queue-unavailable feedback. Identity, entry-not-found, merge limits, and reorder
 drift retain their precedence. Identified queue admission keeps its existing

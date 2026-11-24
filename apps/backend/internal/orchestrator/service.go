@@ -3342,6 +3342,10 @@ func (s *Service) sessionSettingsSnapshotLock(sessionID string) *sync.Mutex {
 	return &s.sessionSettingsSnapshotLocks[hash.Sum32()%uint32(len(s.sessionSettingsSnapshotLocks))]
 }
 
+// tryAcquireSessionLifecycleLock acquires the session lifecycle lock only when
+// it is free. Lock order is lifecycle before queue admission, so a caller that
+// holds queue admission must use this instead of acquireSessionLifecycleLock:
+// resume and recovery can hold the lifecycle lock until their prompt is admitted.
 func (s *Service) tryAcquireSessionLifecycleLock(sessionID string) (func(), bool) {
 	if sessionID == "" {
 		return nil, false

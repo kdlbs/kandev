@@ -30,12 +30,20 @@ cancel a callback that already acquired admission.
 - **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.3:** When a queued dispatch cannot acquire
   admission, its taken message shall be requeued without losing its recorded
   user-message or attachment ownership. Queue mutations, including Clear all,
-  Merge with above, Reorder, edit leases, Auto-run, and Auto-merge, shall report
-  a retryable `UNAVAILABLE` result through existing queue feedback. Desktop
-  and phone controls shall retain pending entries and allow an explicit retry.
+  Merge with above, Reorder, edit leases, Auto-run, Auto-merge, and an agent's
+  deferred workflow move, shall report a retryable `UNAVAILABLE` result through
+  existing queue feedback. Desktop and phone controls shall retain pending
+  entries and allow an explicit retry.
 - **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.4:** A persistently failing attachment
   cleanup shall stop its current retry loop after 60 attempts while retaining
   the durable obligation for the existing recovery pass.
+- **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.5:** While an agent turn is in flight,
+  including a turn started by launch recovery, session focus and idle-suspension
+  checks shall not keep session admission occupied. Queue mutations, deferred
+  workflow moves, prompt admissions, and later focus requests for that session
+  shall acquire admission within the AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.1
+  budget. Fresh launch recovery shall finish once the provider accepts the
+  replayed submission; the turn continues without blocking those operations.
 
 ## Compatibility and exclusions
 
@@ -49,3 +57,4 @@ background worker, or recurring verification is introduced.
 
 - [System design](../system-design/bounded-session-queue-admission.md)
 - [Delivery package](../../../plans/bounded-session-queue-admission/plan.md)
+- [Lifecycle lock-order repair](../../../plans/session-admission-lifecycle-lock/plan.md)

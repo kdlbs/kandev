@@ -100,8 +100,14 @@ func (s *Service) resumeFocusedIdleSuspension(
 	return focusTaskSessionResult{execution: execution, session: session, resumed: execution != nil}, nil
 }
 
+// refreshFocusedLiveSession runs under queue admission. A busy lifecycle lock
+// means a lifecycle operation owns the session, so it is not settled and this
+// focus event leaves the idle interval unchanged.
 func (s *Service) refreshFocusedLiveSession(ctx context.Context, taskID, sessionID string) {
-	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
+	releaseLifecycleLock, acquired := s.tryAcquireSessionLifecycleLock(sessionID)
+	if !acquired {
+		return
+	}
 	defer releaseLifecycleLock()
 	latest, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || !eligibleFocusedSession(latest, taskID) {
