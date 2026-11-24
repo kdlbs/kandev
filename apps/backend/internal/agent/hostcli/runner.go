@@ -106,7 +106,7 @@ func isExecNotFound(err error) bool {
 		strings.Contains(msg, "no such file or directory")
 }
 
-// boundedOutput drains version output while retaining at most 64 KiB.
+// boundedOutput drains command output while retaining at most 64 KiB.
 type boundedOutput struct{ bytes.Buffer }
 
 func (b *boundedOutput) Write(p []byte) (int, error) {

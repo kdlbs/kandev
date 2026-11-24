@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/executor"
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -960,6 +961,10 @@ func (m *Manager) applyLocalRuntimeCommand(
 			}
 		}
 		if acpcompat.IsAntigravity(agentConfig.ID()) {
+			if local.Variant == acpcompat.AntigravityRuntimeCLI {
+				args = antigravityruntime.RequireWorkerMode(args)
+				continueArgs = antigravityruntime.RequireWorkerMode(continueArgs)
+			}
 			return acpcompat.AntigravityAuthPolicyForRuntime(local.Variant, local.Version, false), env, args, continueArgs, nil
 		}
 	}
