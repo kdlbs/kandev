@@ -101,7 +101,10 @@ func (s *Service) resumeFocusedIdleSuspension(
 }
 
 func (s *Service) refreshFocusedLiveSession(ctx context.Context, taskID, sessionID string) {
-	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
+	releaseLifecycleLock, acquired := s.tryAcquireSessionLifecycleLock(sessionID)
+	if !acquired {
+		return
+	}
 	defer releaseLifecycleLock()
 	latest, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || !eligibleFocusedSession(latest, taskID) {
