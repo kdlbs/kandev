@@ -241,6 +241,7 @@ func provideLifecycleManager(
 	// StopAgentWithReason needs the capability state to decide survivable
 	// detach versus terminating stop on backend shutdown.
 	lifecycleMgr.SetAgentSurvivalEnabled(cfg.Features.AgentSurvival)
+	lifecycleMgr.SetACPV2Enabled(cfg.Features.ACPV2)
 	log.Info("Agent Manager configured",
 		zap.Int("runtimes", len(executorRegistry.List())),
 		zap.Int("agent_types", len(agentRegistry.List())))

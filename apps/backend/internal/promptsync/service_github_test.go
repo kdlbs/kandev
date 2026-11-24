@@ -3,6 +3,7 @@ package promptsync
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,7 +28,7 @@ type fakeGitHub struct {
 	listRelease <-chan struct{}
 	blockedPath string
 	getStarted  chan struct{}
-	getRelease  <-chan struct{}
+	getRelease  chan struct{}
 }
 
 func (f *fakeGitHub) BindWorkspaceGitHubHost(ctx context.Context, _, _ string) (context.Context, error) {
@@ -38,6 +39,10 @@ func (f *fakeGitHub) BindWorkspaceGitHubHost(ctx context.Context, _, _ string) (
 func (f *fakeGitHub) CommitWorkspaceGitHubHost(ctx context.Context, _ string, fn func(context.Context) error) error {
 	f.commits++
 	return fn(ctx)
+}
+
+func (*fakeGitHub) ResolveRepoRefForWorkspace(_ context.Context, _, _, _, ref string) (string, error) {
+	return ref, nil
 }
 
 func (f *fakeGitHub) ListRepoDirectoryForWorkspace(_ context.Context, _, _, _, path, _ string) ([]github.RepoContentEntry, error) {
@@ -94,6 +99,39 @@ func TestGitHubSyncBindsHostAndAppliesInsideCommit(t *testing.T) {
 	assert.Equal(t, 2, gh.commits)
 	_, err = prompts.GetPromptByName(context.Background(), "a")
 	require.NoError(t, err)
+}
+
+func TestManualSyncCancellationDuringReadStillRecordsFailure(t *testing.T) {
+	svc, gh, _ := newGitHubFixture(t)
+	gh.blockedPath = DefaultPath + "/a.md"
+	gh.getStarted = make(chan struct{})
+	gh.getRelease = make(chan struct{})
+	gh.quotaErr = context.Canceled
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.Sync(ctx)
+		done <- err
+	}()
+	select {
+	case <-gh.getStarted:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("manual sync did not reach the file read")
+	}
+	cancel()
+	close(gh.getRelease)
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("manual sync did not stop after cancellation")
+	}
+
+	cfg, err := svc.GetConfig(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, cfg.ConsecutiveFailures)
+	assert.NotEmpty(t, cfg.LastErrorClass, "manual failure recording is independent of request cancellation")
 }
 
 func TestGitHubCredentialFailureSuspendsUntilCredentialChanges(t *testing.T) {

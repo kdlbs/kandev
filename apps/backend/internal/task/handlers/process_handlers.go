@@ -17,6 +17,7 @@ import (
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	settingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/authz"
@@ -815,6 +816,10 @@ func (h *ProcessHandlers) httpAuthenticate(c *gin.Context) {
 			zap.String("session_id", sessionID),
 			zap.String("method_id", req.MethodID),
 			zap.Error(err))
+		if errors.Is(err, acpcompat.ErrTaskAuthenticationDenied) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}

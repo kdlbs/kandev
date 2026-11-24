@@ -140,6 +140,8 @@ export type AgentCapabilities = {
   supports_workspace_only: boolean;
 };
 
+export type AntigravityRuntimeVariant = "cli" | "standalone";
+
 export type ModelEntry = {
   id: string;
   name: string;
@@ -228,6 +230,7 @@ export type ProfileRuntimeInfo = {
 
 export type ModelConfig = {
   default_model: string;
+  runtime_variant?: AntigravityRuntimeVariant;
   available_models: ModelEntry[];
   current_model_id?: string;
   available_modes?: ModeEntry[];
@@ -257,6 +260,7 @@ export type ModelDiscovery = {
 
 export type DynamicModelsResponse = {
   agent_name: string;
+  runtime_variant?: AntigravityRuntimeVariant;
   status: CapabilityStatus;
   reason_code?: string;
   models: ModelEntry[];

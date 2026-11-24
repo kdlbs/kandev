@@ -39,6 +39,27 @@ func TestPATClient_ListRepoDirectory(t *testing.T) {
 	}
 }
 
+func TestPATClient_ResolveRepoRefSHA(t *testing.T) {
+	client, requests := newRecordingPATServer(t, map[string]string{
+		"/repos/acme/widget/commits": `[{"sha":"0123456789abcdef"}]`,
+	})
+
+	got, err := client.ResolveRepoRefSHA(context.Background(), "acme", "widget", "feature/prompt-sync")
+	if err != nil {
+		t.Fatalf("ResolveRepoRefSHA: %v", err)
+	}
+	if got != "0123456789abcdef" {
+		t.Fatalf("SHA = %q, want resolved commit", got)
+	}
+	query := parseQueryValues(t, (*requests)[0].Query)
+	if got := query.Get("sha"); got != "feature/prompt-sync" {
+		t.Errorf("sha query = %q, want branch name", got)
+	}
+	if got := query.Get("per_page"); got != "1" {
+		t.Errorf("per_page = %q, want 1", got)
+	}
+}
+
 func TestPATClient_ListRepoDirectory_RootOmitsThePathSegment(t *testing.T) {
 	c, requests := newRecordingPATServer(t, map[string]string{
 		"/repos/acme/widget/contents": `[]`,

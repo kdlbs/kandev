@@ -919,7 +919,7 @@ func (m *Manager) DispatchDeliverySubmission(
 	return (&SubmissionDelivery{Journal: deliveryJournal, Stopping: stopping}).Dispatch(ctx, id, func(ctx context.Context) error {
 		m.setBudgetInFlight(id)
 		defer m.clearBudgetInFlight(id)
-		return call(ctx)
+		return call(streams.WithPromptSubmissionID(ctx, id))
 	})
 }
 
@@ -2618,6 +2618,7 @@ func (m *Manager) buildAdapterConfig() error {
 		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
 	}
 	m.adapterCfg = &adapter.Config{
+		ACPProtocolVersion:         m.requestedACPProtocolVersion(),
 		WorkDir:                    m.cfg.WorkDir,
 		ClaudeConfigDir:            claudeConfigDirFromLaunch(m.cfg.AgentType, m.cfg.AgentEnv, m.cfg.StripEnv),
 		AutoApprove:                m.adapterAutoApprove(),
@@ -2637,13 +2638,16 @@ func (m *Manager) buildAdapterConfig() error {
 	}
 
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
-		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
-		if harness == "" {
-			bundle, err := antigravityruntime.Resolve(context.Background(), antigravityruntime.ResolveOptions{})
-			if err != nil {
-				return fmt.Errorf("resolve Antigravity harness: %w", err)
+		harness := ""
+		if m.cfg.AuthPolicy.RuntimeVariant != acpcompat.AntigravityRuntimeCLI {
+			harness = acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
+			if harness == "" {
+				bundle, err := antigravityruntime.Resolve(context.Background(), antigravityruntime.ResolveOptions{})
+				if err != nil {
+					return fmt.Errorf("resolve Antigravity harness: %w", err)
+				}
+				harness = bundle.HarnessPath
 			}
-			harness = bundle.HarnessPath
 		}
 		env, err := acpcompat.PrepareLocalAntigravityEnv(m.cfg.AgentEnv, harness)
 		if err != nil {
@@ -2940,7 +2944,7 @@ func (m *Manager) closeStderrPipe() error {
 // startAgentShell auto-creates a shell session when ShellEnabled is configured.
 // Failure is non-fatal: the agent can still work without a shell session.
 func (m *Manager) startAgentShell() {
-	if !m.cfg.ShellEnabled {
+	if !m.cfg.ShellEnabled || m.shell != nil {
 		return
 	}
 	// Start calls this while holding startMu. Copy AgentEnv directly instead of
@@ -3012,7 +3016,7 @@ func lookupEnvValue(env []string, key string) string {
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, nil, nil, opencode.Runtime{}, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, false, nil, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithEnvironment sets the agent command and replaces the complete
@@ -3020,41 +3024,41 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 // instance variables that are absent from env remain available to the agent.
 // This must be called before Start() if the instance was created without a command.
 func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, nil, nil, opencode.Runtime{}, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, false, nil, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithProjectDelivery sets the agent command together with
 // execution-bound project delivery evidence. A missing record clears any
 // previous evidence so a new configuration cannot inherit it by omission.
 func (m *Manager) ConfigureWithProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, nil, opencode.Runtime{}, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, false, delivery, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithProjectDeliveryAndInstallContext adds authenticated installer
 // provenance for reusable managed npm repairs.
 func (m *Manager) ConfigureWithProjectDeliveryAndInstallContext(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, installContext, opencode.Runtime{}, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, false, delivery, installContext, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithEnvironmentAndProjectDelivery combines complete environment
 // replacement with execution-bound project delivery evidence.
 func (m *Manager) ConfigureWithEnvironmentAndProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, nil, opencode.Runtime{}, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, false, delivery, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext combines
 // complete environment replacement with authenticated installer provenance.
 func (m *Manager) ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, installContext, opencode.Runtime{}, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, false, delivery, installContext, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureRuntime atomically carries resolved runtime identity with launch
 // configuration.
-func (m *Manager) ConfigureRuntime(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, runtime opencode.Runtime, wrapper launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, replaceEnv, delivery, installContext, runtime, wrapper)
+func (m *Manager) ConfigureRuntime(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv, preferACPV2 bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, runtime opencode.Runtime, wrapper launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, replaceEnv, preferACPV2, delivery, installContext, runtime, wrapper)
 }
 
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, runtime opencode.Runtime, wrapper ...launchwrapper.Spec) error {
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv, preferACPV2 bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, runtime opencode.Runtime, wrapper ...launchwrapper.Spec) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	if m.credentialImport {
@@ -3102,6 +3106,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	m.cfg.AgentCommandConfigured = true
 	m.cfg.AgentArgs = args
 	m.cfg.OpenCodeRuntime = runtime
+	m.cfg.PreferACPV2 = preferACPV2
 	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
 	m.cfg.LaunchWrapperRequired = !spec.IsZero()
 	m.cfg.ProjectMCPDelivery = acceptedDelivery
@@ -3255,32 +3260,34 @@ func (m *Manager) createAdapter() error {
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	m.adapter = adpt
-	if setter, ok := m.adapter.(adapter.MCPAttachmentEventPersisterSetter); ok {
+	if setter, ok := adpt.(adapter.MCPAttachmentEventPersisterSetter); ok {
 		setter.SetMCPAttachmentEventPersister(m.persistDeliveryEvent)
 	}
 
 	// Set stderr provider if the adapter implements the optional StderrProviderSetter interface
-	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
+	if setter, ok := adpt.(adapter.StderrProviderSetter); ok {
 		setter.SetStderrProvider(m)
 	}
-	if consumer, ok := m.adapter.(adapter.StderrLineConsumer); ok {
+	if consumer, ok := adpt.(adapter.StderrLineConsumer); ok {
 		m.stderrConsumer = consumer
 	} else {
 		m.stderrConsumer = nil
 	}
-	if sanitizer, ok := m.adapter.(adapter.StderrLineSanitizer); ok {
+	if sanitizer, ok := adpt.(adapter.StderrLineSanitizer); ok {
 		m.stderrSanitizer = sanitizer
 	} else {
 		m.stderrSanitizer = nil
 	}
 
 	// Set the permission handler
-	m.adapter.SetPermissionHandler(m.handlePermissionRequest)
-	if setter, ok := m.adapter.(adapter.UserInputRequestHandlerSetter); ok {
+	adpt.SetPermissionHandler(m.handlePermissionRequest)
+	if setter, ok := adpt.(adapter.UserInputRequestHandlerSetter); ok {
 		setter.SetUserInputRequestHandler(m.userInputRequestHandler)
 	}
 
+	m.mu.Lock()
+	m.adapter = adpt
+	m.mu.Unlock()
 	return nil
 }
 
@@ -4554,13 +4561,7 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 				"startup_evidence":   evidence,
 			},
 		}
-		m.recordTerminalOutcome(&event)
-		if persisted, persistErr := m.persistDeliveryEvent(event); persistErr != nil {
-			m.logger.Error("failed to commit durable exit error event", zap.Error(persistErr))
-		} else {
-			event = persisted
-			m.sendUpdateBlockingRecorded(event)
-		}
+		m.publishProcessExitError(event)
 	default:
 		m.exitCode.Store(0)
 		m.logger.Info("agent process exited successfully",

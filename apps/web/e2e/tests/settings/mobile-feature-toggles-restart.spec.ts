@@ -1,7 +1,15 @@
 import { expect, test } from "../../fixtures/test-base";
-import { gotoFeatureToggles, stubFeatureToggles } from "./feature-toggles-restart-helpers";
+import {
+  gotoFeatureToggles,
+  saveAcpV2RestartOverride,
+  stubFeatureToggles,
+} from "./feature-toggles-restart-helpers";
 
 test.describe("Mobile Feature Toggles restart action", () => {
+  test("saves the ACP v2 opt-in using touch", async ({ testPage }) => {
+    await saveAcpV2RestartOverride(testPage, true);
+  });
+
   test("keeps the supported restart action reachable", async ({ testPage }) => {
     await stubFeatureToggles(testPage, {
       supported: true,

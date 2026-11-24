@@ -68,7 +68,7 @@ const agentDeliveryRetentionOutputTypesSQL = `'message_chunk', 'reasoning', 'too
 
 const agentDeliveryRetentionControlTypesSQL = `'agent_capabilities', 'session_status', 'available_commands',
  'session_mode', 'session_models', 'session_info', 'context_window',
- 'mcp_attachment', 'turn_started'`
+ 'mcp_attachment', 'turn_started', 'foreground_idle'`
 
 const agentDeliveryRetentionNonterminalTypesSQL = agentDeliveryRetentionOutputTypesSQL + ", " + agentDeliveryRetentionControlTypesSQL
 

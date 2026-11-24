@@ -30,10 +30,11 @@ const (
 
 // AgentCapabilities is the cached result of probing an agent type.
 type AgentCapabilities struct {
-	AgentType    string              `json:"agent_type"`
-	AgentName    string              `json:"agent_name,omitempty"`
-	AgentVersion string              `json:"agent_version,omitempty"`
-	RuntimeInfo  *agents.RuntimeInfo `json:"runtime_info,omitempty"`
+	AgentType      string              `json:"agent_type"`
+	AgentName      string              `json:"agent_name,omitempty"`
+	AgentVersion   string              `json:"agent_version,omitempty"`
+	RuntimeVariant string              `json:"runtime_variant,omitempty"`
+	RuntimeInfo    *agents.RuntimeInfo `json:"runtime_info,omitempty"`
 
 	Status Status `json:"status"`
 	Error  string `json:"error,omitempty"`

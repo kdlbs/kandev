@@ -34,18 +34,20 @@ func IsAuthErrorMessage(s string) bool {
 // high-level fields we extract from `initialize` and `session/new` so the
 // CLI's `matrix` summary and the skill don't have to re-parse JSONL.
 type ProbeResult struct {
-	ProtocolVersion int
-	AgentName       string
-	AgentVersion    string
-	AuthMethods     []string
-	Models          []string
-	CurrentModelID  string
-	Modes           []string
-	CurrentModeID   string
-	SessionID       string
-	MCPHTTP         bool
-	MCPSSE          bool
-	modelConfigID   string
+	RequestedVersion int
+	ProtocolVersion  int
+	AgentName        string
+	AgentVersion     string
+	AuthMethods      []string
+	Models           []string
+	CurrentModelID   string
+	Modes            []string
+	CurrentModeID    string
+	SessionID        string
+	MCPHTTP          bool
+	MCPSSE           bool
+	modelConfigID    string
+	modeConfigID     string
 }
 
 // MCPProbeResult describes what was delivered to an agent separately from
@@ -75,7 +77,7 @@ func Probe(ctx context.Context, r *Runner) (*ProbeResult, error) {
 		return nil, fmt.Errorf("session/new: %w", err)
 	}
 
-	return buildProbeResult(initResp, newResp), nil
+	return r.probeResult(initResp, newResp), nil
 }
 
 // MCPProbe runs initialize and injects a short-lived HTTP sentinel into
@@ -88,6 +90,9 @@ func MCPProbe(ctx context.Context, r *Runner) (*MCPProbeResult, error) {
 	if err := sendAntigravityAuthIfNeeded(ctx, r, initResp); err != nil {
 		return nil, fmt.Errorf("authenticate: %w", err)
 	}
+	if r.cfg.ProtocolVersion == 2 && !buildProbeResult(initResp, nil).MCPHTTP {
+		return nil, errors.New("ACP v2 peer did not advertise HTTP MCP support")
+	}
 	sentinel := NewMCPSentinel(r.rec)
 	defer sentinel.Close()
 	newResp, err := sendSessionNewWithMCP(ctx, r, []any{map[string]any{
@@ -99,7 +104,7 @@ func MCPProbe(ctx context.Context, r *Runner) (*MCPProbeResult, error) {
 		return nil, fmt.Errorf("session/new: %w", err)
 	}
 	result := &MCPProbeResult{
-		ProbeResult: *buildProbeResult(initResp, newResp),
+		ProbeResult: *r.probeResult(initResp, newResp),
 		Delivered:   true,
 	}
 	// Give an asynchronously connecting agent a small, bounded opportunity to
@@ -159,27 +164,37 @@ func Prompt(ctx context.Context, r *Runner, opts PromptOptions) (*PromptResult, 
 		return nil, err
 	}
 
-	if opts.Model != "" {
-		if err := sendModelSelection(ctx, r, probe.SessionID, opts.Model, probe.modelConfigID); err != nil {
-			return nil, fmt.Errorf("model selection: %w", err)
+	if probe.ProtocolVersion == 2 {
+		if err := applyV2Selections(ctx, r, probe, opts); err != nil {
+			return nil, err
 		}
-	}
-	if opts.Mode != "" {
-		if err := sendSetMode(ctx, r, probe.SessionID, opts.Mode); err != nil {
-			return nil, fmt.Errorf("session/set_mode: %w", err)
-		}
+	} else if err := applyV1Selections(ctx, r, probe, opts); err != nil {
+		return nil, err
 	}
 
 	text, err := sendPromptAndCollect(ctx, r, probe.SessionID, opts.Prompt)
 	if err != nil {
 		return nil, fmt.Errorf("session/prompt: %w", err)
 	}
-
 	if opts.Linger > 0 {
 		lingerAfterPrompt(ctx, r, opts.Linger)
 	}
-
 	return &PromptResult{ProbeResult: *probe, Text: text}, nil
+}
+
+func applyV1Selections(ctx context.Context, r *Runner, probe *ProbeResult, opts PromptOptions) error {
+	if opts.Model != "" {
+		if err := sendModelSelection(ctx, r, probe.SessionID, opts.Model, probe.modelConfigID); err != nil {
+			return fmt.Errorf("model selection: %w", err)
+		}
+	}
+	if opts.Mode != "" {
+		if err := sendSetMode(ctx, r, probe.SessionID, opts.Mode); err != nil {
+			return fmt.Errorf("session/set_mode: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // lingerAfterPrompt keeps draining out-of-band frames for the given duration
@@ -209,15 +224,14 @@ func SessionLoad(ctx context.Context, r *Runner, opts SessionLoadOptions) (*Sess
 	if err := sendAntigravityAuthIfNeeded(ctx, r, initResp); err != nil {
 		return nil, fmt.Errorf("authenticate: %w", err)
 	}
-	req, _ := r.Framer().NewRequest("session/load", sessionLoadParams(opts.SessionID, r.cfg.Workdir))
-	resp, err := r.Request(ctx, req)
+	resp, err := loadSession(ctx, r, opts.SessionID)
 	if err != nil {
-		return nil, fmt.Errorf("session/load: %w", err)
+		return nil, err
 	}
-	if errMap, ok := resp["error"].(map[string]any); ok {
-		return nil, fmt.Errorf("session/load error: %v", errMap["message"])
+	result := &SessionLoadResult{ProbeResult: *r.probeResult(initResp, resp)}
+	if result.SessionID == "" {
+		result.SessionID = opts.SessionID
 	}
-	result := &SessionLoadResult{ProbeResult: *buildProbeResult(initResp, resp)}
 	if opts.Prompt == "" {
 		return result, nil
 	}
@@ -226,6 +240,25 @@ func SessionLoad(ctx context.Context, r *Runner, opts SessionLoadOptions) (*Sess
 		return nil, fmt.Errorf("session/prompt: %w", err)
 	}
 	return result, nil
+}
+
+func loadSession(ctx context.Context, r *Runner, sessionID string) (Frame, error) {
+	method := "session/load"
+	params := sessionLoadParams(sessionID, r.cfg.Workdir)
+	if r.cfg.ProtocolVersion == 2 {
+		method = "session/resume"
+		params["replayFrom"] = map[string]any{"type": "start"}
+	}
+	resp, err := sessionSetup(ctx, r, method, params)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", method, err)
+	}
+	if r.cfg.ProtocolVersion == 2 {
+		if err := awaitV2Replay(ctx, r, sessionID); err != nil {
+			return nil, fmt.Errorf("session/resume replay: %w", err)
+		}
+	}
+	return resp, nil
 }
 
 func sessionLoadParams(sessionID, workdir string) map[string]any {
@@ -239,13 +272,22 @@ func sessionLoadParams(sessionID, workdir string) map[string]any {
 // --- JSON-RPC helpers ---
 
 func sendInitialize(ctx context.Context, r *Runner) (Frame, error) {
-	req, _ := r.Framer().NewRequest("initialize", initializeParamsForAgent(r.cfg.AgentID, r.cfg.ClientCapabilities, r.cfg.AIRCapabilities))
-	resp, err := r.Request(ctx, req)
+	variant := acpcompat.AntigravityRuntimeForCommand(r.cfg.Command)
+	params := initializeParamsForRuntime(r.cfg.AgentID, r.cfg.ClientCapabilities, r.cfg.AIRCapabilities, variant)
+	if r.cfg.ProtocolVersion == 2 {
+		params = initializeV2Params(r.cfg)
+	}
+	resp, err := rpcRequest(ctx, r, "initialize", params)
+	result, _ := resp["result"].(map[string]any)
+	version, _ := result["protocolVersion"].(float64)
+	if err == nil && r.cfg.ProtocolVersion == 2 {
+		err = validateV2Initialize(result)
+	}
+	_ = r.rec.Meta("initialize", map[string]any{
+		"requested_version": r.cfg.ProtocolVersion, "selected_version": version, "success": err == nil,
+	})
 	if err != nil {
 		return nil, err
-	}
-	if errMap, ok := resp["error"].(map[string]any); ok {
-		return nil, fmt.Errorf("%v", errMap["message"])
 	}
 	return resp, nil
 }
@@ -254,7 +296,10 @@ func sendInitialize(ctx context.Context, r *Runner) (Frame, error) {
 // before session/new or session/load for a registered Antigravity debugger
 // run. Raw --exec runs keep their existing diagnostic behavior.
 func sendAntigravityAuthIfNeeded(ctx context.Context, r *Runner, initResp Frame) error {
-	if r.cfg.AgentID != acpcompat.AntigravityAgentID {
+	if r.cfg.ProtocolVersion == 2 || r.cfg.AgentID != acpcompat.AntigravityAgentID {
+		return nil
+	}
+	if acpcompat.AntigravityRuntimeForCommand(r.cfg.Command) == acpcompat.AntigravityRuntimeCLI {
 		return nil
 	}
 	if !antigravityAuthMethodAdvertised(initResp) {
@@ -294,6 +339,10 @@ func initializeParams(clientCapabilities map[string]any, airCapabilities []strin
 // initializeParamsForAgent keeps the registered Antigravity debugger on the
 // same wire identity as a live product session.
 func initializeParamsForAgent(agentID string, clientCapabilities map[string]any, airCapabilities []string) map[string]any {
+	return initializeParamsForRuntime(agentID, clientCapabilities, airCapabilities, acpcompat.AntigravityRuntimeStandalone)
+}
+
+func initializeParamsForRuntime(agentID string, clientCapabilities map[string]any, airCapabilities []string, variant string) map[string]any {
 	capabilities := map[string]any{
 		"fs":       map[string]any{"readTextFile": false, "writeTextFile": false},
 		"terminal": false,
@@ -313,13 +362,14 @@ func initializeParamsForAgent(agentID string, clientCapabilities map[string]any,
 	}
 	return map[string]any{
 		"protocolVersion":    1,
-		"clientInfo":         acpdbgClientInfo(agentID),
+		"clientInfo":         acpdbgClientInfo(agentID, variant),
 		"clientCapabilities": capabilities,
 	}
 }
 
-func acpdbgClientInfo(agentID string) map[string]any {
-	if name, version := acpcompat.ClientInfoForAgent(agentID); name != "" {
+func acpdbgClientInfo(agentID, variant string) map[string]any {
+	policy := acpcompat.AntigravityAuthPolicyForRuntime(variant, "", false)
+	if name, version := acpcompat.ClientInfoForLaunch(agentID, policy); name != "" {
 		return map[string]any{"name": name, "version": version}
 	}
 	return map[string]any{"name": "acpdbg", "version": "0.1.0"}
@@ -364,16 +414,26 @@ func sendSessionNew(ctx context.Context, r *Runner) (Frame, error) {
 }
 
 func sendSessionNewWithMCP(ctx context.Context, r *Runner, mcpServers []any) (Frame, error) {
-	req, _ := r.Framer().NewRequest("session/new", map[string]any{
+	return sessionSetup(ctx, r, "session/new", map[string]any{
 		"cwd":        r.cfg.Workdir,
 		"mcpServers": mcpServers,
 	})
+}
+
+func sessionSetup(ctx context.Context, r *Runner, method string, params map[string]any) (Frame, error) {
+	resp, err := rpcRequest(ctx, r, method, params)
+	_ = r.rec.Meta("session_setup", map[string]any{"method": method, "success": err == nil})
+	return resp, err
+}
+
+func rpcRequest(ctx context.Context, r *Runner, method string, params map[string]any) (Frame, error) {
+	req, _ := r.Framer().NewRequest(method, params)
 	resp, err := r.Request(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	if errMap, ok := resp["error"].(map[string]any); ok {
-		return nil, fmt.Errorf("%v", errMap["message"])
+		return resp, fmt.Errorf("%v", errMap["message"])
 	}
 	return resp, nil
 }
@@ -441,6 +501,9 @@ func sendSetMode(ctx context.Context, r *Runner, sessionID, modeID string) error
 }
 
 func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt string) (string, error) {
+	if r.cfg.ProtocolVersion == 2 {
+		return promptV2(ctx, r, sessionID, prompt)
+	}
 	req, promptID := r.Framer().NewRequest("session/prompt", map[string]any{
 		"sessionId": sessionID,
 		"prompt": []any{
@@ -540,10 +603,6 @@ func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt stri
 		case <-ctx.Done():
 			return text.String(), ctx.Err()
 		}
-
-		if r.oobFinished() {
-			return text.String(), io.EOF
-		}
 	}
 }
 
@@ -602,9 +661,19 @@ func buildProbeResult(initResp, newResp Frame) *ProbeResult {
 	return out
 }
 
+func (r *Runner) probeResult(initResp, sessionResp Frame) *ProbeResult {
+	out := buildProbeResult(initResp, sessionResp)
+	out.RequestedVersion = r.cfg.ProtocolVersion
+	return out
+}
+
 func parseInitResult(initResult map[string]any, out *ProbeResult) {
 	if pv, ok := initResult["protocolVersion"].(float64); ok {
 		out.ProtocolVersion = int(pv)
+	}
+	if out.ProtocolVersion == 2 {
+		parseV2InitResult(initResult, out)
+		return
 	}
 	if info, ok := initResult["agentInfo"].(map[string]any); ok {
 		out.AgentName, _ = info["name"].(string)
@@ -623,6 +692,13 @@ func parseInitResult(initResult map[string]any, out *ProbeResult) {
 
 func parseSessionResult(newResult map[string]any, out *ProbeResult) {
 	out.SessionID, _ = newResult["sessionId"].(string)
+	if out.ProtocolVersion == 2 {
+		out.modelConfigID = extractV2ConfigID(newResult, "model")
+		out.modeConfigID = extractV2ConfigID(newResult, "mode")
+		out.CurrentModelID, out.Models = extractSelectConfigOption(newResult, "model")
+		out.CurrentModeID, out.Modes = extractSelectConfigOption(newResult, "mode")
+		return
+	}
 	out.modelConfigID = extractModelConfigOptionID(newResult)
 	if models, ok := newResult["models"].(map[string]any); ok {
 		out.CurrentModelID, _ = models["currentModelId"].(string)

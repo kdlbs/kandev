@@ -66,14 +66,23 @@ func safeStoredMessage(message string) string {
 	return reposync.SafeStoredErrorMessage(message, genericFailureMessage)
 }
 
-func (s *Service) recordFailure(ctx context.Context, cfg *Config, syncErr error) {
+func (s *Service) recordFailure(ctx context.Context, cfg *Config, mode syncMode, syncErr error) {
 	directive := s.failureDirective(cfg, syncErr)
-	incRun("failure")
 	message := safeErrorMessage(syncErr)
-	if err := s.store.RecordFailure(context.WithoutCancel(ctx), message, directive, s.now().UTC()); err != nil {
+	// Manual failure status survives request cancellation. Automatic status
+	// writes follow the poller's cancelable run context.
+	writeCtx := context.WithoutCancel(ctx)
+	if mode == syncAutomatic {
+		writeCtx = ctx
+	}
+	if err := s.store.RecordFailure(writeCtx, message, directive, s.now().UTC()); err != nil {
+		if mode == syncAutomatic && ctx.Err() != nil {
+			return
+		}
 		s.logger.Warn("failed to record prompt sync failure", zap.Error(err))
 		return
 	}
+	incRun("failure")
 	fields := []zap.Field{
 		zap.String("provider", cfg.Provider),
 		zap.String("failure_class", directive.Class),
@@ -91,18 +100,14 @@ func (s *Service) recordFailure(ctx context.Context, cfg *Config, syncErr error)
 }
 
 // recordRunError records a failed run. A background run that GitHub's local
-// admission deferred did not reach the provider, so it is a scheduling wait and
-// not a failure: the configuration stays due and the next tick retries it.
+// admission deferred did not reach the provider, so it leaves the configuration
+// due without recording a failure.
 func (s *Service) recordRunError(ctx context.Context, cfg *Config, mode syncMode, err error) {
 	var deferred *github.AdmissionDeferredError
 	if mode == syncAutomatic && errors.As(err, &deferred) {
-		incPollSkipped("rate_limited")
-		s.logger.Info("prompt sync deferred by GitHub admission; the next tick retries",
-			zap.String("provider", cfg.Provider), zap.String("reason", deferred.Reason),
-			zap.Duration("delay", deferred.Delay))
 		return
 	}
-	s.recordFailure(ctx, cfg, err)
+	s.recordFailure(ctx, cfg, mode, err)
 }
 
 func (s *Service) recordSuccess(cfg *Config, result *SyncResult) {

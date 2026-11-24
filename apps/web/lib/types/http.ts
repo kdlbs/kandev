@@ -750,6 +750,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   agent_profile_id?: AgentProfileId;
   /** Logical profile selected by the user; dynamic profiles resolve this to a concrete launch profile. */
   execution_profile_id?: AgentProfileId;
+  /** Runtime adapter that owns the session's native conversation, when known. */
+  runtime_adapter_version?: string;
   /** Monotonic dynamic-route generation used for stale action rejection. */
   route_generation?: number;
   /** Durable dynamic-route state, such as starting, waiting, or action_required. */

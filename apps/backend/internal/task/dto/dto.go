@@ -426,21 +426,22 @@ type TaskSessionDTO struct {
 	// ExecutionRuntime is the observed runtime recorded for the same
 	// executors_running row as AgentExecutionID/ContainerID. Null means
 	// unknown; it is never inferred from the selected executor.
-	ExecutionRuntime   *string `json:"execution_runtime"`
-	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
-	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
-	RouteGeneration    int64   `json:"route_generation,omitempty"`
-	RouteState         string  `json:"route_state,omitempty"`
-	RouteReason        string  `json:"route_reason,omitempty"`
-	ExecutorID         string  `json:"executor_id,omitempty"`
-	ExecutorProfileID  string  `json:"executor_profile_id,omitempty"`
-	EnvironmentID      string  `json:"environment_id,omitempty"`
-	RepositoryID       string  `json:"repository_id,omitempty"`
-	BaseBranch         string  `json:"base_branch,omitempty"`
-	BaseCommitSHA      string  `json:"base_commit_sha,omitempty"`
-	WorktreeID         string  `json:"worktree_id,omitempty"`
-	WorktreePath       string  `json:"worktree_path,omitempty"`
-	WorktreeBranch     string  `json:"worktree_branch,omitempty"`
+	ExecutionRuntime      *string `json:"execution_runtime"`
+	AgentProfileID        string  `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID    string  `json:"execution_profile_id,omitempty"`
+	RuntimeAdapterVersion string  `json:"runtime_adapter_version,omitempty"`
+	RouteGeneration       int64   `json:"route_generation,omitempty"`
+	RouteState            string  `json:"route_state,omitempty"`
+	RouteReason           string  `json:"route_reason,omitempty"`
+	ExecutorID            string  `json:"executor_id,omitempty"`
+	ExecutorProfileID     string  `json:"executor_profile_id,omitempty"`
+	EnvironmentID         string  `json:"environment_id,omitempty"`
+	RepositoryID          string  `json:"repository_id,omitempty"`
+	BaseBranch            string  `json:"base_branch,omitempty"`
+	BaseCommitSHA         string  `json:"base_commit_sha,omitempty"`
+	WorktreeID            string  `json:"worktree_id,omitempty"`
+	WorktreePath          string  `json:"worktree_path,omitempty"`
+	WorktreeBranch        string  `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
@@ -574,6 +575,9 @@ func EnrichSessionRecoveryBlocks(
 	if generation == nil || generation.Generation < 1 {
 		return nil
 	}
+	if generation.AdapterVersion != "" {
+		result.RuntimeAdapterVersion = generation.AdapterVersion
+	}
 	blocks, err := reader.ListOpenSessionRecoveryBlocks(ctx, session.ID, incarnationID, generation.Generation)
 	if err != nil {
 		return err
@@ -635,21 +639,22 @@ type TaskSessionSummaryDTO struct {
 	// ExecutionRuntime is the observed runtime recorded for the same
 	// executors_running row as AgentExecutionID/ContainerID. Null means
 	// unknown; it is never inferred from the selected executor.
-	ExecutionRuntime   *string `json:"execution_runtime"`
-	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
-	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
-	RouteGeneration    int64   `json:"route_generation,omitempty"`
-	RouteState         string  `json:"route_state,omitempty"`
-	RouteReason        string  `json:"route_reason,omitempty"`
-	ExecutorID         string  `json:"executor_id,omitempty"`
-	ExecutorProfileID  string  `json:"executor_profile_id,omitempty"`
-	EnvironmentID      string  `json:"environment_id,omitempty"`
-	RepositoryID       string  `json:"repository_id,omitempty"`
-	BaseBranch         string  `json:"base_branch,omitempty"`
-	BaseCommitSHA      string  `json:"base_commit_sha,omitempty"`
-	WorktreeID         string  `json:"worktree_id,omitempty"`
-	WorktreePath       string  `json:"worktree_path,omitempty"`
-	WorktreeBranch     string  `json:"worktree_branch,omitempty"`
+	ExecutionRuntime      *string `json:"execution_runtime"`
+	AgentProfileID        string  `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID    string  `json:"execution_profile_id,omitempty"`
+	RuntimeAdapterVersion string  `json:"runtime_adapter_version,omitempty"`
+	RouteGeneration       int64   `json:"route_generation,omitempty"`
+	RouteState            string  `json:"route_state,omitempty"`
+	RouteReason           string  `json:"route_reason,omitempty"`
+	ExecutorID            string  `json:"executor_id,omitempty"`
+	ExecutorProfileID     string  `json:"executor_profile_id,omitempty"`
+	EnvironmentID         string  `json:"environment_id,omitempty"`
+	RepositoryID          string  `json:"repository_id,omitempty"`
+	BaseBranch            string  `json:"base_branch,omitempty"`
+	BaseCommitSHA         string  `json:"base_commit_sha,omitempty"`
+	WorktreeID            string  `json:"worktree_id,omitempty"`
+	WorktreePath          string  `json:"worktree_path,omitempty"`
+	WorktreeBranch        string  `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
@@ -1275,6 +1280,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		ExecutionRuntime:            observedExecutionRuntimePtr(session.ExecutionRuntime),
 		AgentProfileID:              session.AgentProfileID,
 		ExecutionProfileID:          session.ExecutionProfileID,
+		RuntimeAdapterVersion:       models.ACPAdapterVersionForNativeSession(session.Metadata, session.DownstreamACPSessionID),
 		RouteGeneration:             session.RouteGeneration,
 		RouteState:                  session.RouteState,
 		RouteReason:                 session.RouteReason,
