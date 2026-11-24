@@ -1132,7 +1132,8 @@ subscription vocabulary and wildcard rules are in the
 | Completion gates          | `HostTaskCompletionGates(host)`, `SetCriteria`, `Verify`                                                                         | `api_write: tasks` plus `host.v2.write:tasks`                                                                                                    | Task-version, criteria-revision, claim-generation, and idempotency fenced; returns typed criteria, evidence, and blockers. Plugins cannot weaken unmet criteria or issue human overrides. Human recovery APIs remain outside the plugin Host API. Task detail has no gate inspection or recovery dialog. |
 | Task directives            | `IssueDirective`, `ResolveDirective`                                                                                             | `api_write: task_directives` plus `host.v2.write:task_directives`; delegated capability must also be approved for the target                      | Short-lived, version-fenced request records; instruction and resolution bodies are represented by digests                                                                                                                                                                                 |
 | Native task deletion       | `PluginOwnedTaskTrees().Preview`; legacy `Delete` remains in the v1 SDK                                                          | Preview is source-scoped; native deletion is a Human-only task UI action                                                                          | The current Host denies plugin `Delete` with `PermissionDenied` and `native_human_confirmation_required`; see [deletion consent](#native-task-deletion-consent)                                                                                                                           |
-| Exact execution controls   | `HostExecutionCommands(host)`: `EnsureTaskRun`, `StopTaskRun`, `RecoverSession`, `CancelPendingTaskTransition`, `GetSessionModeContext`, `SetSessionMode` | Writes require `api_write: execution` plus `host.v2.write:execution`; mode reads require `api_read: sessions` plus `host.v2.read:sessions` | Exact task/session versions, execution IDs, and the observed management claim generation fence controls; the Host derives the caller installation and serializes effects with ownership changes. Recovery uses normal launch admission; unsafe provider modes are filtered |
+| Exact execution controls   | `HostExecutionCommands(host)`: `EnsureTaskRun`, `StopTaskRun`, `CancelTurn`, `RecoverSession`, `CancelPendingTaskTransition`, `GetSessionModeContext`, `SetSessionMode`, `GetStepApproval`, `ApproveStep` | Writes require `api_write: execution` plus `host.v2.write:execution`; mode and step-approval reads require `api_read: sessions` plus `host.v2.read:sessions`; `ApproveStep` also needs a `step_approval` receipt for a linked user | Exact task/session versions, execution IDs, and the observed management claim generation fence controls; the Host derives the caller installation and serializes effects with ownership changes. Recovery uses normal launch admission; unsafe provider modes are filtered |
+| Linked human responses     | `HostHumanResponseDelegation(host)`: `LinkExternalIdentity`, `RequestHumanResponseReceipt`                                           | `api_write: human_responses`; receipts also need `host.v2.write:human_responses`                                                                  | Receipts are minted only for the Kandev user linked to the external account, when that user holds `session.control`; single-use, five minutes, payload- and revision-bound to the calling installation; `Interaction.ResolvedBy` names the user and surface                              |
 | Managed conversations      | `ExactHost.ManagedAgentConversations()`                                                                                          | `api_read` and/or `api_write: managed_agent_conversations`, plus matching Host v2 workspace grant                                                 | Installation-owned hidden conversations with revisioned launch settings, pause state, retained lifecycle, and durable mutation receipts                                                                                                                                                   |
 | Managed conversation input | `EnqueueInput`, `GetInput`, `ListInputs`, `CancelInput`, `Dispatch`                                                              | Reads use `api_read: managed_agent_conversations`; writes use `api_write: managed_agent_conversations`, plus the matching Host v2 workspace grant | Durable FIFO receipts, bounded sequence reads, exact active cancellation, and immediate dispatch whose `busy` result never queues                                                                                                                                                         |
 | Managed conversation schedules | `HostManagedConversationSchedules(host)`: `List`, `Create`, `Update`, `SetEnabled`, `Delete`                              | Reads require `api_read: automations` plus `host.v2.read:automations`; writes require `api_write: automations` plus `host.v2.write:automations` | Installation-owned schedules use revisioned commands and durable receipts; delivery reauthorizes the retained destination and retries by occurrence ID                                                                                                                                   |
@@ -1736,7 +1737,13 @@ Writes require `api_write: ["execution"]` and the workspace grant
 
 `EnsureTaskRun` checks the task version and enters through normal task launch
 admission. `StopTaskRun` requires the observed session version and execution
-ID; it cannot stop a replacement execution. `RecoverSession` currently
+ID; it cannot stop a replacement execution. `CancelTurn` takes the same
+fields and fences but only interrupts the current turn, like the native Stop
+button in a chat: the session ends `WAITING_FOR_INPUT` and stays promptable,
+and queued messages are paused instead of sent. It returns `APPLIED` with `cancelled=true`
+when a running or starting turn was interrupted and `NO_CHANGE` when no turn
+was active. If the observed turn ends and another starts before the
+cancellation is applied, it returns `CONFLICT` and leaves the new turn running. `RecoverSession` currently
 supports only `resume` for an execution-less interrupted session and uses the
 normal orchestrator launch path. `CancelPendingTaskTransition` requires the
 exact transition ID and resource version. Commands return typed outcomes such
@@ -1789,6 +1796,107 @@ result, interaction, err := responses.RespondPermission(ctx, pluginsdk.ExactPerm
 `AnswerClarification` uses the same receipt flow. The first valid response
 wins. A stale revision or changed payload is denied or conflicted and cannot
 answer a replacement interaction.
+
+#### Responses from linked chat accounts
+
+A chat bridge relays decisions made outside Kandev, such as a button press in
+Discord. Kandev only accepts them from a Kandev user who linked that external
+account, so a plugin can never answer under a name of its choosing.
+
+1. Declare `api_write: [human_responses]` (plus `interactions` for the
+   responses). A workspace manager grants `host.v2.write:human_responses`
+   in Settings > Plugins > Workspace access.
+2. The plugin settings page shows a **Linked chat accounts** card. A Kandev
+   user generates a link code there (single-use, ten minutes) and sends it to
+   your plugin, for example `/link ABCD-EFGH-JKMN`. Redeem it with
+   `LinkExternalIdentity`, passing the external provider and account ID. The
+   call is denied with `missing_capability_approval` until a workspace grants
+   `host.v2.write:human_responses`, and the code stays valid so you can retry
+   after the grant. A later link of the same account or the same user replaces
+   the earlier one.
+   Users revoke their own links on that card and admins revoke any link;
+   uninstalling the plugin removes them.
+3. When a linked person decides, request a receipt for that account and the
+   exact payload, then send the exact response with it:
+
+```go
+delegation, ok := pluginsdk.HostHumanResponseDelegation(host)
+if !ok {
+    return errors.New("linked human responses are unsupported")
+}
+minted, receipt, err := delegation.RequestHumanResponseReceipt(ctx, pluginsdk.HumanResponseReceiptRequest{
+    RequestID: "request-13", WorkspaceID: workspaceID,
+    Provider: "discord", Subject: discordUserID,
+    Kind: pluginsdk.HumanResponseKindPermission, TargetID: observed.Interaction.ID,
+    ExpectedResourceVersion: observed.ResourceVersion, OptionID: selectedOptionID,
+    ApprovalRevision: capability.ApprovalRevision, ManifestDigest: capability.ManifestDigest,
+})
+if err != nil || minted.Status != pluginsdk.CommandApplied {
+    // DENIED "external_identity_not_linked": offer a deep link and /link.
+    // DENIED "linked_user_not_authorized": the user lacks session control.
+    return err
+}
+// receipt.Actor is the Kandev user, e.g. {UserID, DisplayName: "Alice", Via: "discord"}.
+result, interaction, err := responses.RespondPermission(ctx, pluginsdk.ExactPermissionResponse{
+    RequestID: "request-14", WorkspaceID: workspaceID,
+    InteractionID: observed.Interaction.ID, ExpectedResourceVersion: observed.ResourceVersion,
+    OptionID: selectedOptionID, HumanResponseReceiptID: receipt.ID,
+    ApprovalRevision: capability.ApprovalRevision, ManifestDigest: capability.ManifestDigest,
+})
+```
+
+The receipt is bound to your installation; another plugin cannot spend it.
+When it is spent, Kandev checks again that the link exists, the grant is
+active, and the user still holds `session.control`, then responds as that
+user. The permission audit records the user with source `plugin`, and
+`Interactions().Get` returns `ResolvedBy` (for example "Alice via discord").
+`AnswerClarification` works the same way with `Kind:
+pluginsdk.HumanResponseKindClarification` and the exact `Answers`.
+
+#### Approving workflow review steps
+
+`GetStepApproval` reports whether a session's current workflow step awaits
+the native Approve action, the step it is in, and the step approval moves it
+to (empty for a final step). A step awaits approval when the session is not
+running or starting, its review status is not `approved`, and either its
+review status is `pending` or the step has an `on_turn_complete` transition
+with `requires_approval` and the session's latest turn completed in the
+current step entry. An Office approval stage returns gRPC `Unimplemented`;
+approve it in Kandev.
+
+To approve, request a receipt with `Kind:
+pluginsdk.HumanResponseKindStepApproval`, the session ID as `TargetID`, and the
+observed `ResourceVersion`, then call `ApproveStep`:
+
+```go
+approval, err := execution.GetStepApproval(ctx, pluginsdk.ExactStepApprovalQuery{
+    RequestID: "request-15", WorkspaceID: workspaceID, SessionID: sessionID,
+})
+if err != nil || !approval.Awaiting {
+    return err
+}
+_, receipt, err := delegation.RequestHumanResponseReceipt(ctx, pluginsdk.HumanResponseReceiptRequest{
+    RequestID: "request-16", WorkspaceID: workspaceID, Provider: "discord", Subject: discordUserID,
+    Kind: pluginsdk.HumanResponseKindStepApproval, TargetID: sessionID,
+    ExpectedResourceVersion: approval.ResourceVersion,
+    ApprovalRevision: capability.ApprovalRevision, ManifestDigest: capability.ManifestDigest,
+})
+// Check the receipt result as above.
+result, moved, err := execution.ApproveStep(ctx, pluginsdk.ExactStepApprovalCommand{
+    RequestID: "request-17", WorkspaceID: workspaceID, SessionID: sessionID,
+    ExpectedResourceVersion: approval.ResourceVersion, IdempotencyKey: "approve-" + sessionID,
+    HumanResponseReceiptID: receipt.ID,
+    ApprovalRevision: capability.ApprovalRevision, ManifestDigest: capability.ManifestDigest,
+})
+```
+
+`ApproveStep` uses the same path as the native Approve button, acting as the
+linked user: the task moves to `moved.ToStepID`, `task.moved` and `on_enter`
+fire, and the review status becomes `approved`. A step that no longer awaits
+approval returns `CONFLICT` with reason `step_not_awaiting_approval`; a
+changed session or target returns `CONFLICT` with `step_approval_changed`.
+Repeating the same command returns `ALREADY_APPLIED` and never moves the task
+twice.
 
 ### Exact workspace observations
 
@@ -2329,9 +2437,19 @@ conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
 `TaskIDs`, a `Since`/`Until` `created_at` window (RFC3339; `Since` inclusive,
 `Until` exclusive, the natural way to fetch "yesterday"), and message
 `Types`. Each `Message` carries `id`, `session_id`, `task_id`, `turn_id`,
-`author_type` (`user` or `agent`), `content`, `type`, and `created_at`.
-`content` has kandev's injected `<kandev-system>` blocks stripped; a plugin
-never sees raw system prompts.
+`author_type` (`user` or `agent`), `content`, `type`, `created_at`, and
+`source`. `content` has kandev's injected `<kandev-system>` blocks stripped,
+so this read never returns raw system prompts. `Source` is the persisted
+`metadata.source` provenance only, for example `plugin:<id>` on a message your
+plugin sent through `Messages().Send`; it is empty when none was recorded. A
+chat bridge compares it with its own `plugin:<id>` to skip echoes of the
+messages it delivered. The same field is set on exact message observations
+(`ListSanitizedMessages`).
+
+`message.*` bus events are not sanitized the same way. Their `content` is
+stripped, but a payload may also carry `raw_content` with the unstripped
+`<kandev-system>` content. A plugin that must not handle system content uses
+`content` or `Messages().List` and ignores `raw_content`.
 
 ### Pending agent interactions
 

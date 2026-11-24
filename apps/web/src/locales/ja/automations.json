@@ -389,5 +389,8 @@
   "mcpUnavailable": "{{name}}（利用不可）",
   "mcpOptionsFailed": "MCP の選択肢を読み込めませんでした。保存済みの選択は変更されません。",
   "passthroughOutputNotCapturedTitle": "CLI passthrough の出力は、この実行のトランスクリプトには記録されません。",
-  "passthroughOutputFutureSessionsDescription": "今後のセッションで出力を記録するには、自動化のエージェントプロファイルで CLI passthrough を無効にしてください。以前のターミナル出力はここでは復元できません。"
+  "passthroughOutputFutureSessionsDescription": "今後のセッションで出力を記録するには、自動化のエージェントプロファイルで CLI passthrough を無効にしてください。以前のターミナル出力はここでは復元できません。",
+  "enableScheduleFailed": "スケジュールを有効にできませんでした。もう一度お試しください。",
+  "enablingSchedule": "スケジュールを有効にしています...",
+  "turnOnSchedule": "スケジュールを有効にする"
 }

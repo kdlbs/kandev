@@ -20,7 +20,7 @@ test("phone file menu creates editable whole-file feedback", async ({
   const task = await seedReviewTask(backend, apiClient, seedData);
   await loadSession(testPage, task.id);
   const dialog = await openDialogWithChanges(testPage);
-  await exerciseFileComment(testPage, dialog, true);
+  const attachmentId = await exerciseFileComment(testPage, dialog, true);
   const phoneViewport = testPage.viewportSize()!;
   for (const width of [767, 768]) {
     await dialog.getByRole("button", { name: "Close review", exact: true }).click();
@@ -63,7 +63,9 @@ test("phone file menu creates editable whole-file feedback", async ({
         (message) =>
           message.author_type === "user" &&
           message.content.includes("Updated whole-file feedback") &&
-          !message.content.includes(":undefined"),
+          !message.content.includes(":undefined") &&
+          Array.isArray(message.metadata?.attachments) &&
+          message.metadata.attachments.some((file) => file.attachment_id === attachmentId),
       ),
     )
     .toBe(true);

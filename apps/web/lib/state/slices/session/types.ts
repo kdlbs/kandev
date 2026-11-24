@@ -237,6 +237,7 @@ export type QueuedMessage = {
     name?: string;
     size_bytes?: number;
     delivery_mode?: "prompt" | "path";
+    comment_id?: string;
   }>;
   metadata?: QueuedMessageMetadata;
   queued_at: string;

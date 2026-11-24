@@ -73,12 +73,17 @@ var hostCallCallerRequired = map[string]struct{}{
 
 	pluginv1.Host_EnsureTaskRunExact_FullMethodName:               {},
 	pluginv1.Host_StopTaskRunExact_FullMethodName:                 {},
+	pluginv1.Host_CancelTurnExact_FullMethodName:                  {},
 	pluginv1.Host_RecoverSessionExact_FullMethodName:              {},
 	pluginv1.Host_CancelPendingTaskTransitionExact_FullMethodName: {},
 	pluginv1.Host_GetSessionModeContextExact_FullMethodName:       {},
 	pluginv1.Host_SetSessionModeExact_FullMethodName:              {},
+	pluginv1.Host_GetStepApprovalExact_FullMethodName:             {},
+	pluginv1.Host_ApproveStepExact_FullMethodName:                 {},
 	pluginv1.Host_RespondPermissionExact_FullMethodName:           {},
 	pluginv1.Host_AnswerClarificationExact_FullMethodName:         {},
+	pluginv1.Host_LinkExternalIdentity_FullMethodName:             {},
+	pluginv1.Host_RequestHumanResponseReceipt_FullMethodName:      {},
 
 	pluginv1.Host_ListWorkspacesExact_FullMethodName:             {},
 	pluginv1.Host_ListWorkflowsExact_FullMethodName:              {},

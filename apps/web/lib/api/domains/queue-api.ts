@@ -213,6 +213,7 @@ export type QueueMessageParams = {
     name?: string;
     size_bytes?: number;
     delivery_mode?: "prompt" | "path";
+    comment_id?: string;
   }>;
   context_files?: Array<{ path: string; name: string; is_directory?: boolean }>;
   entity_references?: EntityReference[];
@@ -585,6 +586,7 @@ export async function updateQueuedMessage(
       name?: string;
       size_bytes?: number;
       delivery_mode?: "prompt" | "path";
+      comment_id?: string;
     }>;
     entity_references?: EntityReference[];
     user_id?: string;

@@ -15,6 +15,7 @@ import (
 
 type recordingPermissionResolver struct {
 	request   orchestrator.ResolveAgentPermissionRequest
+	dismissed *orchestrator.ResolveAgentPermissionRequest
 	cancelled bool
 	err       error
 }
@@ -27,6 +28,13 @@ func (r *recordingPermissionResolver) ResolveAgentPermission(
 		return nil, r.err
 	}
 	return &orchestrator.ResolveAgentPermissionResult{PendingID: request.PendingID}, nil
+}
+
+func (r *recordingPermissionResolver) CancelAgentPermission(
+	_ context.Context, request orchestrator.ResolveAgentPermissionRequest,
+) error {
+	r.dismissed = &request
+	return r.err
 }
 
 func (r *recordingPermissionResolver) RespondToPermission(
@@ -77,6 +85,49 @@ func TestPluginsInteractionResponderForwardsPermissionIdentity(t *testing.T) {
 	// indistinguishable from a person's after the fact.
 	if permissions.request.Source == taskmodels.PermissionSourceWeb {
 		t.Fatalf("source = %q, want a non-web source for a plugin response", permissions.request.Source)
+	}
+}
+
+// A linked user's decision is audited as a person deciding through the
+// plugin surface, not as plugin automation.
+func TestPluginsInteractionResponderAttributesLinkedUserResponses(t *testing.T) {
+	permissions := &recordingPermissionResolver{}
+	adapter := pluginsInteractionResponderAdapter{permissions: permissions}
+
+	if err := adapter.RespondToPermission(context.Background(), plugins.PluginPermissionResponse{
+		TaskID: "task-1", SessionID: "session-1", RequestID: "request-1",
+		PendingID: "pending-1", OptionID: "allow", LinkedUser: true,
+	}); err != nil {
+		t.Fatalf("RespondToPermission: %v", err)
+	}
+	if permissions.request.Source != taskmodels.PermissionSourcePlugin ||
+		permissions.request.ActorKind != taskmodels.PermissionActorLinkedIdentity {
+		t.Fatalf("resolver saw source=%q actor kind=%q, want plugin/linked_identity", permissions.request.Source, permissions.request.ActorKind)
+	}
+}
+
+// A linked user's dismissal keeps the same audit attribution as a linked
+// option response. It must not fall back to the web wrapper, which records web.
+func TestPluginsInteractionResponderAttributesLinkedUserDismissal(t *testing.T) {
+	permissions := &recordingPermissionResolver{}
+	adapter := pluginsInteractionResponderAdapter{permissions: permissions}
+
+	if err := adapter.RespondToPermission(context.Background(), plugins.PluginPermissionResponse{
+		TaskID: "task-1", SessionID: "session-1", RequestID: "request-1",
+		PendingID: "pending-1", Cancelled: true, LinkedUser: true,
+	}); err != nil {
+		t.Fatalf("RespondToPermission: %v", err)
+	}
+	if permissions.dismissed == nil {
+		t.Fatal("linked dismissal did not reach CancelAgentPermission")
+	}
+	if permissions.dismissed.Source != taskmodels.PermissionSourcePlugin ||
+		permissions.dismissed.ActorKind != taskmodels.PermissionActorLinkedIdentity {
+		t.Fatalf("dismissal saw source=%q actor kind=%q, want plugin/linked_identity",
+			permissions.dismissed.Source, permissions.dismissed.ActorKind)
+	}
+	if permissions.cancelled {
+		t.Fatal("linked dismissal also took the web wrapper path")
 	}
 }
 

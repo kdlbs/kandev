@@ -301,7 +301,7 @@ preview, cancellation, and whole-pair fallback rules.
 | `min_kandev_version`               | conditionally                        | string                                | Lowest released Kandev version this plugin supports. A manifest declaring `capabilities.api_read: messages` (for Go `Messages().List` or the browser conversation facade) must set at least `0.91.1`; `access: admin` actions have the same floor. A manifest declaring `agent_tools[].invocation_scope: workspace` must set at least `0.100.0`, and the `coordinator`/`external` surfaces require at least `0.99.0`. One capability-aware validator enforces missing, malformed, and lower values at manifest/archive/install/boot boundaries in stamped, development, and E2E builds; equal or higher values pass. Release values use up to three dotted numeric segments (`0.78.0`) and may have a leading `v`. |
 | `capabilities.events`              | no                                   | string[]                              | Bus subjects (or wildcard patterns) this plugin subscribes to. See "Event subscription vocabulary" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `capabilities.api_read`            | no                                   | string[]                              | Gates the Host data API's read-only accessors and exact query resources. Entries include `tasks`, `sessions`, `messages`, `interactions`, `workspaces`, `workflows`, `agent_profiles`, `executor_profiles`, `repositories`, `managed_agent_conversations`, `automations`, `task_inbox`, `task_directives`, `task_relations`, `task_transitions`, `change_requests`, `source_issues`, and `usage`. Calling a matching accessor or exact manager without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below. |
-| `capabilities.api_write`           | no                                   | string[]                              | Gates Host writes independently of `api_read`. `tasks` permits `Host.Tasks().Create` and `.Update`; `messages` permits `Host.Messages().Send`; `workspaces`, `workflows`, and `repositories` permit their typed exact administration calls when the matching Host v2 workspace grant is active. `execution` permits exact run, recovery, mode, and pending-transition commands when separately approved for a workspace; `interactions` permits exact permission and clarification responses only with a Host-issued human response receipt; `managed_agent_conversations` permits exact lifecycle and input writes when separately approved for a workspace; `automations` permits exact managed-conversation schedule operations when separately approved for a workspace; `source_issues` permits linked Jira/Linear comments and transitions through native workspace credentials when separately approved for a workspace; `managed_agent_tools` permits the managed agent-tool surface when separately approved for a workspace. Undeclared writes return gRPC `PermissionDenied`. |
+| `capabilities.api_write`           | no                                   | string[]                              | Gates Host writes independently of `api_read`. `tasks` permits `Host.Tasks().Create` and `.Update`; `messages` permits `Host.Messages().Send`; `workspaces`, `workflows`, and `repositories` permit their typed exact administration calls when the matching Host v2 workspace grant is active. `execution` permits exact run, stop, turn cancellation, recovery, mode, and pending-transition commands when separately approved for a workspace; `interactions` permits exact permission and clarification responses only with a Host-issued human response receipt; `human_responses` permits account linking and, when separately approved for a workspace, receipts for the linked Kandev user; `managed_agent_conversations` permits exact lifecycle and input writes when separately approved for a workspace; `automations` permits exact managed-conversation schedule operations when separately approved for a workspace; `source_issues` permits linked Jira/Linear comments and transitions through native workspace credentials when separately approved for a workspace; `managed_agent_tools` permits the managed agent-tool surface when separately approved for a workspace. Undeclared writes return gRPC `PermissionDenied`. |
 | `capabilities.state`               | no                                   | bool                                  | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `capabilities.secrets`             | no                                   | bool                                  | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `capabilities.agent_invoke`        | no                                   | bool                                  | Gates `Host.InvokeUtilityAgent`, a one-shot completion. No options, or an empty `UtilityAgentOptions.ProfileID`, uses the current default profile from Settings > Utility Agents. A non-empty profile ID selects that exact eligible global, enabled, non-CLI profile whose agent supports sessionless inference. The host does not read plugin configuration or utility-agent records for selection. Calling without this capability returns gRPC `PermissionDenied`; a missing, deleted, disabled, CLI-passthrough, workspace-scoped, or non-inference explicit profile returns gRPC `FailedPrecondition` without fallback. See [explicit plugin utility selection](../decisions/2026-09-14-explicit-plugin-utility-selection.md). |
@@ -580,17 +580,24 @@ Only declare the resources the plugin uses. Each exact query also requires its
 separate workspace approval; the manifest declaration alone does not grant
 access.
 `capabilities.api_write` accepts `tasks`, `messages`, `workspaces`, `workflows`,
-`repositories`, `execution`, `interactions`, `managed_agent_conversations`,
-`automations`, `source_issues`, and `managed_agent_tools`.
+`repositories`, `execution`, `interactions`, `human_responses`,
+`managed_agent_conversations`, `automations`, `source_issues`, and
+`managed_agent_tools`.
 `tasks` enables `Host.Tasks().Create` and `.Update`; `messages` enables
-`Host.Messages().Send`; `execution` enables exact run, stop, recovery, session
-mode, and pending-transition commands, subject to its workspace grant.
+`Host.Messages().Send`; `execution` enables exact run, stop, turn
+cancellation, recovery, session mode, and pending-transition commands,
+subject to its workspace grant.
 `workspaces`, `workflows`, and `repositories` enable typed workspace
 administration commands, subject to their separate Host v2 workspace grants.
 `interactions` enables exact responses subject to a separate human response
 receipt from an authenticated user with session-control access. The legacy v1
 interaction response methods return `PermissionDenied` because they cannot
-carry that receipt or an observed revision. `managed_agent_conversations`
+carry that receipt or an observed revision. `human_responses`, with the separate
+`host.v2.write:human_responses` workspace grant, lets the plugin redeem account
+link codes (`LinkExternalIdentity`) and request receipts for the Kandev user
+linked to an external account (`RequestHumanResponseReceipt`);
+the settings page of a plugin that declares it shows a "Linked chat accounts"
+card. `managed_agent_conversations`
 enables exact lifecycle, enqueue, cancellation, and immediate-dispatch writes,
 subject to its workspace grant. `automations` enables exact managed-conversation
 schedule reads and mutations, and automation history reads, subject to their
@@ -617,12 +624,14 @@ automatically.
 
 `messages` reads historical **conversation content** (`Messages().List`):
 one user/agent message per row (`id`, `session_id`, `task_id`, `turn_id`,
-`author_type`, `content`, `type`, `created_at`), filterable by session ids,
-task ids, a `created_at` time range (`since` inclusive / `until` exclusive,
-RFC3339), and message `types`. Content is sanitized; kandev-injected
-`<kandev-system>` blocks are stripped, exactly like the `message.added` bus
-event, so raw system prompts are never exposed. `author_type` is `user` or
-`agent` (there is no `system` author).
+`author_type`, `content`, `type`, `created_at`, `source`), filterable by
+session ids, task ids, a `created_at` time range (`since` inclusive / `until`
+exclusive, RFC3339), and message `types`. Content is sanitized;
+kandev-injected `<kandev-system>` blocks are stripped, so raw system prompts
+are never exposed through this read. `author_type` is `user` or `agent`
+(there is no `system` author). `source` is the message's persisted
+provenance, for example `plugin:<id>` on a message a plugin sent, and is empty
+when none was recorded. No other message metadata is exposed.
 
 ## Config schema validation and secret fields
 
@@ -728,6 +737,12 @@ here.
 
 > Event list current as of 2026-07-16; regenerate from
 > `apps/backend/internal/events/types.go` if this page drifts from the code.
+
+`message.*` event payloads are the bus payloads that the native chat UI
+consumes. Their `content` is stripped of `<kandev-system>` blocks, but a
+payload may also include `raw_content` with the unstripped content, and then
+`metadata.has_hidden_prompts` is `true`. A plugin that must not handle system
+content reads only `content`, or reads messages through `Messages().List`.
 
 ## Runtime-managed fields (do not author these)
 

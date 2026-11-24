@@ -820,6 +820,7 @@ jobs:
             ./internal/telemetrycontract
             ./internal/terminal/repository
             ./internal/user/store
+            ./internal/utility/store
             ./internal/workflow/repository
             ./internal/workflowsync
             ./internal/worktree

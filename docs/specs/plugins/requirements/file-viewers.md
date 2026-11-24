@@ -97,7 +97,10 @@ verification and remaining release gates.
 
 - **AC-PLUGINS-FILE-VIEWERS-004.1:** An unsupported file shall offer Find viewer
   plugin, opening the marketplace with an exact normalized extension filter.
-  Unknown text formats shall remain readable and offer this action from Open with.
+  When the built-in editor or preview displays a file, the file surface shall omit
+  the discovery bar and its button on desktop and mobile. This includes plain text.
+  Unknown text formats shall remain readable and offer discovery inside an
+  explicitly opened Open with surface.
 - **AC-PLUGINS-FILE-VIEWERS-004.2:** Listings shall expose extension tags derived
   from declared formats. General File viewers and 3D categories shall remain
   available without serving as proof of format support.

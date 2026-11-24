@@ -29,17 +29,19 @@ var (
 
 // CreatePlanCommentRequest contains task-owned plan comment fields supplied by a client.
 type CreatePlanCommentRequest struct {
-	TaskID       string
-	PlanID       string
-	ID           string
-	Body         string
-	SelectedText string
-	AnchorFrom   int
-	AnchorTo     int
+	AttachmentIDs []string
+	TaskID        string
+	PlanID        string
+	ID            string
+	Body          string
+	SelectedText  string
+	AnchorFrom    int
+	AnchorTo      int
 }
 
 // UpdatePlanCommentRequest identifies and edits one pending plan comment.
 type UpdatePlanCommentRequest struct {
+	AttachmentIDs   []string
 	TaskID          string
 	PlanID          string
 	ID              string
@@ -82,7 +84,7 @@ func (s *PlanService) CreatePlanComment(
 		return nil, err
 	}
 	comment := &models.TaskPlanComment{
-		ID: req.ID, TaskID: req.TaskID, PlanID: req.PlanID, Body: req.Body,
+		ID: req.ID, TaskID: req.TaskID, PlanID: req.PlanID, Body: req.Body, AttachmentIDs: req.AttachmentIDs,
 		SelectedText: req.SelectedText, AnchorFrom: req.AnchorFrom, AnchorTo: req.AnchorTo,
 	}
 	snapshot, err := s.repo.CreateTaskPlanComment(ctx, comment)
@@ -105,7 +107,7 @@ func (s *PlanService) UpdatePlanComment(
 		return nil, err
 	}
 	snapshot, err := s.repo.UpdateTaskPlanComment(ctx, &models.TaskPlanComment{
-		ID: req.ID, TaskID: req.TaskID, PlanID: req.PlanID, Body: req.Body,
+		ID: req.ID, TaskID: req.TaskID, PlanID: req.PlanID, Body: req.Body, AttachmentIDs: req.AttachmentIDs,
 	}, req.ExpectedVersion)
 	if err != nil {
 		return snapshot, mapPlanCommentError(err)
