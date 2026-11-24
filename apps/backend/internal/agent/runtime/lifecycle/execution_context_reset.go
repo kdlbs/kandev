@@ -16,7 +16,7 @@ var ErrContextResetFenced = errors.New("agent context reset requires explicit re
 
 var errContextResetInProgress = errors.New("agent context reset is in progress")
 
-const maxContextResetEvents = 64
+const maxContextResetSetupEvents = 64
 
 const contextResetLeasePoll = 10 * time.Millisecond
 
@@ -76,6 +76,7 @@ func (e *AgentExecution) beginContextReset() error {
 	}
 	e.contextResetInFlight = true
 	e.contextResetEvents = nil
+	e.contextResetSetupEventCount = 0
 	return nil
 }
 
@@ -87,6 +88,7 @@ func (e *AgentExecution) drainContextResetEvents(newSessionID string) []agentctl
 	defer e.contextResetMu.Unlock()
 	buffered := e.contextResetEvents
 	e.contextResetEvents = nil
+	e.contextResetSetupEventCount = 0
 	if len(buffered) == 0 {
 		return nil
 	}
@@ -109,6 +111,7 @@ func (e *AgentExecution) finishContextReset(newSessionID string) []agentctl.Agen
 	e.contextResetMu.Lock()
 	buffered := e.contextResetEvents
 	e.contextResetEvents = nil
+	e.contextResetSetupEventCount = 0
 	e.contextResetInFlight = false
 	e.contextResetMu.Unlock()
 
@@ -127,6 +130,7 @@ func (e *AgentExecution) failContextReset(fence bool, reason string) {
 	e.contextResetInFlight = false
 	e.contextResetRecoveryInFlight = false
 	e.contextResetEvents = nil
+	e.contextResetSetupEventCount = 0
 	if fence {
 		e.contextResetFenced = true
 		e.contextResetFenceReason = reason
@@ -185,9 +189,11 @@ func (e *AgentExecution) bufferOrDropContextResetEvent(event agentctl.AgentEvent
 	if !e.contextResetInFlight {
 		return false
 	}
-	if (isContextResetSetupEvent(event) || isContextResetRetiredWatchProjection(event)) &&
-		len(e.contextResetEvents) < maxContextResetEvents {
+	if isContextResetRetiredWatchProjection(event) {
 		e.contextResetEvents = append(e.contextResetEvents, event)
+	} else if isContextResetSetupEvent(event) && e.contextResetSetupEventCount < maxContextResetSetupEvents {
+		e.contextResetEvents = append(e.contextResetEvents, event)
+		e.contextResetSetupEventCount++
 	}
 	return true
 }

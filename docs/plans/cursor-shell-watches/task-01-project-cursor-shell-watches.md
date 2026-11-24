@@ -86,7 +86,7 @@ After:   + panel menu / Panels -> Background Work -> History (1)
 | Duplicate and delayed frames | The replay repeats registration, progress, and completion, then sends late progress. The projection keeps one terminal workload and run. | `011.2` |
 | ACP failure | `TestCursorShellWatchFailureKeepsSiblingRunningAndRejectsLateProgress` and `TestCursorShellWatchFailureProjectionRetainsHistoryAndSibling` retain only the matching failure in History. | `011.6` |
 | Confirmed prompt cancellation | `TestCancelledPromptInterruptsOnlyItsOpenCursorWatches` verifies notification ordering, prompt-generation ownership, and preservation of a drained completion. | `011.7` |
-| Native binding replacement | `TestCursorShellWatchNativeResetRetiresRunningBinding`, `TestContextResetAcceptsRetiredWatchProjectionForCommittedSession`, and `TestCursorShellWatchResetProjectionSeparatesReusedCallID` cover retained-process reset, fence acceptance, and independent successor identity. | `011.8` |
+| Native binding replacement | `TestCursorShellWatchNativeResetRetiresRunningBinding`, `TestContextResetAcceptsRetiredWatchProjectionForCommittedSession`, `TestContextResetRetainsWatchRetirementsBeyondSetupBufferLimit`, and `TestCursorShellWatchResetProjectionSeparatesReusedCallID` verify retained-process reset, lossless retirement past the setup cap, and independent successor identity. | `011.8` |
 | Session or execution replacement | `TestCursorShellWatchIdentity` sends the same raw ID across session and native generation boundaries. A new adapter assigns a fresh opaque ID. | `011.2` |
 | Origin and admission | `TestBackgroundWorkObservationOriginTurn` resolves the original generation while a successor is current. `TestCursorShellWatchProjection` verifies that inspection leaves the Cursor turn busy. | `011.1`, `011.5` |
 | Unusable evidence | `TestCursorShellWatchRejectsUnsupportedFrames` checks the disabled setting, foreign provider, misleading title, and a shell list with one missing ID. | `011.3` |
@@ -103,6 +103,9 @@ dependencies from `apps/` with `pnpm install --frozen-lockfile`.
 ```bash
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestCursorShellWatchLifecycle$' -count=1 -v)
 (cd apps/backend && go test -race -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp ./internal/agent/runtime/lifecycle ./internal/orchestrator -count=1)
+(cd apps/backend && GOMEMLIMIT=3GiB GOMAXPROCS=2 GOFLAGS=-p=2 go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle -run '^(TestContextResetRetainsWatchRetirementsBeyondSetupBufferLimit|TestContextResetAcceptsRetiredWatchProjectionForCommittedSession|TestFinishContextResetReturnsEventsBufferedDuringFinalization)$' -count=1 -v)
+(cd apps/backend && GOMEMLIMIT=3GiB GOMAXPROCS=2 GOFLAGS=-p=2 go test -race -trimpath -tags fts5 ./internal/agent/runtime/lifecycle -count=1)
+make -C apps/backend build
 (cd apps && pnpm --filter @kandev/web exec vitest run components/task/chat/background-work/background-work.test.tsx)
 (cd apps/web && pnpm e2e:run --host --project chromium tests/task/claude-monitor-lifecycle.spec.ts)
 (cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/task/mobile-claude-monitor-lifecycle.spec.ts)
@@ -122,13 +125,14 @@ bash scripts/lint-go-changed \
   apps/backend/internal/agentctl/server/adapter/transport/acp/claude_monitor_completion_test.go \
   apps/backend/internal/agent/runtime/lifecycle/execution_context_reset.go \
   apps/backend/internal/agent/runtime/lifecycle/execution_context_test.go \
+  apps/backend/internal/agent/runtime/lifecycle/types.go \
   apps/backend/internal/agent/runtime/lifecycle/manager_events.go \
   apps/backend/internal/agent/runtime/lifecycle/events_background_work_test.go \
   apps/backend/internal/orchestrator/cursor_shell_watch_projection_test.go
 (cd apps/backend && GOMEMLIMIT=3GiB GOMAXPROCS=2 GOFLAGS=-p=2 golangci-lint run \
   ./internal/agentctl/server/adapter/transport/acp \
   ./internal/agent/runtime/lifecycle ./internal/orchestrator \
-  --new-from-rev=4b7c8fb6c509794e3bf3afe1e3659456e5efe6b5 \
+  --new-from-rev=cd9311560732ff4f744e1c65df273ba5d71ade41 \
   --timeout=15m --concurrency=2)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
@@ -191,7 +195,9 @@ running and one terminal observation for each interleaved watch. Ownership,
 unsupported-frame, identity-boundary, duplicate/delayed-update, and projection
 regressions passed. ACP failure, cancelled-prompt, and native-reset regressions
 verify terminal precedence, prompt ownership, reset-fence delivery, and call-ID
-reuse.
+reuse. The PR review regression first reproduced the reset-buffer loss with 64
+setup events and 71 retirements; the focused reset tests now retain every
+retirement while preserving the setup cap.
 
 - The complete ACP, lifecycle, and orchestrator package suites passed with the
   race detector enabled. The backend build passed for the host and helper
@@ -202,7 +208,12 @@ reuse.
 - The changed-file lint wrapper previously timed out while loading the packages
   at its five-minute limit. The equivalent `golangci-lint` invocation with a
   15-minute timeout completed with zero issues after these fixes.
+- The complete lifecycle package passed with the race detector after the reset
+  buffer fix. Changed-file Go lint passed with zero issues.
+- `make -C apps/backend build` passed after the reset buffer fix.
+- `011.8` reset-buffer regression: the focused reset tests passed after first
+  reproducing the dropped retirements with 64 setup events and 71 watches.
 - Public documentation validation passed all 63 tests and validated 56 pages.
-  Documentation index validation passed for 464 decisions and 2,108 specs;
+  Documentation index validation passed for 464 decisions and 2,110 specs;
   all specification lint checks passed.
 - `git diff --check` passed.

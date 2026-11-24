@@ -139,11 +139,15 @@ native-reset regressions verify terminal precedence, prompt ownership, reset
 fence delivery, and call-ID reuse. The ACP, lifecycle, and orchestrator package
 suites passed with the race detector enabled. The backend build and
 changed-package lint passed. The shared viewer suite passed all 27 tests.
+The PR review regression reproduced the buffer-cap loss with 64 setup events
+and 71 watch retirements, then passed with every retirement retained and setup
+events still capped. The full lifecycle package passed with the race detector;
+the backend build passed, and changed-file Go lint reported zero issues.
 Desktop and mobile Monitor lifecycle E2E each passed one test, with the host
 backend and web assets built by the E2E runner. Changed-file Go lint passed
 with an extended timeout after package loading exceeded the wrapper's default.
 Public docs validation passed all 63 tests and validated 56 published pages;
-spec validation passed for 464 decisions and 2,108 specifications, and all
+spec validation passed for 464 decisions and 2,110 specifications, and all
 spec-file lint checks passed. `git diff --check` passed.
 
 ## Risks

@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -108,5 +109,51 @@ func TestContextResetAcceptsRetiredWatchProjectionForCommittedSession(t *testing
 	accepted := execution.drainContextResetEvents("new-session")
 	require.Equal(t, []agentctl.AgentEvent{retired}, accepted,
 		"the reset commit accepts the retirement update and excludes stale old-session events")
+	execution.finishContextReset("new-session")
+}
+
+func TestContextResetRetainsWatchRetirementsBeyondSetupBufferLimit(t *testing.T) {
+	execution := &AgentExecution{}
+	require.NoError(t, execution.beginContextReset())
+
+	for i := 0; i < maxContextResetSetupEvents; i++ {
+		require.True(t, execution.bufferOrDropContextResetEvent(agentctl.AgentEvent{
+			Type: streams.EventTypeSessionModels, SessionID: "new-session", OperationID: strconv.Itoa(i),
+		}))
+	}
+	require.True(t, execution.bufferOrDropContextResetEvent(agentctl.AgentEvent{
+		Type: streams.EventTypeSessionModels, SessionID: "new-session", OperationID: "setup-overflow",
+	}))
+
+	const watchCount = maxContextResetSetupEvents + 7
+	for i := 0; i < watchCount; i++ {
+		id := strconv.Itoa(i)
+		require.True(t, execution.bufferOrDropContextResetEvent(agentctl.AgentEvent{
+			Type: streams.EventTypeBackgroundWorkUpdated, SessionID: "new-session",
+			BackgroundWork: &streams.WorkloadRunObservation{
+				WorkID: "watch-work-" + id, RunID: "watch-run-" + id,
+				Kind: streams.WorkloadKindMonitor, State: streams.RunStateUnknown,
+				SourceCallID: "watch-call-" + id,
+			},
+		}))
+	}
+
+	accepted := execution.drainContextResetEvents("new-session")
+	require.Equal(t, maxContextResetSetupEvents+watchCount, len(accepted))
+	setupCount := 0
+	retiredWorkIDs := make(map[string]struct{}, watchCount)
+	for _, event := range accepted {
+		switch event.Type {
+		case streams.EventTypeSessionModels:
+			setupCount++
+			require.NotEqual(t, "setup-overflow", event.OperationID)
+		case streams.EventTypeBackgroundWorkUpdated:
+			require.NotNil(t, event.BackgroundWork)
+			retiredWorkIDs[event.BackgroundWork.WorkID] = struct{}{}
+		}
+	}
+	require.Equal(t, maxContextResetSetupEvents, setupCount)
+	require.Len(t, retiredWorkIDs, watchCount)
+
 	execution.finishContextReset("new-session")
 }
