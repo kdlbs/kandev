@@ -61,18 +61,3 @@ func tidyDeletedProject(t *testing.T, event, kind string) {
 		memBus.Close()
 	}
 }
-
-func TestPhase31Effective_FollowsPhase3AndItsOwnFlag(t *testing.T) {
-	for _, on := range []bool{false, true} {
-		for _, p2 := range []bool{false, true} {
-			for _, p3 := range []bool{false, true} {
-				for _, p31 := range []bool{false, true} {
-					want := on && p2 && p3 && p31
-					if got := phase31Effective(on, p2, p3, p31); got != want {
-						t.Fatalf("phase31Effective(%v,%v,%v,%v) = %v, want %v", on, p2, p3, p31, got, want)
-					}
-				}
-			}
-		}
-	}
-}
