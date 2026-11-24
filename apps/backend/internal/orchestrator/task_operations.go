@@ -1057,19 +1057,14 @@ func (s *Service) startCreatedSession(
 	planModeActive := planMode
 	if !options.promptAlreadyComposed {
 		var generatedPromptReferenceContext string
-		if options.preserveDirectPrompt {
-			effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContextOptions(
-				ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
-				planMode, task.IsEphemeral, session.IsPassthrough, false, promptReferenceContext,
-				options.promptReferencesPrepared, true,
-			)
-		} else {
-			effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContextOptions(
-				ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
-				planMode, task.IsEphemeral, session.IsPassthrough, false, promptReferenceContext,
-				options.promptReferencesPrepared, false,
-			)
-		}
+		effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContextOptions(
+			ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
+			planMode, task.IsEphemeral, session.IsPassthrough, workflowPromptOptions{
+				trustedPromptContext:     promptReferenceContext,
+				promptReferencesPrepared: options.promptReferencesPrepared,
+				preserveDirectPrompt:     options.preserveDirectPrompt,
+			},
+		)
 		if generatedPromptReferenceContext != "" {
 			// The workflow helper preserves a direct message's acceptance-time
 			// context. Auto-started workflow prompts have no prior context, so their
@@ -1965,9 +1960,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		}
 	}
 
-	// Use provided prompt, fall back to task description
+	// A move that skips the step prompt also skips the task description fallback.
 	effectivePrompt := prompt
-	if effectivePrompt == "" {
+	if effectivePrompt == "" && (opts.EntryOptions == nil || !opts.EntryOptions.SkipStepPrompt) {
 		effectivePrompt = task.Description
 	}
 
@@ -2106,29 +2101,14 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// wrapping and launch behavior.
 	isPassthrough = launchSession.IsPassthrough
 
-	skipStepPrompt := opts.EntryOptions != nil && opts.EntryOptions.SkipStepPrompt
 	promptWorkflowStepID := workflowStepID
 	if promptWorkflowStepID == "" && !isOfficeTask && !opts.PreserveWorkflowSourceBinding {
 		promptWorkflowStepID = workflowSessionConfigStepID
 	}
-	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
+	effectivePrompt, planModeActive, promptReferenceContext := s.prepareFreshTaskPrompt(
 		ctx, effectivePrompt, task.ID, sessionID, promptWorkflowStepID,
-		planMode, task.IsEphemeral, isPassthrough, skipStepPrompt,
+		planMode, task.IsEphemeral, isPassthrough, opts.EntryOptions,
 	)
-
-	// Append one-shot workflow-move instructions to a fresh auto-started
-	// session. The prompt was rebuilt from the durable step by ID above, so a
-	// transient step overlay could not carry them; append the same sentinel
-	// block once here. The sentinel guards against a double append on retry.
-	if opts.EntryOptions != nil && opts.EntryOptions.Instructions != "" &&
-		!strings.Contains(effectivePrompt, workflowmove.InstructionsEnd) {
-		wrapped := workflowmove.WrapInstructions(opts.EntryOptions.Instructions)
-		if effectivePrompt == "" {
-			effectivePrompt = wrapped
-		} else {
-			effectivePrompt = effectivePrompt + "\n\n" + wrapped
-		}
-	}
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -2988,6 +2968,43 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 }
 
+type workflowPromptOptions struct {
+	skipStepPrompt           bool
+	trustedPromptContext     string
+	promptReferencesPrepared bool
+	preserveDirectPrompt     bool
+	moveInstructions         string
+}
+
+func (s *Service) prepareFreshTaskPrompt(
+	ctx context.Context,
+	prompt, taskID, sessionID, workflowStepID string,
+	planMode, isEphemeral, isPassthrough bool,
+	entryOptions *workflowmove.EntryOptions,
+) (string, bool, string) {
+	if entryOptions == nil {
+		return s.applyWorkflowAndPlanMode(ctx, prompt, taskID, sessionID, workflowStepID,
+			planMode, isEphemeral, isPassthrough, false)
+	}
+	return s.applyWorkflowAndPlanModeWithPromptContextOptions(
+		ctx, prompt, taskID, sessionID, workflowStepID, planMode, isEphemeral, isPassthrough,
+		workflowPromptOptions{
+			skipStepPrompt:   entryOptions.SkipStepPrompt,
+			moveInstructions: workflowmove.WrapInstructions(entryOptions.Instructions),
+		},
+	)
+}
+
+func appendWorkflowMoveInstructions(prompt, instructions string) string {
+	if instructions == "" || strings.Contains(prompt, workflowmove.InstructionsEnd) {
+		return prompt
+	}
+	if prompt == "" {
+		return instructions
+	}
+	return prompt + "\n\n" + instructions
+}
+
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
 // Returns the effective prompt and whether plan mode is active (from either the step or the caller).
 // For ephemeral tasks (quick chat), workflow step processing is skipped since they have no workflow.
@@ -3027,7 +3044,10 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 ) (string, bool, string) {
 	return s.applyWorkflowAndPlanModeWithPromptContextOptions(
 		ctx, prompt, taskID, sessionID, workflowStepID, planMode,
-		isEphemeral, isPassthrough, skipStepPrompt, trustedPromptContext, false, false,
+		isEphemeral, isPassthrough, workflowPromptOptions{
+			skipStepPrompt:       skipStepPrompt,
+			trustedPromptContext: trustedPromptContext,
+		},
 	)
 }
 
@@ -3040,21 +3060,18 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContextOptions(
 	planMode bool,
 	isEphemeral bool,
 	isPassthrough bool,
-	skipStepPrompt bool,
-	trustedPromptContext string,
-	promptReferencesPrepared bool,
-	preserveDirectPrompt bool,
+	options workflowPromptOptions,
 ) (string, bool, string) {
 	effectivePrompt := prompt
 	promptReferenceContext := ""
-	if isPassthrough && trustedPromptContext != "" {
-		trustedBlock := sysprompt.Wrap(trustedPromptContext)
+	if isPassthrough && options.trustedPromptContext != "" {
+		trustedBlock := sysprompt.Wrap(options.trustedPromptContext)
 		if strings.Contains(effectivePrompt, trustedBlock) {
 			effectivePrompt = strings.TrimSpace(strings.ReplaceAll(effectivePrompt, trustedBlock, ""))
 		}
 		// Dynamic routing can switch a prepared structured launch to a
 		// passthrough profile. Hidden saved-prompt context must not reach its PTY.
-		trustedPromptContext = ""
+		options.trustedPromptContext = ""
 		promptReferenceContext = ""
 	}
 
@@ -3070,15 +3087,15 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContextOptions(
 		} else if step != nil {
 			workflowPromptComposed = true
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-			effectivePrompt, promptReferenceContext = s.buildWorkflowStepPrompt(
-				ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt,
-				trustedPromptContext, promptReferencesPrepared, preserveDirectPrompt,
+			effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithTrustedContextOptions(
+				ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, options,
 			)
 		}
 	}
 	if !workflowPromptComposed {
+		effectivePrompt = appendWorkflowMoveInstructions(effectivePrompt, options.moveInstructions)
 		effectivePrompt, promptReferenceContext = s.applyDirectPromptReferenceContext(
-			ctx, effectivePrompt, isPassthrough, trustedPromptContext, promptReferencesPrepared,
+			ctx, effectivePrompt, isPassthrough, options.trustedPromptContext, options.promptReferencesPrepared,
 		)
 	}
 
@@ -3112,30 +3129,6 @@ func (s *Service) applyDirectPromptReferenceContext(
 		return prompt, ""
 	}
 	return s.expandPromptReferencesWithContext(ctx, prompt, isPassthrough)
-}
-
-func (s *Service) buildWorkflowStepPrompt(
-	ctx context.Context,
-	basePrompt string,
-	step *wfmodels.WorkflowStep,
-	taskID string,
-	sessionID string,
-	isPassthrough bool,
-	skipStepPrompt bool,
-	trustedPromptContext string,
-	promptReferencesPrepared bool,
-	preserveDirectPrompt bool,
-) (string, string) {
-	if trustedPromptContext != "" {
-		return s.buildWorkflowPromptWithTrustedContextOptions(
-			ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt,
-			trustedPromptContext, preserveDirectPrompt, promptReferencesPrepared,
-		)
-	}
-	return s.buildWorkflowPromptWithContextOptions(
-		ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt, preserveDirectPrompt,
-		promptReferencesPrepared,
-	)
 }
 
 // backfillInitialUserMessageIfMissing records the task's description as the
@@ -3282,8 +3275,11 @@ func (s *Service) buildWorkflowPromptWithContextOptions(
 	promptReferencesPrepared bool,
 ) (string, string) {
 	return s.buildWorkflowPromptWithTrustedContextOptions(
-		ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt, "",
-		preserveDirectPrompt, promptReferencesPrepared,
+		ctx, basePrompt, step, taskID, sessionID, isPassthrough, workflowPromptOptions{
+			skipStepPrompt:           skipStepPrompt,
+			preserveDirectPrompt:     preserveDirectPrompt,
+			promptReferencesPrepared: promptReferencesPrepared,
+		},
 	)
 }
 
@@ -3302,8 +3298,10 @@ func (s *Service) buildWorkflowPromptWithTrustedContext(
 	trustedPromptContext string,
 ) (string, string) {
 	return s.buildWorkflowPromptWithTrustedContextOptions(
-		ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt,
-		trustedPromptContext, false, false,
+		ctx, basePrompt, step, taskID, sessionID, isPassthrough, workflowPromptOptions{
+			skipStepPrompt:       skipStepPrompt,
+			trustedPromptContext: trustedPromptContext,
+		},
 	)
 }
 
@@ -3314,10 +3312,7 @@ func (s *Service) buildWorkflowPromptWithTrustedContextOptions(
 	taskID string,
 	sessionID string,
 	isPassthrough bool,
-	skipStepPrompt bool,
-	trustedPromptContext string,
-	preserveDirectPrompt bool,
-	promptReferencesPrepared bool,
+	options workflowPromptOptions,
 ) (string, string) {
 	_ = sessionID
 	var parts []string
@@ -3331,9 +3326,8 @@ func (s *Service) buildWorkflowPromptWithTrustedContextOptions(
 	}
 
 	// skip_step_prompt suppresses the step prompt and its task-description
-	// fallback for this one entry; only the workflow-level block above (and any
-	// one-time move instructions appended by the caller) remain.
-	if !skipStepPrompt {
+	// fallback for this entry. The workflow block and move instructions remain.
+	if !options.skipStepPrompt {
 		// {step_entry_number} and {task_title} are resolved against the step's
 		// own template before {{task_prompt}} substitution, so a literal token
 		// inside basePrompt (task description / direct message) is never treated
@@ -3352,11 +3346,12 @@ func (s *Service) buildWorkflowPromptWithTrustedContextOptions(
 			stepCopy.Prompt = interpolated
 			interpolatedStep = &stepCopy
 		}
-		parts = append(parts, finalizeTitle(stepPromptBodyWithOptions(interpolatedStep, taskID, basePrompt, preserveDirectPrompt)))
+		parts = append(parts, finalizeTitle(stepPromptBodyWithOptions(interpolatedStep, taskID, basePrompt, options.preserveDirectPrompt)))
 	}
 
-	joined := strings.Join(parts, "\n\n")
-	if trustedPromptContext == "" && !promptReferencesPrepared {
+	joined := appendWorkflowMoveInstructions(strings.Join(parts, "\n\n"), options.moveInstructions)
+	trustedPromptContext := options.trustedPromptContext
+	if trustedPromptContext == "" && !options.promptReferencesPrepared {
 		return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
 	}
 	acceptedContext := trustedPromptContext

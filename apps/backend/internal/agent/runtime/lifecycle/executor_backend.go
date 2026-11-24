@@ -1024,6 +1024,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		promptTurnID:                     req.PromptTurnID,
 		AgentID:                          agentID,
 		AuthPolicy:                       req.AuthPolicy,
+		LocalRuntimeEnv:                  cloneStringMap(req.LocalRuntimeEnv),
 		ContainerID:                      ri.ContainerID,
 		ContainerIP:                      ri.ContainerIP,
 		WorkspacePath:                    workspacePath,

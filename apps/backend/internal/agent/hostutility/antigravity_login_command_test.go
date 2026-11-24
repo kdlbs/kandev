@@ -38,8 +38,8 @@ type antigravityLoginCommandAgent struct {
 
 func (a *antigravityLoginCommandAgent) ResolveLocalRuntime(
 	context.Context,
-) (agents.Command, map[string]string, error) {
-	return a.command, a.env, nil
+) (agents.LocalRuntimeSelection, error) {
+	return agents.LocalRuntimeSelection{Command: a.command, Env: a.env}, nil
 }
 
 type antigravityLoginConfigureFixture struct {

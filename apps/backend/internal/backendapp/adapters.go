@@ -460,6 +460,7 @@ func buildLifecycleLaunchRequest(
 		TaskScope:                     req.TaskScope,
 		SessionSettingsPolicy:         lifecycleSessionSettingsPolicy(req.SessionSettingsPolicy),
 		RequiredNativeConversationID:  req.RequiredNativeConversationID,
+		RuntimeAdapterVersion:         req.RuntimeAdapterVersion,
 		InterruptedSubmissionID:       req.InterruptedSubmissionID,
 		InterruptedStreamID:           req.InterruptedStreamID,
 		InterruptedHarnessGeneration:  req.InterruptedHarnessGeneration,

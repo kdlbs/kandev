@@ -1,4 +1,4 @@
-import { createRef, useEffect } from "react";
+import { createRef, useEffect, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
@@ -6,6 +6,7 @@ import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import type { RichTextInputHandle } from "./task/chat/rich-text-input";
 import { TaskPromptReferenceEditor } from "./task-prompt-reference-editor";
+import { setMoveInstructions } from "./task/workflow-move-instructions-test-helpers";
 
 const PROMPT = {
   id: "prompt-1",
@@ -15,6 +16,7 @@ const PROMPT = {
   created_at: "2026-09-12T00:00:00Z",
   updated_at: "2026-09-12T00:00:00Z",
 };
+const MOVE_INSTRUCTIONS_LABEL = "Move instructions";
 const PROMPT_REFERENCE_REMOVE_TEST_ID = "task-prompt-reference-remove";
 const PROMPT_REFERENCE_TEST_ID = "task-prompt-reference";
 const PROMPT_MENTION_TEST_ID = "custom-prompt-mention";
@@ -284,6 +286,64 @@ describe("TaskPromptReferenceEditor reconciliation", () => {
 });
 
 describe("TaskPromptReferenceEditor insertion", () => {
+  it("keeps suggestions closed after Escape reconciles an exact reference", async () => {
+    const prompt = { ...PROMPT, name: "review" };
+    function InlineEditor() {
+      const [value, setValue] = useState("");
+      return (
+        <TaskPromptReferenceEditor
+          value={value}
+          onChange={setValue}
+          promptSuggestions={{ label: MOVE_INSTRUCTIONS_LABEL, testId: "move-input", inline: true }}
+        />
+      );
+    }
+    render(
+      <StateProvider initialState={{ prompts: { items: [prompt], loaded: true, loading: false } }}>
+        <InlineEditor />
+      </StateProvider>,
+    );
+    const input = screen.getByRole("textbox", { name: MOVE_INSTRUCTIONS_LABEL });
+    setMoveInstructions(input, `@${prompt.name}`);
+    await screen.findByRole("option", { name: prompt.name });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    await screen.findByTestId(PROMPT_MENTION_TEST_ID);
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  // @covers AC-TASKS-SAVED-PROMPT-DELIVERY-001.15, AC-TASKS-SAVED-PROMPT-DELIVERY-001.16
+  it("selects an inline match with Tab and preserves text on both sides", async () => {
+    const ref = createRef<RichTextInputHandle>();
+    function InlineEditor() {
+      const [value, setValue] = useState("Before  after");
+      return (
+        <TaskPromptReferenceEditor
+          ref={ref}
+          value={value}
+          onChange={setValue}
+          promptSuggestions={{ label: MOVE_INSTRUCTIONS_LABEL, testId: "move-input", inline: true }}
+        />
+      );
+    }
+    render(
+      <StateProvider initialState={{ prompts: { items: [PROMPT], loaded: true, loading: false } }}>
+        <InlineEditor />
+      </StateProvider>,
+    );
+    const input = screen.getByRole("textbox", { name: MOVE_INSTRUCTIONS_LABEL });
+    act(() => ref.current!.insertText("@Dai", 7, 7));
+    const option = await screen.findByRole("option", { name: PROMPT.name });
+    expect(input.getAttribute("aria-activedescendant")).toBe(option.id);
+
+    fireEvent.keyDown(input, { key: "Tab" });
+
+    expect(ref.current?.getValue()).toBe(`Before @${PROMPT.name} after`);
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect((await screen.findByTestId(PROMPT_MENTION_TEST_ID)).textContent).toBe(`@${PROMPT.name}`);
+  });
+
   it("inserts literal plain text, including HTML-like content, in synchronous calls", async () => {
     const ref = createRef<RichTextInputHandle>();
     const onChange = vi.fn();

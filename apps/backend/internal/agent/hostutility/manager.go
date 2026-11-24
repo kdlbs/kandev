@@ -513,9 +513,9 @@ func (m *Manager) rebootstrapAgent(ctx context.Context, ia agents.InferenceAgent
 		if errors.Is(err, errAgentNotInstalled) {
 			status = StatusNotInstalled
 		}
-		m.publishCapabilitiesForEpoch(epoch, nil, probeFailureCapabilities(
-			ag.ID(), status, err.Error(), 0, time.Now(),
-		))
+		caps := probeFailureCapabilities(ag.ID(), status, err.Error(), 0, time.Now())
+		m.stampConfiguredRuntime(ctx, &caps, ia)
+		m.publishCapabilitiesForEpoch(epoch, nil, caps)
 		return
 	}
 	caps := m.probe(ctx, inst, resolvedAgent, false)
@@ -570,6 +570,10 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	publish := func(inst *instance, caps AgentCapabilities) {
 		m.publishCapabilitiesForEpoch(epoch, inst, caps)
 	}
+	publishFailure := func(caps AgentCapabilities) {
+		m.stampConfiguredRuntime(ctx, &caps, ia)
+		publish(nil, caps)
+	}
 
 	// Publish "probing" synchronously so the UI can distinguish "not started"
 	// (cache miss) from "in flight".
@@ -581,7 +585,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 
 	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
-		publish(nil, AgentCapabilities{
+		publishFailure(AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusNotConfigured,
 			Error:         "inference config not available",
@@ -597,7 +601,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 			msg = err.Error()
 		}
 		log.Info("skipping host utility bootstrap: agent not installed")
-		publish(nil, AgentCapabilities{
+		publishFailure(AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusNotInstalled,
 			Error:         msg,
@@ -609,7 +613,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	inst, err := m.createInstance(ctx, agentType)
 	if err != nil {
 		log.Warn("failed to create host utility instance", zap.Error(err))
-		publish(nil, AgentCapabilities{
+		publishFailure(AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusFailed,
 			Error:         err.Error(),
@@ -995,7 +999,9 @@ func (m *Manager) probeWithOverrides(
 	}
 	resp, resolvedCommand, err := m.probeManagedRuntime(probeCtx, inst, ia, command, req)
 	if err != nil {
-		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
+		caps := probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
+		stampConfiguredRuntimeVersion(&caps, ia, resolvedCommand)
+		return caps
 	}
 	caps := capabilitiesFromProbe(inst.agentType, resp, time.Now())
 	stampConfiguredRuntimeVersion(&caps, ia, resolvedCommand)
@@ -1069,7 +1075,7 @@ func (m *Manager) probeManagedRuntime(
 	if err != nil {
 		return nil, command, err
 	}
-	req = cloneProbeRequestWithCommand(req, command)
+	req = cloneProbeRequestWithCommand(req, ia, command)
 	req.InferenceConfig.Env = mergeInferenceEnv(req.InferenceConfig.Env, localEnv)
 	req.InstallContext = managedRuntimeProbeInstallContext(
 		req.InferenceConfig,
@@ -1155,7 +1161,7 @@ func (m *Manager) recoverManagedRuntimeProbe(
 		zap.String("agent_type", inst.agentType),
 		zap.String("recovery_scope", "host_capability_probe"),
 		zap.Int("attempt", 1))
-	retryRequest := cloneProbeRequestWithCommand(failedRequest, recoveryCommand)
+	retryRequest := cloneProbeRequestWithCommand(failedRequest, ia, recoveryCommand)
 	retryRequest.Preparation = preparation
 	response, err := inst.client.Probe(ctx, retryRequest)
 	if err != nil {
@@ -1212,18 +1218,20 @@ func (m *Manager) retryManagedRuntimeProbe(
 	if ctx.Err() != nil || (contextCurrent != nil && !contextCurrent()) {
 		return initial
 	}
-	retryRequest := cloneProbeRequestWithCommand(failedRequest, command)
+	retryRequest := cloneProbeRequestWithCommand(failedRequest, ia, command)
 	retryRequest.InferenceConfig.Env = mergeInferenceEnv(retryRequest.InferenceConfig.Env, localEnv)
 	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, retryRequest, initial)
 }
 
 func cloneProbeRequestWithCommand(
 	request *agentctlutil.ProbeRequest,
+	ia agents.InferenceAgent,
 	command agents.Command,
 ) *agentctlutil.ProbeRequest {
 	retry := *request
 	config := *request.InferenceConfig
 	config.Command = command.Args()
+	config.AuthPolicy = hostUtilityAuthPolicy(ia, command)
 	retry.InferenceConfig = &config
 	return &retry
 }
@@ -1302,7 +1310,13 @@ func capabilitiesFromProbe(agentType string, resp *agentctlutil.ProbeResponse, n
 }
 
 func stampConfiguredRuntimeVersion(caps *AgentCapabilities, ia agents.InferenceAgent, command agents.Command) {
-	if caps == nil || caps.RuntimeInfo == nil {
+	if caps == nil {
+		return
+	}
+	if registered, ok := ia.(agents.Agent); ok && acpcompat.IsAntigravity(registered.ID()) {
+		caps.RuntimeVariant = acpcompat.AntigravityRuntimeForCommand(command.Args())
+	}
+	if caps.RuntimeInfo == nil {
 		return
 	}
 	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
@@ -1336,6 +1350,18 @@ func stampConfiguredRuntimeVersion(caps *AgentCapabilities, ia agents.InferenceA
 	}
 }
 
+func (m *Manager) stampConfiguredRuntime(ctx context.Context, caps *AgentCapabilities, ia agents.InferenceAgent) {
+	ag, ok := ia.(agents.Agent)
+	if !ok {
+		return
+	}
+	command, _, err := m.resolveInferenceCommand(ctx, ag.ID(), ia, agents.Command{})
+	if err != nil {
+		return
+	}
+	stampConfiguredRuntimeVersion(caps, ia, command)
+}
+
 // resolveInferenceCommand selects the trusted exact host version for ordinary
 // probes and prompts. A non-empty override is reserved for candidate probes.
 func (m *Manager) resolveInferenceCommand(
@@ -1353,7 +1379,8 @@ func (m *Manager) resolveInferenceCommand(
 	}
 	command := cfg.Command
 	if resolver, ok := ia.(agents.LocalRuntimeAgent); ok {
-		return resolver.ResolveLocalRuntime(ctx)
+		selection, err := resolver.ResolveLocalRuntime(ctx)
+		return selection.Command, selection.Env, err
 	}
 	ag, ok := ia.(agents.Agent)
 	if !ok || m.managedRuntimeSelections == nil {
@@ -1432,8 +1459,8 @@ func (m *Manager) acquireInferenceCommand(
 		release()
 		return agents.Command{}, nil, nil, err
 	}
-	if hostUtilityAuthPolicy(ia) != nil {
-		if err := inst.client.RequireCapability(ctx, acpcompat.AntigravityPersonalAuthCapability); err != nil {
+	if policy := hostUtilityAuthPolicy(ia, command); policy != nil {
+		if err := inst.client.RequireCapability(ctx, acpcompat.AntigravityRuntimeCapability(policy)); err != nil {
 			release()
 			return agents.Command{}, nil, nil, err
 		}
@@ -1466,7 +1493,7 @@ func buildProbeRequest(
 			Env:             agents.RuntimeEnvFor(ia),
 			StripEnv:        agents.StripEnvFor(ia),
 			OperatorDefined: cfg.OperatorDefined,
-			AuthPolicy:      hostUtilityAuthPolicy(ia),
+			AuthPolicy:      hostUtilityAuthPolicy(ia, probeCommand),
 		},
 	}
 }
@@ -1576,12 +1603,16 @@ func managedRuntimeCommandVersion(command agents.Command, spec agents.ManagedNPM
 	return ""
 }
 
-func hostUtilityAuthPolicy(ia agents.InferenceAgent) *acpcompat.AuthPolicy {
+func hostUtilityAuthPolicy(ia agents.InferenceAgent, commands ...agents.Command) *acpcompat.AuthPolicy {
 	ag, ok := ia.(agents.Agent)
 	if !ok || !acpcompat.IsAntigravity(ag.ID()) {
 		return nil
 	}
-	return acpcompat.AntigravityAuthPolicy(false)
+	variant := acpcompat.AntigravityRuntimeStandalone
+	if len(commands) > 0 {
+		variant = acpcompat.AntigravityRuntimeForCommand(commands[0].Args())
+	}
+	return acpcompat.AntigravityAuthPolicyForRuntime(variant, "", false)
 }
 
 func inferenceConfigForHostUtility(ia agents.InferenceAgent) *agents.InferenceConfig {

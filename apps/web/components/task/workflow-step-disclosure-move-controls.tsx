@@ -73,10 +73,8 @@ export function StepDisclosureMoveControls({
       {showOptions && (
         <div
           className="pb-1 pl-4 pr-1"
-          onKeyDown={(event) => {
-            submission.onKeyDown(event);
-            event.stopPropagation();
-          }}
+          onKeyDownCapture={submission.onKeyDown}
+          onKeyDown={(event) => event.stopPropagation()}
           data-testid={`workflow-step-disclosure-options-panel-${stepId}`}
         >
           <WorkflowMoveOptionsFields
