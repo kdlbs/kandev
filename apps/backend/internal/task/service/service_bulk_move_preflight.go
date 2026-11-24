@@ -132,13 +132,18 @@ func (s *Service) prepareBulkMoveCandidate(
 	candidate := *task
 	candidate.WorkflowID = targetWorkflowID
 	candidate.WorkflowStepID = targetStepID
+	candidate.WIPAdmitted = !willQueue && !task.IsEphemeral
+	candidate.QueuedForStepID = ""
+	if willQueue {
+		candidate.QueuedForStepID = targetStepID
+	}
 	if !willQueue && task.WorkflowStepID != targetStepID {
 		if err := s.syncTaskStateForWorkflowMove(ctx, &candidate, task.WorkflowStepID, targetStepID, MoveTaskOptions{}); err != nil {
 			return nil, false, false, err
 		}
 	}
 	needsCompletionPreflight := candidate.State == v1.TaskStateCompleted
-	if willQueue {
+	if willQueue || (models.IsTerminalTaskState(candidate.State) && !needsCompletionPreflight) {
 		completing, err := s.terminalWorkflowStep(ctx, targetStepID)
 		if err != nil {
 			return nil, false, false, err

@@ -387,13 +387,14 @@ func (s *Service) commitTaskPRWorkflowTransition(
 		return workflowTransitionCommitResult{}, err
 	}
 	transitionCtx := transitionContext(ctx, sessionID, trigger, targetStep)
-	task, oldWorkflowID, applied, wipLimit, err := s.workflowStore.applyTransitionIfAtStepRaw(
+	task, oldWorkflowID, oldState, applied, wipLimit, err := s.workflowStore.applyTransitionIfAtStepRaw(
 		transitionCtx, taskID, result.FromStepID, result.ToStepID,
 	)
 	if err != nil || !applied {
 		return workflowTransitionCommitResult{}, err
 	}
 	s.publishTaskUpdated(ctx, task, oldWorkflowID)
+	s.workflowStore.publishCommittedCompletion(ctx, task, oldState)
 	if task.QueuedForStepID == "" {
 		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 			s.logger.Warn("failed to clear session review status",
