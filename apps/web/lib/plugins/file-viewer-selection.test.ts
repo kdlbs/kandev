@@ -2,7 +2,7 @@ import { afterEach, expect, it } from "vitest";
 import { pluginRegistry } from "./registry";
 import {
   shouldOpenFilePreview,
-  canOfferViewerAfterReadFailure,
+  canFindViewerForFileType,
   fileViewerCandidates,
 } from "./file-viewer-selection";
 afterEach(() => pluginRegistry.unregisterPlugin("formats"));
@@ -18,8 +18,8 @@ it("preserves built-in and source defaults while bypassing text reads for binary
     expect(shouldOpenFilePreview(path)).toBe(false);
   expect(fileViewerCandidates("file.ts")).toHaveLength(1);
   expect(fileViewerCandidates("file.png")).toHaveLength(0);
-  expect(canOfferViewerAfterReadFailure("large.custom-format")).toBe(true);
-  expect(canOfferViewerAfterReadFailure("source.ts")).toBe(false);
+  expect(canFindViewerForFileType("large.custom-format")).toBe(true);
+  expect(canFindViewerForFileType("source.ts")).toBe(false);
 });
 it("extracts the preview name from Windows paths", async () => {
   const { previewFileState } = await import("./file-viewer-selection");

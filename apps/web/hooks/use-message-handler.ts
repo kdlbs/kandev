@@ -197,6 +197,7 @@ function buildQueueAttachments(attachments?: MessageAttachment[]) {
     name: att.name,
     size_bytes: att.size_bytes,
     delivery_mode: att.delivery_mode,
+    ...(att.comment_id && { comment_id: att.comment_id }),
   }));
 }
 

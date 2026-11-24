@@ -211,6 +211,8 @@
   "attachmentSizeKb": "({{size}} KB)",
   "attachmentsCanTotalUpTo": "Attachments can total up to {{bytes}}.",
   "addFiles": "Add files",
+  "commentAttachments": "Comment files",
+  "commentAttachmentsHint": "Attach screenshots or files to this comment.",
   "answerAttachments": "Answer files",
   "answerAttachmentsHint": "Attach screenshots or files to this answer.",
   "answerAttachmentsLimit": "Up to {{maxFiles}} files, {{maxSize}} total.",
@@ -3356,5 +3358,16 @@
   "previewMoveToolbarHint": "Drag to move. Double-click to put it back at the top.",
   "previewHideComments": "Hide comments",
   "referenceCurrentTitle": "Current title: {{title}}",
-  "referenceOpenForDetails": "Open the task for details."
+  "referenceOpenForDetails": "Open the task for details.",
+  "sessionBootstrapThinkingFailedTitle": "Thinking level could not be applied",
+  "sessionBootstrapThinkingUnknownBody": "The thinking level could not be applied before startup.",
+  "sessionBootstrapThinkingUnavailableBody": "{{agent}} cannot use thinking level “{{level}}” with the selected model.",
+  "sessionBootstrapThinkingMismatchBody": "{{agent}} reported “{{effectiveLevel}}” instead of the requested thinking level “{{level}}”.",
+  "sessionBootstrapThinkingUnconfirmedBody": "{{agent}} did not confirm thinking level “{{level}}”.",
+  "sessionBootstrapThinkingFailedBody": "{{agent}} could not apply thinking level “{{level}}”.",
+  "sessionErrorDetailThinkingLevel": "Requested thinking level",
+  "sessionErrorDetailEffectiveThinkingLevel": "Effective thinking level",
+  "thinkingProfileHelp": "Edit the profile and choose Use provider default or a supported thinking level. Save before starting a fresh session.",
+  "thinkingSessionHelp": "A session or workflow override supplies this thinking level. Change that override or reset the session configuration to its profile.",
+  "thinkingUnknownSourceHelp": "Check the Pi thinking level in the profile and any session or workflow overrides before starting a fresh session."
 }

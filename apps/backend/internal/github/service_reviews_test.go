@@ -76,15 +76,56 @@ func reviewPRDetailsFrom(pr *PR) reviewPRDetails {
 	}
 }
 
+type reviewPRRetryScenario struct {
+	service      *Service
+	watch        *ReviewWatch
+	client       *reviewWatchSearchClient
+	firstPollPRs []*PR
+	events       []*NewReviewPREvent
+	retryPR      *PR
+}
+
+func assertReviewPRDeferredThenRetried(t *testing.T, scenario *reviewPRRetryScenario) {
+	t.Helper()
+	if len(scenario.firstPollPRs) != 0 {
+		t.Fatalf("new review PR count after failed detail lookup = %d, want 0", len(scenario.firstPollPRs))
+	}
+	if len(scenario.events) != 0 {
+		t.Fatal("review watch published a PR event before details were available")
+	}
+	scenario.client.detailPR = scenario.retryPR
+	scenario.client.detailErr = nil
+	retried, err := scenario.service.TriggerReviewWatch(context.Background(), scenario.watch)
+	if err != nil {
+		t.Fatalf("TriggerReviewWatch after details became available: %v", err)
+	}
+	if len(retried) != 1 {
+		t.Fatalf("new review PR count after successful retry = %d, want 1", len(retried))
+	}
+	if scenario.client.getPRCalls != 2 {
+		t.Fatalf("GetPR calls after retry = %d, want 2", scenario.client.getPRCalls)
+	}
+	if len(scenario.events) != 1 || scenario.events[0].PR == nil {
+		t.Fatal("review watch did not publish the PR after details became available")
+	}
+	eventPR := scenario.events[0].PR
+	if eventPR.HeadRepoOwner != "acme" || eventPR.HeadRepoName != "widget" {
+		t.Fatalf("retried event head repository = %s/%s, want acme/widget", eventPR.HeadRepoOwner, eventPR.HeadRepoName)
+	}
+}
+
 func TestCheckReviewWatchEnrichesSearchResultsBeforePublishingEvent(t *testing.T) {
 	tests := []struct {
 		name        string
 		detailPR    *PR
 		detailErr   error
+		retryPR     *PR
 		wantDetails reviewPRDetails
+		wantEvent   bool
 	}{
 		{
-			name: "same repository identity",
+			name:      "same repository identity",
+			wantEvent: true,
 			detailPR: &PR{
 				RepoOwner: "acme", RepoName: "widget",
 				HeadBranch: "feature/detail", HeadSHA: "head-sha-detail",
@@ -106,7 +147,8 @@ func TestCheckReviewWatchEnrichesSearchResultsBeforePublishingEvent(t *testing.T
 			},
 		},
 		{
-			name: "fork identity",
+			name:      "fork identity",
+			wantEvent: true,
 			detailPR: &PR{
 				HeadBranch: "contrib/feature", HeadSHA: "fork-head-sha",
 				BaseBranch: "main", BaseSHA: "base-sha",
@@ -127,16 +169,20 @@ func TestCheckReviewWatchEnrichesSearchResultsBeforePublishingEvent(t *testing.T
 			},
 		},
 		{
-			name:      "detail lookup failure keeps identity unavailable",
+			name:      "detail lookup failure defers PR until a later successful poll",
 			detailErr: errors.New("GitHub detail lookup failed"),
-			wantDetails: reviewPRDetails{
-				headBranch: "feature/search", baseBranch: "main", additions: 1, deletions: 2,
+			retryPR: &PR{
+				HeadBranch: "feature/search", HeadSHA: "head-sha-retry",
+				BaseBranch: "main", BaseSHA: "base-sha-retry",
+				HeadRepoOwner: "acme", HeadRepoName: "widget",
 			},
 		},
 		{
-			name: "nil detail response keeps identity unavailable",
-			wantDetails: reviewPRDetails{
-				headBranch: "feature/search", baseBranch: "main", additions: 1, deletions: 2,
+			name: "nil detail response defers PR until a later successful poll",
+			retryPR: &PR{
+				HeadBranch: "feature/search", HeadSHA: "head-sha-retry",
+				BaseBranch: "main", BaseSHA: "base-sha-retry",
+				HeadRepoOwner: "acme", HeadRepoName: "widget",
 			},
 		},
 	}
@@ -155,13 +201,13 @@ func TestCheckReviewWatchEnrichesSearchResultsBeforePublishingEvent(t *testing.T
 			}
 			eventBus := bus.NewMemoryEventBus(testLogger(t))
 			t.Cleanup(eventBus.Close)
-			var emitted *NewReviewPREvent
+			retryScenario := &reviewPRRetryScenario{retryPR: tt.retryPR}
 			subscription, err := eventBus.Subscribe(events.GitHubNewReviewPR, func(_ context.Context, event *bus.Event) error {
 				payload, ok := event.Data.(*NewReviewPREvent)
 				if !ok {
 					return errors.New("event data is not a NewReviewPREvent")
 				}
-				emitted = payload
+				retryScenario.events = append(retryScenario.events, payload)
 				return nil
 			})
 			if err != nil {
@@ -180,17 +226,25 @@ func TestCheckReviewWatchEnrichesSearchResultsBeforePublishingEvent(t *testing.T
 			if err := store.CreateReviewWatch(ctx, watch); err != nil {
 				t.Fatalf("create review watch: %v", err)
 			}
+			retryScenario.service = service
+			retryScenario.watch = watch
+			retryScenario.client = client
 
 			prs, err := service.TriggerReviewWatch(ctx, watch)
 			if err != nil {
 				t.Fatalf("TriggerReviewWatch: %v", err)
 			}
-			if len(prs) != 1 {
-				t.Fatalf("new review PR count = %d, want 1", len(prs))
-			}
 			if client.getPRCalls != 1 || client.getPROwner != "acme" || client.getPRRepo != "widget" || client.getPRNum != 42 {
 				t.Fatalf("GetPR calls = (%d, %q, %q, %d), want one lookup for acme/widget#42",
 					client.getPRCalls, client.getPROwner, client.getPRRepo, client.getPRNum)
+			}
+			if !tt.wantEvent {
+				retryScenario.firstPollPRs = prs
+				assertReviewPRDeferredThenRetried(t, retryScenario)
+				return
+			}
+			if len(prs) != 1 {
+				t.Fatalf("new review PR count = %d, want 1", len(prs))
 			}
 			if got := reviewPRDetailsFrom(prs[0]); got != tt.wantDetails {
 				t.Errorf("enriched PR details = %+v, want %+v", got, tt.wantDetails)
@@ -198,14 +252,15 @@ func TestCheckReviewWatchEnrichesSearchResultsBeforePublishingEvent(t *testing.T
 			if prs[0].RepoOwner != "acme" || prs[0].RepoName != "widget" {
 				t.Errorf("search target repository = %s/%s, want acme/widget", prs[0].RepoOwner, prs[0].RepoName)
 			}
-			if emitted == nil || emitted.PR == nil {
+			if len(retryScenario.events) != 1 || retryScenario.events[0].PR == nil {
 				t.Fatal("review watch did not publish a PR event")
 			}
-			if got := reviewPRDetailsFrom(emitted.PR); got != tt.wantDetails {
+			emittedPR := retryScenario.events[0].PR
+			if got := reviewPRDetailsFrom(emittedPR); got != tt.wantDetails {
 				t.Errorf("event PR details = %+v, want %+v", got, tt.wantDetails)
 			}
-			if emitted.PR.RepoOwner != "acme" || emitted.PR.RepoName != "widget" {
-				t.Errorf("event target repository = %s/%s, want acme/widget", emitted.PR.RepoOwner, emitted.PR.RepoName)
+			if emittedPR.RepoOwner != "acme" || emittedPR.RepoName != "widget" {
+				t.Errorf("event target repository = %s/%s, want acme/widget", emittedPR.RepoOwner, emittedPR.RepoName)
 			}
 		})
 	}

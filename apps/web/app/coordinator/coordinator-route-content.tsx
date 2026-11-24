@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
+import { cn } from "@/lib/utils";
 import { selectWorkspaceById } from "@/lib/state/slices/workspace/selectors";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import { linkToCoordinatorNeedsYou, linkToCoordinatorQueue } from "@/lib/coordinator/links";
@@ -88,9 +89,6 @@ function CoordinatorScreenList({
           coordinatorId={coordinator.id}
         />
       )}
-      {/* Full width under the topbar, not inside the content column: the
-          derived-facts caption sits beside the counts, which only fits when
-          the strip spans the window (mockup v2.1 `.strip`). */}
       {!tasksHardFailed && !attention.watchSetUnavailable && (
         <div className="bg-background sticky top-0 z-10 border-b px-4">
           <CountStrip
@@ -101,7 +99,7 @@ function CoordinatorScreenList({
           />
         </div>
       )}
-      <div className="w-full max-w-3xl space-y-4 p-4">
+      <div className={cn("w-full space-y-4 p-4", view === "queue" && "max-w-3xl")}>
         <InputFailureBanner inputs={attention.inputs} retry={attention.retryFailed} />
         {!tasksHardFailed && children({ coordinator, coordinators, attention, canManage })}
       </div>

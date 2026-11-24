@@ -257,7 +257,12 @@ Registry builds derive formats from the released manifest. Install still checks
 the actual manifest, digest, compatibility, and normal permission flow. Listing
 metadata is discovery evidence only. A mismatch cannot create a runtime provider.
 Unsupported previews show Find viewer plugin and existing download/external-open.
-Unknown text retains its editor and exposes discovery in Open with. Return state
+FileViewerOptions shares the editor behavior across file tabs, panels, and mobile.
+A preview kind of `none` means the file lacks a Markdown or HTML preview. The
+text editor can still display it. Keep discovery out of the editor toolbar.
+Render no toolbar container when there are no actions. Keep installed viewer
+selection available and preserve editor state when switching. For unknown text,
+place discovery inside the explicit Open with flow. Return state
 retains only host-local file identity. Cancel/back restores the file. After an
 explicit install, offer Open with the ready provider and recheck eligibility.
 No auto-install, auto-enable, or automatic replacement after failure.

@@ -745,11 +745,19 @@ Changing a Linear issue state requires `task.write` on the workspace. A viewer c
 
 Linear watches can filter by team, states, labels, projects, priorities, assignee, creator, estimate range, and free-text query. At least one of those filters is required. Filters combine with AND; within states, labels, or projects, an issue matches any selected value. Pick a team to choose its projects, so one team can route each project to its own repository with a separate watch. Saved projects remain removable even if no team is selected or a project is no longer available. They also define dispatch order, workflow and starting step, optional repository/base branch/profile overrides, prompt, poll interval, and a maximum in-flight count. New watches default to five in-flight tasks and **Priority (high → low)** dispatch. The poll interval defaults to 300 seconds and accepts 60–3,600 seconds; clear the in-flight field for no cap.
 
+Turn on **Only start issues whose blockers are done** to make a watch wait for Linear "blocked by" relations. Blockers in other teams or projects count. A canceled blocker keeps the issue waiting, as does an issue with more than 25 incoming relations.
+
+Waiting issues use no in-flight task slots. When the last blocker completes, the next poll can dispatch the issue in the configured order as slots become available. If task creation fails after dispatch, the watch can retry the issue on a later poll.
+
+Kandev re-checks up to 250 pending issues per watch by ID after they leave the search window. It keeps each ID until the issue gets a task or no longer matches the watch filter. The watch relies on the search window for matches beyond the pending limit.
+
 The watch prompt accepts `{{issue.identifier}}`, `{{issue.title}}`, `{{issue.url}}`, `{{issue.state}}`, `{{issue.priority}}`, `{{issue.team}}`, `{{issue.assignee}}`, `{{issue.creator}}`, and `{{issue.description}}`, plus project placeholders: `{{issue.project.name}}`, `{{issue.project.url}}`, `{{issue.project.summary}}` (the project's short summary), and `{{issue.project.description}}` (the project page content). Project placeholders are empty for an issue without a project. The project description is truncated to 4,000 characters with a notice and is captured when the task is created; later edits do not reach existing tasks. Kandev fetches project descriptions only when `{{issue.project.description}}` appears directly in the watch prompt. Saved-prompt references expand later, so provider placeholders inside referenced prompts are not interpolated. Content is fetched in batches of up to 25 projects, but a large response can still exceed the 4 MB limit and fail the poll. The next poll retries; repeated oversized responses require changing the project content or removing the description placeholder.
 
 Leaving the repository blank creates repo-less tasks. When a repository is selected, a blank branch resolves to its default branch. Test narrow filters before enabling the watch. Deleting a Linear watch retains existing tasks; **Reset** permanently deletes every watch-created task, including archived tasks, clears cursor/deduplication state, and makes current matches eligible for the next poll. Cancelling a watcher dialog does not cancel its submitted save. Its result is still reported while a later dialog keeps its own draft and save state. After changing a create dialog's workspace, an earlier save cannot close it.
 
-Linear polling is also bounded. **Default (Linear order)** reads one page of 50; an explicit dispatch sort reads at most five pages of 50 before sorting locally. Matches outside that window can remain unseen, and reset does not bypass the bound.
+**Default (Linear order)** reads one page of 50 with the blocker setting off. An explicit dispatch sort or the blocker setting reads at most five pages of 50. The same search limit applies after a reset.
+
+With the blocker setting on, default order uses the most recent update first across the search and re-check results.
 
 </details>
 

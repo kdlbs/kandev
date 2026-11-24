@@ -51,9 +51,9 @@ find them and decide later whether they belong in a commit.
 
 - **AC-TASKS-WORKSPACE-ROOT-FILES-001.1:** When a multi-repository task
   workspace root contains at least one workspace root file, desktop and phone
-  Changes shall show an **Outside repositories** section that lists each file
-  by its root-relative path. The section shall show this list even when every
-  checkout is clean.
+  Changes shall show an **Outside repositories** group. Each file shall be
+  identifiable by its root-relative path. The group shall appear even when
+  every checkout is clean.
 - **AC-TASKS-WORKSPACE-ROOT-FILES-001.2:** When a workspace root file is
   created, modified, renamed, or deleted, an open Changes view shall show the
   updated list without a page reload. The update latency shall be the same as
@@ -66,8 +66,24 @@ find them and decide later whether they belong in a commit.
   files. When more eligible files exist, Changes shall say that the list is
   truncated.
 - **AC-TASKS-WORKSPACE-ROOT-FILES-001.5:** When the task workspace is a single
-  checkout or a Git repository, Changes shall not show the section. Its
+  checkout or a Git repository, Changes shall not show the group. Its
   existing content and empty state shall stay the same.
+- **AC-TASKS-WORKSPACE-ROOT-FILES-001.6:** The group shall start expanded
+  and use the same header alignment, typography, count style, and disclosure
+  control as a repository group. A click, tap, or keyboard activation shall
+  toggle the group on its own. The file count shall remain visible when collapsed.
+  Group and folder disclosure choices shall survive a file refresh in the
+  same workspace view.
+- **AC-TASKS-WORKSPACE-ROOT-FILES-001.7:** The group shall follow the
+  **Changes Panel Layout** preference. Tree shall show files under
+  collapsible folders and combine single-child folder chains as repository
+  trees do. List shall show the root-relative paths in a flat list. File
+  names shall match the font family, size, and weight of repository file
+  names in the same layout.
+- **AC-TASKS-WORKSPACE-ROOT-FILES-001.8:** On phones and with a coarse
+  pointer, group, folder, file, and overflow controls shall have touch
+  targets at least 44 pixels high. Each file shall have a visible overflow
+  control for its available actions.
 
 ### REQ-TASKS-WORKSPACE-ROOT-FILES-002: Open workspace root files
 
@@ -96,7 +112,7 @@ existing Stage, Commit, and Push actions can handle the file.
   selects a checkout and confirms.
 - **AC-TASKS-WORKSPACE-ROOT-FILES-003.2:** After a confirmed move, the file
   shall be at `<checkout>/<root-relative path>`. It shall leave the Outside
-  repositories section and appear as an untracked file in that checkout's
+  repositories group and appear as an untracked file in that checkout's
   Unstaged group. The system shall not stage, commit, or push the file.
 - **AC-TASKS-WORKSPACE-ROOT-FILES-003.3:** When the destination path already
   exists, the move shall fail without overwriting anything. Changes shall show a

@@ -84,48 +84,49 @@ func adapterFor(descriptor requiredstores.Descriptor) testconformance.Adapter {
 }
 
 var schemaInitializers = map[string]testconformance.Scenario{
-	"schema-meta":           schemaMeta,
-	"task":                  taskSchema,
-	"workflow":              workflowSchema,
-	"analytics":             analyticsSchema,
-	"agent-settings":        agentSettingsSchema,
-	"user":                  userSchema,
-	"notification":          notificationSchema,
-	"editor":                editorSchema,
-	"prompts":               promptSchema,
-	"utility":               utilitySchema,
-	"office":                officeSchema,
-	"terminal":              terminalSchema,
-	"quick-terminal":        quickTerminalSchema,
-	"runtime-flags":         runtimeFlagsSchema,
-	"auth":                  authSchema,
-	"secrets":               secretsSchema,
-	"system-settings":       systemSettingsSchema,
-	"auth-hostnames":        hostnameSchema,
-	"organizations":         organizationSchema,
-	"organization-units":    organizationUnitSchema,
-	"message-queue":         messageQueueSchema,
-	"task-share":            shareSchema,
-	"telemetry-contract":    telemetrySchema,
-	"delivery":              deliverySchema,
-	"storage":               storageSchema,
-	"plugin-instances":      pluginInstancesSchema,
-	"plugin-marketplace":    pluginMarketplaceSchema,
-	"plugin-settings":       pluginSettingsSchema,
-	"plugin-state":          pluginStateSchema,
-	"plugin-instance-state": pluginInstanceStateSchema,
-	"plugin-user-state":     pluginUserStateSchema,
-	"canvas":                canvasSchema,
-	"github":                githubSchema,
-	"gitlab":                gitlabSchema,
-	"jira":                  jiraSchema,
-	"linear":                linearSchema,
-	"sentry":                sentrySchema,
-	"workflow-sync":         workflowSyncSchema,
-	"prompt-sync":           promptSyncSchema,
-	"office-config-sync":    officeConfigSyncSchema,
-	"automation":            automationSchema,
-	"coordinator":           coordinatorSchema,
+	"schema-meta":             schemaMeta,
+	"task":                    taskSchema,
+	"workflow":                workflowSchema,
+	"analytics":               analyticsSchema,
+	"agent-settings":          agentSettingsSchema,
+	"user":                    userSchema,
+	"notification":            notificationSchema,
+	"editor":                  editorSchema,
+	"prompts":                 promptSchema,
+	"utility":                 utilitySchema,
+	"office":                  officeSchema,
+	"terminal":                terminalSchema,
+	"quick-terminal":          quickTerminalSchema,
+	"runtime-flags":           runtimeFlagsSchema,
+	"auth":                    authSchema,
+	"secrets":                 secretsSchema,
+	"system-settings":         systemSettingsSchema,
+	"auth-hostnames":          hostnameSchema,
+	"organizations":           organizationSchema,
+	"organization-units":      organizationUnitSchema,
+	"message-queue":           messageQueueSchema,
+	"task-share":              shareSchema,
+	"telemetry-contract":      telemetrySchema,
+	"delivery":                deliverySchema,
+	"storage":                 storageSchema,
+	"plugin-instances":        pluginInstancesSchema,
+	"plugin-marketplace":      pluginMarketplaceSchema,
+	"plugin-settings":         pluginSettingsSchema,
+	"plugin-state":            pluginStateSchema,
+	"plugin-instance-state":   pluginInstanceStateSchema,
+	"plugin-user-state":       pluginUserStateSchema,
+	"plugin-command-receipts": pluginCommandReceiptsSchema,
+	"canvas":                  canvasSchema,
+	"github":                  githubSchema,
+	"gitlab":                  gitlabSchema,
+	"jira":                    jiraSchema,
+	"linear":                  linearSchema,
+	"sentry":                  sentrySchema,
+	"workflow-sync":           workflowSyncSchema,
+	"prompt-sync":             promptSyncSchema,
+	"office-config-sync":      officeConfigSyncSchema,
+	"automation":              automationSchema,
+	"coordinator":             coordinatorSchema,
 }
 
 func schemaInitializerFor(descriptor requiredstores.Descriptor) testconformance.Scenario {
@@ -375,6 +376,13 @@ func pluginStateSchema(s testconformance.ScenarioContext) error {
 func pluginInstanceStateSchema(s testconformance.ScenarioContext) error {
 	if _, err := pluginstate.NewInstanceStore(pluginPool(s)); err != nil {
 		return fmt.Errorf("plugin instance state schema: %w", err)
+	}
+	return nil
+}
+
+func pluginCommandReceiptsSchema(s testconformance.ScenarioContext) error {
+	if _, err := pluginstate.NewCommandStore(pluginPool(s)); err != nil {
+		return fmt.Errorf("plugin command receipts schema: %w", err)
 	}
 	return nil
 }

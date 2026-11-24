@@ -132,6 +132,8 @@
   "query": "Consulta",
   "queryHelp": "Correspondência de texto livre no título e na descrição (opcional).",
   "queryPlaceholder": "bug de autenticação",
+  "requireBlockersDone": "Iniciar apenas issues com bloqueadores concluídos",
+  "requireBlockersDoneHelp": "Retém cada issue correspondente até que todas as issues do Linear que a bloqueiam estejam concluídas. Um bloqueador cancelado continua a retê-la.",
   "reEnableItInSettings": "Volte a ativá-la nas definições",
   "refresh": "Atualizar",
   "removeConfiguration": "Remover configuração",

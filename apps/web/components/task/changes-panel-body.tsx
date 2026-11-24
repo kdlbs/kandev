@@ -174,6 +174,7 @@ export function ChangesPanelBody(props: ChangesPanelBodyProps) {
             />
             {!workspaceBlocked && (
               <ChangesPanelRootFiles
+                contextKey={props.contextKey}
                 listing={workspaceRootFiles}
                 sessionId={activeSessionId}
                 onEditFile={props.onEditFile}

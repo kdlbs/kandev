@@ -17,6 +17,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
@@ -1214,6 +1216,9 @@ func (m *Manager) restoreSessionRuntimeConfigWithClient(ctx context.Context, exe
 	}
 	if err := m.reapplySessionModelAfterResetWithClient(ctx, execution, client, sessionID, config.Model); err != nil {
 		return fmt.Errorf("restore session runtime model: %w", err)
+	}
+	if execution.AgentID == acpcompat.PiAgentID {
+		config.Mode, config.ConfigOptions = profileconfig.PiThinkingIntent(config.Mode, config.ConfigOptions, piThinkingConfigID(execution.GetModelState()))
 	}
 	if err := m.applySessionModeAfterResetWithClient(ctx, execution, client, sessionID, config.Mode); err != nil {
 		return fmt.Errorf("restore session runtime mode: %w", err)

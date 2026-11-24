@@ -361,6 +361,7 @@ func TestExactSanitizedMessageSnapshot(t *testing.T) {
 	host.messageData = &fakeMessageDataSource{messages: []*taskmodels.Message{{
 		ID: "message-one", TaskID: task.ID, TaskSessionID: session.ID, AuthorType: taskmodels.MessageAuthorUser,
 		Content: "before <kandev-system>private instruction</kandev-system> after", CreatedAt: base,
+		Metadata: map[string]interface{}{"source": "plugin:discord", "operation_id": "private"},
 	}}}
 	page, err := host.ListSanitizedMessages(context.Background(), pluginsdk.ExactMessageQuery{
 		RequestID: "messages", WorkspaceID: "workspace-one", Filter: pluginsdk.MessageFilter{TaskIDs: []string{task.ID}},
@@ -371,5 +372,8 @@ func TestExactSanitizedMessageSnapshot(t *testing.T) {
 	}
 	if strings.Contains(page.Items[0].Message.Content, "private instruction") || !strings.Contains(page.Items[0].Message.Content, "before") || page.Items[0].Sanitization != "system_context_removed" {
 		t.Fatalf("message content = %+v, want private system content removed", page.Items[0])
+	}
+	if page.Items[0].Message.Source != "plugin:discord" {
+		t.Fatalf("message source = %q, want the persisted metadata.source", page.Items[0].Message.Source)
 	}
 }
