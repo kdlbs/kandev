@@ -36,6 +36,30 @@ func TestFocusTaskSessionDoesNotResumeWorkflowParkedSession(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.10
+func TestIdleSuspensionResumeShortcutRejectsWorkflowParkedSession(t *testing.T) {
+	ctx := context.Background()
+	svc, _, row := newIdleParkingFixture(t, true, 1, "claude-acp")
+	if err := svc.repo.SetSessionMetadataKey(ctx, row.SessionID, models.SessionMetaKeyWorkflowParking, models.WorkflowParking{
+		Stamp: "workflow-parking-1", ParkedAt: time.Now().UTC(), SourceSessionID: row.SessionID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	row.IdleSuspensionState = models.ExecutorIdleSuspensionSuspended
+	if err := svc.repo.UpsertExecutorRunning(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	session, err := svc.repo.GetTaskSession(ctx, row.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	execution, err := svc.idleSuspensionResumeShortcut(ctx, row.TaskID, row.SessionID, session, row)
+	if execution != nil || err != ErrIdleSuspensionProvenanceRequired {
+		t.Fatalf("workflow-parked resume shortcut = (%v, %v), want provenance-required error", execution, err)
+	}
+}
+
 func TestFocusTaskSessionDoesNotWakeManuallyStoppedSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

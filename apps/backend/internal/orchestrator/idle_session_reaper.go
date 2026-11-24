@@ -321,12 +321,14 @@ func (s *Service) suspendWorkspaceIdleSessionsOnce(ctx context.Context) {
 	if !ok || suspender == nil {
 		return
 	}
+	scanStartedAt := time.Now().UTC()
 	rows, err := s.repo.ListExecutorsRunning(ctx)
 	if err != nil {
 		s.logger.Warn("workspace idle suspension scan skipped; inventory read failed", zap.Error(err))
 		return
 	}
 	now := time.Now().UTC()
+	liveSessions := idleParkingSessionIDs(rows)
 	summary := idleParkingScanSummary{
 		observed: make(map[idleParkingCandidateKey]struct{}),
 		skipped:  make(map[idleParkingSkipReason]int),
@@ -334,8 +336,18 @@ func (s *Service) suspendWorkspaceIdleSessionsOnce(ctx context.Context) {
 	for _, row := range rows {
 		s.processWorkspaceIdleRow(ctx, row, now, suspender, &summary)
 	}
-	s.pruneIdleParkingCandidates(summary.observed)
+	s.pruneIdleParkingCandidates(summary.observed, liveSessions, scanStartedAt)
 	s.logWorkspaceIdleScan(summary)
+}
+
+func idleParkingSessionIDs(rows []*models.ExecutorRunning) map[string]struct{} {
+	sessions := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		if row != nil && row.SessionID != "" {
+			sessions[row.SessionID] = struct{}{}
+		}
+	}
+	return sessions
 }
 
 type idleParkingScanSummary struct {
@@ -384,6 +396,7 @@ func (s *Service) suspendWorkspaceIdleCandidate(
 	revalidated := false
 	revalidationCtx, cancelRevalidation := context.WithTimeout(ctx, idleSuspensionRevalidationTimeout)
 	suspendErr := s.withSessionPromptAdmission(revalidationCtx, row.SessionID, func(admittedCtx context.Context) error {
+		// A busy lifecycle lock means the session is not idle; a later scan retries.
 		releaseLifecycleLock, acquired := s.tryAcquireSessionLifecycleLock(row.SessionID)
 		if !acquired {
 			return nil
@@ -391,6 +404,9 @@ func (s *Service) suspendWorkspaceIdleCandidate(
 		defer releaseLifecycleLock()
 		current, _, currentOK := s.workspaceIdleCandidate(admittedCtx, row, time.Now().UTC())
 		if !currentOK || current.key != candidate.key || current.identity != candidate.identity {
+			return nil
+		}
+		if !s.idleParkingCandidateDue(current.key, time.Now().UTC(), current.timeout) {
 			return nil
 		}
 		identity = current.identity
@@ -685,7 +701,11 @@ func (s *Service) finishIdleParkingCandidate(key idleParkingCandidateKey, succee
 	}
 }
 
-func (s *Service) pruneIdleParkingCandidates(observed map[idleParkingCandidateKey]struct{}) {
+func (s *Service) pruneIdleParkingCandidates(
+	observed map[idleParkingCandidateKey]struct{},
+	liveSessions map[string]struct{},
+	scanStartedAt time.Time,
+) {
 	s.idleParkingMu.Lock()
 	defer s.idleParkingMu.Unlock()
 	for key := range s.idleParkingCandidates {
@@ -693,12 +713,9 @@ func (s *Service) pruneIdleParkingCandidates(observed map[idleParkingCandidateKe
 			delete(s.idleParkingCandidates, key)
 		}
 	}
-	observedSessions := make(map[string]struct{}, len(observed))
-	for key := range observed {
-		observedSessions[key.sessionID] = struct{}{}
-	}
-	for sessionID := range s.idleParkingFocusAt {
-		if _, exists := observedSessions[sessionID]; !exists {
+	for sessionID, focusedAt := range s.idleParkingFocusAt {
+		_, live := liveSessions[sessionID]
+		if !live && focusedAt.Before(scanStartedAt) {
 			delete(s.idleParkingFocusAt, sessionID)
 		}
 	}
