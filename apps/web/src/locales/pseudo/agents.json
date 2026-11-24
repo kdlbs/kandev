@@ -199,8 +199,8 @@
   "hostTerminal": "Ĥōśţ ţēŕḿĩńàĺ",
   "hostTerminalDescription": "Ŕũńś à śĥēĺĺ ōń ţĥē ķàńďēv ĥōśţ. Ũśē ĩţ ţō ĩńśţàĺĺ ōŕ ćōńƒĩĝũŕē àĝēńţś ḿàńũàĺĺŷ.",
   "install": "Ĩńśţàĺĺ",
-  "localInstallHint": "Ĩńśţàĺĺś ţĥē ōƒƒĩćĩàĺ Àńţĩĝŕàvĩţŷ ÀĆƤ śēŕvēŕ àńď ĥàŕńēśś ōń ţĥĩś ḿàćĥĩńē. Ţĥē àĝŷ ĆĹĨ ĩś śēƥàŕàţē.",
-  "antigravityLoginTitle": "Śĩĝń ĩń ţō Àńţĩĝŕàvĩţŷ",
+  "localInstallHint": "Ĩńśţàĺĺś ţĥē ƥĩńńēď śţàńďàĺōńē Àńţĩĝŕàvĩţŷ ÀĆƤ śēŕvēŕ àńď ĥàŕńēśś ōń ţĥĩś ḿàćĥĩńē. Ĩţ ũśēś ćŕēďēńţĩàĺś śēƥàŕàţē ƒŕōḿ ţĥē Àńţĩĝŕàvĩţŷ ĆĹĨ.",
+  "antigravityLoginTitle": "Śĩĝń ĩń ţō ţĥē śţàńďàĺōńē Àńţĩĝŕàvĩţŷ ÀĆƤ śēŕvēŕ",
   "antigravityLoginDescription": "Ũśē ŷōũŕ ƥēŕśōńàĺ Ĝōōĝĺē ÀĨ śũƀśćŕĩƥţĩōń.",
   "antigravityLoginSeparateStore": "Ţĥē àĝŷ ĆĹĨ àńď ţĥē ÀĆƤ śēŕvēŕ ķēēƥ śēƥàŕàţē ĺōĝĩńś.",
   "antigravityLoginSameMachine": "Ƒĩńĩśĥ śĩĝń-ĩń ĩń à ƀŕōŵśēŕ ōń ţĥē Ķàńďēv ḿàćĥĩńē.",
@@ -654,5 +654,16 @@
   "thinkingLevel": "Ţĥĩńķĩńĝ ĺēvēĺ",
   "useProviderDefault": "Ũśē ƥŕōvĩďēŕ ďēƒàũĺţ",
   "thinkingLevelUnavailable": "{{value}} (ũńàvàĩĺàƀĺē)",
-  "editProfile": "Ēďĩţ ƥŕōƒĩĺē"
+  "editProfile": "Ēďĩţ ƥŕōƒĩĺē",
+  "antigravityCLILoginDescription": "Ķàńďēv ŕũńś {{command}} ōń ţĥē Ķàńďēv ĥōśţ. Ţĥē ĆĹĨ ķēēƥś ĩţś śĩĝń-ĩń śēƥàŕàţē ƒŕōḿ ţĥē śţàńďàĺōńē śēŕvēŕ.",
+  "antigravityCLISetupGuide": "Àńţĩĝŕàvĩţŷ ĆĹĨ śēţũƥ ĝũĩďē",
+  "antigravityCLISignInHint": "Śĩĝń ĩń ţō ţĥē śēĺēćţēď Àńţĩĝŕàvĩţŷ ĆĹĨ ōń ţĥē Ķàńďēv ĥōśţ. Ķàńďēv ŕēƒŕēśĥēś ĩţś ḿōďēĺś ŵĥēń ŷōũ ƒĩńĩśĥ.",
+  "antigravityGoogleSignInRequired": "Ĝōōĝĺē śĩĝń-ĩń ŕēqũĩŕēď",
+  "antigravityInstallStandaloneACP": "Ĩńśţàĺĺ śţàńďàĺōńē ÀĆƤ śēŕvēŕ",
+  "antigravityLoginRuntimeChanged": "Ţĥē śēĺēćţēď Àńţĩĝŕàvĩţŷ ŕũńţĩḿē ćĥàńĝēď. Ŕēƒŕēśĥ àĝēńţ śţàţũś àńď ţŕŷ àĝàĩń.",
+  "antigravityNotInstalledHint": "Ĩńśţàĺĺ à ćōḿƥàţĩƀĺē Àńţĩĝŕàvĩţŷ ĆĹĨ, ōŕ ĩńśţàĺĺ ţĥē śţàńďàĺōńē ÀĆƤ śēŕvēŕ ƀēĺōŵ.",
+  "antigravityRuntimeCLI": "Àńţĩĝŕàvĩţŷ ĆĹĨ",
+  "antigravityRuntimeStandalone": "Śţàńďàĺōńē ÀĆƤ śēŕvēŕ",
+  "antigravityStandaloneSignInHint": "Śĩĝń ĩń ţō ţĥē śţàńďàĺōńē ÀĆƤ śēŕvēŕ ōń ţĥē Ķàńďēv ĥōśţ. Ĩţś ćŕēďēńţĩàĺś àŕē śēƥàŕàţē ƒŕōḿ ţĥē Àńţĩĝŕàvĩţŷ ĆĹĨ.",
+  "signIn": "Śĩĝń ĩń"
 }

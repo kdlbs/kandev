@@ -11,6 +11,10 @@ import ptTask from "@/src/locales/pt-pt/task.json";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/components/settings/antigravity-login-dialog", () => ({
+  AntigravityLoginDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="antigravity-login-dialog" /> : null,
+}));
 afterEach(() => {
   cleanup();
   document.body.removeAttribute("tabindex");
@@ -22,6 +26,7 @@ const CURSOR_METHOD_NAME = "Cursor CLI login";
 const CURSOR_METHOD_ID = "cursor_login";
 const CURSOR_PROFILE_ID = "profile-cursor";
 const CURSOR_AGENT_NAME = "cursor-acp";
+const ANTIGRAVITY_PROFILE_ID = "profile-antigravity";
 const AUTH_FAILURE_OCCURRED_AT = "2026-11-12T10:00:00Z";
 const RECOVERY_CARD_TEST_ID = "session-recovery-card";
 const COMPOSER_TEST_ID = "composer";
@@ -325,6 +330,85 @@ describe("authentication recovery choices", () => {
     expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(RESTART_BUTTON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(RESTORE_BUTTON_TEST_ID)).toBeNull();
+  });
+});
+
+describe("saved Antigravity authentication recovery", () => {
+  it("opens standalone sign-in for a saved standalone session when the host default is CLI", () => {
+    const cliDefault = {
+      name: "antigravity-acp",
+      available: true,
+      model_config: { runtime_variant: "cli", status: "ok" },
+    };
+    render(
+      <StateProvider
+        initialState={
+          {
+            ...initialState,
+            availableAgents: { items: [cliDefault] },
+            taskSessions: {
+              items: {
+                [session.id]: {
+                  ...session,
+                  runtime_adapter_version: "antigravity-standalone/1.4.5",
+                },
+              },
+            },
+          } as unknown as Partial<AppState>
+        }
+      >
+        <TooltipProvider>
+          <SessionRecoveryCard
+            model={authenticationModel("resume")}
+            actions={actions as unknown as SessionRecoveryActions}
+            onNewSession={vi.fn()}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId("antigravity-standalone-recovery-login"));
+    expect(screen.getByTestId("antigravity-login-dialog")).toBeTruthy();
+  });
+
+  it("opens standalone sign-in for an untagged saved Antigravity session when the host default is CLI", () => {
+    const cliDefault = {
+      name: "antigravity-acp",
+      available: true,
+      model_config: { runtime_variant: "cli", status: "ok" },
+    };
+    render(
+      <StateProvider
+        initialState={
+          {
+            ...initialState,
+            agentProfiles: {
+              items: [{ id: ANTIGRAVITY_PROFILE_ID, agent_name: "antigravity-acp" }],
+            },
+            availableAgents: { items: [cliDefault] },
+            taskSessions: {
+              items: {
+                [session.id]: {
+                  ...session,
+                  agent_profile_id: ANTIGRAVITY_PROFILE_ID,
+                },
+              },
+            },
+          } as unknown as Partial<AppState>
+        }
+      >
+        <TooltipProvider>
+          <SessionRecoveryCard
+            model={authenticationModel("resume")}
+            actions={actions as unknown as SessionRecoveryActions}
+            onNewSession={vi.fn()}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId("antigravity-standalone-recovery-login"));
+    expect(screen.getByTestId("antigravity-login-dialog")).toBeTruthy();
   });
 });
 

@@ -22,6 +22,7 @@ var SurvivalCapabilities = []string{
 	"agent-delivery.v1",
 	launchwrapper.Capability,
 	acpcompat.AntigravityPersonalAuthCapability,
+	acpcompat.AntigravityCLIRuntimeCapability,
 	p.BuiltinPackagesCapability,
 	p.AutomationMCPSelectionCapability,
 	// CopilotNativeCompactionCapability advertises that this agentctl build can

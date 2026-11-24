@@ -4,6 +4,9 @@ import { useRef, useEffect, useLayoutEffect, useState } from "react";
 import Link from "@/components/routing/app-link";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@kandev/ui/button";
+import { useAppStore } from "@/components/state-provider";
+import { AntigravityLoginDialog } from "@/components/settings/antigravity-login-dialog";
 import type { ActiveSessionRecovery } from "@/lib/active-session-recovery";
 import type { RecoveryAuthMethod } from "./types";
 import type { SessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
@@ -181,6 +184,7 @@ export function SessionRecoveryCard({
           required={authentication.required}
           methods={authentication.methods}
           metadata={model.metadata}
+          sessionId={model.sessionId}
         />
         <RecoveryActions
           actions={choices}
@@ -217,23 +221,53 @@ function RecoveryAuthenticationGuidance({
   required,
   methods,
   metadata,
+  sessionId,
 }: {
   required: boolean;
   methods: RecoveryAuthMethod[];
   metadata: ActiveSessionRecovery["metadata"];
+  sessionId: string;
 }) {
+  const { t } = useTranslation();
+  const [loginOpen, setLoginOpen] = useState(false);
+  const runtimeAdapterVersion = useAppStore(
+    (state) => state.taskSessions.items[sessionId]?.runtime_adapter_version,
+  );
+  const savedAgentName = useAppStore((state) => {
+    const session = state.taskSessions.items[sessionId];
+    const profileId = session?.execution_profile_id || session?.agent_profile_id;
+    return state.agentProfiles.items.find((profile) => profile.id === profileId)?.agent_name;
+  });
+  const standaloneAntigravitySession =
+    runtimeAdapterVersion?.startsWith("antigravity-standalone/") ||
+    (!runtimeAdapterVersion && savedAgentName === "antigravity-acp");
   if (!required) return null;
   return (
-    <ActionMessageDetails
-      metadata={{
-        is_auth_error: true,
-        auth_methods: methods,
-        remediation_url: metadata?.remediation_url,
-        provider_error: metadata?.provider_error,
-      }}
-      allowGenericTerminal={false}
-      executionHostGuidance
-    />
+    <>
+      <ActionMessageDetails
+        metadata={{
+          is_auth_error: true,
+          auth_methods: methods,
+          remediation_url: metadata?.remediation_url,
+          provider_error: metadata?.provider_error,
+        }}
+        allowGenericTerminal={false}
+        executionHostGuidance
+      />
+      {standaloneAntigravitySession && (
+        <div className="mt-3">
+          <Button
+            className={controlSizingClassName("standard")}
+            variant="outline"
+            onClick={() => setLoginOpen(true)}
+            data-testid="antigravity-standalone-recovery-login"
+          >
+            {t("agents:antigravityLoginStart")}
+          </Button>
+          <AntigravityLoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
+        </div>
+      )}
+    </>
   );
 }
 

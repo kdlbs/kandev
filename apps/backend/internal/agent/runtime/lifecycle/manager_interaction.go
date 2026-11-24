@@ -812,6 +812,10 @@ func (m *Manager) AuthenticateBySessionID(ctx context.Context, sessionID, method
 	if !exists {
 		return fmt.Errorf("no agent running for session %q", sessionID)
 	}
+	if acpcompat.IsAntigravity(execution.AgentID) && execution.AuthPolicy != nil &&
+		execution.AuthPolicy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI {
+		return acpcompat.ErrTaskAuthenticationDenied
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
