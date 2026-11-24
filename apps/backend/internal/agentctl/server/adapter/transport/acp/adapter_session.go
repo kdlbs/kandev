@@ -192,6 +192,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	priorSessionID := a.sessionID
 	a.pendingCopilotNative = nil
 	a.pendingCopilotNativeDropped = false
+	a.clearCopilotInterruptionLocked()
 	a.mu.Unlock()
 
 	if conn == nil {
@@ -734,6 +735,10 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.isLoadingSession = true
 	a.loadingSessionID = sessionID
 	a.loadReplayPlan = nil
+	a.copilotInterruption = copilotInterruptionState{
+		sessionID:        sessionID,
+		coreMCPDelivered: copilotCoreMCPDelivered(mcpServers, a.projectDeliveryEvidence()),
+	}
 	delete(a.usageBySession, sessionID)
 	a.mu.Unlock()
 
@@ -763,6 +768,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 			a.loadReplayPlan = nil
 			a.pendingCopilotNative = nil
 			a.pendingCopilotNativeDropped = false
+			a.clearCopilotInterruptionLocked()
 			a.mu.Unlock()
 		}
 		if !a.syncNotifQueueThen(clearFailedLoad) {
@@ -873,6 +879,7 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	a.mu.Lock()
 	conn := a.acpConn
 	supportsResume := a.capabilities.SessionCapabilities.Resume != nil
+	a.clearCopilotInterruptionLocked()
 	a.mu.Unlock()
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import { StatusMessage } from "./status-message";
@@ -63,6 +63,59 @@ describe("StatusMessage model selection warnings", () => {
       screen.getByText("The executor applied the only advertised variation of the saved model."),
     ).toBeTruthy();
     expect(screen.queryByText(/fallback model/i)).toBeNull();
+  });
+});
+
+describe("StatusMessage Copilot interruption notices", () => {
+  it("shows a clarification summary and opens the original warning as plain text", () => {
+    const comment: Message = {
+      id: "copilot-notice-1",
+      session_id: toSessionId("session-1"),
+      task_id: toTaskId("task-1"),
+      author_type: "agent",
+      content: "**Warning:** verify the current state.",
+      type: "status",
+      created_at: STATUS_CREATED_AT,
+      metadata: { copilot_interruption_notice: "clarification" },
+    };
+    render(<StatusMessage comment={comment} />);
+
+    expect(
+      screen.getByText("The pending question was interrupted. You can continue the conversation."),
+    ).toBeTruthy();
+    expect(screen.queryByText(comment.content)).toBeNull();
+    const details = screen.getByRole("button", { name: "Details" });
+    expect(details.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(details);
+
+    expect(screen.getByTestId("copilot-interruption-details").textContent).toBe(comment.content);
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getByRole("button", { name: "Hide details" }).getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+  });
+
+  it("shows the generic tool summary and provides a coarse-pointer target", () => {
+    const comment: Message = {
+      id: "copilot-notice-2",
+      session_id: toSessionId("session-1"),
+      task_id: toTaskId("task-1"),
+      author_type: "agent",
+      content: "Warning: verify the tool effects.",
+      type: "status",
+      created_at: STATUS_CREATED_AT,
+      metadata: { copilot_interruption_notice: "tool" },
+    };
+
+    render(<StatusMessage comment={comment} />);
+
+    expect(
+      screen.getByText("A tool call was interrupted. Check its effects before retrying."),
+    ).toBeTruthy();
+    const details = screen.getByRole("button", { name: "Details" });
+    expect(details.className).toContain("[@media(pointer:coarse)]:min-h-11");
+    fireEvent.click(details);
+    expect(screen.getByTestId("copilot-interruption-details").textContent).toBe(comment.content);
   });
 });
 

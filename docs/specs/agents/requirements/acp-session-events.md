@@ -15,6 +15,7 @@ events instead of inferring them from text or usage changes. Kandev users can se
 when an agent compacts its context and can tell provider warnings apart from the
 agent's reply. The agents system owns this contract because it interprets provider
 wire behavior. Task storage and chat consume the normalized result.
+Copilot can also report an interrupted tool call as text when a session resumes.
 
 ## Terminology
 
@@ -128,13 +129,41 @@ temporary wire proxy.
   advertises a model config option, `acpdbg` shall select the model through that option.
   Otherwise it shall use the legacy model request.
 
+### REQ-AGENTS-ACP-SESSION-EVENTS-006: Copilot interrupted-call recovery
+
+After a restart, users need to know whether a pending question was interrupted
+or whether a tool may have changed their workspace.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-ACP-SESSION-EVENTS-006.1:** When Copilot sends a recognized
+  interrupted-call warning after resume, chat shall show one compact, muted
+  status row before the assistant reply. The summary text shall meet 4.5:1 contrast.
+- **AC-AGENTS-ACP-SESSION-EVENTS-006.2:** When verified evidence identifies the
+  only interrupted call as a Kandev clarification, the summary shall say the
+  pending question was interrupted and the conversation can continue.
+- **AC-AGENTS-ACP-SESSION-EVENTS-006.3:** When the warning covers any other call,
+  multiple calls, or a call of uncertain identity, the summary shall advise
+  users to check the tool's effects before retrying.
+- **AC-AGENTS-ACP-SESSION-EVENTS-006.4:** The status shall offer the original
+  Copilot warning in a collapsed plain-text disclosure. The disclosure shall
+  be readable and operable by keyboard or touch on desktop and phone.
+- **AC-AGENTS-ACP-SESSION-EVENTS-006.5:** After Copilot successfully resumes
+  a conversation, the user shall be able to skip the saved question and receive
+  a reply in that conversation. The interruption notice shall be informational,
+  with the composer available under the usual turn rules.
+- **AC-AGENTS-ACP-SESSION-EVENTS-006.6:** A recognized warning shall appear once
+  in the same transcript after reconnect or reload. Ordinary assistant messages
+  and unrecognized warning frames shall keep their regular chat presentation.
+
 ## Out of scope
 
 - Native child sessions, inter-session messages, client-supplied system prompts, and MCP
   over ACP. No pinned agent supports them in a usable way.
 - Compaction or notice presentation outside the chat timeline, such as toasts or task
   list badges.
-- Parsing provider text to synthesize compaction or notice entries.
+- Inferring compaction or notices from provider text outside the qualified
+  Copilot recovery sequence.
 - Starting a compaction from the Kandev UI.
 
 ## Provider-specific evidence

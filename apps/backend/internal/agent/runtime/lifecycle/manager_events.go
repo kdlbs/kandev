@@ -1538,6 +1538,16 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 	if m.handleCodexMCPStartupWarningEvent(execution, &event, attemptID) {
 		return
 	}
+	if streams.CopilotInterruptionNoticeType(event.Data) != "" {
+		if event.TurnID == "" && event.PromptGeneration != 0 {
+			event.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
+		}
+		if event.TurnID != "" {
+			m.handleCopilotInterruptionNoticeEvent(execution, event, attemptID)
+			return
+		}
+		event.Data = withoutCopilotInterruptionNotice(event.Data)
+	}
 	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != toolStatusError) {
 		m.recordActivity(execution, event)
 	}
@@ -1562,6 +1572,27 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 			return
 		}
 	}
+	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
+}
+
+func (m *Manager) handleCopilotInterruptionNoticeEvent(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	attemptID string,
+) {
+	if event.CanonicalProjection {
+		m.publishCanonicalStreamingContent(
+			execution,
+			"message_streaming",
+			event.CanonicalMessageID,
+			event.Text,
+			event.CanonicalMessageAppend,
+			false,
+			decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
+		)
+		return
+	}
+	event.Type = streams.EventTypeCopilotInterruptionNotice
 	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
 }
 
@@ -1642,6 +1673,19 @@ func (m *Manager) handleMCPAttachmentEvent(
 	// ownership. They flow directly to the orchestrator for persistence.
 	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, *event, attemptID)
 	return true
+}
+
+func withoutCopilotInterruptionNotice(data map[string]any) map[string]any {
+	if len(data) <= 1 {
+		return nil
+	}
+	clean := make(map[string]any, len(data)-1)
+	for key, value := range data {
+		if key != streams.AgentEventDataCopilotInterruptionNotice {
+			clean[key] = value
+		}
+	}
+	return clean
 }
 
 func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, event *agentctl.AgentEvent) bool {

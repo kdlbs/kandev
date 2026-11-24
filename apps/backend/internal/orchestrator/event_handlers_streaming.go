@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -136,6 +138,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		if eventType != streams.EventTypeUsageObservation {
 			return
 		}
+	}
+	if eventType == streams.EventTypeCopilotInterruptionNotice {
+		s.handleCopilotInterruptionStatus(ctx, payload)
+		return
 	}
 	if eventType == streams.EventTypeMCPStartupWarning {
 		s.handleCodexMCPStartupWarning(ctx, payload, eventExecutionID)
@@ -963,6 +969,52 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 	s.handleStreamingEventKind(ctx, payload, "message",
 		s.messageCreator.AppendAgentMessage,
 		s.messageCreator.CreateAgentMessageStreaming)
+}
+
+func (s *Service) handleCopilotInterruptionStatus(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if payload == nil || payload.Data == nil || s.messageCreator == nil || payload.TaskID == "" ||
+		payload.SessionID == "" || payload.ExecutionID == "" || payload.Data.Text == "" {
+		return
+	}
+	noticeType := streams.CopilotInterruptionNoticeType(payload.Data.Data)
+	if noticeType == "" {
+		return
+	}
+	turnID := payload.Data.TurnID
+	if turnID == "" {
+		payload.Data.Type = "message_streaming"
+		payload.Data.MessageType = string(v1.MessageTypeMessage)
+		if payload.Data.MessageID == "" {
+			payload.Data.MessageID = copilotInterruptionMessageID(
+				payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration,
+			)
+		}
+		s.handleMessageStreamingEvent(ctx, payload)
+		return
+	}
+	messageID := copilotInterruptionMessageID(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration)
+	metadata := map[string]interface{}{
+		"variant": streams.EventTypeCopilotInterruptionNotice,
+		streams.AgentEventDataCopilotInterruptionNotice: noticeType,
+	}
+	if err := s.messageCreator.CreateSessionMessageIdempotent(
+		ctx, messageID, payload.TaskID, payload.Data.Text, payload.SessionID,
+		string(v1.MessageTypeStatus), turnID, metadata, false,
+	); err != nil {
+		s.logger.Error("failed to persist Copilot interruption status",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+	}
+}
+
+func copilotInterruptionMessageID(sessionID, executionID string, promptGeneration uint64) string {
+	identity := fmt.Sprintf("%s\x00%s\x00%d", sessionID, executionID, promptGeneration)
+	digest := sha256.Sum256([]byte(identity))
+	return "copilot-interruption-" + hex.EncodeToString(digest[:16])
 }
 
 // handleThinkingStreamingEvent handles streaming thinking events for real-time reasoning updates.

@@ -469,9 +469,12 @@ func (r *Repository) persistCanonicalAgentMessageTx(
 	}
 	content := agentEvent.Text
 	messageType := "message"
+	noticeType := streams.CopilotInterruptionNoticeType(agentEvent.Data)
 	if agentEvent.Type == streams.EventTypeReasoning {
 		content = agentEvent.ReasoningText
 		messageType = string(models.MessageTypeThinking)
+	} else if noticeType != "" && agentEvent.TurnID != "" {
+		messageType = string(models.MessageTypeStatus)
 	}
 	if content == "" {
 		return false, nil
@@ -511,6 +514,10 @@ func (r *Repository) persistCanonicalAgentMessageTx(
 		"durable_delivery":   true,
 		"delivery_stream_id": event.StreamID,
 		"delivery_sequence":  event.Sequence,
+	}
+	if noticeType != "" && agentEvent.TurnID != "" {
+		messageMetadata[streams.AgentEventDataCopilotInterruptionNotice] = noticeType
+		messageMetadata["variant"] = streams.EventTypeCopilotInterruptionNotice
 	}
 	if messageType == string(models.MessageTypeThinking) {
 		messageMetadata["thinking"] = content
