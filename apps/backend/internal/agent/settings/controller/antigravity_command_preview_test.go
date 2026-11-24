@@ -34,7 +34,7 @@ func TestAntigravityCommandPreviewUsesSelectedLocalRuntime(t *testing.T) {
 					t.Fatal(err)
 				}
 				cli := filepath.Join(bin, "agy")
-				writePreviewAntigravityCLI(t, cli, "1.5.15")
+				writeAntigravityCLI(t, cli, "1.5.15")
 				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 				return cli
 			},
@@ -45,7 +45,7 @@ func TestAntigravityCommandPreviewUsesSelectedLocalRuntime(t *testing.T) {
 			wantVariant: "standalone",
 			prepareRuntime: func(t *testing.T, home string) string {
 				bin := t.TempDir()
-				writePreviewAntigravityCLI(t, filepath.Join(bin, "agy"), "1.4.9")
+				writeAntigravityCLI(t, filepath.Join(bin, "agy"), "1.4.9")
 				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 				artifact, err := antigravityruntime.ArtifactFor(runtime.GOOS, runtime.GOARCH)
 				if err != nil {
@@ -87,7 +87,10 @@ func TestAntigravityCommandPreviewUsesSelectedLocalRuntime(t *testing.T) {
 				agents.AntigravityACPAgentID: agents.NewAntigravityACP(),
 			})
 			response, err := controller.PreviewAgentCommand(context.Background(), agents.AntigravityACPAgentID, CommandPreviewRequest{
-				CLIFlags: []dto.CLIFlagDTO{{Flag: "--profile 'value with spaces'", Enabled: true}},
+				CLIFlags: []dto.CLIFlagDTO{
+					{Flag: "--profile 'value with spaces'", Enabled: true},
+					{Flag: "--process-per-session=false", Enabled: true},
+				},
 			})
 			if err != nil {
 				t.Fatalf("PreviewAgentCommand: %v", err)
@@ -98,6 +101,11 @@ func TestAntigravityCommandPreviewUsesSelectedLocalRuntime(t *testing.T) {
 			if tt.wantVariant == "cli" && !slices.Equal(response.Command[:2], []string{selected, "acp"}) {
 				t.Fatalf("CLI command prefix = %#v, want [%s acp]", response.Command[:2], selected)
 			}
+			if tt.wantVariant == "cli" {
+				if !slices.Contains(response.Command, "--process-per-session=false") || response.Command[len(response.Command)-1] != "--process-per-session" {
+					t.Fatalf("CLI worker flag is not effective after profile flags: %#v", response.Command)
+				}
+			}
 			if !slices.Contains(response.Command, "value with spaces") {
 				t.Fatalf("CLI flag value was not preserved as one argv token: %#v", response.Command)
 			}
@@ -105,9 +113,11 @@ func TestAntigravityCommandPreviewUsesSelectedLocalRuntime(t *testing.T) {
 	}
 }
 
-func writePreviewAntigravityCLI(t *testing.T, path, version string) {
+func writeAntigravityCLI(t *testing.T, path, version string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte("#!/bin/sh\necho 'agy "+version+"'\n"), 0o755); err != nil {
+	script := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'agy " + version + "'; exit 0; fi\n" +
+		"if [ \"$1\" = \"acp\" ] && [ \"$2\" = \"--help\" ]; then printf 'Usage: agy acp [flags]\\n\\nFlags:\\n  --process-per-session  Serve each session from an isolated worker process\\n'; exit 0; fi\nexit 0\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }

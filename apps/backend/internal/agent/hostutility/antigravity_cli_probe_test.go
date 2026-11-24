@@ -25,7 +25,7 @@ func TestAntigravityLocalProbePrefersCLIWithStandaloneInstalled(t *testing.T) {
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	binDir := t.TempDir()
 	cliPath := filepath.Join(binDir, "agy")
-	cli := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'agy 1.5.15'; exit 0; fi\nexit 1\n"
+	cli := hostUtilityAntigravityCLIScript("1.5.15")
 	if err := os.WriteFile(cliPath, []byte(cli), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestAntigravityLocalProbePrefersCLIWithStandaloneInstalled(t *testing.T) {
 			if request.InferenceConfig.AuthPolicy != nil {
 				selectedRuntime = request.InferenceConfig.AuthPolicy.RuntimeVariant
 			}
-			if slices.Equal(selectedCommand, []string{cliPath, "acp"}) {
+			if slices.Equal(selectedCommand, []string{cliPath, "acp", "--process-per-session"}) {
 				_ = json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
 					Success: true,
 					Models:  []agentctlutil.ProbeModel{{ID: "agy-gemini-3", Name: "Gemini 3"}},
@@ -72,8 +72,8 @@ func TestAntigravityLocalProbePrefersCLIWithStandaloneInstalled(t *testing.T) {
 	if result.RuntimeVariant != "cli" {
 		t.Fatalf("runtime variant = %q, want cli", result.RuntimeVariant)
 	}
-	if !slices.Equal(selectedCommand, []string{cliPath, "acp"}) {
-		t.Fatalf("selected command = %v, want %v", selectedCommand, []string{cliPath, "acp"})
+	if !slices.Equal(selectedCommand, []string{cliPath, "acp", "--process-per-session"}) {
+		t.Fatalf("selected command = %v, want %v", selectedCommand, []string{cliPath, "acp", "--process-per-session"})
 	}
 	if selectedRuntime != acpcompat.AntigravityRuntimeCLI {
 		t.Fatalf("probe auth runtime = %q, want %q", selectedRuntime, acpcompat.AntigravityRuntimeCLI)
@@ -88,7 +88,7 @@ func TestAntigravityFailedCLIProbeKeepsSelectedRuntime(t *testing.T) {
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	binDir := t.TempDir()
 	cliPath := filepath.Join(binDir, "agy")
-	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.5.15'\n"), 0o755); err != nil {
+	if err := os.WriteFile(cliPath, []byte(hostUtilityAntigravityCLIScript("1.5.15")), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir)
@@ -112,4 +112,9 @@ func TestAntigravityFailedCLIProbeKeepsSelectedRuntime(t *testing.T) {
 	if result.RuntimeVariant != acpcompat.AntigravityRuntimeCLI {
 		t.Fatalf("failed probe runtime variant = %q, want cli", result.RuntimeVariant)
 	}
+}
+
+func hostUtilityAntigravityCLIScript(version string) string {
+	return "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'agy " + version + "'; exit 0; fi\n" +
+		"if [ \"$1\" = \"acp\" ] && [ \"$2\" = \"--help\" ]; then printf 'Usage: agy acp [flags]\\n\\nFlags:\\n  --process-per-session  Serve each session from an isolated worker process\\n'; exit 0; fi\nexit 1\n"
 }
