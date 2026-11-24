@@ -139,7 +139,6 @@ func (s *Server) setupRoutes() {
 
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
-		api.GET("/agent/copilot-context-tier", s.handleCopilotContextTier)
 		api.GET("/agent/launch-wrapper", s.handleLaunchWrapper)
 		api.POST("/agent/opencode/credentials", s.handleOpenCodeCredentials)
 		api.GET("/agent/opencode/credentials", s.handleOpenCodeCredentialStatus)
@@ -147,7 +146,6 @@ func (s *Server) setupRoutes() {
 		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
 		api.POST("/start", s.handleStart)
 		api.POST("/stop", s.handleStop)
-		api.POST("/agent/process/stop", s.handleAgentProcessStop)
 
 		// Agent stream: bidirectional WebSocket for agent events, MCP, and agent operations
 		// (initialize, session/new, session/load, prompt, cancel, stderr, permissions/respond)
@@ -671,20 +669,6 @@ func (s *Server) handleStop(c *gin.Context) {
 		Success: true,
 		Message: "agent stopped",
 	})
-}
-
-func (s *Server) handleAgentProcessStop(c *gin.Context) {
-	if err := s.procMgr.StopAgentProcess(c.Request.Context()); err != nil {
-		s.logger.Error("failed to stop agent subprocess", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, StopResponse{Success: false, Error: err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, StopResponse{Success: true, Message: "agent subprocess stopped"})
-}
-
-func (s *Server) handleCopilotContextTier(c *gin.Context) {
-	tier, running := s.procMgr.CopilotContextTier()
-	c.JSON(http.StatusOK, gin.H{"running": running, "context_tier": tier})
 }
 
 // ShellStatusResponse represents shell status

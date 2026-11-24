@@ -9,10 +9,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/startup"
@@ -789,11 +787,6 @@ func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution 
 	if err != nil {
 		return fmt.Errorf("agent and continuation commands: %w", err)
 	}
-	if agentConfig.ID() == agents.CopilotACPAgentID {
-		if err := m.preserveRecoveredCopilotContextTier(ctx, execution, commands.args); err != nil {
-			return err
-		}
-	}
 	execution.AgentCommand = commands.initial
 	execution.ContinueCommand = commands.continue_
 	execution.AgentArgs = commands.args
@@ -802,34 +795,6 @@ func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution 
 	execution.LaunchWrapper, err = recoveredLaunchWrapper(ctx, execution, commands.wrapper)
 	if err != nil {
 		return err
-	}
-	return nil
-}
-
-func (m *Manager) preserveRecoveredCopilotContextTier(
-	ctx context.Context,
-	execution *AgentExecution,
-	desiredArgs []string,
-) error {
-	client, releaseClient := execution.AcquireAgentCtlClient()
-	defer releaseClient()
-	if client == nil {
-		return errors.New("retained copilot agentctl client is unavailable")
-	}
-	liveTier, running, err := client.CopilotContextTier(ctx)
-	if err != nil {
-		return fmt.Errorf("read retained copilot launch tier: %w", err)
-	}
-	if execution.Status == v1.AgentStatusRunning && !running {
-		return errors.New("retained copilot child is not running")
-	}
-	if !running {
-		return nil
-	}
-	execution.setConfirmedCopilotContextTier(liveTier)
-	desiredTier, _ := acpcompat.ParseCopilotContextTierFromArgs(desiredArgs)
-	if desiredTier != liveTier {
-		stageCopilotContextTierOnExecution(execution, execution.ACPSessionID, desiredTier, nil)
 	}
 	return nil
 }

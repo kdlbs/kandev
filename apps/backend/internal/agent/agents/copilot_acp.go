@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/usage"
-	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -95,34 +94,7 @@ func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) 
 func (a *CopilotACP) NativeBinaryName() string { return copilotNativeBinary }
 
 func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
-	cmd := a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
-	return appendCopilotContextTierFlag(cmd, opts.ConfigOptions, opts.CLIFlagTokens)
-}
-
-func (a *CopilotACP) BuildPassthroughCommand(opts PassthroughOptions) Command {
-	if tier, ok := resolveCopilotContextTierCLIFlag(opts.ConfigOptions, opts.CLIFlagTokens); ok {
-		opts.CLIFlagTokens = append([]string{"--context", tier}, opts.CLIFlagTokens...)
-	}
-	return a.StandardPassthrough.BuildPassthroughCommand(opts)
-}
-
-func appendCopilotContextTierFlag(cmd Command, configOptions map[string]string, cliFlagTokens []string) Command {
-	tier, ok := resolveCopilotContextTierCLIFlag(configOptions, cliFlagTokens)
-	if !ok {
-		return cmd
-	}
-	return cmd.With().Flag("--context", tier).Build()
-}
-
-func resolveCopilotContextTierCLIFlag(configOptions map[string]string, cliFlagTokens []string) (string, bool) {
-	if len(configOptions) == 0 || acpcompat.HasCopilotContextCLIFlag(cliFlagTokens) {
-		return "", false
-	}
-	tier := configOptions[acpcompat.CopilotContextTierOptionID]
-	if !acpcompat.IsValidCopilotContextTier(tier) {
-		return "", false
-	}
-	return tier, true
+	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
 }
 
 func (a *CopilotACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
@@ -177,6 +149,15 @@ func (a *CopilotACP) PermissionSettings() map[string]PermissionSetting {
 // (see acp-debug captures) shows it does not suppress session/request_permission
 // frames. Only `--allow-all-tools` and the other `--allow-all-*` flags do.
 var copilotPermSettings = map[string]PermissionSetting{
+	"long_context": {
+		Supported:    true,
+		Default:      false,
+		Label:        "Long context",
+		Description:  "Request a larger context window for new sessions on supported models. May use more AI credits.",
+		ApplyMethod:  PermissionApplyMethodCLIFlag,
+		CLIFlag:      "--context",
+		CLIFlagValue: "long_context",
+	},
 	"allow_all_tools": {
 		Supported: true,
 		// Enabled by default so autonomous runs don't stall on per-tool-call

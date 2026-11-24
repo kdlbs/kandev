@@ -97,10 +97,6 @@ type Config struct {
 	// CopilotNativeSessionEvents enables Copilot's opt-in native compaction and
 	// attributed usage notifications for this launch.
 	CopilotNativeSessionEvents bool
-
-	// LaunchArgs holds the CLI argv passed to the child agent subprocess so
-	// protocol dialects can reflect startup-only flags in normalized config state.
-	LaunchArgs []string
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

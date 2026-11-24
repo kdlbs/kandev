@@ -6,28 +6,18 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
 )
 
 type recordingSessionUpdater struct {
-	mu      sync.Mutex
 	updates []acp.SessionNotification
 }
 
 func (r *recordingSessionUpdater) SessionUpdate(_ context.Context, update acp.SessionNotification) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.updates = append(r.updates, update)
 	return nil
-}
-
-func (r *recordingSessionUpdater) snapshot() []acp.SessionNotification {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]acp.SessionNotification(nil), r.updates...)
 }
 
 func (r *recordingSessionUpdater) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
@@ -53,8 +43,8 @@ func TestCopilotNativeFixtureEmitsRawVendorFrames(t *testing.T) {
 	if resp.StopReason != acp.StopReasonEndTurn {
 		t.Fatalf("stop reason = %q", resp.StopReason)
 	}
-	if len(updater.snapshot()) != 1 {
-		t.Fatalf("session updates = %d, want the terminal text frame", len(updater.snapshot()))
+	if len(updater.updates) != 1 {
+		t.Fatalf("session updates = %d, want the terminal text frame", len(updater.updates))
 	}
 
 	if _, err := output.Seek(0, 0); err != nil {
@@ -172,105 +162,4 @@ func TestCopilotNativeLiveFramesAddOneDistinctCompletion(t *testing.T) {
 	if completions != 1 {
 		t.Fatalf("completions = %d, want 1", completions)
 	}
-}
-
-func TestCopilotNativeContextTierFlagHistoryAndConfigRejection(t *testing.T) {
-	t.Setenv("KANDEV_MOCK_COPILOT_NATIVE", "true")
-
-	tier, err := parseContextTierFlag([]string{"mock-agent", "--acp", "--model", "mock-fast", "--context", "long_context"})
-	if err != nil || tier != "long_context" {
-		t.Fatalf("parseContextTierFlag(--context long_context) = (%q, %v), want (\"long_context\", nil)", tier, err)
-	}
-	if _, err := parseContextTierFlag([]string{"mock-agent", "--context=2m"}); err == nil {
-		t.Fatal("parseContextTierFlag(--context=2m) must reject unsupported context tiers")
-	}
-
-	firstUpdater := &recordingSessionUpdater{}
-	firstAgent := &mockAgent{
-		conn:        firstUpdater,
-		model:       modelFast,
-		contextTier: "default",
-		sessions:    make(map[acp.SessionId]bool),
-	}
-	newResp, err := firstAgent.NewSession(context.Background(), acp.NewSessionRequest{Cwd: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = firstAgent.CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: newResp.SessionId})
-	})
-
-	_, setErr := firstAgent.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{
-		ValueId: &acp.SetSessionConfigOptionValueId{
-			SessionId: newResp.SessionId,
-			ConfigId:  "context_tier",
-			Value:     "long_context",
-		},
-	})
-	if setErr == nil || !strings.Contains(setErr.Error(), "-32602") {
-		t.Fatalf("SetSessionConfigOption(context_tier) err = %v, want -32602 Invalid params", setErr)
-	}
-
-	zeroTurnAgent := &mockAgent{
-		conn:        &recordingSessionUpdater{},
-		model:       modelFast,
-		contextTier: "long_context",
-		sessions:    make(map[acp.SessionId]bool),
-	}
-	if _, loadZeroErr := zeroTurnAgent.LoadSession(context.Background(), acp.LoadSessionRequest{
-		SessionId: newResp.SessionId,
-		Cwd:       t.TempDir(),
-	}); loadZeroErr == nil || !strings.Contains(loadZeroErr.Error(), "-32602") {
-		t.Fatalf("LoadSession(0-turn session) err = %v, want -32602 session not found", loadZeroErr)
-	}
-
-	if _, err := firstAgent.Prompt(context.Background(), acp.PromptRequest{
-		SessionId: newResp.SessionId,
-		Prompt:    []acp.ContentBlock{acp.TextBlock("<kandev-system>task envelope</kandev-system>\n\n/e2e:copilot-context-info")},
-	}); err != nil {
-		t.Fatalf("first Prompt: %v", err)
-	}
-	firstText := collectRecordedAgentMessageText(firstUpdater.snapshot())
-	if !strings.Contains(firstText, "Copilot runtime context_tier=default") ||
-		!strings.Contains(firstText, "loads=0 prior_turns=0") {
-		t.Fatalf("first prompt text = %q, want default tier with loads=0 prior_turns=0", firstText)
-	}
-
-	secondUpdater := &recordingSessionUpdater{}
-	secondAgent := &mockAgent{
-		conn:        secondUpdater,
-		model:       modelFast,
-		contextTier: "long_context",
-		sessions:    make(map[acp.SessionId]bool),
-	}
-	t.Cleanup(func() {
-		_, _ = secondAgent.CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: newResp.SessionId})
-	})
-	if _, err := secondAgent.LoadSession(context.Background(), acp.LoadSessionRequest{
-		SessionId: newResp.SessionId,
-		Cwd:       t.TempDir(),
-	}); err != nil {
-		t.Fatalf("LoadSession: %v", err)
-	}
-	if _, err := secondAgent.Prompt(context.Background(), acp.PromptRequest{
-		SessionId: newResp.SessionId,
-		Prompt:    []acp.ContentBlock{acp.TextBlock("/e2e:copilot-context-info")},
-	}); err != nil {
-		t.Fatalf("second Prompt: %v", err)
-	}
-	secondText := collectRecordedAgentMessageText(secondUpdater.snapshot())
-	if !strings.Contains(secondText, "Copilot runtime context_tier=long_context") ||
-		!strings.Contains(secondText, "loads=1 prior_turns=1") {
-		t.Fatalf("second prompt text = %q, want long_context tier with loads=1 prior_turns=1", secondText)
-	}
-}
-
-func collectRecordedAgentMessageText(updates []acp.SessionNotification) string {
-	var builder strings.Builder
-	for _, item := range updates {
-		if item.Update.AgentMessageChunk != nil && item.Update.AgentMessageChunk.Content.Text != nil {
-			builder.WriteString(item.Update.AgentMessageChunk.Content.Text.Text)
-		}
-	}
-	return builder.String()
 }

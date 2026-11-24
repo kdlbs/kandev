@@ -10,10 +10,6 @@ For agentctl API, Git operations, or pull request creation, read [API guidance](
 
 For agent adapters and dialects, read [adapter guidance](ADAPTERS.md).
 
-### Copilot ACP dialect (`dialect_copilot.go`)
-
-GitHub Copilot CLI (`@github/copilot`) accepts context-window tier selection via startup `--context <default|long_context>`, omits `context_tier` from ACP `configOptions`, and rejects `session/set_config_option("context_tier", ...)` with `-32602`. `acpcompat.NormalizeCopilotConfigOptions` synthesizes a `context_tier` select (`category: "context_window"`, values `default` / `long_context`) seeded from the subprocess launch argv (`ParseCopilotContextTierFromArgs`) unless Copilot advertises a native context option. `dialect_copilot.go` re-applies that active value across `NewSession`, `LoadSession`, `ResumeSession`, authoritative post-mutation snapshots, and `ConfigOptionUpdate` notifications so model switches do not drop `context_tier`. Live `context_tier` changes on synthesized options are handled in `internal/agent/runtime/lifecycle/copilot_context_tier.go`: while idle, `applySynthesizedCopilotContextTier` validates replacement launch readiness and stages the choice immediately in `ModelState` without stopping the idle subprocess (`preserveStagedCopilotContextTier` prevents `session_models` flicker), and `reconcileCopilotContextTierBeforePrompt` reloads the child subprocess once right before the next prompt via `agentctl` + `session/load` (falling back to `session/new` only on 0-turn session-not-found, and rejecting live changes while a turn is active).
-
 ## ACP Protocol
 
 When changing or debugging ACP handling, read [ACP protocol guidance](ACP-PROTOCOL.md).

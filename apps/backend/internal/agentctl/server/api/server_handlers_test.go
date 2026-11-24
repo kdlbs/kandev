@@ -125,24 +125,6 @@ func TestHandleStart_WithoutConfiguredCommandIs500(t *testing.T) {
 	}
 }
 
-func TestHandleAgentProcessStopKeepsAgentctlAvailable(t *testing.T) {
-	srv := newTestServer(t)
-	rec := serverPost(t, srv, "/api/v1/agent/process/stop")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
-	}
-	var body StopResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode stop response: %v", err)
-	}
-	if !body.Success {
-		t.Fatalf("success = false: %s", body.Error)
-	}
-	if got := srv.procMgr.Status(); got != process.StatusStopped {
-		t.Fatalf("agent status = %q, want stopped", got)
-	}
-}
-
 func TestHandleStart_EmptyBodyRetainsOrdinaryStartBehavior(t *testing.T) {
 	srv := newTestServer(t)
 	recorder := httptest.NewRecorder()

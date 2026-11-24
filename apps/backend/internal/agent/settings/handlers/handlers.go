@@ -753,13 +753,12 @@ func (h *Handlers) httpDeleteAgent(c *gin.Context) {
 }
 
 type commandPreviewRequest struct {
-	Model                  string            `json:"model"`
-	PermissionSettings     map[string]bool   `json:"permission_settings"`
-	ConfigOptions          map[string]string `json:"config_options,omitempty"`
-	CLIPassthrough         bool              `json:"cli_passthrough"`
-	CLIFlags               []dto.CLIFlagDTO  `json:"cli_flags"`
-	CommandPrefix          string            `json:"command_prefix,omitempty"`
-	CopilotSelectedPlugins []string          `json:"copilot_selected_plugins,omitempty"`
+	Model                  string           `json:"model"`
+	PermissionSettings     map[string]bool  `json:"permission_settings"`
+	CLIPassthrough         bool             `json:"cli_passthrough"`
+	CLIFlags               []dto.CLIFlagDTO `json:"cli_flags"`
+	CommandPrefix          string           `json:"command_prefix,omitempty"`
+	CopilotSelectedPlugins []string         `json:"copilot_selected_plugins,omitempty"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -778,7 +777,6 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 	resp, err := h.controller.PreviewAgentCommand(c.Request.Context(), agentName, controller.CommandPreviewRequest{
 		Model:                  body.Model,
 		PermissionSettings:     body.PermissionSettings,
-		ConfigOptions:          body.ConfigOptions,
 		CLIPassthrough:         body.CLIPassthrough,
 		CLIFlags:               body.CLIFlags,
 		CommandPrefix:          body.CommandPrefix,

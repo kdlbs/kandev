@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -1165,94 +1164,6 @@ func (c *Client) Stop(ctx context.Context) error {
 
 	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
 	return nil
-}
-
-// StopAgentProcess stops the agent child while keeping agentctl workspace
-// services available. Older peers return an error and are not stopped through
-// the full teardown endpoint.
-func (c *Client) StopAgentProcess(ctx context.Context) error {
-	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/agent/process/stop", c.executionID)
-	defer span.End()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/agent/process/stop", nil)
-	if err != nil {
-		tracing.TraceHTTPResponse(span, 0, err)
-		return err
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		tracing.TraceHTTPResponse(span, 0, err)
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := readResponseBody(resp)
-	if err != nil {
-		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
-		return fmt.Errorf("failed to read agent subprocess stop response: %w", err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		httpErr := fmt.Errorf("agent subprocess stop request failed with status %d: %s", resp.StatusCode, string(body))
-		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
-		return httpErr
-	}
-	var result struct {
-		Success bool   `json:"success"`
-		Error   string `json:"error,omitempty"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
-		return fmt.Errorf("failed to parse agent subprocess stop response: %w", err)
-	}
-	if !result.Success {
-		stopErr := fmt.Errorf("agent subprocess stop failed: %s", result.Error)
-		tracing.TraceHTTPResponse(span, resp.StatusCode, stopErr)
-		return stopErr
-	}
-	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
-	return nil
-}
-
-// CopilotContextTier returns the launch tier of a running Copilot child. The
-// endpoint returns no command arguments or environment values.
-func (c *Client) CopilotContextTier(ctx context.Context) (string, bool, error) {
-	ctx, span := tracing.TraceHTTPRequest(ctx, http.MethodGet, "/api/v1/agent/copilot-context-tier", c.executionID)
-	defer span.End()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/agent/copilot-context-tier", nil)
-	if err != nil {
-		tracing.TraceHTTPResponse(span, 0, err)
-		return "", false, err
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		tracing.TraceHTTPResponse(span, 0, err)
-		return "", false, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := readResponseBody(resp)
-	if err != nil {
-		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
-		return "", false, fmt.Errorf("failed to read Copilot context tier response: %w", err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		httpErr := fmt.Errorf("copilot context tier request failed with status %d: %s", resp.StatusCode, string(body))
-		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
-		return "", false, httpErr
-	}
-	var result struct {
-		Running     bool   `json:"running"`
-		ContextTier string `json:"context_tier"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
-		return "", false, fmt.Errorf("failed to parse Copilot context tier response: %w", err)
-	}
-	if result.Running && !acpcompat.IsValidCopilotContextTier(result.ContextTier) {
-		parseErr := fmt.Errorf("agentctl returned unsupported Copilot context tier %q", result.ContextTier)
-		tracing.TraceHTTPResponse(span, resp.StatusCode, parseErr)
-		return "", false, parseErr
-	}
-	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
-	return result.ContextTier, result.Running, nil
 }
 
 // WaitForReady waits until agentctl is ready to accept requests

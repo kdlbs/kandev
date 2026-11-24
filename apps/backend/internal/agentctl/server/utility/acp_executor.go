@@ -185,7 +185,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	gatewayAuth *acpprovider.GatewayAuth,
 	authArgs ...authSessionArgs,
 ) (string, error) {
-	authPolicy, consent, _, _ := authSessionOptions(authArgs)
+	authPolicy, consent, _ := authSessionOptions(authArgs)
 	updates := newACPProbeNotificationState(agentID)
 	// Collect response text from updates
 	var responseText strings.Builder
@@ -669,12 +669,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	}
 	resp, err := e.probeACPSessionWithContext(
 		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions, cfg.ProviderGatewayAuth,
-		authSessionArgs{
-			policy:        cfg.AuthPolicy,
-			consent:       stderr.consent(),
-			onInitialized: publishInitialized,
-			launchArgs:    args,
-		},
+		authSessionArgs{policy: cfg.AuthPolicy, consent: stderr.consent(), onInitialized: publishInitialized},
 	)
 	if err != nil {
 		var authErr *probeAuthRequiredError
@@ -1213,7 +1208,7 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	gatewayAuth *acpprovider.GatewayAuth,
 	authArgs ...authSessionArgs,
 ) (*ProbeResponse, error) {
-	authPolicy, consent, onInitialized, launchArgs := authSessionOptions(authArgs)
+	authPolicy, consent, onInitialized := authSessionOptions(authArgs)
 	updates := newACPProbeNotificationState(agentID)
 
 	client := acpclient.NewClient(
@@ -1320,19 +1315,9 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	waitForProbeCommands(ctx, updates)
 
 	out := buildInitProbeFields(initResp)
-	applySessionProbeFields(out, sessionResp, agentID, resolveProbeCopilotContextTier(launchArgs, requestedConfigOptions))
+	applySessionProbeFields(out, sessionResp, agentID)
 	out.Commands = updates.commandsSnapshot()
 	return out, nil
-}
-
-func resolveProbeCopilotContextTier(launchArgs []string, requested map[string]string) string {
-	if requested != nil {
-		if tier := requested[acpcompat.CopilotContextTierOptionID]; acpcompat.IsValidCopilotContextTier(tier) {
-			return tier
-		}
-	}
-	tier, _ := acpcompat.ParseCopilotContextTierFromArgs(launchArgs)
-	return tier
 }
 
 // buildInitProbeFields populates agent info, protocol version, capabilities and
@@ -1375,7 +1360,7 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 // top-level `models` field via acp.LegacyModels for agents that haven't
 // migrated yet (auggie 0.29.x). The legacy `modes` field is still present on
 // the SDK type and we keep populating from it for older agents.
-func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionResponse, agentID string, copilotContextTier ...string) {
+func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionResponse, agentID string) {
 	out.ConfigOptions = probeConfigOptions(sessionResp.ConfigOptions)
 	modeOption := findSelectConfigOption(sessionResp.ConfigOptions, acp.SessionConfigOptionCategoryMode)
 	if modeOption != nil {
@@ -1395,10 +1380,10 @@ func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionRespo
 	if len(out.Models) == 0 {
 		applyLegacyModelsFallback(out, sessionResp.LegacyModels)
 	}
-	applySessionCompatibility(out, agentID, copilotContextTier...)
+	applySessionCompatibility(out, agentID)
 }
 
-func applySessionCompatibility(out *ProbeResponse, agentID string, copilotContextTier ...string) {
+func applySessionCompatibility(out *ProbeResponse, agentID string) {
 	models := make([]acpcompat.Model, 0, len(out.Models))
 	for _, model := range out.Models {
 		models = append(models, acpcompat.Model{ID: model.ID, Name: model.Name, Meta: model.Meta})
@@ -1423,16 +1408,7 @@ func applySessionCompatibility(out *ProbeResponse, agentID string, copilotContex
 		}
 		base = append(base, converted)
 	}
-	var normalized []streams.ConfigOption
-	if agentID == acpcompat.CopilotAgentID {
-		tier := acpcompat.CopilotContextTierDefault
-		if len(copilotContextTier) > 0 && acpcompat.IsValidCopilotContextTier(copilotContextTier[0]) {
-			tier = copilotContextTier[0]
-		}
-		normalized, _ = acpcompat.NormalizeCopilotConfigOptions(base, tier)
-	} else {
-		normalized = acpcompat.NormalizeSessionConfig(agentID, base, models, out.CurrentModelID)
-	}
+	normalized := acpcompat.NormalizeSessionConfig(agentID, base, models, out.CurrentModelID)
 	if agentID == acpcompat.PiAgentID && len(base) > 0 {
 		out.Modes = nil
 		out.CurrentModeID = ""
@@ -1443,6 +1419,7 @@ func applySessionCompatibility(out *ProbeResponse, agentID string, copilotContex
 			}
 		}
 	}
+
 	out.ConfigOptions = make([]ProbeConfigOption, 0, len(normalized))
 	for _, option := range normalized {
 		converted := ProbeConfigOption{

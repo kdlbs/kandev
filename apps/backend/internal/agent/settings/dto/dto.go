@@ -617,12 +617,11 @@ type AgentProfileMcpConfigDTO struct {
 
 // CommandPreviewRequest is the request body for previewing the agent CLI command
 type CommandPreviewRequest struct {
-	Model                  string            `json:"model"`
-	PermissionSettings     map[string]bool   `json:"permission_settings"`
-	ConfigOptions          map[string]string `json:"config_options,omitempty"`
-	CLIPassthrough         bool              `json:"cli_passthrough"`
-	CommandPrefix          string            `json:"command_prefix,omitempty"`
-	CopilotSelectedPlugins []string          `json:"copilot_selected_plugins,omitempty"`
+	Model                  string          `json:"model"`
+	PermissionSettings     map[string]bool `json:"permission_settings"`
+	CLIPassthrough         bool            `json:"cli_passthrough"`
+	CommandPrefix          string          `json:"command_prefix,omitempty"`
+	CopilotSelectedPlugins []string        `json:"copilot_selected_plugins,omitempty"`
 }
 
 // Flag destinations reported by CommandPreviewResponse.

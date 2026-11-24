@@ -146,21 +146,20 @@ type AgentExecution struct {
 	// DeliveryReplayCursor is the exact SQL projected position captured during
 	// adoption. It is used to reconcile the descriptor's bounded high-water
 	// mark before a live stream is attached.
-	DeliveryReplayCursor        uint64
-	AgentCommand                string             // Command to start the agent subprocess
-	ContinueCommand             string             // Command for follow-up prompts (one-shot agents)
-	LaunchWrapper               launchwrapper.Spec `json:"-"`
-	OpenCodeRuntime             opencode.Runtime
-	preferACPV2                 bool
-	AgentArgs                   []string // Structured argv for AgentCommand
-	confirmedCopilotContextTier atomic.Pointer[string]
-	ContinueArgs                []string             // Structured argv for ContinueCommand
-	RuntimeName                 agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
-	Status                      v1.AgentStatus
-	StartedAt                   time.Time
-	FinishedAt                  *time.Time
-	ExitCode                    *int
-	ErrorMessage                string
+	DeliveryReplayCursor uint64
+	AgentCommand         string             // Command to start the agent subprocess
+	ContinueCommand      string             // Command for follow-up prompts (one-shot agents)
+	LaunchWrapper        launchwrapper.Spec `json:"-"`
+	OpenCodeRuntime      opencode.Runtime
+	preferACPV2          bool
+	AgentArgs            []string             // Structured argv for AgentCommand
+	ContinueArgs         []string             // Structured argv for ContinueCommand
+	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
+	Status               v1.AgentStatus
+	StartedAt            time.Time
+	FinishedAt           *time.Time
+	ExitCode             *int
+	ErrorMessage         string
 	// OriginalWorkspacePath is the first agent-visible CWD for this native
 	// session. It is retained separately from the current target so restore
 	// policy can classify relocation before touching native state.

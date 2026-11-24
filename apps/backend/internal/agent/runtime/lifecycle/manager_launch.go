@@ -777,7 +777,6 @@ func (m *Manager) buildAgentCommandWithRuntimeOptions(
 		SessionID:             sessionID,
 		AutoApprove:           autoApprove,
 		PermissionValues:      permissionValues,
-		ConfigOptions:         m.resolveLaunchConfigOptions(ctx, req.TaskID, req.SessionID, profileInfo, nil),
 		CLIFlagTokens:         cliFlagTokens,
 		Runtime:               runtime,
 		PreferNativeBinary:    preferNative,
@@ -3500,10 +3499,6 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 	if err != nil {
 		m.updateExecutionError(execution.ID, "failed to start agent: "+err.Error())
 		return "", fmt.Errorf("failed to start agent: %w", err)
-	}
-	if execution.AgentID == agents.CopilotACPAgentID {
-		tier, _ := acpcompat.ParseCopilotContextTierFromArgs(agentArgs)
-		execution.setConfirmedCopilotContextTier(tier)
 	}
 
 	bootCommand := fullCommand

@@ -640,8 +640,8 @@ func (a *Adapter) convertACPSessionNotification(n acp.SessionNotification) (*Age
 		}, true
 
 	case u.ConfigOptionUpdate != nil:
-		rawOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
-		if len(rawOptions) > 0 || a.agentID == acpcompat.PiAgentID {
+		configOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
+		if len(configOptions) > 0 || a.agentID == acpcompat.PiAgentID {
 			// Refresh the cached config options so emitSetModelEvent
 			// (called from SetModel) doesn't reuse the stale snapshot from
 			// session/new. Include the cached available models so the event
@@ -651,13 +651,7 @@ func (a *Adapter) convertACPSessionNotification(n acp.SessionNotification) (*Age
 				a.mu.Unlock()
 				return nil, true
 			}
-			cachedModels := append([]modelInfo(nil), a.availableModels...)
-			configOptions := a.dialect.sessionConfigOptions(
-				nil,
-				u.ConfigOptionUpdate.ConfigOptions,
-				cachedModels,
-				currentModelFromConfig(rawOptions),
-			)
+			cachedModels := a.availableModels
 			a.availableConfigOptions = configOptions
 			a.clearUnknownThinkingModeLocked(configOptions)
 			if modes, found := a.sessionModesFromConfig(configOptions); found {

@@ -2635,7 +2635,6 @@ func (m *Manager) buildAdapterConfig() error {
 		AuthPolicy:                 m.cfg.AuthPolicy,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
 		CopilotNativeSessionEvents: m.cfg.CopilotNativeSessionEvents,
-		LaunchArgs:                 append([]string(nil), m.cfg.AgentArgs...),
 	}
 
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
@@ -3719,46 +3718,6 @@ func (m *Manager) Stop(ctx context.Context) error {
 	return m.stop(ctx)
 }
 
-// StopAgentProcess stops only the agent subprocess. Workspace shells, VS Code,
-// process runner tasks, and workspace trackers remain owned by this manager.
-func (m *Manager) StopAgentProcess(ctx context.Context) error {
-	m.startOperationMu.Lock()
-	defer m.startOperationMu.Unlock()
-	m.stopInProgress.Add(1)
-	defer m.stopInProgress.Add(-1)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	status := m.Status()
-	if status == StatusStopped {
-		tornDown := m.closeAdapterAndStdin()
-		if m.mainReapPending.Load() {
-			if err := m.waitForProcessExit(ctx); err != nil {
-				return err
-			}
-			m.mainReapPending.Store(false)
-		} else if tornDown {
-			m.drainAfterLateTeardown(ctx)
-		}
-		return nil
-	}
-
-	m.status.Store(StatusStopping)
-	if stopping := m.shutdownIntent.Load(); stopping != nil {
-		stopping.Store(true)
-	}
-	m.closeAdapterAndStdin()
-	m.killProcessGroupIfRequired()
-	stopErr := m.waitForProcessExit(ctx)
-	m.status.Store(StatusStopped)
-	if stopErr != nil {
-		m.mainReapPending.Store(true)
-		return stopErr
-	}
-	m.mainReapPending.Store(false)
-	return nil
-}
-
 // StopForTeardown permanently closes process admission and drains prior owners
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
@@ -3966,19 +3925,6 @@ func (m *Manager) agentPID() int {
 // transitive descendant set.
 func (m *Manager) AgentPID() int {
 	return m.agentPID()
-}
-
-// CopilotContextTier reports the tier used by the live Copilot child. It reads
-// the started command, not the manager's possibly newer staged configuration.
-func (m *Manager) CopilotContextTier() (string, bool) {
-	m.startMu.Lock()
-	defer m.startMu.Unlock()
-	if m.cfg == nil || m.cfg.AgentType != acpcompat.CopilotAgentID || m.Status() != StatusRunning ||
-		m.cmd == nil || m.cmd.Process == nil {
-		return "", false
-	}
-	tier, _ := acpcompat.ParseCopilotContextTierFromArgs(m.cmd.Args)
-	return tier, true
 }
 
 func (m *Manager) agentProtocol() string {

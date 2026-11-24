@@ -60,6 +60,8 @@
   "cursorMcpSelectionTitle": "エージェント MCP の選択",
   "cursorMcpSelectionDescription": "次回の起動時にこのプロファイルで使う、有効なネイティブ MCP サーバーを選びます。",
   "refreshMcpDiscovery": "検出結果を更新",
+  "copilotLongContextFlag": "長いコンテキスト",
+  "copilotLongContextFlagDescription": "対応モデルを使用する新しいセッションで、より大きなコンテキストウィンドウを要求します。AI クレジットの消費が増えることがあります。",
   "copilotPluginsTitle": "プラグイン",
   "copilotPluginsDescription": "このプロファイルのプラグイン全体を読み込みます。プラグインは MCP サーバー、スキル、エージェント、コマンド、フック、その他の実行可能なコンポーネントを実行できます。選択したプラグインは Copilot のネイティブ読み込みに追加されるため、Copilot は他の有効なプラグインも引き続き読み込めます。",
   "copilotPluginsScopeNote": "ローカルおよびワークツリー実行者専用です。選択内容は次回のプロセス起動時に適用されます。実行中のプロセスは元のプラグインを保持します。",

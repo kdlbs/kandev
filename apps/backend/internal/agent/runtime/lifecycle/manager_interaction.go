@@ -185,11 +185,11 @@ func (m *Manager) PromptAgentWithDispatchCallbackAndSubmissionID(
 	key := executionActivityKey(executionID)
 	m.trackActivity(key, lease)
 	m.setRuntimeInterest(execution.SessionID, true)
-	operationRelease, err := m.acquirePromptContextOperation(ctx, execution)
+	operationRelease, err := execution.acquireContextResetOperation(ctx)
 	if err != nil {
 		m.releaseActivity(key)
 		m.setRuntimeInterest(execution.SessionID, false)
-		return nil, MarkPromptNotDispatched(err)
+		return nil, err
 	}
 	defer operationRelease()
 	result, err := m.sessionManager.SendPromptWithDispatchCallbackAndSubmissionID(
@@ -247,11 +247,11 @@ func (m *Manager) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	key := executionActivityKey(executionID)
 	m.trackActivity(key, lease)
 	m.setRuntimeInterest(execution.SessionID, true)
-	operationRelease, err := m.acquirePromptContextOperation(ctx, execution)
+	operationRelease, err := execution.acquireContextResetOperation(ctx)
 	if err != nil {
 		m.releaseActivity(key)
 		m.setRuntimeInterest(execution.SessionID, false)
-		return nil, MarkPromptNotDispatched(err)
+		return nil, err
 	}
 	defer operationRelease()
 	result, err := m.sessionManager.SendPromptWithAdmissionCallbackAndSubmissionID(
@@ -735,9 +735,6 @@ func (m *Manager) applySessionConfigOption(
 	includeResult bool,
 	expectedModelID string,
 ) (SessionConfigurationResult, error) {
-	if isSynthesizedCopilotContextOptionForExecution(ctx, m.profileResolver, execution, configID) {
-		return m.applySynthesizedCopilotContextTier(ctx, execution, configID, value, expectedModelID)
-	}
 	execution.sessionConfigurationMu.Lock()
 	defer execution.sessionConfigurationMu.Unlock()
 	unknown := SessionConfigurationResult{ConfigID: configID, Requested: value, ExecutionID: execution.ID}
@@ -935,21 +932,8 @@ func (m *Manager) reapplySessionModelAfterResetWithClientAndState(
 	modelState *CachedModelState,
 	newSessionID, modelID string,
 ) error {
-	_, err := m.reapplySessionModelAfterResetWithClientAndStateDecision(
-		ctx, execution, client, modelState, newSessionID, modelID,
-	)
-	return err
-}
-
-func (m *Manager) reapplySessionModelAfterResetWithClientAndStateDecision(
-	ctx context.Context,
-	execution *AgentExecution,
-	client *agentctlclient.Client,
-	modelState *CachedModelState,
-	newSessionID, modelID string,
-) (ModelSelectionDecision, error) {
 	if client == nil || modelID == "" {
-		return ModelSelectionDecision{}, nil
+		return nil
 	}
 	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
 	policy.Model = modelID
@@ -961,7 +945,7 @@ func (m *Manager) reapplySessionModelAfterResetWithClientAndStateDecision(
 			zap.String("execution_id", execution.ID),
 			zap.String("model", modelID),
 			zap.Error(err))
-		return ModelSelectionDecision{}, err
+		return err
 	}
 	if decision.Warning && m.sessionManager != nil {
 		m.sessionManager.publishModelSelectionWarningEvent(execution, newSessionID, decision)
@@ -976,7 +960,7 @@ func (m *Manager) reapplySessionModelAfterResetWithClientAndStateDecision(
 			zap.String("model", decision.EffectiveModel),
 			zap.Bool("using_fallback", decision.Outcome == ModelSelectionOutcomeExplicitFallback))
 	}
-	return decision, nil
+	return nil
 }
 
 func cacheFreshSessionModelState(execution *AgentExecution) bool {
@@ -1231,31 +1215,17 @@ func (m *Manager) restoreSessionRuntimeConfig(
 }
 
 func (m *Manager) restoreSessionRuntimeConfigWithClient(ctx context.Context, execution *AgentExecution, client *agentctlclient.Client, sessionID string, config models.SessionRuntimeConfig) error {
-	_, err := m.restoreSessionRuntimeConfigWithClientAndDecision(ctx, execution, client, sessionID, config)
-	return err
-}
-
-func (m *Manager) restoreSessionRuntimeConfigWithClientAndDecision(
-	ctx context.Context,
-	execution *AgentExecution,
-	client *agentctlclient.Client,
-	sessionID string,
-	config models.SessionRuntimeConfig,
-) (ModelSelectionDecision, error) {
 	if client == nil {
-		return ModelSelectionDecision{}, fmt.Errorf("cannot restore session runtime configuration without an agentctl client")
+		return fmt.Errorf("cannot restore session runtime configuration without an agentctl client")
 	}
-	decision, err := m.reapplySessionModelAfterResetWithClientAndStateDecision(
-		ctx, execution, client, execution.GetModelState(), sessionID, config.Model,
-	)
-	if err != nil {
-		return ModelSelectionDecision{}, fmt.Errorf("restore session runtime model: %w", err)
+	if err := m.reapplySessionModelAfterResetWithClient(ctx, execution, client, sessionID, config.Model); err != nil {
+		return fmt.Errorf("restore session runtime model: %w", err)
 	}
 	if execution.AgentID == acpcompat.PiAgentID {
 		config.Mode, config.ConfigOptions = profileconfig.PiThinkingIntent(config.Mode, config.ConfigOptions, piThinkingConfigID(execution.GetModelState()))
 	}
 	if err := m.applySessionModeAfterResetWithClient(ctx, execution, client, sessionID, config.Mode); err != nil {
-		return ModelSelectionDecision{}, fmt.Errorf("restore session runtime mode: %w", err)
+		return fmt.Errorf("restore session runtime mode: %w", err)
 	}
 	options := sanitizeRuntimeConfigOptionsWithCatalog(config.ConfigOptions, execution.GetModelState())
 	optionIDs := make([]string, 0, len(options))
@@ -1265,18 +1235,12 @@ func (m *Manager) restoreSessionRuntimeConfigWithClientAndDecision(
 	sort.Strings(optionIDs)
 	for _, id := range optionIDs {
 		value := options[id]
-		if isSynthesizedCopilotContextOptionForExecution(ctx, m.profileResolver, execution, id) {
-			if err := restageSynthesizedCopilotContextTier(execution, sessionID, value, m.eventPublisher); err != nil {
-				return ModelSelectionDecision{}, fmt.Errorf("restore session runtime option %q: %w", id, err)
-			}
-			continue
-		}
 		err := client.SetConfigOption(ctx, id, value)
 		if err != nil {
-			return ModelSelectionDecision{}, fmt.Errorf("restore session runtime option %q: %w", id, err)
+			return fmt.Errorf("restore session runtime option %q: %w", id, err)
 		}
 	}
-	return decision, nil
+	return nil
 }
 
 // ResetAgentContext resets the agent's conversation context. For ACP agents that support
@@ -1288,21 +1252,9 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
 
-	// Passthrough agents need a full restart. A staged Copilot tier also needs
-	// one, with the staged value captured before command construction.
+	// Passthrough agents always need full restart
 	if execution.PassthroughProcessID != "" {
 		return m.RestartAgentProcess(ctx, executionID)
-	}
-	if isCopilotACPExecution(ctx, m.profileResolver, execution) {
-		execution.sessionConfigurationMu.Lock()
-		desiredTier, needed := m.needsCopilotContextTierReload(ctx, execution)
-		if needed {
-			runtimeConfig := m.buildCopilotReloadRuntimeConfig(ctx, execution, desiredTier)
-			err := m.restartAgentProcessWithRuntimeConfig(ctx, executionID, &runtimeConfig)
-			execution.sessionConfigurationMu.Unlock()
-			return err
-		}
-		execution.sessionConfigurationMu.Unlock()
 	}
 	if err := execution.contextResetAdmissionError(); err != nil {
 		return err
@@ -1904,14 +1856,6 @@ func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force b
 // conversation context. For ACP agents this restarts via agentctl with a new ACP session.
 // For passthrough (TUI) agents this kills the PTY process and relaunches without --resume.
 func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) error {
-	return m.restartAgentProcessWithRuntimeConfig(ctx, executionID, nil)
-}
-
-func (m *Manager) restartAgentProcessWithRuntimeConfig(
-	ctx context.Context,
-	executionID string,
-	runtimeConfigOverride *models.SessionRuntimeConfig,
-) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
@@ -1926,7 +1870,7 @@ func (m *Manager) restartAgentProcessWithRuntimeConfig(
 		return err
 	}
 	defer operationRelease()
-	err = m.restartAgentProcess(ctx, executionID, runtimeConfigOverride)
+	err = m.restartAgentProcess(ctx, executionID, nil)
 	if err != nil {
 		execution.finishContextResetRecovery(false, err.Error())
 		return err
@@ -2111,7 +2055,7 @@ func (m *Manager) prepareAgentRestart(
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to get agent config for restart: %w", err)
 	}
-	commands, err := m.buildFreshAgentCommandWithProfileAndOverride(ctx, execution, agentConfig, profileInfo, runtimeConfigOverride)
+	commands, err := m.buildFreshAgentCommandWithProfile(ctx, execution, agentConfig, profileInfo)
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to rebuild agent command for restart: %w", err)
 	}
@@ -3710,16 +3654,6 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 	agentConfig agents.Agent,
 	profileInfo *AgentProfileInfo,
 ) (agentCommands, error) {
-	return m.buildFreshAgentCommandWithProfileAndOverride(ctx, execution, agentConfig, profileInfo, nil)
-}
-
-func (m *Manager) buildFreshAgentCommandWithProfileAndOverride(
-	ctx context.Context,
-	execution *AgentExecution,
-	agentConfig agents.Agent,
-	profileInfo *AgentProfileInfo,
-	runtimeConfigOverride *models.SessionRuntimeConfig,
-) (agentCommands, error) {
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)
@@ -3732,9 +3666,6 @@ func (m *Manager) buildFreshAgentCommandWithProfileAndOverride(
 	}
 	if override := execution.metadataString(MetadataKeyModelOverride); override != "" {
 		model = override
-	}
-	if runtimeConfigOverride != nil && runtimeConfigOverride.Model != "" {
-		model = runtimeConfigOverride.Model
 	}
 
 	// Preserve the profile's cli_flags and command_prefix across restarts. A
@@ -3754,7 +3685,6 @@ func (m *Manager) buildFreshAgentCommandWithProfileAndOverride(
 		SessionID:        "", // Fresh start — no resume flags
 		AutoApprove:      autoApprove,
 		PermissionValues: permissionValues,
-		ConfigOptions:    m.resolveExecutionConfigOptions(ctx, execution, profileInfo, runtimeConfigOverride),
 		CLIFlagTokens:    cliFlagTokens,
 		// Runtime is "standalone" / "docker" / "sprites" — MockAgent
 		// reads this to pick a bare name (container PATH lookup) vs.

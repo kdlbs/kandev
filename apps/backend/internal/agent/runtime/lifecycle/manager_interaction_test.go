@@ -22,7 +22,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -59,15 +58,10 @@ type restartMockAgentctlServer struct {
 	setOptions         []restartConfigOption
 
 	failStop                          bool
-	failAgentProcessStop              bool
-	retainedCopilotContextTier        string
 	onStop                            func(context.Context)
 	failSessionNew                    bool
 	initializeError                   string
 	sessionNewError                   string
-	sessionLoadError                  string
-	sessionLoadErrorCode              string
-	sessionLoadErrorDetails           map[string]interface{}
 	configureError                    string
 	startError                        string
 	failSessionReset                  bool
@@ -95,7 +89,6 @@ type restartMockAgentctlServer struct {
 	preparationDirectives             []agentctltypes.ManagedRuntimePreparationDirective
 	loadedSessionIDs                  []string
 	promptCalls                       int
-	emitPromptComplete                bool
 	onReset                           func()
 	onSessionNew                      func()
 	onCacheRepair                     func()
@@ -238,27 +231,6 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 		}
 		_, _ = w.Write([]byte(`{"success":true}`))
 	})
-	mux.HandleFunc("/api/v1/agent/process/stop", func(w http.ResponseWriter, _ *http.Request) {
-		m.recordHTTP("stop-agent")
-		m.mu.Lock()
-		failed := m.failAgentProcessStop
-		m.mu.Unlock()
-		if failed {
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"error":"child-scoped stop is unsupported"}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"success":true}`))
-	})
-	mux.HandleFunc("/api/v1/agent/copilot-context-tier", func(w http.ResponseWriter, _ *http.Request) {
-		m.mu.Lock()
-		tier := m.retainedCopilotContextTier
-		m.mu.Unlock()
-		if tier == "" {
-			tier = acpcompat.CopilotContextTierDefault
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"running": true, "context_tier": tier})
-	})
 	mux.HandleFunc("/api/v1/agent/managed-runtime/cache-repair", func(w http.ResponseWriter, r *http.Request) {
 		m.recordHTTP("cache-repair")
 		var request agentctl.RepairManagedRuntimeCacheRequest
@@ -369,16 +341,12 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					})
 					break
 				}
-				agentInfo := map[string]interface{}{
-					"name":    "test-agent",
-					"version": "1.0.0",
-				}
-				if supportsSessionLoad {
-					agentInfo["supports_session_load"] = true
-				}
 				payload := map[string]interface{}{
-					"success":    true,
-					"agent_info": agentInfo,
+					"success": true,
+					"agent_info": map[string]string{
+						"name":    "test-agent",
+						"version": "1.0.0",
+					},
 				}
 				if supportsSessionLoad {
 					payload["supports_session_load"] = true
@@ -417,30 +385,12 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				}
 				_ = json.Unmarshal(msg.Payload, &request)
 				m.mu.Lock()
-				sessionLoadError := m.sessionLoadError
-				sessionLoadErrorCode := m.sessionLoadErrorCode
-				sessionLoadErrorDetails := m.sessionLoadErrorDetails
 				m.loadedSessionIDs = append(m.loadedSessionIDs, request.SessionID)
-				loadModelState := m.newModelState
-				if loadModelState == nil {
-					loadModelState = m.modelState
-				}
 				m.mu.Unlock()
-				if sessionLoadError != "" {
-					if sessionLoadErrorCode == "" {
-						sessionLoadErrorCode = ws.ErrorCodeInternalError
-					}
-					resp, _ = ws.NewError(msg.ID, msg.Action, sessionLoadErrorCode, sessionLoadError, sessionLoadErrorDetails)
-					break
-				}
-				payload := map[string]interface{}{
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"success":    true,
 					"session_id": request.SessionID,
-				}
-				if loadModelState != nil {
-					payload["model_state"] = loadModelState
-				}
-				resp, _ = ws.NewResponse(msg.ID, msg.Action, payload)
+				})
 			case "agent.session.reset":
 				if m.onReset != nil {
 					m.onReset()
@@ -511,42 +461,12 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					})
 				}
 			case "agent.prompt":
-				var promptReq struct {
-					PromptGeneration uint64 `json:"prompt_generation"`
-				}
-				_ = json.Unmarshal(msg.Payload, &promptReq)
 				m.mu.Lock()
 				m.promptCalls++
-				emitComplete := m.emitPromptComplete
 				m.mu.Unlock()
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"success": true,
 				})
-				data, _ := json.Marshal(resp)
-				if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-					return
-				}
-				if emitComplete {
-					chunkData, _ := json.Marshal(agentctl.AgentEvent{
-						Type:             streams.EventTypeMessageChunk,
-						SessionID:        "copilot-acp-session-1",
-						PromptGeneration: promptReq.PromptGeneration,
-						Text:             "reloaded turn reply",
-					})
-					if err := conn.WriteMessage(websocket.TextMessage, chunkData); err != nil {
-						return
-					}
-					completeData, _ := json.Marshal(agentctl.AgentEvent{
-						Type:             streams.EventTypeComplete,
-						SessionID:        "copilot-acp-session-1",
-						PromptGeneration: promptReq.PromptGeneration,
-						Data:             map[string]any{"stop_reason": "end_turn"},
-					})
-					if err := conn.WriteMessage(websocket.TextMessage, completeData); err != nil {
-						return
-					}
-				}
-				continue
 			case "agent.stderr":
 				m.mu.Lock()
 				stderrLines := append([]string(nil), m.stderrLines...)

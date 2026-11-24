@@ -650,22 +650,3 @@ func TestBuildAdapterConfigPreservesPromptSuggestionsAndBackgroundWork(t *testin
 		})
 	}
 }
-
-// @covers AC-AGENTS-COPILOT-CONTEXT-TIER-002.1
-func TestBuildAdapterConfigPropagatesLaunchArgs(t *testing.T) {
-	wantArgs := []string{"npx", "--yes", "@github/copilot@1.0.114", "--acp", "--context", "long_context"}
-	m := &Manager{
-		cfg: &config.InstanceConfig{
-			AgentType: "copilot-acp",
-			AgentArgs: wantArgs,
-			WorkDir:   t.TempDir(),
-			AgentEnv:  []string{"PATH=/usr/bin"},
-			Protocol:  agent.ProtocolACP,
-		},
-		logger: newTestLogger(t),
-	}
-	require.NoError(t, m.buildAdapterConfig())
-	t.Cleanup(func() { _ = m.adapter.Close() })
-	shared := m.adapterCfg.ToSharedConfig()
-	require.Equal(t, wantArgs, shared.LaunchArgs)
-}

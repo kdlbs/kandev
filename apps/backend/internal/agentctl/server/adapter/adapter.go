@@ -451,9 +451,6 @@ type Config struct {
 	// CopilotNativeSessionEvents enables Copilot's opt-in native compaction and
 	// attributed usage notifications for this launch.
 	CopilotNativeSessionEvents bool
-
-	// LaunchArgs holds the CLI argv passed to the child agent subprocess.
-	LaunchArgs []string
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -495,7 +492,6 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		AuthPolicy:                 c.AuthPolicy,
 		PromptSuggestions:          c.PromptSuggestions,
 		CopilotNativeSessionEvents: c.CopilotNativeSessionEvents,
-		LaunchArgs:                 append([]string(nil), c.LaunchArgs...),
 	}
 }
 

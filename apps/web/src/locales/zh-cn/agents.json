@@ -60,6 +60,8 @@
   "cursorMcpSelectionTitle": "智能体 MCP 选择",
   "cursorMcpSelectionDescription": "选择此配置在下次启动时使用的已启用原生 MCP 服务器。",
   "refreshMcpDiscovery": "刷新发现结果",
+  "copilotLongContextFlag": "长上下文",
+  "copilotLongContextFlagDescription": "为使用受支持模型的新会话请求更大的上下文窗口。可能消耗更多 AI 积分。",
   "copilotPluginsTitle": "插件",
   "copilotPluginsDescription": "为此配置加载完整插件。插件可以运行 MCP 服务器、技能、代理、命令、钩子和其他可执行组件。所选插件会添加到 Copilot 的原生加载中，因此 Copilot 仍可加载其他已启用的插件。",
   "copilotPluginsScopeNote": "仅限本地和工作树执行器。选择会在下一个进程启动时生效。正在运行的进程保留原有插件。",

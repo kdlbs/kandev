@@ -304,7 +304,6 @@ function ProfileEditorBody({
         agentName={agent.name}
         model={draft.model}
         permissionSettings={{ allow_indexing: draft.allowIndexing }}
-        configOptions={draft.configOptions}
         cliPassthrough={draft.cliPassthrough}
         cliFlags={draft.cliFlags ?? []}
         commandPrefix={draft.commandPrefix}

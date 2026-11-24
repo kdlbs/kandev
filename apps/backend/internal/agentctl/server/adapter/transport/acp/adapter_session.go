@@ -2017,16 +2017,7 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 	settingsPolicy streams.SessionSettingsPolicy,
 	expectedGeneration ...uint64,
 ) {
-	rawOptions := convertACPConfigOptions(options)
-	configOptions := rawOptions
-	if len(rawOptions) > 0 {
-		configOptions = a.dialect.sessionConfigOptions(
-			nil,
-			options,
-			cachedModels,
-			currentModelFromConfig(rawOptions),
-		)
-	}
+	configOptions := convertACPConfigOptions(options)
 	event := AgentEvent{
 		Type:                  streams.EventTypeSessionModels,
 		SessionID:             sessionID,
