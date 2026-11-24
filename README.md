@@ -174,6 +174,10 @@ npm install -g kandev@latest
 kandev
 ```
 
+### Run your first task
+
+Follow the [first-task guide](docs/public/use-kandev.md#add-a-local-repository) to add a local repository, configure an agent, and start a task.
+
 ### Updates
 
 - `brew upgrade kandev`
