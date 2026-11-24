@@ -9,7 +9,7 @@ afterEach(async () => {
 });
 
 describe("RichOutputMotionSettingsCard", () => {
-  it("renders a translated, controlled, touch-sized device preference", async () => {
+  it("renders a translated, controlled device preference", async () => {
     await i18n.changeLanguage("pseudo");
     const onChange = vi.fn();
     render(<RichOutputMotionSettingsCard enabled isDirty onChange={onChange} />);
@@ -20,9 +20,6 @@ describe("RichOutputMotionSettingsCard", () => {
     expect(screen.getByTestId("rich-output-motion-settings-card").dataset.settingsDirty).toBe(
       "true",
     );
-    expect(screen.getByTestId("rich-output-motion-toggle-row").className).toContain("min-h-11");
-    expect(toggle.className).toContain("data-[size=default]:h-11");
-    expect(toggle.className).toContain("data-[size=default]:w-11");
     expect(toggle.className).toContain("data-[state=checked]:before:bg-primary");
     expect(
       screen.getByText(

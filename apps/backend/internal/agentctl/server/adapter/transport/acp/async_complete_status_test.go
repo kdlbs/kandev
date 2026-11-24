@@ -2,6 +2,8 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -9,6 +11,105 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
+
+const codexMCPStartupToolCallFrame = `{"sessionId":"session","update":{"sessionUpdate":"tool_call","toolCallId":"mcp_startup.server.550e8400-e29b-41d4-a716-446655440000","title":"mcp__server__startup","kind":"other","status":"failed","content":[{"type":"content","content":{"type":"text","text":"[codex-acp forwarded startup error] MCP server ` + "`server`" + ` failed to start: https://secret.example/?token=sk-proj-secret"}}]}}`
+
+func codexMCPStartupNotification(t *testing.T, toolCallID, title string) acp.SessionNotification {
+	t.Helper()
+	frame := strings.Replace(codexMCPStartupToolCallFrame, "mcp_startup.server.550e8400-e29b-41d4-a716-446655440000", toolCallID, 1)
+	frame = strings.Replace(frame, "mcp__server__startup", title, 1)
+	var notification acp.SessionNotification
+	if err := json.Unmarshal([]byte(frame), &notification); err != nil {
+		t.Fatalf("decode pinned Codex ACP startup report: %v", err)
+	}
+	return notification
+}
+
+func TestCodexMCPStartupWarningDoesNotArmAsyncTurn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		setAsyncTurnCompleteIdleForTest(t, 10*time.Millisecond)
+		a := newTestAdapterForAgent(codexAgentID)
+		defer func() { _ = a.Close() }()
+		a.mu.Lock()
+		a.sessionID = "session"
+		a.mu.Unlock()
+
+		a.handleACPUpdate(codexMCPStartupNotification(
+			t, "mcp_startup.server.550e8400-e29b-41d4-a716-446655440000", "mcp__server__startup",
+		), 0)
+		a.asyncTurnMu.Lock()
+		_, reportFinalizerCreated := a.asyncTurnFinalizers["session"]
+		a.asyncTurnMu.Unlock()
+		if reportFinalizerCreated {
+			t.Fatal("Codex MCP startup report created an async turn finalizer")
+		}
+		var report *AgentEvent
+		for _, event := range drainEvents(a) {
+			if event.Type == "mcp_startup_warning" {
+				eventCopy := event
+				report = &eventCopy
+			}
+		}
+		if report == nil {
+			t.Fatal("expected a session startup warning event")
+		}
+		if report.ToolCallID != "mcp_startup.server.550e8400-e29b-41d4-a716-446655440000" {
+			t.Fatalf("report ID = %q, want the ACP startup report ID", report.ToolCallID)
+		}
+		if strings.Contains(report.Text, "secret.example") || strings.Contains(report.Text, "sk-proj-secret") {
+			t.Fatalf("startup warning retained provider detail: %q", report.Text)
+		}
+
+		turn := acp.SessionUpdateToolCall{
+			ToolCallId: "genuine-failed-tool",
+			Title:      "mcp__server__startup",
+			Kind:       acp.ToolKindOther,
+			Status:     acp.ToolCallStatus("failed"),
+		}
+		a.handleACPUpdate(makeNotification("genuine", acp.SessionUpdate{ToolCall: &turn}), 0)
+		a.asyncTurnMu.Lock()
+		genuineFinalizer := a.asyncTurnFinalizers["genuine"]
+		a.asyncTurnMu.Unlock()
+		if genuineFinalizer == nil || len(genuineFinalizer.activeTools) != 1 {
+			t.Fatal("ordinary failed tool with a similar title did not remain tracked as tool activity")
+		}
+		ordinaryToolCall := false
+		for _, event := range drainEvents(a) {
+			if event.Type == streams.EventTypeToolCall && event.ToolCallID == "genuine-failed-tool" {
+				ordinaryToolCall = true
+			}
+		}
+		if !ordinaryToolCall {
+			t.Fatal("ordinary failed tool with a similar title was not emitted as a tool call")
+		}
+
+		a.mu.Lock()
+		_, promptTurn := a.registerPromptTurn(context.Background(), 42)
+		a.mu.Unlock()
+		defer a.clearPromptTurn(promptTurn)
+		a.handleACPUpdate(codexMCPStartupNotification(
+			t, "mcp_startup.server.550e8400-e29b-41d4-a716-446655440001", "mcp__server__startup",
+		), 42)
+		for _, event := range drainEvents(a) {
+			if event.Type != "mcp_startup_warning" || event.ToolCallID != "mcp_startup.server.550e8400-e29b-41d4-a716-446655440001" {
+				continue
+			}
+			if event.PromptGeneration != 0 {
+				t.Fatalf("startup warning prompt generation = %d, want 0 while prompt generation 42 is active", event.PromptGeneration)
+			}
+			promptTurn.evidenceMu.Lock()
+			capacityToolCount := len(promptTurn.capacityTools)
+			capacityUnknown := promptTurn.capacityUnknown
+			continuationUnsafe := promptTurn.continuationUnsafe
+			promptTurn.evidenceMu.Unlock()
+			if capacityToolCount != 0 || capacityUnknown || continuationUnsafe {
+				t.Fatalf("startup report contaminated prompt evidence: tools=%d unknown=%t continuationUnsafe=%t", capacityToolCount, capacityUnknown, continuationUnsafe)
+			}
+			return
+		}
+		t.Fatal("startup report during an active prompt was not emitted as a warning")
+	})
+}
 
 // drainAdapterEventsWithoutComplete returns every event delivered within one
 // idle window and reports whether a synthetic completion arrived.

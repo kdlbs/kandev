@@ -5102,6 +5102,8 @@ func (s *Service) handleWorkflowEntryPromptError(
 	s.publishSessionWaitingEvent(ctx, taskID, session.ID, step.ID, session)
 }
 
+const metaKeyWorkflowMoveInstructions = "workflow_move_instructions"
+
 // queueMoveInstructionsForSession delivers one-shot workflow-move instructions
 // to an existing session that will not otherwise receive the overlaid step
 // prompt (no auto-start, no profile switch). It is a no-op for ordinary steps
@@ -5116,7 +5118,7 @@ func (s *Service) queueMoveInstructionsForSession(ctx context.Context, taskID, s
 	}
 	if _, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx, sessionID, taskID, block, "",
-		messagequeue.QueuedByUser, false, nil, nil,
+		messagequeue.QueuedByUser, false, nil, map[string]interface{}{metaKeyWorkflowMoveInstructions: true},
 	); err != nil {
 		s.logger.Warn("failed to queue one-shot workflow move instructions",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
@@ -6967,8 +6969,8 @@ func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, bas
 		attachments = make([]v1.MessageAttachment, 0, len(msg.Attachments))
 		for _, a := range msg.Attachments {
 			attachments = append(attachments, v1.MessageAttachment{
-				Type:         a.Type,
-				AttachmentID: a.AttachmentID,
+				Type:      a.Type,
+				CommentID: a.CommentID, AttachmentID: a.AttachmentID,
 				Data:         a.Data,
 				MimeType:     a.MimeType,
 				Name:         a.Name,
@@ -7059,8 +7061,8 @@ func toQueuedAttachments(attachments []v1.MessageAttachment) []messagequeue.Mess
 	queued := make([]messagequeue.MessageAttachment, 0, len(attachments))
 	for _, attachment := range attachments {
 		queued = append(queued, messagequeue.MessageAttachment{
-			Type:         attachment.Type,
-			AttachmentID: attachment.AttachmentID,
+			Type:      attachment.Type,
+			CommentID: attachment.CommentID, AttachmentID: attachment.AttachmentID,
 			Data:         attachment.Data,
 			MimeType:     attachment.MimeType,
 			Name:         attachment.Name,

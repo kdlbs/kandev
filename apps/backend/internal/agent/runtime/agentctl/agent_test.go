@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -26,6 +28,28 @@ func newTestLogger() *logger.Logger {
 		Format: "json",
 	})
 	return log
+}
+
+// @covers AC-EXECUTORS-OPENCODE-AUTH-001.9
+func TestConfigureAgentRuntimeMetadata(t *testing.T) {
+	want := managedruntime.OpenCodeRuntime{Family: managedruntime.OpenCodeFamilyV2, Source: managedruntime.OpenCodeSourceManaged, Version: "2.1.2"}
+	var got struct {
+		Runtime managedruntime.OpenCodeRuntime `json:"opencode_runtime"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+		}
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer server.Close()
+	client := &Client{baseURL: server.URL, httpClient: server.Client()}
+	if err := client.ConfigureAgentRuntime(context.Background(), "unrelated display command", []string{"runner"}, nil, "", nil, want, launchwrapper.Spec{}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Runtime != want {
+		t.Fatalf("runtime = %+v, want %+v", got.Runtime, want)
+	}
 }
 
 func TestConfigureAgent_SerializesStructuredArgsAndOmitsAbsentFallback(t *testing.T) {

@@ -190,6 +190,10 @@ const SELECTION_FAILURE_CODES = new Set([
   "permission_mode_failed",
   "permission_mode_unconfirmed",
   "permission_mode_mismatch",
+  "thinking_level_unavailable",
+  "thinking_level_failed",
+  "thinking_level_mismatch",
+  "thinking_level_unconfirmed",
 ]);
 
 export function isSelectionFailureRecoveryMetadata(value: unknown): boolean {

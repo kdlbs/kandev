@@ -348,3 +348,31 @@ disk on its first restart after upgrading to this version.
 
 Related: [Authoring a plugin](plugins-authoring.md), [Plugin manifest
 reference](plugins-manifest.md), and [Extending Kandev](extending-kandev.md).
+
+## Preview files with a plugin
+
+A compatible viewer automatically loads a workspace file when you open it in
+the file panel. If several viewers match, select one with
+**Open with**. Text files keep their editor, and switching to a viewer preserves
+unsaved text. **Open as text** retains the existing 10 MiB text limit.
+
+Plugin settings include **External file previews** for the current user and
+workspace. **Ask** is the default. **Preview once** permits one selected file
+revision. **Allow** permits authorized external regular files without a prompt;
+**Deny** blocks them. Repository symlinks that resolve outside the selected root
+also use this policy. Remote paths refer to the selected executor, not the
+Kandev server. Updating or replacing a plugin resets the setting to Ask.
+
+Download and Open as text remain explicit host actions. They use the existing
+file reader and its 10 MiB limit, independently of plugin preview permission.
+
+The host preview limit is 64 MiB. The STL viewer also limits geometry to one
+million triangles. Close or switch files to release preview resources. STL has
+no unit information: dimensions and grid spacing use model units. Native plugins remain trusted code; the preview setting
+does not isolate a plugin from the host.
+
+The file-viewer API and standalone STL package are currently development work.
+Use a host release that includes the contract before installing a published viewer.
+
+File viewers also render rich-output `FilePreview` cards in chat through the
+same registration and permission checks. See the [authoring guide](plugins-authoring.md#reuse-viewers-in-rich-file-previews) for the agent payload and lifecycle.

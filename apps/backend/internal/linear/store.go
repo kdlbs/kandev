@@ -77,7 +77,7 @@ const createTablesSQL = `
 		-- the API layer. See docs/specs/tasks/system-design/wip-limit-pull-system.md.
 		max_inflight_tasks INTEGER DEFAULT 5,
 		-- Dispatch order for matched issues under the in-flight cap.
-		-- '' = Linear default order (updatedAt asc). See linear/issue_sort.go.
+		-- '' = Linear default order (updatedAt desc). See linear/issue_sort.go.
 		sort_by TEXT NOT NULL DEFAULT '',
 		last_polled_at DATETIME,
 		last_error TEXT NOT NULL DEFAULT '',
@@ -96,6 +96,16 @@ const createTablesSQL = `
 		task_id TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
 		UNIQUE(issue_watch_id, issue_identifier),
+		FOREIGN KEY(issue_watch_id) REFERENCES linear_issue_watches(id) ON DELETE CASCADE
+	);
+
+	-- Issues a blocker-aware watch has matched but not yet started: held
+	-- issues and released issues not yet reserved. Polls re-check these by ID
+	-- so they still start after leaving the watch's paged search window.
+	CREATE TABLE IF NOT EXISTS linear_issue_watch_pending_issues (
+		issue_watch_id TEXT NOT NULL,
+		issue_id TEXT NOT NULL,
+		PRIMARY KEY(issue_watch_id, issue_id),
 		FOREIGN KEY(issue_watch_id) REFERENCES linear_issue_watches(id) ON DELETE CASCADE
 	);
 `
@@ -126,7 +136,25 @@ func (s *Store) initSchema() error {
 	if err := s.addIssueWatchRepositoryColumns(); err != nil {
 		return err
 	}
+	if err := s.addIssueWatchPollRevision(); err != nil {
+		return err
+	}
 	return s.migrateExecutorCreators()
+}
+
+func (s *Store) addIssueWatchPollRevision() error {
+	cols, err := s.tableColumns("linear_issue_watches")
+	if err != nil {
+		return err
+	}
+	if _, ok := cols["poll_revision"]; ok {
+		return nil
+	}
+	_, err = s.db.Exec("ALTER TABLE linear_issue_watches ADD COLUMN poll_revision BIGINT NOT NULL DEFAULT 1")
+	if err != nil && !dbutil.IsDuplicateColumnError(err) {
+		return fmt.Errorf("add issue watch poll revision: %w", err)
+	}
+	return nil
 }
 
 // addConfigColumns brings old per-workspace tables up to the current

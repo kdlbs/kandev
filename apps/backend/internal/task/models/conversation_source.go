@@ -1,6 +1,10 @@
 package models
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+)
 
 // ErrConversationCursorStale indicates that a page boundary no longer exists
 // in the current source state and the caller must restart reconciliation.
@@ -39,7 +43,8 @@ type ConversationMutationOperation struct {
 	// HadOutput is populated only on a turn-completion operation. It keeps the
 	// live core projection equivalent to the ordered turn.completed event
 	// without persisting a transient UI-only fact in the turn row.
-	HadOutput *bool `json:"had_output,omitempty"`
+	HadOutput                  *bool                               `json:"had_output,omitempty"`
+	ConfigurationCommandResult *streams.ConfigurationCommandResult `json:"configuration_result,omitempty"`
 }
 
 // ConversationMutationReceipt describes a complete revision interval for

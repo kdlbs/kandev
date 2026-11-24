@@ -29,10 +29,14 @@ type TaskChangeLinkRequest struct {
 }
 
 const (
-	taskChangeOperationLink    = "link"
-	taskChangeOperationUnlink  = "unlink"
-	taskChangeOperationReplace = "replace"
+	taskChangeOperationLink                 = "link"
+	taskChangeOperationUnlink               = "unlink"
+	taskChangeOperationReplace              = "replace"
+	taskChangeRepositoryIDValidationMessage = "repository_id must be the Kandev ID of a repository attached to the target task"
 )
+
+// ErrTaskChangeRepositoryNotAttached marks a repository ID that is absent from the target task.
+var ErrTaskChangeRepositoryNotAttached = errors.New("repository not found for task")
 
 // TaskChangeLinkMutationResult is the structured result of a neutral change
 // request operation. StateKnown is false when the provider mutation or the
@@ -128,7 +132,7 @@ func (h *Handlers) handleManageTaskChangeRequest(ctx context.Context, msg *ws.Me
 	if mutationService, ok := h.taskChangeLinks.(TaskChangeLinkMutationService); ok {
 		result, err := mutationService.ManageTaskChangeRequest(ctx, request)
 		if err != nil {
-			return taskChangeLinkMutationError(msg, result, err)
+			return taskChangeLinkMutationError(msg, payload.Operation, result, err)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, result)
 	}
@@ -142,14 +146,23 @@ func (h *Handlers) handleManageTaskChangeRequest(ctx context.Context, msg *ws.Me
 		links, err = h.taskChangeLinks.ReplaceTaskChange(ctx, request)
 	}
 	if err != nil {
-		return taskChangeLinkMutationError(msg, TaskChangeLinkMutationResult{
+		return taskChangeLinkMutationError(msg, payload.Operation, TaskChangeLinkMutationResult{
 			TaskID: payload.TaskID, StateKnown: false,
 		}, err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{keyTaskID: payload.TaskID, "links": links})
 }
 
-func taskChangeLinkMutationError(msg *ws.Message, result TaskChangeLinkMutationResult, err error) (*ws.Message, error) {
+func taskChangeRepositoryIDValidationError(msg *ws.Message) (*ws.Message, error) {
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, taskChangeRepositoryIDValidationMessage, nil)
+}
+
+func taskChangeLinkMutationError(
+	msg *ws.Message, operation string, result TaskChangeLinkMutationResult, err error,
+) (*ws.Message, error) {
+	if operation == taskChangeOperationLink && errors.Is(err, ErrTaskChangeRepositoryNotAttached) {
+		return taskChangeRepositoryIDValidationError(msg)
+	}
 	if result.OperationError == "" && err != nil {
 		result.OperationError = "task change request operation failed"
 	}

@@ -92,7 +92,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		eventExecutionID,
 		payload.Data.PromptGeneration,
 	) {
-		s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
+		if eventType != streams.EventTypeMCPStartupWarning {
+			s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
+		}
 		s.logger.Debug("ignoring stream event for execution outside cancellation identity",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
@@ -134,6 +136,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		if eventType != streams.EventTypeUsageObservation {
 			return
 		}
+	}
+	if eventType == streams.EventTypeMCPStartupWarning {
+		s.handleCodexMCPStartupWarning(ctx, payload, eventExecutionID)
+		return
 	}
 	switch eventType {
 	case streams.EventTypeMessageChunk:
@@ -504,6 +510,9 @@ func (s *Service) completeTurnForStreamEvent(
 	if len(capturedTurnIDs) > 0 {
 		capturedTurnID = capturedTurnIDs[0]
 	}
+	if capturedTurnID != "" && payload.Data != nil && payload.Data.TurnID == capturedTurnID {
+		ctx = withConfigurationCommandResult(ctx, payload.Data.ConfigurationCommandResult)
+	}
 	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, payload.TaskID, payload.SessionID, capturedTurnID)
 	if capturedTurnID != "" {
 		// A durable turn ID is authoritative. If the event is stale and an
@@ -611,7 +620,9 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	if sessionID != "" && payload.Data.ACPSessionID != "" {
-		s.storeResumeTokenFromAgentEvent(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
+		s.storeResumeTokenFromStreamEvent(
+			ctx, taskID, sessionID, payload.ExecutionID, payload.AgentType, payload.Data.ACPSessionID, "", payload.AttemptID,
+		)
 	}
 	if sessionID == "" || s.messageCreator == nil {
 		return
@@ -1027,17 +1038,19 @@ func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecyc
 	terminal := isTerminalToolStatus(status)
 	turnID := ""
 	if terminal {
-		var err error
-		turnID, err = s.peekActiveTurnID(ctx, payload.SessionID)
-		if err != nil {
-			s.logger.Warn("failed to look up active turn for terminal tool update",
-				zap.String("task_id", payload.TaskID),
-				zap.String("session_id", payload.SessionID),
-				zap.String("tool_call_id", payload.Data.ToolCallID),
-				zap.Error(err))
-			// Fail closed: without a confirmed active turn, this must be an
-			// update-only reconciliation and cannot wake a settled session.
-			turnID = ""
+		if !isMonitorPresentationOnlyToolUpdate(payload) {
+			var err error
+			turnID, err = s.peekActiveTurnID(ctx, payload.SessionID)
+			if err != nil {
+				s.logger.Warn("failed to look up active turn for terminal tool update",
+					zap.String("task_id", payload.TaskID),
+					zap.String("session_id", payload.SessionID),
+					zap.String("tool_call_id", payload.Data.ToolCallID),
+					zap.Error(err))
+				// Fail closed: without a confirmed active turn, this must be an
+				// update-only reconciliation and cannot wake a settled session.
+				turnID = ""
+			}
 		}
 	} else if s.messageCreator != nil {
 		// Only message creation needs a turn to attach a fallback-created
@@ -3584,7 +3597,10 @@ func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *li
 			lastMsgUUID = uuid
 		}
 	}
-	s.storeResumeTokenFromAgentEvent(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
+	s.storeResumeTokenFromStreamEvent(
+		ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.AgentType,
+		payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID,
+	)
 }
 
 func (s *Service) resolveCompleteEventTurnID(
@@ -3792,9 +3808,10 @@ func emptyTurnCompletionFromPayload(payload *lifecycle.AgentStreamEventPayload) 
 			ExecutionProfileID: payload.ExecutionProfileID,
 			PromptGeneration:   payload.Data.PromptGeneration,
 		},
-		stopReason:     extractStopReason(payload),
-		isError:        extractCompleteIsError(payload),
-		completeOutput: completeFrameCarriesOutput(payload),
+		stopReason:                 extractStopReason(payload),
+		isError:                    extractCompleteIsError(payload),
+		completeOutput:             completeFrameCarriesOutput(payload),
+		configurationCommandResult: payload.Data.ConfigurationCommandResult,
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kdlbs/kandev/pluginsdk"
@@ -49,36 +50,47 @@ func (f *fakeInteractionDataSource) GetInteraction(
 
 type recordedPermissionResponse struct {
 	in PluginPermissionResponse
+	// actor is the identity the response ran as; empty for the plugin context.
+	actor string
 }
 
 type fakeInteractionResponder struct {
-	permission  *recordedPermissionResponse
-	answers     []PluginClarificationAnswer
-	answered    string
-	declined    string
-	reason      string
-	err         error
-	writeCalled bool
+	permission      *recordedPermissionResponse
+	permissionCalls int
+	answers         []PluginClarificationAnswer
+	answered        string
+	answerActor     string
+	declined        string
+	reason          string
+	err             error
+	writeCalled     bool
+}
+
+func actingUserID(ctx context.Context) string {
+	identity, _ := authn.IdentityFromContext(ctx)
+	return identity.UserID
 }
 
 func (f *fakeInteractionResponder) RespondToPermission(
-	_ context.Context, in PluginPermissionResponse,
+	ctx context.Context, in PluginPermissionResponse,
 ) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.permission = &recordedPermissionResponse{in: in}
+	f.permission = &recordedPermissionResponse{in: in, actor: actingUserID(ctx)}
+	f.permissionCalls++
 	f.writeCalled = true
 	return nil
 }
 
 func (f *fakeInteractionResponder) AnswerClarification(
-	_ context.Context, pendingID string, answers []PluginClarificationAnswer,
+	ctx context.Context, pendingID string, answers []PluginClarificationAnswer,
 ) error {
 	if f.err != nil {
 		return f.err
 	}
 	f.answered, f.answers, f.writeCalled = pendingID, answers, true
+	f.answerActor = actingUserID(ctx)
 	return nil
 }
 

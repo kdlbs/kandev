@@ -134,6 +134,9 @@ type Controller struct {
 	hostCLIModels     map[string]hostCLIModelEntry
 	hostCLIGeneration map[string]uint64
 	hostCLISlots      chan struct{}
+
+	antigravityRuntimeRefreshMu      sync.Mutex
+	antigravityRuntimeRefreshVariant string
 }
 
 // SetCopilotPluginRunner installs the bounded native inventory runner used by

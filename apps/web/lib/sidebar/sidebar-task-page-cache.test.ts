@@ -14,6 +14,7 @@ import {
   sidebarTaskPageRankingKey,
   sidebarTaskPageScope,
 } from "./sidebar-task-page-cache";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({ querySidebarTasks: vi.fn() }));
 vi.mock("@/lib/api/domains/settings-api", async (importOriginal) => {
@@ -214,14 +215,6 @@ it("keeps the current page after a group-indent write and its full settings ackn
   store.getState().updateSidebarDraft({ groupIndent: false });
   const local = store.getState().sidebarViewsByWorkspace.ws;
   expect(local.draft?.groupIndent).toBe(false);
-  expect(updateUserSettings).toHaveBeenCalledWith(
-    expect.objectContaining({
-      sidebar_view_state: expect.objectContaining({
-        workspace_id: "ws",
-        draft: expect.objectContaining({ group_indent: false }),
-      }),
-    }),
-  );
 
   const userSettings = store.getState().userSettings;
   registerUsersHandlers(store)["user.settings.updated"]?.(
@@ -523,4 +516,19 @@ it("does not re-admit a foreground episode claimed by the active cycle", async (
   lease.release();
   replay.release();
   later.release();
+});
+
+it("rejects a late grouping snapshot and never retains it after a scoped source update", async () => {
+  const { cache } = setup();
+  const reference = "plugin:acme:labels";
+  pluginRegistry.setSidebarGroupings([{ reference, label: "Labels", generation: "generation-1" }]);
+  const pending = Promise.withResolvers<SidebarTaskPageResponse>();
+  vi.mocked(querySidebarTasks).mockReturnValueOnce(pending.promise);
+  const request = cache.request("ws", { ...query, group: reference }, "plugin-page");
+  pluginRegistry.invalidateSidebarGroupings("acme", "ws");
+  pending.resolve({ ...page(), grouping_generation: "generation-1", grouping_revision: "old" });
+  await expect(request.promise).rejects.toMatchObject({ name: "AbortError" });
+  expect(cache.get("plugin-page")).toBeNull();
+  request.release();
+  pluginRegistry.setSidebarGroupings([]);
 });

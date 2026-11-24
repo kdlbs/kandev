@@ -75,6 +75,14 @@ func Provide(log *logger.Logger, codexAppServerEnabled ...bool) (*Registry, func
 			}
 			configureMockAgent(reg, agents.DevinACPAgentID, log)
 		}
+		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") && strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_PI"), "true") {
+			pi := agents.NewMockAgentWithID("pi-acp", "Pi", "Pi")
+			pi.SetDisplayOrder(1002)
+			if err := reg.Register(pi); err != nil {
+				return nil, nil, err
+			}
+			configureMockAgent(reg, "pi-acp", log)
+		}
 		configureMockAgent(reg, "mock-agent", log)
 		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
 			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_AUGGIE"), "true") {

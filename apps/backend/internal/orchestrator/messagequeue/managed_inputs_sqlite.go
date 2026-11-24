@@ -355,7 +355,7 @@ func (r *sqliteRepository) MarkManagedInputRunning(
 	}
 	var headID string
 	err = tx.GetContext(ctx, &headID, r.db.Rebind(`
-		SELECT id FROM queued_messages WHERE session_id = ? ORDER BY position ASC LIMIT 1
+		SELECT id FROM queued_messages WHERE session_id = ? ORDER BY position ASC, id ASC LIMIT 1
 	`), identity.SessionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ManagedInputReceipt{}, false, ErrManagedInputNotPending
@@ -582,7 +582,7 @@ func (r *sqliteRepository) findPendingPeriodicManagedInputTx(
 		JOIN queued_messages q ON q.id = m.input_id AND q.task_id = m.task_id AND q.session_id = m.session_id
 		WHERE m.task_id = ? AND m.session_id = ? AND m.session_incarnation_id = ?
 		AND m.state = ? AND m.origin = ? AND m.coalesce_key = ?
-		ORDER BY q.position DESC`
+		ORDER BY q.position DESC, q.id DESC`
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), identity.TaskID,
 		identity.SessionID, identity.SessionIncarnationID, ManagedInputStateAccepted,
 		ManagedInputOriginPeriodic, coalesceKey)

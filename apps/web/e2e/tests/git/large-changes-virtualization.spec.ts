@@ -140,7 +140,7 @@ test.describe("Large Changes virtualization", () => {
           await expect
             .poll(() => testPage.evaluate(() => matchMedia("(pointer: fine)").matches))
             .toBe(true);
-          await expect(directory).toHaveCSS("min-height", "24px");
+          await expect(directory).toHaveCSS("min-height", width < 768 ? "44px" : "24px");
         }
       }
       const firstRow = testPage.getByTestId(firstFile);

@@ -93,8 +93,9 @@ export function formatMessageSessionConfig(
   if (!model) return null;
   if (!snapshot) return model;
   const details = changedConfigOptions(snapshot).map((option) => {
-    const name = option.name ?? humanizeConfigKey(option.id);
-    return `${name}: ${option.value_name ?? option.value}`;
+    const label = `${option.name ?? humanizeConfigKey(option.id)}: `;
+    const value = option.value_name ?? option.value;
+    return value.startsWith(label) ? value : `${label}${value}`;
   });
   return details.length > 0 ? `${model} · ${details.join(" · ")}` : model;
 }

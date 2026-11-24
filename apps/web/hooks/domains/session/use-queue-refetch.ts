@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { getQueueStatus } from "@/lib/api/domains/queue-api";
+import { queuePolicyStatusMeta } from "@/lib/state/slices/session/queue-policy-meta";
 import type { QueueSessionIdentity } from "@/lib/api/domains/queue-api";
 import type {
   QueueOperationToken,
@@ -33,18 +34,7 @@ function queueStatusMeta(status: QueueStatus) {
     ...(status.status_generation !== undefined
       ? { statusGeneration: status.status_generation }
       : {}),
-    ...(status.auto_merge_available !== undefined
-      ? { autoMergeAvailable: status.auto_merge_available }
-      : {}),
-    ...(status.auto_merge_enabled !== undefined
-      ? { autoMergeEnabled: status.auto_merge_enabled }
-      : {}),
-    ...(status.auto_merge_source !== undefined
-      ? { autoMergeSource: status.auto_merge_source }
-      : {}),
-    ...(status.auto_merge_revision !== undefined
-      ? { autoMergeRevision: status.auto_merge_revision }
-      : {}),
+    ...queuePolicyStatusMeta(status),
   };
 }
 

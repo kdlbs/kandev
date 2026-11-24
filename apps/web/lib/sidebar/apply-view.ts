@@ -35,6 +35,9 @@ export type SidebarGroup = {
   tasks: TaskSwitcherItem[];
   matchingCount?: number;
   isContinuation?: boolean;
+  color?: string;
+  /** Each repeated plugin tree owns its bounded child occurrences. */
+  subTasksByParentId?: Map<string, TaskSwitcherItem[]>;
 };
 
 export type GroupedSidebarList = {
@@ -570,32 +573,6 @@ export function countGroupTasks(
     if (children) stack.push(...children);
   }
   return total;
-}
-
-/**
- * Flatten the grouped sidebar tree into the exact top-to-bottom order of the
- * task rows the user currently sees, honoring collapsed groups and collapsed
- * subtask parents. This is the ordered list shift-click range selection walks.
- */
-export function flattenVisibleTaskIds(
-  grouped: GroupedSidebarList,
-  collapsedGroupKeys: string[],
-  collapsedSubtaskParentIds: string[],
-): string[] {
-  const collapsedGroups = new Set(collapsedGroupKeys);
-  const collapsedSubs = new Set(collapsedSubtaskParentIds);
-  const out: string[] = [];
-  const visit = (task: TaskSwitcherItem) => {
-    out.push(task.id);
-    if (collapsedSubs.has(task.id)) return;
-    const subs = grouped.subTasksByParentId.get(task.id);
-    if (subs) for (const sub of subs) visit(sub);
-  };
-  for (const group of grouped.groups) {
-    if (collapsedGroups.has(group.key)) continue;
-    for (const task of group.tasks) visit(task);
-  }
-  return out;
 }
 
 /**

@@ -8,7 +8,7 @@
 #
 # Raw output:
 #   JSON object with:
-#   - pr: { number, branch, is_cross_repository, base_ref_name, base_head_oid,
+#   - pr: { number, url, branch, is_cross_repository, base_ref_name, base_head_oid,
 #       base_target_oid, merge_base_oid, base_advanced_since_head, head_repository_owner,
 #       head_repository_name, head_ref_name, head_ref_oid, maintainer_can_modify }
 #   - since: { head_oid, committed_at } or null
@@ -35,7 +35,7 @@
 # Summary output (--summary):
 #   Includes closing-head merge_state, plus:
 #   JSON object with:
-#   - pr: { number, branch, is_cross_repository, base_ref_name, base_head_oid,
+#   - pr: { number, url, branch, is_cross_repository, base_ref_name, base_head_oid,
 #       base_target_oid, merge_base_oid, base_advanced_since_head, head_repository_owner,
 #       head_repository_name, head_ref_name, head_ref_oid, maintainer_can_modify }
 #   - since: { head_oid, committed_at } or null
@@ -997,6 +997,7 @@ if pr_view_json="$(gh_json pr view "$PR" --json number,baseRefName,headRefName,h
   fi
   pr_json="$(jq -c '{
     number: .number,
+    url: .url,
     branch: (.headRefName // "unknown"),
     is_cross_repository: (if has("isCrossRepository") then .isCrossRepository else null end),
     base_ref_name: (.baseRefName // null),

@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentLinks } from "@/components/shared/attachment-links";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { memo } from "react";
@@ -24,6 +25,7 @@ export const CommentItem = memo(function CommentItem({ item }: { item: CommentCo
               <p className="text-muted-foreground">{t("review:fileComment")}</p>
               <p>{[comment.repositoryName, comment.filePath].filter(Boolean).join("/")}</p>
               <p className="whitespace-pre-wrap">{comment.text}</p>
+              <AttachmentLinks attachments={comment.attachments} />
               <Button
                 variant="ghost"
                 className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"

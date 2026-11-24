@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/offlinebudget"
 	"strings"
 	"time"
 
@@ -180,9 +181,10 @@ type ExecutorBackend interface {
 type RecoveryCandidateOutcome string
 
 const (
-	RecoveryOutcomeNoMatchingInstance RecoveryCandidateOutcome = "no_matching_instance"
-	RecoveryOutcomeEnumerationFailed  RecoveryCandidateOutcome = "enumeration_failed"
-	RecoveryOutcomeUnknown            RecoveryCandidateOutcome = "unknown"
+	RecoveryOutcomeNoMatchingInstance     RecoveryCandidateOutcome = "no_matching_instance"
+	RecoveryOutcomeRecordedResourceAbsent RecoveryCandidateOutcome = "recorded_resource_absent"
+	RecoveryOutcomeEnumerationFailed      RecoveryCandidateOutcome = "enumeration_failed"
+	RecoveryOutcomeUnknown                RecoveryCandidateOutcome = "unknown"
 )
 
 // DetailedRecoveryBackend is an optional extension for ExecutorBackend implementations
@@ -354,6 +356,9 @@ const (
 	// task-supplied metadata can never enable it, because that would let a
 	// task arm a destructive remote operation its profile never approved.
 	MetadataKeySSHReclaimTaskDir = "ssh_reclaim_task_dir"
+	// MetadataKeyOfflineBudgetMinutes carries the profile's offline budget.
+	// It is an authoritative profile key: task-supplied metadata cannot set it.
+	MetadataKeyOfflineBudgetMinutes = offlinebudget.Key
 	// MetadataKeySSHLaunchReceipt carries the immutable launch proof a managed
 	// SSH controller self-reported during its authenticated handshake. It is
 	// the only durable evidence that survives session-directory loss, so it
@@ -398,6 +403,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHIdentityFile:         true,
 	MetadataKeySSHShell:                true,
 	MetadataKeySSHReclaimTaskDir:       true,
+	MetadataKeyOfflineBudgetMinutes:    true,
 	MetadataKeySSHLaunchReceipt:        true,
 
 	// Remote Docker adopted agentctl identity.
@@ -1018,6 +1024,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		promptTurnID:                     req.PromptTurnID,
 		AgentID:                          agentID,
 		AuthPolicy:                       req.AuthPolicy,
+		LocalRuntimeEnv:                  cloneStringMap(req.LocalRuntimeEnv),
 		ContainerID:                      ri.ContainerID,
 		ContainerIP:                      ri.ContainerIP,
 		WorkspacePath:                    workspacePath,

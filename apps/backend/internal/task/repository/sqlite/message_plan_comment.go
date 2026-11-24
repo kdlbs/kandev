@@ -276,6 +276,9 @@ func (r *Repository) createQueuedMessagePlanCommentBoundary(
 		return nil, err
 	}
 	message.Content = resolved.Content
+	if fields.metadataJSON, err = marshalMessagePlanCommentFiles(ctx, tx, message, queued, resolved, claim, fields.metadataJSON); err != nil {
+		return nil, err
+	}
 	queued.Content = resolved.Content
 	if err := r.claimDirectMessageAttachmentsTx(
 		ctx, tx, claim, message.TaskID, message.TaskSessionID, message.ID,
@@ -368,6 +371,9 @@ func (r *Repository) createMessagePlanCommentBoundary(
 		return nil, err
 	}
 	message.Content = resolved.Content
+	if metadataJSON, err = marshalMessagePlanCommentFiles(ctx, tx, message, nil, resolved, claim, metadataJSON); err != nil {
+		return nil, err
+	}
 	if err := r.claimDirectMessageAttachmentsTx(
 		ctx, tx, claim, message.TaskID, message.TaskSessionID, message.ID,
 	); err != nil {
