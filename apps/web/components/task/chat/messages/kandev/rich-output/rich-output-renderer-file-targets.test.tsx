@@ -14,6 +14,7 @@ const EXPANDED_ATTRIBUTE = "aria-expanded";
 const PREVIEW_FAILURE = "Preview unavailable.";
 const PREVIEW_LOADING = "Loading preview";
 const OLD_CONTENT = "Old target content";
+const EDITED_CONTENT = "Updated workspace content";
 
 type Target = { sessionId: string; path: string; repo?: string };
 const initial: Target = { sessionId: "session-a", path: "a.txt", repo: "alpha" };
@@ -32,6 +33,30 @@ function propsFor(
       blocks: [
         { type: "file", path: target.path, repo: target.repo, title: "Report", ...metadata },
       ],
+    },
+  };
+}
+
+function propsForVersion(target: Target, version: 1 | 2): KandevRendererProps {
+  if (version === 1) return propsFor(target);
+  return {
+    status: "complete",
+    sessionId: target.sessionId,
+    result: undefined,
+    args: {
+      version: 2,
+      catalog_version: 1,
+      title: "Artifacts",
+      spec: {
+        root: "report",
+        elements: {
+          report: {
+            type: "FilePreview",
+            props: { path: target.path, repo: target.repo },
+            children: [],
+          },
+        },
+      },
     },
   };
 }
@@ -246,19 +271,36 @@ it.each([
   expect(transport.read).toHaveBeenCalledTimes(2);
 });
 
-// @covers AC-AGENTS-AGENT-RICH-OUTPUT-001.11
-it("loads lazily and reuses successful preview content", async () => {
-  render(<RendererHarness {...propsFor(initial)} />);
-  expect(toggle().getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
-  expect(transport.read).not.toHaveBeenCalled();
-  await togglePreview();
-  expect(screen.getByText(contentFor(initial))).toBeTruthy();
-  await togglePreview();
-  expect(screen.queryByText(contentFor(initial))).toBeNull();
-  await togglePreview();
-  expect(screen.getByText(contentFor(initial))).toBeTruthy();
-  expect(transport.read).toHaveBeenCalledOnce();
-});
+// @covers AC-AGENTS-AGENT-RICH-OUTPUT-001.11, AC-AGENTS-AGENT-RICH-OUTPUT-001.14
+it.each([1, 2] as const)(
+  "reads an edited file on reopening a mounted version %i preview",
+  async (version) => {
+    let currentContent = contentFor(initial);
+    transport.read.mockImplementation(async () => ({ content: currentContent, is_binary: false }));
+    render(<RendererHarness {...propsForVersion(initial, version)} />);
+    expect(toggle().getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
+    expect(transport.read).not.toHaveBeenCalled();
+
+    await togglePreview();
+    expect(screen.getByText(contentFor(initial))).toBeTruthy();
+    expect(transport.read).toHaveBeenCalledOnce();
+
+    await togglePreview();
+    expect(screen.queryByText(contentFor(initial))).toBeNull();
+    expect(transport.read).toHaveBeenCalledOnce();
+    currentContent = EDITED_CONTENT;
+
+    await togglePreview();
+    expect(screen.getByText(EDITED_CONTENT)).toBeTruthy();
+    expect(transport.read).toHaveBeenCalledTimes(2);
+    expect(transport.read).toHaveBeenLastCalledWith(
+      transport.client,
+      initial.sessionId,
+      initial.path,
+      initial.repo,
+    );
+  },
+);
 
 // @covers AC-AGENTS-AGENT-RICH-OUTPUT-001.9
 it("keeps collapsed descriptor replacement lazy until the new target is expanded", async () => {
@@ -330,10 +372,11 @@ it.each(["success", "error"])("keeps the new preview after late old %s", async (
 });
 
 // @covers AC-AGENTS-AGENT-RICH-OUTPUT-001.11
-it("preserves cached disclosure through same-target rerenders and metadata changes", async () => {
+it("preserves disclosure through same-target rerenders without extra reads", async () => {
   const props = propsFor(initial);
   const view = render(<RendererHarness {...props} />);
   await togglePreview();
+  expect(transport.read).toHaveBeenCalledOnce();
   view.rerender(<RendererHarness {...props} />);
   view.rerender(<RendererHarness {...propsFor(initial)} />);
   view.rerender(
@@ -343,10 +386,61 @@ it("preserves cached disclosure through same-target rerenders and metadata chang
   expect(screen.getByText("New caption")).toBeTruthy();
   expect(screen.getByText(contentFor(initial))).toBeTruthy();
   expect(toggle().getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
+  expect(transport.read).toHaveBeenCalledOnce();
   await togglePreview();
+  expect(transport.read).toHaveBeenCalledOnce();
   await togglePreview();
   expect(screen.getByText(contentFor(initial))).toBeTruthy();
+  expect(transport.read).toHaveBeenCalledTimes(2);
+});
+
+// @covers AC-AGENTS-AGENT-RICH-OUTPUT-001.11
+it.each(["success", "error"])(
+  "keeps the reopened result after a late same-target %s",
+  async (outcome) => {
+    const previousRead = deferredPreview();
+    transport.read
+      .mockReturnValueOnce(previousRead.promise)
+      .mockResolvedValueOnce({ content: EDITED_CONTENT, is_binary: false });
+    render(<RendererHarness {...propsFor(initial)} />);
+    try {
+      await togglePreview();
+      expect(transport.read).toHaveBeenCalledOnce();
+      await togglePreview();
+      await togglePreview();
+      expect(screen.getByText(EDITED_CONTENT)).toBeTruthy();
+      expect(transport.read).toHaveBeenCalledTimes(2);
+      await settleOld(previousRead, outcome);
+      expect(screen.getByText(EDITED_CONTENT)).toBeTruthy();
+      expect(screen.queryByText(OLD_CONTENT)).toBeNull();
+      expect(screen.queryByText(PREVIEW_FAILURE)).toBeNull();
+    } finally {
+      await settleOld(previousRead, outcome);
+    }
+  },
+);
+
+// @covers AC-AGENTS-AGENT-RICH-OUTPUT-001.11
+it("shows an unavailable read and fetches restored contents after reopening", async () => {
+  transport.read
+    .mockResolvedValueOnce({ content: "Existing workspace content", is_binary: false })
+    .mockRejectedValueOnce(new Error("File is missing"))
+    .mockResolvedValueOnce({ content: "Restored workspace content", is_binary: false });
+  render(<RendererHarness {...propsFor(initial)} />);
+
+  await togglePreview();
+  expect(screen.getByText("Existing workspace content")).toBeTruthy();
   expect(transport.read).toHaveBeenCalledOnce();
+  await togglePreview();
+  expect(transport.read).toHaveBeenCalledOnce();
+  await togglePreview();
+  expect(screen.getByText(PREVIEW_FAILURE)).toBeTruthy();
+  expect(transport.read).toHaveBeenCalledTimes(2);
+  await togglePreview();
+  await togglePreview();
+  expect(screen.getByText("Restored workspace content")).toBeTruthy();
+  expect(screen.queryByText(PREVIEW_FAILURE)).toBeNull();
+  expect(transport.read).toHaveBeenCalledTimes(3);
 });
 
 // @covers AC-AGENTS-AGENT-RICH-OUTPUT-001.11

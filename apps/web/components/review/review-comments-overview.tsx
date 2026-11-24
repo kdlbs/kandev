@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentLinks } from "@/components/shared/attachment-links";
 import { IconMessage } from "@tabler/icons-react";
 import type { ReviewComment } from "@/lib/state/slices/comments";
 import { formatLineRange } from "@/lib/diff";
@@ -88,6 +89,7 @@ export function ReviewCommentsOverview({ comments }: { comments: ReviewComment[]
                   <p className="line-clamp-2 whitespace-pre-wrap text-xs leading-snug text-foreground/90">
                     {comment.text}
                   </p>
+                  <AttachmentLinks attachments={comment.attachments} />
                 </div>
               ))}
             </div>

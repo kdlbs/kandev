@@ -1669,7 +1669,7 @@ func (s *Server) registerTaskPRLinkTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("manage_task_change_request_kandev",
-			"Link, unlink, or replace a GitHub pull request or GitLab merge request for a task. Provide the operation, target task, provider, canonical repository identity, and positive change request number. Replacement requires the complete old identity and keeps both identities on the same provider.",
+			"Link, unlink, or replace a GitHub pull request or GitLab merge request for a task. Provide the operation, target task, provider, Kandev repository ID, and positive change request number. For link, the repository ID must be attached to the target task. Replacement requires the complete old identity and keeps both identities on the same provider.",
 			taskChangeRequestToolSchema(),
 		),
 		s.wrapHandler("manage_task_change_request_kandev", s.manageTaskChangeRequestHandler()),

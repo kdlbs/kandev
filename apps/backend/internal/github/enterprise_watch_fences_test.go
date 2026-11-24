@@ -12,6 +12,13 @@ type enterpriseWatchClient struct {
 	admitted, release chan struct{}
 }
 
+func (c *enterpriseWatchClient) GetPR(_ context.Context, owner, repo string, number int) (*PR, error) {
+	return &PR{
+		Number: number, RepoOwner: owner, RepoName: repo,
+		HeadRepoOwner: owner, HeadRepoName: repo, BaseRepoOwner: owner, BaseRepoName: repo,
+	}, nil
+}
+
 func (c *enterpriseWatchClient) wait(ctx context.Context) error {
 	if c.admitted == nil {
 		return nil

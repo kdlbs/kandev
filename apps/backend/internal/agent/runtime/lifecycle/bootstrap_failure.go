@@ -22,20 +22,24 @@ const StopReasonAgentBootstrapFailed = "agent bootstrap failed"
 // and errors.Is/errors.As callers; user-facing projections must use Code and
 // Detail instead of Error().
 type BootstrapFailure struct {
-	Operation      string
-	Code           string
-	Reason         string
-	Detail         string
-	RequestedModel string
-	EffectiveModel string
-	AttemptedModel string
-	RequestedMode  string
-	EffectiveMode  string
-	RuntimeVersion string
-	PromptNotSent  *bool
-	ExitCode       *int
-	SessionFailure *agentctltypes.SessionOperationFailure
-	Cause          error
+	Operation        string
+	Code             string
+	Reason           string
+	Detail           string
+	RequestedModel   string
+	EffectiveModel   string
+	AttemptedModel   string
+	RequestedSetting string
+	EffectiveSetting string
+	SettingConfigID  string
+	SettingSource    string
+	RequestedMode    string
+	EffectiveMode    string
+	RuntimeVersion   string
+	PromptNotSent    *bool
+	ExitCode         *int
+	SessionFailure   *agentctltypes.SessionOperationFailure
+	Cause            error
 }
 
 func (e *BootstrapFailure) Error() string {
@@ -105,16 +109,20 @@ func (e *BootstrapFailure) SafeAgentErrorCause(operation string) (models.AgentEr
 		operation = e.Operation
 	}
 	cause := models.AgentErrorCause{
-		Operation:      operation,
-		Code:           e.SafeCode(),
-		Detail:         e.SafeDetail(),
-		Reason:         e.Reason,
-		RequestedModel: safeBootstrapSelector(e.RequestedModel),
-		EffectiveModel: safeBootstrapSelector(e.EffectiveModel),
-		AttemptedModel: safeBootstrapSelector(e.AttemptedModel),
-		RequestedMode:  safeBootstrapSelector(e.RequestedMode),
-		EffectiveMode:  safeBootstrapSelector(e.EffectiveMode),
-		RuntimeVersion: e.RuntimeVersion,
+		Operation:        operation,
+		Code:             e.SafeCode(),
+		Detail:           e.SafeDetail(),
+		Reason:           e.Reason,
+		RequestedModel:   safeBootstrapSelector(e.RequestedModel),
+		EffectiveModel:   safeBootstrapSelector(e.EffectiveModel),
+		AttemptedModel:   safeBootstrapSelector(e.AttemptedModel),
+		RequestedSetting: safeBootstrapSelector(e.RequestedSetting),
+		EffectiveSetting: safeBootstrapSelector(e.EffectiveSetting),
+		SettingConfigID:  safeBootstrapSelector(e.SettingConfigID),
+		SettingSource:    e.SettingSource,
+		RequestedMode:    safeBootstrapSelector(e.RequestedMode),
+		EffectiveMode:    safeBootstrapSelector(e.EffectiveMode),
+		RuntimeVersion:   e.RuntimeVersion,
 	}
 	if e.PromptNotSent != nil {
 		value := *e.PromptNotSent
@@ -147,7 +155,9 @@ func isSelectionBootstrapCause(code string) bool {
 		models.AgentErrorCauseCodeModelSelectionFailed,
 		models.AgentErrorCauseCodePermissionModeFailed,
 		models.AgentErrorCauseCodePermissionModeUnconfirmed,
-		models.AgentErrorCauseCodePermissionModeMismatch:
+		models.AgentErrorCauseCodePermissionModeMismatch,
+		models.AgentErrorCauseCodeThinkingLevelFailed, models.AgentErrorCauseCodeThinkingLevelUnavailable,
+		models.AgentErrorCauseCodeThinkingLevelMismatch, models.AgentErrorCauseCodeThinkingLevelUnconfirmed:
 		return true
 	default:
 		return false
@@ -168,6 +178,8 @@ func isKnownBootstrapCauseCode(code string) bool {
 		models.AgentErrorCauseCodePermissionModeFailed,
 		models.AgentErrorCauseCodePermissionModeUnconfirmed,
 		models.AgentErrorCauseCodePermissionModeMismatch,
+		models.AgentErrorCauseCodeThinkingLevelFailed, models.AgentErrorCauseCodeThinkingLevelUnavailable,
+		models.AgentErrorCauseCodeThinkingLevelMismatch, models.AgentErrorCauseCodeThinkingLevelUnconfirmed,
 		models.AgentErrorCauseCodePluginPreparationFailed,
 		models.AgentErrorCauseCodeProcessExited,
 		models.AgentErrorCauseCodeUnknown:
@@ -284,6 +296,14 @@ func bootstrapFailureDetail(code string) string {
 		return "The requested model is unavailable."
 	case models.AgentErrorCauseCodeModelSelectionFailed:
 		return "The requested model could not be selected."
+	case models.AgentErrorCauseCodeThinkingLevelUnavailable:
+		return "The requested thinking level is unavailable for the selected model."
+	case models.AgentErrorCauseCodeThinkingLevelFailed:
+		return "The requested thinking level could not be applied."
+	case models.AgentErrorCauseCodeThinkingLevelMismatch:
+		return "The applied thinking level did not match the request."
+	case models.AgentErrorCauseCodeThinkingLevelUnconfirmed:
+		return "The requested thinking level was not confirmed."
 	case models.AgentErrorCauseCodePermissionModeFailed:
 		return "The requested permission mode could not be applied."
 	case models.AgentErrorCauseCodePermissionModeUnconfirmed:

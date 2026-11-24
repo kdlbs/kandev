@@ -1,13 +1,60 @@
 import fs from "node:fs";
 import path from "node:path";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import type { WsWatcher } from "../../helpers/causal-waits";
 
 export const RICH_OUTPUT_FILE = "rich-output-report.txt";
 export const RICH_OUTPUT_FILE_CONTENT = "RICH_OUTPUT_FILE_PREVIEW\nchecks=38\nfailures=0\n";
+export const RICH_OUTPUT_FILE_UPDATED_CONTENT =
+  "RICH_OUTPUT_FILE_PREVIEW_UPDATED\nchecks=99\nfailures=0\n";
 export const RICH_OUTPUT_IMAGE = "rich-output-image.PNG";
+
+export async function reopenRichOutputPreviewWithCurrentContents({
+  card,
+  repositoryPath,
+  watcher,
+  touch,
+}: {
+  card: Locator;
+  repositoryPath: string;
+  watcher: WsWatcher;
+  touch: boolean;
+}): Promise<void> {
+  const filePath = path.join(repositoryPath, RICH_OUTPUT_FILE);
+  const originalContent = fs.readFileSync(filePath, "utf8");
+  const toggle = card.getByTestId("rich-output-file-preview-toggle");
+  const activate = () => (touch ? toggle.tap() : toggle.click());
+
+  try {
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await Promise.all([
+      watcher.waitForResponse("workspace.file.get", {
+        requestWhere: (payload) => payload.path === RICH_OUTPUT_FILE,
+      }),
+      activate(),
+    ]);
+    await expect(card).toContainText(RICH_OUTPUT_FILE_CONTENT.trim());
+
+    await activate();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(card).not.toContainText(RICH_OUTPUT_FILE_CONTENT.trim());
+    fs.writeFileSync(filePath, RICH_OUTPUT_FILE_UPDATED_CONTENT);
+
+    await Promise.all([
+      watcher.waitForResponse("workspace.file.get", {
+        requestWhere: (payload) => payload.path === RICH_OUTPUT_FILE,
+      }),
+      activate(),
+    ]);
+    await expect(card).toContainText(RICH_OUTPUT_FILE_UPDATED_CONTENT.trim());
+    await expect(card).not.toContainText(RICH_OUTPUT_FILE_CONTENT.trim());
+  } finally {
+    fs.writeFileSync(filePath, originalContent);
+  }
+}
 
 export function seedRichOutputImage(repositoryPath: string) {
   fs.copyFileSync(

@@ -457,6 +457,10 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin user state: %w", err)
 	}
+	if err := s.deleteInstallationIdentityLinks(ctx, rec.InstallationID); err != nil {
+		s.reconcileAbortedUninstall(id, wasRunning)
+		return fmt.Errorf("plugins: uninstall aborted, could not remove linked accounts: %w", err)
+	}
 	if err := s.deletePluginAgentConversations(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin agent conversations: %w", err)

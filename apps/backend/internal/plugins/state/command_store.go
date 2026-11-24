@@ -135,7 +135,10 @@ func (s *CommandStore) initSchema() error {
 	if err := s.initSourceWritebackSchema(); err != nil {
 		return err
 	}
-	return s.initTaskDirectiveSchema()
+	if err := s.initTaskDirectiveSchema(); err != nil {
+		return err
+	}
+	return s.initIdentityLinkSchema()
 }
 
 // Admit records an intent before the domain service is allowed to perform its

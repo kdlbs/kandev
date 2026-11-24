@@ -137,6 +137,37 @@ describe("DiffViewer comment editing", () => {
     await waitFor(() => expect(latestCommentText()).toBe(EDITED_TEXT));
   });
 
+  it("refreshes a controlled comment when only its attachments change", async () => {
+    const original = comment(ORIGINAL_TEXT);
+    const view = render(
+      <DiffViewer data={data} sessionId={SESSION_ID} enableComments comments={[original]} />,
+    );
+    const updated: DiffComment = {
+      ...original,
+      attachments: [
+        {
+          attachment_id: "file",
+          name: "line-note.txt",
+          type: "resource",
+          mime_type: "text/plain",
+          delivery_mode: "path",
+        },
+      ],
+    };
+    view.rerender(
+      <DiffViewer data={data} sessionId={SESSION_ID} enableComments comments={[updated]} />,
+    );
+    await waitFor(() =>
+      expect(
+        captured.at(-1)?.lineAnnotations?.find((entry) => entry.metadata.comment?.id === COMMENT_ID)
+          ?.metadata.comment?.attachments,
+      ).toEqual(updated.attachments),
+    );
+    const link = screen.getByRole("link", { name: "line-note.txt" });
+    expect(link.getAttribute("href")).toContain("/file");
+    expect(screen.queryByPlaceholderText(COMMENT_PLACEHOLDER)).toBeNull();
+  });
+
   it("submits edited text from the inline comment form", async () => {
     useCommentsStore.getState().addComment(comment(ORIGINAL_TEXT));
 

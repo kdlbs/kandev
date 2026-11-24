@@ -42,7 +42,7 @@ func (r *sqliteRepository) InsertWithPlanComments(
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	existing, replay, err := r.commitPlanCommentQueueReplay(ctx, tx, &candidate, refs)
+	existing, replay, err := r.commitPlanCommentQueueReplay(ctx, tx, identity, &candidate, refs)
 	if err != nil {
 		return nil, false, err
 	}
@@ -65,6 +65,9 @@ func (r *sqliteRepository) InsertWithPlanComments(
 		return nil, false, err
 	}
 	candidate.Content = resolved.Content
+	if err := applyQueuedPlanCommentFiles(ctx, tx, &candidate, resolved, claim); err != nil {
+		return nil, false, err
+	}
 	if err := r.insertCoalesced(ctx, tx, &candidate, 0); err != nil {
 		return nil, false, err
 	}
@@ -72,11 +75,26 @@ func (r *sqliteRepository) InsertWithPlanComments(
 	if err != nil {
 		return nil, false, err
 	}
+	if resolved.HasFiles() {
+		if err := r.recordPlanCommentFileQueueReceipt(ctx, tx, identity, &candidate); err != nil {
+			return nil, false, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, false, fmt.Errorf("commit plan-comment queue admission: %w", err)
 	}
 	*msg = candidate
 	return snapshot, false, nil
+}
+
+func (r *sqliteRepository) recordPlanCommentFileQueueReceipt(
+	ctx context.Context, tx *sqlx.Tx, identity QueueSessionIdentity, candidate *QueuedMessage,
+) error {
+	fingerprint, _ := candidate.Metadata[plancomments.MetadataRequestFingerprint].(string)
+	if fingerprint == "" {
+		return errors.New("plan comment queue fingerprint is required")
+	}
+	return r.insertQueueAdmissionReceiptTx(ctx, tx, identity, candidate.ID, fingerprint, candidate)
 }
 
 func (r *sqliteRepository) beginPlanCommentQueueAdmission(
@@ -110,9 +128,17 @@ func (r *sqliteRepository) beginPlanCommentQueueAdmission(
 func (r *sqliteRepository) commitPlanCommentQueueReplay(
 	ctx context.Context,
 	tx *sqlx.Tx,
+	identity QueueSessionIdentity,
 	candidate *QueuedMessage,
 	refs []models.TaskPlanCommentRef,
 ) (*QueuedMessage, bool, error) {
+	receipt, err := r.readQueueAdmissionReceiptTx(ctx, tx, identity, candidate.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if receipt != nil {
+		return commitPlanCommentQueueReplay(tx, receipt.Message, candidate, refs)
+	}
 	existing, err := r.findQueuedMessageByIDTx(ctx, tx, candidate.ID)
 	if err != nil {
 		return nil, false, err
@@ -120,6 +146,12 @@ func (r *sqliteRepository) commitPlanCommentQueueReplay(
 	if existing == nil {
 		return nil, false, nil
 	}
+	return commitPlanCommentQueueReplay(tx, existing, candidate, refs)
+}
+
+func commitPlanCommentQueueReplay(
+	tx *sqlx.Tx, existing, candidate *QueuedMessage, refs []models.TaskPlanCommentRef,
+) (*QueuedMessage, bool, error) {
 	if !samePlanCommentQueueRequest(existing, candidate, refs) {
 		return nil, false, ErrQueueIDConflict
 	}

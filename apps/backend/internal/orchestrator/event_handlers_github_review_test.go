@@ -127,6 +127,7 @@ func TestReviewWatchSearchResultIdentityControlsAutoStart(t *testing.T) {
 		name          string
 		detailPR      *github.PR
 		detailErr     error
+		wantEvent     bool
 		wantHeadOwner string
 		wantHeadRepo  string
 		wantAutostart bool
@@ -139,6 +140,7 @@ func TestReviewWatchSearchResultIdentityControlsAutoStart(t *testing.T) {
 				BaseRepoOwner: "acme",
 				BaseRepoName:  "widget",
 			},
+			wantEvent:     true,
 			wantHeadOwner: "acme",
 			wantHeadRepo:  "widget",
 			wantAutostart: true,
@@ -151,11 +153,20 @@ func TestReviewWatchSearchResultIdentityControlsAutoStart(t *testing.T) {
 				BaseRepoOwner: "acme",
 				BaseRepoName:  "widget",
 			},
+			wantEvent:     true,
 			wantHeadOwner: "contributor",
 			wantHeadRepo:  "widget-fork",
 		},
 		{
-			name:      "missing identity after detail lookup failure",
+			name: "missing identity after successful detail lookup",
+			detailPR: &github.PR{
+				BaseRepoOwner: "acme",
+				BaseRepoName:  "widget",
+			},
+			wantEvent: true,
+		},
+		{
+			name:      "detail lookup failure is deferred",
 			detailErr: errors.New("GitHub detail lookup failed"),
 		},
 	}
@@ -163,6 +174,12 @@ func TestReviewWatchSearchResultIdentityControlsAutoStart(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			emitted, prs := triggerReviewWatchForAutoStartTest(t, tt.detailPR, tt.detailErr)
+			if !tt.wantEvent {
+				if len(prs) != 0 || emitted != nil {
+					t.Fatalf("review watch result = (%d PRs, event=%v), want no PR and no event", len(prs), emitted != nil)
+				}
+				return
+			}
 			if len(prs) != 1 || emitted == nil || emitted.PR == nil {
 				t.Fatalf("review watch result = (%d PRs, event=%v), want one PR event", len(prs), emitted != nil)
 			}

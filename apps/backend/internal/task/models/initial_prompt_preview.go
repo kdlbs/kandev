@@ -19,7 +19,7 @@ func NewInitialPromptPreview(content string, attachments []v1.MessageAttachment)
 			continue
 		}
 		preview.Attachments = append(preview.Attachments, v1.MessageAttachment{
-			AttachmentID: attachment.AttachmentID, Type: attachment.Type,
+			CommentID: attachment.CommentID, AttachmentID: attachment.AttachmentID, Type: attachment.Type,
 			Name: attachment.Name, MimeType: attachment.MimeType,
 			SizeBytes: attachment.SizeBytes, DeliveryMode: attachment.DeliveryMode,
 		})

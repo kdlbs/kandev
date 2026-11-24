@@ -1793,6 +1793,7 @@ func recordPluginStores(ctx context.Context, tracker *requiredstores.Tracker, in
 		"plugin-state",
 		"plugin-instance-state",
 		"plugin-user-state",
+		"plugin-command-receipts",
 		"plugin-task-change-requests",
 	} {
 		initErr := initErrors[id]

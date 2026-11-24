@@ -54,6 +54,23 @@ async function openBackgroundWorkHistory(page: Page): Promise<void> {
   );
 }
 
+async function openBackgroundWorkActive(page: Page): Promise<void> {
+  if ((page.viewportSize()?.width ?? 0) < 768) {
+    await page.getByTestId("mobile-session-nav-panels").click();
+    await page.getByTestId("mobile-background-work-open").tap();
+    await expect(page.getByTestId("background-work-mobile-panel")).toBeVisible();
+  } else {
+    await page.getByTestId("dockview-add-panel-btn").first().click();
+    await page.getByTestId("add-panel-background-work").click();
+    await expect(page.getByTestId("background-work-overview")).toBeVisible();
+  }
+  await page.getByTestId("background-work-tab-active").click();
+  await expect(page.getByTestId("background-work-tab-active")).toHaveAttribute(
+    "data-state",
+    "active",
+  );
+}
+
 async function expectJobState(
   apiClient: ApiClient,
   sessionId: string,
@@ -92,7 +109,8 @@ async function expectRunningCount(
  * shell with a null outcome. Desktop and phone share this flow through their
  * own specs (REQ-AGENTS-BACKGROUND-WORK-005 and -010, AC .5 and .6).
  * `signalFile` is the test-owned gate that releases the fixture's terminal
- * frames only after both running jobs have been observed.
+ * frames after the test observes both running jobs. The output E2E uses an
+ * earlier signal value to request one live output append before the release.
  */
 export async function expectClaudeBackgroundTerminalExit(
   testPage: Page,
@@ -174,4 +192,59 @@ export async function expectClaudeBackgroundTerminalExit(
   for (const workId of [jobs.first, jobs.second]) {
     await expect(testPage.getByTestId(`background-workload-card-${workId}`)).toBeVisible();
   }
+}
+
+export async function expectClaudeBackgroundShellOutput(
+  testPage: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+  signalFile: string,
+): Promise<void> {
+  const agentProfileId = await createClaudeACpProfile(apiClient);
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    "Claude background shell output",
+    agentProfileId,
+    {
+      description: "Claude background shell output",
+      repository_ids: [seedData.repositoryId],
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    },
+  );
+
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  const sessionId = task.session_id ?? (await firstSessionId(apiClient, task.id));
+  await session.sendMessageViaButton("/claude-background-terminal 15s 8s");
+  await session.expectChatResponseVisible("Two background commands are running.");
+  await expectRunningCount(apiClient, sessionId, 2);
+  const jobs = await resolveTerminalJobs(apiClient, sessionId);
+
+  await openBackgroundWorkActive(testPage);
+  await testPage.getByTestId(`open-workload-${jobs.first}`).click();
+  const liveDetail = testPage.getByTestId(`background-work-detail-${jobs.first}`);
+  await expect(liveDetail).toBeVisible();
+  const liveOutput = liveDetail.getByTestId("background-work-detail-scroll");
+  await expect(liveOutput).toContainText("Mock test suite started", { timeout: 30_000 });
+
+  fs.writeFileSync(signalFile, "append-live-output");
+  await expect(liveOutput).toContainText("Mock test suite is still running", { timeout: 30_000 });
+
+  fs.writeFileSync(signalFile, "release-terminal-frames");
+  await expectJobState(apiClient, sessionId, jobs.first, "ended");
+  await expectJobState(apiClient, sessionId, jobs.second, "ended");
+
+  await testPage.reload();
+  await expect(testPage.getByTestId("dockview-add-panel-btn").first()).toBeVisible({
+    timeout: 30_000,
+  });
+  await openBackgroundWorkHistory(testPage);
+  await testPage.getByTestId(`open-workload-${jobs.first}`).click();
+  const retainedDetail = testPage.getByTestId(`background-work-detail-${jobs.first}`);
+  await expect(retainedDetail).toBeVisible();
+  const retainedOutput = retainedDetail.getByTestId("background-work-detail-scroll");
+  await expect(retainedOutput).toContainText("Mock test suite started");
+  await expect(retainedOutput).toContainText("Mock test suite finished");
 }

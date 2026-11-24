@@ -115,6 +115,7 @@ var schemaInitializers = map[string]testconformance.Scenario{
 	"plugin-state":                pluginStateSchema,
 	"plugin-instance-state":       pluginInstanceStateSchema,
 	"plugin-user-state":           pluginUserStateSchema,
+	"plugin-command-receipts":     pluginCommandReceiptsSchema,
 	"plugin-task-change-requests": pluginTaskChangeRequestSchema,
 	"canvas":                      canvasSchema,
 	"github":                      githubSchema,
@@ -379,6 +380,13 @@ func pluginStateSchema(s testconformance.ScenarioContext) error {
 func pluginInstanceStateSchema(s testconformance.ScenarioContext) error {
 	if _, err := pluginstate.NewInstanceStore(pluginPool(s)); err != nil {
 		return fmt.Errorf("plugin instance state schema: %w", err)
+	}
+	return nil
+}
+
+func pluginCommandReceiptsSchema(s testconformance.ScenarioContext) error {
+	if _, err := pluginstate.NewCommandStore(pluginPool(s)); err != nil {
+		return fmt.Errorf("plugin command receipts schema: %w", err)
 	}
 	return nil
 }

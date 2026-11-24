@@ -265,6 +265,26 @@ ACP runtime selection does not replace the passthrough command.
 
 The status shown on this page is authoritative for the current host. A CLI that works in your interactive shell can still be absent from Kandev when the service has a different `PATH`, home directory, or operating-system user.
 
+### Pi thinking levels
+
+Pi's session mode controls its **thinking level**. It does not control tool permissions.
+The available levels depend on the selected model and the installed Pi provider extension.
+A model can advertise only **off**, even when its name contains “High”.
+
+In **Settings > Agents > Pi**, open the profile and choose **Thinking level**:
+
+- **Use provider default** removes the profile's thinking override. It keeps the model and exact-model setting.
+- A supported level, including **off**, saves an explicit override.
+- An unavailable saved value stays visible until you replace or clear it.
+
+If startup reports an unavailable or unapplied thinking level, no prompt was sent.
+If the level came from the profile, select **Edit profile**, choose a supported level or **Use provider default**, and save.
+If the level came from a session or workflow override, change that override or use the existing session configuration reset when applicable.
+If Kandev cannot identify the source, check both the profile and any overrides.
+Start a fresh session after you correct the setting. Saving a profile does not resend the failed prompt.
+
+Kandev uses the capabilities reported by Pi. Incorrect model metadata in a provider extension must be corrected in that extension.
+
 ### Update Oh My Pi on the Kandev host
 
 On an installed `omp` card, select the update icon under **Settings > Agents**.

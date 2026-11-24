@@ -87,8 +87,10 @@ func (r *stubProfileResolver) ResolveProfile(context.Context, string) (*AgentPro
 type inferenceHarness struct {
 	manager *Manager
 
-	mu       sync.Mutex
-	requests []utility.PromptRequest
+	mu                 sync.Mutex
+	requests           []utility.PromptRequest
+	promptStarted      chan struct{}
+	releasePromptAgent chan struct{}
 }
 
 // recorded returns a copy of the prompt requests the fake agentctl saw. The
@@ -115,6 +117,14 @@ func newInferenceHarness(t *testing.T, resolver ProfileResolver, registered ...a
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
+		}
+		if h.promptStarted != nil && h.releasePromptAgent != nil {
+			close(h.promptStarted)
+			select {
+			case <-h.releasePromptAgent:
+			case <-r.Context().Done():
+				return
+			}
 		}
 		h.mu.Lock()
 		h.requests = append(h.requests, req)

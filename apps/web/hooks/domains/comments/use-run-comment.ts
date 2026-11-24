@@ -4,6 +4,8 @@ import { appendToQueue, queueMessage } from "@/lib/api/domains/queue-api";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import {
+  appendCommentAttachmentMarker,
+  commentAttachmentsForDelivery,
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
@@ -64,6 +66,7 @@ function formatSingleComment(comment: Comment): string {
         lines.push("```");
       }
       lines.push(`> ${fc.text}`);
+      appendCommentAttachmentMarker(lines, fc);
       lines.push("", "---", "");
       return lines.join("\n");
     }
@@ -477,6 +480,8 @@ async function runSessionComment({
   const inputMode = deriveSessionInputMode(activeSession, queuedCount);
   const planModeEnabled = state.chatInput.planModeBySessionId[sessionId] ?? false;
   const content = formatSingleComment(comment);
+  const attachments = commentAttachmentsForDelivery([comment]);
+  const attachmentPayload = attachments.length > 0 ? { attachments } : {};
 
   if (inputMode === "unavailable") {
     throw new Error("Session is not available for input");
@@ -485,21 +490,27 @@ async function runSessionComment({
     if (!activeSession?.queue_incarnation_id) {
       throw new Error("Session is not available for input");
     }
-    await appendToQueue(
-      buildQueuePayload(
-        sessionId,
-        taskId,
-        activeSession.queue_incarnation_id,
-        content,
-        planModeEnabled,
-      ),
+    const queuePayload = buildQueuePayload(
+      sessionId,
+      taskId,
+      activeSession.queue_incarnation_id,
+      content,
+      planModeEnabled,
     );
+    if (attachments.length > 0) {
+      await queueMessage({ ...queuePayload, client_queue_id: generateUUID(), attachments });
+    } else {
+      await appendToQueue(queuePayload);
+    }
   } else {
     const client = getWebSocketClient();
     if (!client) throw new Error("WebSocket client unavailable");
     const created = await client.request<Message | undefined>(
       "message.add",
-      buildMessagePayload(sessionId, taskId, content, planModeEnabled, comment),
+      {
+        ...buildMessagePayload(sessionId, taskId, content, planModeEnabled, comment),
+        ...attachmentPayload,
+      },
       10000,
     );
     if (created?.id && created.session_id) storeApi.getState().addMessage(created);

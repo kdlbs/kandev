@@ -96,6 +96,8 @@ Quick Chat is an agent conversation outside the board. Use it for repository ori
 
 In Task Chat or Quick Chat, select text from a settled agent prose reply, then select the comment button that appears beside the selection. On a phone or tablet, the comment button joins the row of icons above the composer instead, so your device's own selection menu cannot cover it. The same applies in Office threads, Markdown previews, and code files, where the button appears in the bottom-right corner. The editor works like plan comments: enter feedback and choose **Add** to keep it as pending context, or **Run** to send it immediately. Pending selections use the same inline highlight and comment badge as plans; select either one to update or delete the feedback. Pending message comments are kept for the current browser tab, appear as composer context chips, and are included in the next prompt as Markdown. If the agent is busy, **Run** queues the feedback for its next turn.
 
+To include a file with feedback on an agent reply, walkthrough step, or file line, open the paperclip and choose **Add files**. Wait for each file to finish uploading before you add or run the comment. The agent receives a readable file path with that comment. If an upload fails, retry it or remove the file to continue.
+
 Inline comments are available only on ordinary settled prose. Streaming replies, tool/thinking/status output, plans, rich-block content, raw views, and user messages do not accept inline comments.
 
 ### Reference tasks and work items

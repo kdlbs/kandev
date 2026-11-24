@@ -211,6 +211,8 @@
   "attachmentSizeKb": "({{size}} ĶƁ)",
   "attachmentsCanTotalUpTo": "Àţţàćĥḿēńţś ćàń ţōţàĺ ũƥ ţō {{bytes}}.",
   "addFiles": "Àďď ƒĩĺēś",
+  "commentAttachments": "Ćōḿḿēńţ ƒĩĺēś",
+  "commentAttachmentsHint": "Àţţàćĥ śćŕēēńśĥōţś ōŕ ƒĩĺēś ţō ţĥĩś ćōḿḿēńţ.",
   "answerAttachments": "Àńśŵēŕ ƒĩĺēś",
   "answerAttachmentsHint": "Àţţàćĥ śćŕēēńśĥōţś ōŕ ƒĩĺēś ţō ţĥĩś àńśŵēŕ.",
   "answerAttachmentsLimit": "Ũƥ ţō {{maxFiles}} ƒĩĺēś, {{maxSize}} ţōţàĺ.",
@@ -3356,5 +3358,16 @@
   "previewMoveToolbarHint": "Ďŕàĝ ţō ḿōvē. Ďōũƀĺē-ćĺĩćķ ţō ƥũţ ĩţ ƀàćķ àţ ţĥē ţōƥ.",
   "previewHideComments": "Ĥĩďē ćōḿḿēńţś",
   "referenceCurrentTitle": "Ćũŕŕēńţ ţĩţĺē: {{title}}",
-  "referenceOpenForDetails": "Ōƥēń ţĥē ţàśķ ƒōŕ ďēţàĩĺś."
+  "referenceOpenForDetails": "Ōƥēń ţĥē ţàśķ ƒōŕ ďēţàĩĺś.",
+  "sessionBootstrapThinkingFailedTitle": "Ţĥĩńķĩńĝ ĺēvēĺ ćōũĺď ńōţ ƀē àƥƥĺĩēď",
+  "sessionBootstrapThinkingUnknownBody": "Ţĥē ţĥĩńķĩńĝ ĺēvēĺ ćōũĺď ńōţ ƀē àƥƥĺĩēď ƀēƒōŕē śţàŕţũƥ.",
+  "sessionBootstrapThinkingUnavailableBody": "{{agent}} ćàńńōţ ũśē ţĥĩńķĩńĝ ĺēvēĺ “{{level}}” ŵĩţĥ ţĥē śēĺēćţēď ḿōďēĺ.",
+  "sessionBootstrapThinkingMismatchBody": "{{agent}} ŕēƥōŕţēď “{{effectiveLevel}}” ĩńśţēàď ōƒ ţĥē ŕēqũēśţēď ţĥĩńķĩńĝ ĺēvēĺ “{{level}}”.",
+  "sessionBootstrapThinkingUnconfirmedBody": "{{agent}} ďĩď ńōţ ćōńƒĩŕḿ ţĥĩńķĩńĝ ĺēvēĺ “{{level}}”.",
+  "sessionBootstrapThinkingFailedBody": "{{agent}} ćōũĺď ńōţ àƥƥĺŷ ţĥĩńķĩńĝ ĺēvēĺ “{{level}}”.",
+  "sessionErrorDetailThinkingLevel": "Ŕēqũēśţēď ţĥĩńķĩńĝ ĺēvēĺ",
+  "sessionErrorDetailEffectiveThinkingLevel": "Ēƒƒēćţĩvē ţĥĩńķĩńĝ ĺēvēĺ",
+  "thinkingProfileHelp": "Ēďĩţ ţĥē ƥŕōƒĩĺē àńď ćĥōōśē Ũśē ƥŕōvĩďēŕ ďēƒàũĺţ ōŕ à śũƥƥōŕţēď ţĥĩńķĩńĝ ĺēvēĺ. Śàvē ƀēƒōŕē śţàŕţĩńĝ à ƒŕēśĥ śēśśĩōń.",
+  "thinkingSessionHelp": "À śēśśĩōń ōŕ ŵōŕķƒĺōŵ ōvēŕŕĩďē śũƥƥĺĩēś ţĥĩś ţĥĩńķĩńĝ ĺēvēĺ. Ćĥàńĝē ţĥàţ ōvēŕŕĩďē ōŕ ŕēśēţ ţĥē śēśśĩōń ćōńƒĩĝũŕàţĩōń ţō ĩţś ƥŕōƒĩĺē.",
+  "thinkingUnknownSourceHelp": "Ćĥēćķ ţĥē Ƥĩ ţĥĩńķĩńĝ ĺēvēĺ ĩń ţĥē ƥŕōƒĩĺē àńď àńŷ śēśśĩōń ōŕ ŵōŕķƒĺōŵ ōvēŕŕĩďēś ƀēƒōŕē śţàŕţĩńĝ à ƒŕēśĥ śēśśĩōń."
 }

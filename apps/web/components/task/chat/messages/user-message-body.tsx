@@ -25,6 +25,7 @@ type UserMessageBodyOptions = {
   hasAttachments: boolean;
   content: string;
   rawContent?: string;
+  attachments?: readonly { comment_id?: string }[];
   promptMentionComponents?: Components;
   taskMentions?: readonly TaskMentionReference[];
   taskId: string;
@@ -299,11 +300,24 @@ function CoordinatorAboutMessage({
   );
 }
 
+function hideCommentAttachmentMarkers(
+  content: string,
+  attachments: UserMessageBodyOptions["attachments"],
+) {
+  if (!attachments?.some((attachment) => attachment.comment_id)) return content;
+  const ids = new Set(attachments.map((attachment) => attachment.comment_id));
+  return content.replace(
+    /^<!-- kandev-comment-files:([a-zA-Z0-9_-]{1,128}) -->$\n?/gm,
+    (line, id: string) => (ids.has(id) ? "" : line),
+  );
+}
+
 export function renderUserMessageBody({
   hasContent,
   showRaw,
   hasAttachments,
-  content,
+  content: storedContent,
+  attachments,
   rawContent,
   promptMentionComponents,
   taskMentions,
@@ -313,7 +327,7 @@ export function renderUserMessageBody({
   taskOrigin,
 }: UserMessageBodyOptions): React.ReactNode {
   if (hasContent && showRaw) {
-    const raw = rawContent || content;
+    const raw = rawContent || storedContent;
     return (
       <BoundedMessagePreview
         source={raw}
@@ -325,6 +339,7 @@ export function renderUserMessageBody({
     );
   }
   if (hasContent) {
+    const content = hideCommentAttachmentMarkers(storedContent, attachments);
     const coordinatorPrefix =
       taskOrigin === "coordinator" ? parseCoordinatorAboutPrefix(content) : null;
     if (coordinatorPrefix) {

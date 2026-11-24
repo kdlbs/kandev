@@ -11,6 +11,10 @@ The [explicit Auggie recovery amendment](explicit-resume-settings.md) permits on
 
 ## Overview
 
+[Session setting semantics](session-setting-semantics.md) defines the proposed
+classification of Pi legacy thinking aliases. Thinking does not grant permissions;
+the strict permission guarantees below remain unchanged.
+
 An agent profile exposes a permission `mode`, an `auto_approve` toggle, and
 `cli_flags`. Kandev must distinguish a delivered control from an accepted but
 ineffective control. It must report the effective mode and its source.

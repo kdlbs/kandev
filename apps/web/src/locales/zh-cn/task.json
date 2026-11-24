@@ -180,6 +180,8 @@
   "attachmentSizeKb": "({{size}} KB)",
   "attachmentsCanTotalUpTo": "附件总大小最多 {{bytes}}。",
   "addFiles": "添加文件",
+  "commentAttachments": "评论文件",
+  "commentAttachmentsHint": "为此评论附加截图或文件。",
   "answerAttachments": "回答文件",
   "answerAttachmentsHint": "为此回答附加截图或文件。",
   "answerAttachmentsLimit": "最多 {{maxFiles}} 个文件，总计 {{maxSize}}。",
@@ -3356,5 +3358,16 @@
   "previewHideCapture": "隐藏截取内容",
   "previewHideComments": "隐藏评论",
   "referenceCurrentTitle": "当前标题：{{title}}",
-  "referenceOpenForDetails": "打开任务以查看详情。"
+  "referenceOpenForDetails": "打开任务以查看详情。",
+  "sessionBootstrapThinkingFailedTitle": "无法应用思考级别",
+  "sessionBootstrapThinkingUnknownBody": "无法在启动前应用思考级别。",
+  "sessionBootstrapThinkingUnavailableBody": "{{agent}} 无法对所选模型使用思考级别“{{level}}”。",
+  "sessionBootstrapThinkingMismatchBody": "{{agent}} 报告的级别为“{{effectiveLevel}}”，而非请求的思考级别“{{level}}”。",
+  "sessionBootstrapThinkingUnconfirmedBody": "{{agent}} 未确认思考级别“{{level}}”。",
+  "sessionBootstrapThinkingFailedBody": "{{agent}} 无法应用思考级别“{{level}}”。",
+  "sessionErrorDetailThinkingLevel": "请求的思考级别",
+  "sessionErrorDetailEffectiveThinkingLevel": "实际思考级别",
+  "thinkingProfileHelp": "编辑配置文件，选择“使用提供商默认值”或受支持的思考级别。保存后再启动新会话。",
+  "thinkingSessionHelp": "此思考级别由会话或工作流的覆盖设置指定。请修改该覆盖设置，或将会话配置重置为配置文件的设置。",
+  "thinkingUnknownSourceHelp": "启动新会话前，请检查配置文件中的 Pi 思考级别，以及会话或工作流中的覆盖设置。"
 }

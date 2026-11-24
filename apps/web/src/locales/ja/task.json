@@ -211,6 +211,8 @@
   "attachmentSizeKb": "({{size}} KB)",
   "attachmentsCanTotalUpTo": "添付ファイル合計は最大 {{bytes}} まで。",
   "addFiles": "ファイルを追加",
+  "commentAttachments": "コメントのファイル",
+  "commentAttachmentsHint": "このコメントにスクリーンショットやファイルを添付します。",
   "answerAttachments": "回答ファイル",
   "answerAttachmentsHint": "この回答にスクリーンショットやファイルを添付します。",
   "answerAttachmentsLimit": "最大 {{maxFiles}} ファイル、合計 {{maxSize}}。",
@@ -3356,5 +3358,16 @@
   "previewHideCapture": "キャプチャを非表示",
   "previewHideComments": "コメントを非表示",
   "referenceCurrentTitle": "現在のタイトル：{{title}}",
-  "referenceOpenForDetails": "タスクを開いて詳細を確認してください。"
+  "referenceOpenForDetails": "タスクを開いて詳細を確認してください。",
+  "sessionBootstrapThinkingFailedTitle": "思考レベルを適用できませんでした",
+  "sessionBootstrapThinkingUnknownBody": "起動前に思考レベルを適用できませんでした。",
+  "sessionBootstrapThinkingUnavailableBody": "{{agent}} は選択したモデルで思考レベル「{{level}}」を使用できません。",
+  "sessionBootstrapThinkingMismatchBody": "{{agent}} は要求された思考レベル「{{level}}」ではなく「{{effectiveLevel}}」を報告しました。",
+  "sessionBootstrapThinkingUnconfirmedBody": "{{agent}} は思考レベル「{{level}}」を確認しませんでした。",
+  "sessionBootstrapThinkingFailedBody": "{{agent}} は思考レベル「{{level}}」を適用できませんでした。",
+  "sessionErrorDetailThinkingLevel": "要求された思考レベル",
+  "sessionErrorDetailEffectiveThinkingLevel": "実際の思考レベル",
+  "thinkingProfileHelp": "プロファイルを編集し、プロバイダーの既定値または対応する思考レベルを選択してください。保存してから新しいセッションを開始してください。",
+  "thinkingSessionHelp": "この思考レベルはセッションまたはワークフローの上書き設定で指定されています。その設定を変更するか、セッション設定をプロファイルの設定に戻してください。",
+  "thinkingUnknownSourceHelp": "新しいセッションを開始する前に、プロファイルの Pi の思考レベルと、セッションまたはワークフローの上書き設定を確認してください。"
 }

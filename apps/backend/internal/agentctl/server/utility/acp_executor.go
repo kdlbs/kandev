@@ -1409,6 +1409,17 @@ func applySessionCompatibility(out *ProbeResponse, agentID string) {
 		base = append(base, converted)
 	}
 	normalized := acpcompat.NormalizeSessionConfig(agentID, base, models, out.CurrentModelID)
+	if agentID == acpcompat.PiAgentID && len(base) > 0 {
+		out.Modes = nil
+		out.CurrentModeID = ""
+		if option, ok := acpcompat.ThinkingOption(base); ok {
+			out.CurrentModeID = option.CurrentValue
+			for _, choice := range option.Options {
+				out.Modes = append(out.Modes, ProbeMode{ID: choice.Value, Name: choice.Name, Description: choice.Description})
+			}
+		}
+	}
+
 	out.ConfigOptions = make([]ProbeConfigOption, 0, len(normalized))
 	for _, option := range normalized {
 		converted := ProbeConfigOption{
