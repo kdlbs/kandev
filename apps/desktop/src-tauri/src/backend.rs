@@ -1346,6 +1346,91 @@ fn normalized_path(existing: Option<&OsString>, home_dir: Option<&Path>) -> OsSt
     env::join_paths(entries).unwrap_or_else(|_| existing.cloned().unwrap_or_default())
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+struct NvmNodeVersion([u64; 3]);
+
+#[cfg(target_os = "macos")]
+fn parse_nvm_node_version(value: &str) -> Option<(NvmNodeVersion, usize)> {
+    let value = value.strip_prefix('v').unwrap_or(value);
+    let parts: Vec<&str> = value.split('.').collect();
+    if parts.is_empty() || parts.len() > 3 {
+        return None;
+    }
+
+    let mut version = [0; 3];
+    for (index, part) in parts.iter().enumerate() {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        version[index] = part.parse().ok()?;
+    }
+    Some((NvmNodeVersion(version), parts.len()))
+}
+
+#[cfg(target_os = "macos")]
+fn nvm_default_node_bin(home_dir: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let alias_path = home_dir.join(".nvm/alias/default");
+    if !fs::metadata(&alias_path).is_ok_and(|metadata| metadata.is_file()) {
+        return None;
+    }
+    let alias = fs::read_to_string(alias_path).ok()?;
+    let default = alias
+        .lines()
+        .map(|line| line.split('#').next().unwrap_or_default().trim())
+        .find(|line| !line.is_empty())?;
+    let prefix = if default == "node" {
+        None
+    } else {
+        Some(parse_nvm_node_version(default)?)
+    };
+    let versions_dir = home_dir.join(".nvm/versions/node");
+    let mut selected: Option<(NvmNodeVersion, PathBuf)> = None;
+
+    for entry in fs::read_dir(versions_dir).ok()?.flatten() {
+        if !entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+            continue;
+        }
+        let version_name = entry.file_name();
+        let Some(version_name) = version_name.to_str() else {
+            continue;
+        };
+        if !version_name.starts_with('v') {
+            continue;
+        }
+        let Some((version, component_count)) = parse_nvm_node_version(version_name) else {
+            continue;
+        };
+        if component_count != 3 {
+            continue;
+        }
+        if let Some((prefix, prefix_len)) = prefix {
+            if version.0[..prefix_len] != prefix.0[..prefix_len] {
+                continue;
+            }
+        }
+        if selected
+            .as_ref()
+            .is_none_or(|(current, _)| version > *current)
+        {
+            selected = Some((version, entry.path().join("bin")));
+        }
+    }
+
+    let bin = selected?.1;
+    ["node", "npm", "npx"]
+        .into_iter()
+        .all(|tool| {
+            let path = bin.join(tool);
+            path.is_file()
+                && fs::metadata(path)
+                    .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+        })
+        .then_some(bin)
+}
+
 fn common_path_entries(home_dir: Option<&Path>) -> Vec<PathBuf> {
     let mut entries = if cfg!(windows) {
         Vec::new()
@@ -1373,6 +1458,12 @@ fn common_path_entries(home_dir: Option<&Path>) -> Vec<PathBuf> {
         } else {
             entries.push(home.join(".bun/bin"));
             entries.push(home.join(".opencode/bin"));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = home_dir {
+        if let Some(nvm_bin) = nvm_default_node_bin(home) {
+            entries.push(nvm_bin);
         }
     }
     entries
@@ -1545,6 +1636,59 @@ mod tests {
     use super::*;
     use std::fs;
 
+    #[cfg(target_os = "macos")]
+    fn make_test_executable(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(path)
+            .expect("read executable fixture permissions")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(path, permissions).expect("set executable fixture permissions");
+    }
+
+    #[cfg(target_os = "macos")]
+    fn write_test_executable(path: &Path, output: &str) {
+        fs::write(path, format!("#!/bin/sh\nprintf '%s\\n' '{output}'\n"))
+            .expect("write executable fixture");
+        make_test_executable(path);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn install_nvm_test_version(home: &Path, version: &str, omit_tool: Option<&str>) -> PathBuf {
+        let bin = home.join(".nvm/versions/node").join(version).join("bin");
+        fs::create_dir_all(&bin).expect("create nvm bin fixture");
+        for tool in ["node", "npm", "npx"] {
+            if Some(tool) != omit_tool {
+                write_test_executable(&bin.join(tool), &format!("{tool}-{version}"));
+            }
+        }
+        bin
+    }
+
+    #[cfg(target_os = "macos")]
+    fn write_nvm_test_default(home: &Path, contents: &str) -> PathBuf {
+        let alias_path = home.join(".nvm/alias/default");
+        fs::create_dir_all(alias_path.parent().expect("nvm alias parent"))
+            .expect("create nvm alias directory");
+        fs::write(&alias_path, contents).expect("write nvm default alias");
+        alias_path
+    }
+
+    #[cfg(target_os = "macos")]
+    fn create_test_fifo(path: &Path) {
+        use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+        let path = CString::new(path.as_os_str().as_bytes()).expect("convert FIFO path");
+        let result = unsafe { libc::mkfifo(path.as_ptr(), 0o600) };
+        assert_eq!(
+            result,
+            0,
+            "create alias FIFO: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
     #[test]
     fn command_spec_uses_headless_launcher_and_loopback_env() {
         let runtime_dir = temp_runtime_dir("command-spec");
@@ -1637,6 +1781,178 @@ mod tests {
         assert_eq!(entries.first(), Some(&PathBuf::from("/existing/bin")));
         assert!(entries.contains(&PathBuf::from("/usr/local/bin")) || cfg!(windows));
         assert!(entries.contains(&home_dir.join(".local/bin")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_nvm_launch_resolves_nvm_tools() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_root("nvm-launch");
+        let home = root.join("home");
+        let inherited_bin = home.join("inherited/bin");
+        fs::create_dir_all(&inherited_bin).expect("create inherited bin fixture");
+        write_test_executable(&inherited_bin.join("node"), "inherited-node");
+
+        let stray_v22_9_bin = install_nvm_test_version(&home, "22.9.0", None);
+        let v22_9_bin = install_nvm_test_version(&home, "v22.9.0", None);
+        let v22_10_bin = install_nvm_test_version(&home, "v22.10.0", None);
+        let alias_path = write_nvm_test_default(&home, "");
+        let runtime_dir = temp_runtime_dir("nvm-launch-runtime");
+        let launcher = runtime_dir.join("bin/kandev");
+        fs::write(&launcher, "#!/bin/sh\nprintf '%s\\n' \"$PATH\"\n")
+            .expect("write PATH-printing launcher stub");
+        make_test_executable(&launcher);
+
+        let cases = [
+            (Some("node"), Some(v22_10_bin.as_path())),
+            (Some("22"), Some(v22_10_bin.as_path())),
+            (Some("v22.9.0"), Some(v22_9_bin.as_path())),
+            (Some("22.9.0"), Some(v22_9_bin.as_path())),
+            (
+                Some("# default managed by nvm\n\n22.9.0 # select numeric Node version"),
+                Some(v22_9_bin.as_path()),
+            ),
+            (Some("22.9"), Some(v22_9_bin.as_path())),
+            (Some("v22.10"), Some(v22_10_bin.as_path())),
+            (Some("lts/*"), None),
+            (Some("22..9"), None),
+            (None, None),
+        ];
+
+        for (default, expected_bin) in cases {
+            match default {
+                Some(default) => fs::write(&alias_path, default).expect("write nvm default alias"),
+                None => fs::remove_file(&alias_path).expect("remove nvm default alias"),
+            }
+
+            let mut inherited = BTreeMap::new();
+            inherited.insert(
+                OsString::from("PATH"),
+                env::join_paths([inherited_bin.as_path()]).expect("join inherited PATH"),
+            );
+            let spec = build_backend_command(&runtime_dir, 48123, inherited, Some(&home))
+                .expect("build backend command");
+            let path = spec.env.get(OsStr::new("PATH")).expect("launcher PATH");
+            let entries: Vec<PathBuf> = env::split_paths(path).collect();
+
+            let mut expected_entries = vec![
+                inherited_bin.clone(),
+                PathBuf::from("/opt/homebrew/bin"),
+                PathBuf::from("/usr/local/bin"),
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin"),
+                home.join(".local/bin"),
+                home.join(".bun/bin"),
+                home.join(".opencode/bin"),
+            ];
+            if let Some(expected_bin) = expected_bin {
+                expected_entries.push(expected_bin.to_path_buf());
+            }
+            assert_eq!(entries, expected_entries, "default alias: {default:?}");
+
+            let child = spawn_backend_command(&spec)
+                .expect("spawn PATH-printing launcher stub")
+                .wait_with_output()
+                .expect("wait for PATH-printing launcher stub");
+            assert!(child.status.success());
+            assert_eq!(
+                String::from_utf8(child.stdout).expect("child PATH output"),
+                format!("{}\n", path.to_string_lossy()),
+                "default alias: {default:?}"
+            );
+        }
+
+        assert!(stray_v22_9_bin.is_dir());
+        install_nvm_test_version(&home, "v22.11.0", Some("npx"));
+        fs::write(&alias_path, "node").expect("select incomplete latest nvm version");
+        let mut inherited = BTreeMap::new();
+        inherited.insert(
+            OsString::from("PATH"),
+            env::join_paths([inherited_bin.as_path()]).expect("join inherited PATH"),
+        );
+        let spec = build_backend_command(&runtime_dir, 48123, inherited, Some(&home))
+            .expect("build command with incomplete nvm version");
+        let entries: Vec<PathBuf> =
+            env::split_paths(spec.env.get(OsStr::new("PATH")).unwrap()).collect();
+        assert!(!entries.contains(&home.join(".nvm/versions/node/v22.11.0/bin")));
+        assert!(!entries.contains(&v22_10_bin));
+
+        let v22_12_bin = install_nvm_test_version(&home, "v22.12.0", None);
+        let npx_path = v22_12_bin.join("npx");
+        let mut permissions = fs::metadata(&npx_path)
+            .expect("read npx fixture permissions")
+            .permissions();
+        permissions.set_mode(0o600);
+        fs::set_permissions(&npx_path, permissions).expect("make npx fixture non-executable");
+        fs::write(&alias_path, "node").expect("select non-executable nvm version");
+        let mut inherited = BTreeMap::new();
+        inherited.insert(
+            OsString::from("PATH"),
+            env::join_paths([inherited_bin.as_path()]).expect("join inherited PATH"),
+        );
+        let spec = build_backend_command(&runtime_dir, 48123, inherited, Some(&home))
+            .expect("build command with non-executable nvm tool");
+        let entries: Vec<PathBuf> =
+            env::split_paths(spec.env.get(OsStr::new("PATH")).unwrap()).collect();
+        assert!(!entries.contains(&v22_12_bin));
+        assert!(!entries.contains(&v22_10_bin));
+
+        fs::remove_dir_all(root).expect("remove nvm launch fixture");
+        fs::remove_dir_all(runtime_dir).expect("remove runtime fixture");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_nvm_ignores_non_regular_default_alias() {
+        let root = temp_root("nvm-fifo-alias");
+        let alias_path = root.join(".nvm/alias/default");
+        fs::create_dir_all(alias_path.parent().expect("nvm alias parent"))
+            .expect("create nvm alias directory");
+        create_test_fifo(&alias_path);
+
+        let home = root.clone();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let lookup = thread::spawn(move || {
+            done_tx
+                .send(nvm_default_node_bin(&home))
+                .expect("send alias lookup result");
+        });
+        let result = done_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("non-regular alias lookup must not block");
+
+        assert_eq!(result, None);
+        lookup.join().expect("join alias lookup");
+        fs::remove_dir_all(root).expect("remove FIFO alias fixture");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_nvm_ignores_unprefixed_installed_version_directories() {
+        let root = temp_root("nvm-unprefixed-version");
+        let home = root.join("home");
+        install_nvm_test_version(&home, "22.9.0", None);
+        install_nvm_test_version(&home, "vv22.9.0", None);
+        write_nvm_test_default(&home, "22.9.0");
+
+        assert_eq!(nvm_default_node_bin(&home), None);
+        fs::remove_dir_all(root).expect("remove unprefixed nvm version fixture");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_nvm_reads_first_numeric_alias_after_comments() {
+        let root = temp_root("nvm-commented-alias");
+        let home = root.join("home");
+        let expected_bin = install_nvm_test_version(&home, "v22.9.0", None);
+        write_nvm_test_default(
+            &home,
+            "# configured by nvm\n\n22.9.0 # selected numeric version\n# ignored alias\n",
+        );
+
+        assert_eq!(nvm_default_node_bin(&home), Some(expected_bin));
+        fs::remove_dir_all(root).expect("remove commented alias fixture");
     }
 
     #[test]
