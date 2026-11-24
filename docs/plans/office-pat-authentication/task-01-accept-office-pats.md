@@ -28,8 +28,8 @@ Office continues to validate agent JWTs in its own middleware and runtime handle
 ## Scope
 
 - In `AgentAuthMiddleware`, detect PAT bearers with `auth.IsPATFormat(strings.TrimSpace(token))`.
-- Read the real user identity with `authn.FromGin` and pass the request to the workspace guard.
-- If the identity is absent or synthetic, abort with the existing Office `401 {"error":"invalid token"}` response.
+- Read the identity with `authn.FromGin` and pass the request to the workspace guard.
+- When authentication is enabled, an unresolved PAT has no identity and must receive the existing Office `401 {"error":"invalid token"}` response. When authentication is disabled, the synthetic identity means a PAT-shaped bearer is treated as if no bearer was sent.
 - Keep the raw token for the non-PAT agent JWT path.
 - Add a sentence in the existing personal access token section of the public auth reference. Explain that user-facing Office routes use the same bearer header and runtime routes require an agent JWT.
 
@@ -40,7 +40,7 @@ The Office workspace guard owns workspace authorization. Runtime callbacks verif
 
 1. An owning PAT returns the project's data with HTTP 200. A valid PAT without access to the workspace returns 404.
 2. An unrecognized PAT without a valid cookie returns 401. A valid cookie takes precedence over a PAT on the same request. Required credential lookup errors return 503.
-3. The agent JWT tests pass, and a user PAT receives 401 on an agent runtime route. With auth disabled, a credentialless Office request succeeds and a PAT bearer receives 401.
+3. The agent JWT tests pass, and a user PAT receives 401 on an agent runtime route. With auth disabled, a credentialless Office request and a PAT-shaped bearer both succeed on the metadata route.
 
 ## Regression test
 
@@ -59,7 +59,7 @@ Send a valid session and the unregistered PAT to the owned project list to asser
 Send the valid PAT to `/api/v1/office/runtime/projects` to assert `401 {"error":"invalid runtime token"}`.
 
 In `TestOfficePATAuthenticationDisabledMode`, use `newDisabledAuthService` on the same route mount.
-Assert 200 on Office metadata without a bearer and 401 with a PAT bearer.
+Assert 200 on Office metadata both without a bearer and with a PAT-shaped bearer.
 
 ## Verification
 
@@ -95,7 +95,7 @@ This work order runs independently.
 
 ## Risk
 
-A PAT-shaped bearer can reach Office before authentication succeeds. Reject it before handler dispatch unless the request has a real user identity.
+A PAT-shaped bearer can reach Office before authentication succeeds. With authentication enabled, reject it before handler dispatch unless a verified user identity exists. With authentication disabled, global auth supplies the synthetic identity and Office treats the PAT-shaped bearer like no bearer.
 
 ## Parallelism
 

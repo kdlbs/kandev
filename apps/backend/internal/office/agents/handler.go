@@ -72,8 +72,7 @@ func AgentAuthMiddleware(svc *AgentService) gin.HandlerFunc {
 		}
 		token := strings.TrimPrefix(authorization, "Bearer ")
 		if auth.IsPATFormat(strings.TrimSpace(token)) {
-			identity, ok := authn.FromGin(c)
-			if !ok || identity.Synthetic {
+			if _, ok := authn.FromGin(c); !ok {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 				return
 			}

@@ -94,11 +94,12 @@ This conditional change must be explicit in public reference documentation and m
 
 The Office route group receives the identity that `httpmw.Middleware` puts in the request context.
 `AgentAuthMiddleware` uses `auth.IsPATFormat` with the same whitespace handling as `httpmw.BearerToken` to classify PAT bearers.
-For a PAT bearer, the middleware passes a real user identity from `authn.FromGin` to `officeWorkspaceScopeMiddleware`.
+With authentication enabled, a PAT bearer passes a verified user identity from `authn.FromGin` to `officeWorkspaceScopeMiddleware`.
 A valid session cookie can supply that identity because `httpmw.ResolveRequest` gives the cookie precedence.
-If the request has no identity or has a synthetic identity, the Office middleware returns HTTP 401 with `invalid token`.
+If authentication is enabled and the request has no identity, the Office middleware returns HTTP 401 with `invalid token`.
+When authentication is disabled, global auth supplies a synthetic identity and the Office middleware treats a PAT-shaped bearer as if no bearer was sent.
 
-The workspace guard applies user authorization to session and PAT callers.
+The workspace guard applies user authorization to session and PAT callers when authentication is enabled.
 The agent JWT path validates the signature and supplies the agent claims for workspace authorization.
 Office runtime callbacks also verify their own agent JWT in `contextFromRequest`.
 

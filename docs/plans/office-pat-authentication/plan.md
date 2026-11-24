@@ -27,13 +27,13 @@ A session cookie received 200 on the Office project list.
 ## Scope and technical approach
 
 In `apps/backend/internal/office/agents/handler.go`, classify PAT bearers with `auth.IsPATFormat` after trimming surrounding whitespace for that check.
-Require a real identity from `authn.FromGin` for that branch.
-If the request has a real identity, pass it to Office workspace authorization. Otherwise, return the existing 401 response.
+Require an identity from `authn.FromGin` for that branch.
+When authentication is enabled, pass the verified user identity to Office workspace authorization and return the existing 401 response if no identity exists. When authentication is disabled, global auth supplies a synthetic identity, so treat the PAT-shaped bearer as if no bearer was sent.
 
 The change belongs at the Office boundary because global auth already resolves the cookie and PAT and handles storage errors.
 Continue to pass non-PAT bearers to the agent JWT validator with the existing token extraction.
 The runtime handlers authenticate Office agents with their own JWT check.
-When auth is disabled, credentialless Office requests pass through and PAT bearers still receive 401.
+When auth is disabled, credentialless Office requests and PAT-shaped bearers pass through with the synthetic identity.
 Add a short clarification to the public auth reference during implementation. [Office bearer authentication design](../../specs/auth/system-design/credential-lookup-failures.md#office-bearer-authentication)
 
 ## Tests
@@ -45,7 +45,7 @@ This exercises the API from the Authorization header to the project response.
 | --- | --- |
 | `AC-AUTH-AUTH-001.4`, `.7` | `TestOfficePATAuthentication` returns the seeded project for an owning PAT and 404 for a workspace outside the caller’s scope. It also covers the global bearer whitespace rules. |
 | `AC-AUTH-AUTH-001.12`, `.13` | The same test returns 401 for an unrecognized PAT on Office metadata and 200 when a valid session cookie accompanies that bearer on the project list. |
-| `AC-AUTH-AUTH-001.16` | A user PAT receives 401 from the runtime JWT check. `TestOfficePATAuthenticationDisabledMode` covers credentialless access and PAT rejection in disabled mode. The existing Office JWT tests cover agent authorization. |
+| `AC-AUTH-AUTH-001.16` | A user PAT receives 401 from the runtime JWT check. `TestOfficePATAuthenticationDisabledMode` covers credentialless access and confirms a PAT-shaped bearer has the same result in disabled mode. The existing Office JWT tests cover agent authorization. |
 | `AC-AUTH-AUTH-001.11`, `.13`, `.16` | The existing `internal/auth/httpmw` tests cover cookie and PAT lookup errors, fallback, and downstream deferral. |
 
 ## Work orders
@@ -61,11 +61,11 @@ Cookie precedence, runtime JWT enforcement, disabled mode, and the selected agen
 The specification catalog, specification lint, and PR documentation coverage preflight passed.
 The coverage preflight used `internal/office/agents/handler.go` as the proposed code change.
 
-The permanent regression reproduced the 401 before the middleware change and passed afterward. It covers owning and whitespace-padded PATs, foreign-workspace denial, invalid PAT rejection, session-cookie precedence, runtime JWT enforcement, and disabled-mode behavior.
+The permanent regression reproduced the 401 before the middleware change and passed afterward. It covers owning and whitespace-padded PATs, foreign-workspace denial, invalid PAT rejection, session-cookie precedence, runtime JWT enforcement, and disabled-mode behavior. During PR fixup, the disabled-mode regression first failed with 401, then passed after the middleware treated the PAT-shaped bearer like no bearer.
 The focused Go tests passed in `internal/backendapp`, `internal/office/agents`, and `internal/auth/httpmw`.
 The full backend build, changed-file Go lint, public documentation tests and validation, and `git diff --check` passed.
 
 ## Risk
 
 The global layer can defer an unresolved bearer to Office.
-The PAT prefix classifies the credential. Office must require a real user identity even on routes without a workspace parameter.
+The PAT prefix classifies the credential. With authentication enabled, Office requires an authenticated identity even on routes without a workspace parameter. With authentication disabled, the synthetic identity makes a PAT-shaped bearer behave like no bearer.

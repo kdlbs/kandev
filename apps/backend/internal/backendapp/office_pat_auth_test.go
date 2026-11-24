@@ -104,8 +104,8 @@ func TestOfficePATAuthenticationDisabledMode(t *testing.T) {
 	}
 
 	rec = officePATGet(t, router, authSvc, "/api/v1/office/meta", auth.PATPrefix+"unregistered", "")
-	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), `"error":"invalid token"`) {
-		t.Fatalf("disabled-mode PAT response = %d %s, want 401 invalid token", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disabled-mode PAT response = %d %s, want 200 like a request without a bearer", rec.Code, rec.Body.String())
 	}
 }
 
