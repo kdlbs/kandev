@@ -1,6 +1,6 @@
 ---
 created: 2026-11-24
-status: done
+status: in_progress
 requirements:
   - REQ-UI-QUICK-CHAT-ELEVATION-001
 system_design:
@@ -130,7 +130,7 @@ and `-50% -50%` translation. See the work order for the exact commands.
 
 ## Work orders
 
-- [x] [Task 01. Restore sharp text in the Quick Chat modal](task-01-transform-free-dialog.md)
+- [ ] [Task 01. Restore sharp text in the Quick Chat modal](task-01-transform-free-dialog.md)
 
 ## Verification results
 
@@ -147,6 +147,7 @@ lint, and `git diff --check` also passed. The native Orion comparison remains
 pending because this Linux environment cannot run Orion on macOS.
 The review follow-up keeps WebKit auto margins active at every viewport and
 asserts the app's normal Chromium engine marker.
+The plan remains in progress until the native comparison is recorded.
 
 ## Risks
 

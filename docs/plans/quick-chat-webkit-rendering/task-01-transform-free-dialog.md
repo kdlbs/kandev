@@ -1,7 +1,7 @@
 ---
 id: "01-transform-free-dialog"
 title: "Restore sharp text in the Quick Chat modal"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -165,3 +165,4 @@ fade keyframes.
 - Review follow-up: WebKit auto margins now apply at every viewport, the exit
   animation listener is installed before Escape with a bounded assertion, and
   the Chromium control verifies the runtime `other` marker.
+- Delivery remains in progress until native Orion comparison results are recorded.
