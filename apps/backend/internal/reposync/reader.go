@@ -21,6 +21,12 @@ type GitHubClientProvider interface {
 	) ([]byte, error)
 }
 
+// GitHubRefResolver resolves a repository ref through a workspace's GitHub
+// connection. Callers can use the SHA to read one immutable repository snapshot.
+type GitHubRefResolver interface {
+	ResolveRepoRefForWorkspace(ctx context.Context, workspaceID, owner, repo, ref string) (string, error)
+}
+
 // GitLabClientProvider exposes workspace-routed GitLab repository reads.
 type GitLabClientProvider interface {
 	ListRepoTreeForWorkspace(
@@ -35,6 +41,7 @@ type GitLabClientProvider interface {
 // interfaces, so drift breaks the build rather than DI wiring.
 var (
 	_ GitHubClientProvider = (*github.Service)(nil)
+	_ GitHubRefResolver    = (*github.Service)(nil)
 	_ GitLabClientProvider = (*gitlab.Service)(nil)
 )
 
