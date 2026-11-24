@@ -103,6 +103,13 @@ GOWORK=off bash scripts/lint-go-changed \
   apps/backend/internal/agentctl/server/api/agent.go \
   apps/backend/internal/agentctl/server/api/agent_initialize_protocol_test.go \
   apps/backend/internal/agentctl/server/process/acp_preview.go
+mapfile -t pr_go_paths < <(git diff --name-only --diff-filter=ACM origin/main...HEAD -- 'apps/backend/**/*.go')
+GOWORK=off GOMEMLIMIT=5GiB GOMAXPROCS=2 GOFLAGS=-trimpath bash scripts/lint-go-changed "${pr_go_paths[@]}"
+node --test scripts/backend-lint-workflow.test.mjs
+python3 .github/scripts/backend-tests-workflow-contract_test.py
+python3 .github/scripts/external-runner-workflow-contract_test.py
+python3 .github/scripts/ci-gates_test.py
+python3 .github/scripts/lint-action-pinning_test.py
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 node --test scripts/validate-public-docs.test.mjs
@@ -142,8 +149,11 @@ Use the existing feature settings catalog for all supported locales.
 - `pnpm run typecheck` passed.
 - `pnpm run lint` passed.
 - `pnpm run i18n:check` passed.
-- The backend packages in the review fix passed Go lint in the commit hook.
-  The full PR scope exceeded the local lint timeout.
+- The backend review fixes passed Go lint in the commit hook. A scoped run
+  for all 77 changed Go paths passed with the 5 GiB memory target.
+- The backend workflow, external runner, CI gate, and action pinning contract
+  tests passed. The hosted static check uses larger budgets for cold lint runs.
+  See the [Go lint design](../../specs/platform/system-design/go-pre-commit-lint.md#verification-boundaries).
 - `python3 scripts/list-docs.py validate` passed.
 - `python3 scripts/lint-spec-files.py --all` passed.
 - All 63 public documentation validator tests passed.
