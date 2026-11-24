@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,11 +27,12 @@ func TestRealUtilityProbeAdmitsQualifiedAntigravityCLI(t *testing.T) {
 	}
 	cliPath := filepath.Join(dir, "agy")
 	marker := filepath.Join(t.TempDir(), "acp-invoked")
+	argvMarker := filepath.Join(t.TempDir(), "acp-argv")
 	writeProfileProbeFixture(t, cliPath, `#!/bin/sh
 if [ "$1" = "--version" ]; then echo 'agy 1.5.15'; exit 0; fi
 if [ "$1" = "acp" ] && [ "$2" = "--help" ]; then printf 'Usage: agy acp [flags]\n\nFlags:\n  --process-per-session  Serve each session from an isolated worker process\n'; exit 0; fi
 if [ "$1" != "acp" ]; then exit 2; fi
-case "$*" in *"--process-per-session=false --process-per-session -- after-delimiter"*) ;; *) exit 3 ;; esac
+printf '%s\n' "$@" > "$ANTIGRAVITY_ARGV_MARKER"
 printf 'invoked' > "$ANTIGRAVITY_CLI_MARKER"
 while IFS= read -r line; do
  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([^,}]*\).*/\1/p')
@@ -41,6 +44,7 @@ done
 `)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("ANTIGRAVITY_CLI_MARKER", marker)
+	t.Setenv("ANTIGRAVITY_ARGV_MARKER", argvMarker)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -66,6 +70,18 @@ done
 	}
 	if got, err := os.ReadFile(marker); err != nil || string(got) != "invoked" {
 		t.Fatalf("fake ACP executable evidence = %q, %v", got, err)
+	}
+	argvOutput, err := os.ReadFile(argvMarker)
+	if err != nil {
+		t.Fatalf("read fake ACP argv: %v", err)
+	}
+	gotArgv := strings.Split(strings.TrimSuffix(string(argvOutput), "\n"), "\n")
+	wantArgv := []string{
+		"acp", "--process-per-session", "--profile", "value with spaces",
+		"--process-per-session=false", "--process-per-session", "--", "after-delimiter",
+	}
+	if !slices.Equal(gotArgv, wantArgv) {
+		t.Fatalf("fake ACP argv = %q, want %q", gotArgv, wantArgv)
 	}
 	if _, errText := resolveSpawnCommandContext(ctx, acpcompat.AntigravityAgentID, &InferenceConfigDTO{
 		Command: []string{cliPath, "acp"},

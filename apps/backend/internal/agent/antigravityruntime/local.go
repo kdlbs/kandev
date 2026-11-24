@@ -285,8 +285,8 @@ func hasWorkerModeFlag(output string) bool {
 	inDeclarations := false
 	for _, line := range strings.Split(output, "\n") {
 		declaration := strings.TrimSpace(line)
-		if declaration == "Flags:" || declaration == "Options:" {
-			inDeclarations = true
+		if strings.HasSuffix(declaration, ":") && !strings.HasPrefix(declaration, "-") {
+			inDeclarations = declaration == "Flags:" || declaration == "Options:"
 			continue
 		}
 		if !inDeclarations {

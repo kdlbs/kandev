@@ -1,6 +1,6 @@
 ---
 created: 2026-11-24
-status: done
+status: in_progress
 requirements:
   - REQ-AGENTS-ANTIGRAVITY-ACP-003
   - REQ-AGENTS-ANTIGRAVITY-ACP-004
@@ -58,13 +58,13 @@ For end-to-end evidence, start a task in an isolated Kandev instance with the qu
 
 ## Work orders
 
-- [x] [Task 01 Enable HTTP MCP by default for the Antigravity CLI](task-01-cli-worker-mode.md) (done)
+- [ ] [Task 01 Enable HTTP MCP by default for the Antigravity CLI](task-01-cli-worker-mode.md) (in progress)
 
 ## Verification results
 
 The Linux `agy` 1.5.15 diagnostic probes reproduced the capability mismatch and verified worker mode, tool discovery, flag precedence, and native resume. Implementation qualification now requires the worker option, and all local launch composition points enforce it after profile arguments.
 
-The exact package-filtered Go test command and public documentation checks passed. `make -C apps/backend build` passed, with the existing warning that macOS artifacts remain unsigned because no signing tool is installed. Resolver regressions verify value-aware flag placement and qualification from successful help declarations. The two-model ACP fixture verified HTTP advertisement and Core delivery through `session/new`. A lifecycle fixture verified that stopping one launch reaps only its child, a fresh manager resumes with the stored native ID using the saved CLI runtime, and its child is reaped on stop. The isolated task smoke reached ACP startup but could not create a native session because the isolated home had no Google sign-in.
+The exact package-filtered Go test command and public documentation checks passed. `make -C apps/backend build` passed, with the existing warning that macOS artifacts remain unsigned because no signing tool is installed. Resolver regressions verify value-aware flag placement and qualification from successful help declarations. The two-model ACP fixture verified HTTP advertisement and Core delivery through `session/new`. A lifecycle fixture verified that stopping one launch reaps only its child, a fresh manager resumes with the stored native ID using the saved CLI runtime, and its child is reaped on stop. The isolated task smoke reached ACP startup but could not create a native session because the isolated home had no Google sign-in. The plan remains in progress until the isolated task flow can create a real native session, discover tools, and resume it.
 
 ## Risks
 

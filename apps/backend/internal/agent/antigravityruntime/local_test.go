@@ -109,6 +109,7 @@ func TestHasWorkerModeFlagRequiresExactOption(t *testing.T) {
 		{name: "declared option with value", output: "Options:\n  --process-per-session=<boolean>  Enable worker mode", want: true},
 		{name: "usage only", output: "Usage: agy acp [--process-per-session]", want: false},
 		{name: "prose warning in flags section", output: "Flags:\n  Warning: use --process-per-session on this host", want: false},
+		{name: "examples after options do not qualify", output: "Flags:\n  --help  Show help\n\nExamples:\n  --process-per-session is unavailable in this build", want: false},
 		{name: "other option suffix", output: "Flags:\n  --process-per-session-extra  Similar option", want: false},
 		{name: "disabling option", output: "Flags:\n  --no-process-per-session  Disable worker mode", want: false},
 	} {
@@ -134,6 +135,10 @@ func TestResolveLocalFallsBackWhenWorkerHelpIsUnqualified(t *testing.T) {
 		{
 			name:   "successful prose-only help",
 			output: "Flags:\n  Warning: --process-per-session may be used by another command",
+		},
+		{
+			name:   "successful examples after options",
+			output: "Flags:\n  --help  Show help\n\nExamples:\n  --process-per-session is unavailable in this build",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

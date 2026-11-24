@@ -1,7 +1,7 @@
 ---
 id: "01-cli-worker-mode"
 title: "Enable HTTP MCP by default for the Antigravity CLI"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -69,7 +69,7 @@ go test -trimpath ./internal/agent/antigravityruntime ./internal/agent/agents \
   ./internal/agent/runtime/lifecycle ./internal/agent/settings/controller \
   ./internal/agent/hostutility ./internal/agent/loginpty \
   ./internal/agentctl/server/utility ./internal/agentctl/server/adapter/transport/acp \
-  -run 'Antigravity|TestResolveLocalRuntimeSelection|TestResolveSavedRuntime|TestResolveLocalHonorsCancellation' -count=1
+  -run 'Antigravity|TestResolveLocalRuntimeSelection|TestResolveSavedRuntime|TestResolveLocalHonorsCancellation|TestRequireWorkerModePreservesOptionValuesAndDelimiter|TestHasWorkerModeFlagRequiresExactOption|TestResolveLocalFallsBackWhenWorkerHelpIsUnqualified' -count=1
 ```
 
 From the repository root, run the existing public-docs checks.
@@ -116,6 +116,6 @@ Verification passed:
 - `node scripts/validate-public-docs.mjs` (56 published pages).
 - `gofmt -l` on all changed Go files and `git diff --check`.
 
-The isolated Kandev task smoke reached ACP startup but stopped before native session creation because the isolated home had no Google sign-in. No credentials were copied. The isolated instance and temporary workspace were removed. The deterministic ACP fixture now covers `session/new`, process cleanup, restart-time `session/resume`, and native ID continuity without requiring credentials.
+The isolated Kandev task smoke reached ACP startup but stopped before native session creation because the isolated home had no Google sign-in. No credentials were copied. The isolated instance and temporary workspace were removed. The deterministic ACP fixture now covers `session/new`, process cleanup, restart-time `session/resume`, and native ID continuity without requiring credentials. The work order remains in progress until the isolated task flow can create and resume a real native session.
 
 Changed-package lint first found two capitalized error strings. Both are corrected. Later lint attempts could not start because separate `golangci-lint` processes on unrelated packages were active. The package tests and backend build passed after the corrections.
