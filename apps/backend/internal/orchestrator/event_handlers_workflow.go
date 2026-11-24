@@ -5102,6 +5102,8 @@ func (s *Service) handleWorkflowEntryPromptError(
 	s.publishSessionWaitingEvent(ctx, taskID, session.ID, step.ID, session)
 }
 
+const metaKeyWorkflowMoveInstructions = "workflow_move_instructions"
+
 // queueMoveInstructionsForSession delivers one-shot workflow-move instructions
 // to an existing session that will not otherwise receive the overlaid step
 // prompt (no auto-start, no profile switch). It is a no-op for ordinary steps
@@ -5116,7 +5118,7 @@ func (s *Service) queueMoveInstructionsForSession(ctx context.Context, taskID, s
 	}
 	if _, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx, sessionID, taskID, block, "",
-		messagequeue.QueuedByUser, false, nil, nil,
+		messagequeue.QueuedByUser, false, nil, map[string]interface{}{metaKeyWorkflowMoveInstructions: true},
 	); err != nil {
 		s.logger.Warn("failed to queue one-shot workflow move instructions",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))

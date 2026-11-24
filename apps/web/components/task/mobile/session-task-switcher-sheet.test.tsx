@@ -107,44 +107,51 @@ function task(id: string): TaskSwitcherItem {
   };
 }
 
-it("keeps the Tasks drawer as the sole modal during confirmation and restores its list", () => {
-  const previousWidth = window.innerWidth;
-  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
-  function Tasks() {
-    const [confirm, setConfirm] = useState(false);
-    return (
-      <TaskSwitcherDrawer open onOpenChange={vi.fn()}>
-        <DrawerTitle>Tasks</DrawerTitle>
-        <input aria-label={TASK_FILTER_LABEL} defaultValue="Work in progress" />
-        <button onClick={() => setConfirm(true)}>Archive target</button>
-        <MobileActionConfirmation
-          open={confirm}
-          onOpenChange={setConfirm}
-          targetKey="task"
-          title="Archive task?"
-          subject="Target"
-          cancelLabel="Cancel"
-          confirmLabel="Archive"
-          onConfirm={vi.fn()}
-        />
-      </TaskSwitcherDrawer>
-    );
-  }
-  const view = render(<Tasks />);
-  try {
-    const drawer = screen.getByRole("dialog", { name: "Tasks" });
-    const input = screen.getByRole("textbox", { name: TASK_FILTER_LABEL });
-    fireEvent.click(screen.getByRole("button", { name: "Archive target" }));
-    expect(screen.getByRole("dialog", { name: "Archive task?" })).toBe(drawer);
-    expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
-    expect(screen.queryByRole("textbox", { name: TASK_FILTER_LABEL })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.getByRole("textbox", { name: TASK_FILTER_LABEL })).toBe(input);
-  } finally {
-    view.unmount();
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
-  }
-});
+it.each(["click", "Escape"])(
+  "keeps the Tasks drawer open when %s cancels confirmation",
+  (action) => {
+    const previousWidth = window.innerWidth;
+    const onDrawerOpenChange = vi.fn();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    function Tasks() {
+      const [confirm, setConfirm] = useState(false);
+      return (
+        <TaskSwitcherDrawer open onOpenChange={onDrawerOpenChange}>
+          <DrawerTitle>Tasks</DrawerTitle>
+          <input aria-label={TASK_FILTER_LABEL} defaultValue="Work in progress" />
+          <button onClick={() => setConfirm(true)}>Archive target</button>
+          <MobileActionConfirmation
+            open={confirm}
+            onOpenChange={setConfirm}
+            targetKey="task"
+            title="Archive task?"
+            subject="Target"
+            cancelLabel="Cancel"
+            confirmLabel="Archive"
+            onConfirm={vi.fn()}
+          />
+        </TaskSwitcherDrawer>
+      );
+    }
+    const view = render(<Tasks />);
+    try {
+      const drawer = screen.getByRole("dialog", { name: "Tasks" });
+      const input = screen.getByRole("textbox", { name: TASK_FILTER_LABEL });
+      fireEvent.click(screen.getByRole("button", { name: "Archive target" }));
+      expect(screen.getByRole("dialog", { name: "Archive task?" })).toBe(drawer);
+      expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+      expect(screen.queryByRole("textbox", { name: TASK_FILTER_LABEL })).toBeNull();
+      const cancel = screen.getByRole("button", { name: "Cancel" });
+      if (action === "Escape") fireEvent.keyDown(cancel, { key: "Escape" });
+      else fireEvent.click(cancel);
+      expect(screen.getByRole("textbox", { name: TASK_FILTER_LABEL })).toBe(input);
+      expect(onDrawerOpenChange).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
+  },
+);
 
 it("restores the original pointer style when workspace selection unmounts the nested menu and drawer", async () => {
   const originalPointerEvents = document.body.style.pointerEvents;

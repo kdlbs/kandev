@@ -14,6 +14,7 @@ type Params = {
 };
 
 type InputParams = {
+  anchorToCaret?: boolean;
   inputRef: React.RefObject<RichTextInputHandle | null>;
   value: string;
   onChange: (newValue: string) => void;
@@ -80,10 +81,11 @@ export function useTaskCreatePromptMention({
  * so selection offsets stay in plain-text coordinates.
  */
 export function useTaskCreatePromptMentionForInput({
+  anchorToCaret,
   inputRef,
   value,
   onChange,
   promptInsertMode,
 }: InputParams) {
-  return useInlineMention({ inputRef, value, onChange, promptInsertMode });
+  return useInlineMention({ inputRef, value, onChange, promptInsertMode, anchorToCaret });
 }

@@ -10,9 +10,11 @@ import {
 } from "./composer-action-layout-helpers";
 import {
   expectMoveInstructionsDelivered,
+  expectMoveSavedPromptDelivered,
   fillMoveOverrides,
   MOVE_INSTRUCTIONS,
   seedMoveOverrideFixture,
+  selectMoveSavedPrompt,
   TARGET_STEP_MESSAGE,
   waitForMoveRequest,
 } from "./workflow-step-move-overrides-helpers";
@@ -237,29 +239,61 @@ test("uses the desktop next-step anchored form for the same one-shot move contra
     testPage.getByTestId("proceed-next-step-options"),
     "workflow-move-submit",
   );
-  await fillMoveOverrides(testPage);
-  const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
-  await testPage.getByTestId("workflow-move-submit").click();
+  await fillMoveOverrides(testPage, { instructions: "" });
+  const savedPrompt = await selectMoveSavedPrompt(testPage, apiClient, "keyboard");
+  try {
+    const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
+    await testPage.getByTestId("workflow-move-submit").click();
 
-  expect((await moveRequest).postDataJSON()).toMatchObject({
-    workflow_step_id: fixture.targetStepId,
-    entry_options: {
-      reset_context: true,
-      instructions: MOVE_INSTRUCTIONS,
-    },
-  });
-  await expect(fixture.session.stepperStep("Verify")).toHaveAttribute("aria-current", "step", {
-    timeout: 15_000,
-  });
-  expect((await apiClient.getTask(fixture.taskId)).primary_session_id).toBe(
-    fixture.primarySessionId,
-  );
-  await expect
-    .poll(() => countSessionMessages(apiClient, fixture.primarySessionId, MOVE_INSTRUCTIONS), {
-      timeout: 30_000,
-      message: "instructions were not delivered exactly once to the primary session",
-    })
-    .toBe(1);
+    expect((await moveRequest).postDataJSON()).toMatchObject({
+      workflow_step_id: fixture.targetStepId,
+      entry_options: {
+        reset_context: true,
+        instructions: savedPrompt.instructions,
+      },
+    });
+    await expect(fixture.session.stepperStep("Verify")).toHaveAttribute("aria-current", "step", {
+      timeout: 15_000,
+    });
+    expect((await apiClient.getTask(fixture.taskId)).primary_session_id).toBe(
+      fixture.primarySessionId,
+    );
+    await expect
+      .poll(() => countSessionMessages(apiClient, fixture.primarySessionId, MOVE_INSTRUCTIONS), {
+        timeout: 30_000,
+        message: "instructions were not delivered exactly once to the primary session",
+      })
+      .toBe(1);
+    await expectMoveSavedPromptDelivered(apiClient, fixture.primarySessionId);
+  } finally {
+    await apiClient.deletePrompt(savedPrompt.id);
+  }
+});
+
+// @covers AC-TASKS-SAVED-PROMPT-DELIVERY-001.15, AC-TASKS-SAVED-PROMPT-DELIVERY-001.16
+test("selects a saved prompt from the sidebar task Move menu", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const name = "Context Menu Saved Prompt";
+  const fixture = await seedMoveOverrideFixture(testPage, apiClient, seedData, name);
+  await fixture.session.openSidebarTaskContextMenu(`${name} Task`);
+  await testPage.getByTestId("task-context-move-to").hover();
+  await testPage.getByTestId(`task-context-step-${fixture.targetStepId}`).hover();
+
+  const savedPrompt = await selectMoveSavedPrompt(testPage, apiClient, "mouse");
+  try {
+    const move = waitForMoveRequest(testPage, fixture.taskId);
+    await testPage.getByTestId("workflow-move-submit").click();
+    expect((await move).postDataJSON()).toMatchObject({
+      workflow_step_id: fixture.targetStepId,
+      entry_options: { instructions: savedPrompt.instructions },
+    });
+    await expectMoveSavedPromptDelivered(apiClient, fixture.primarySessionId);
+  } finally {
+    await apiClient.deletePrompt(savedPrompt.id);
+  }
 });
 
 test("keeps the desktop next-step form open when clicking a checkbox label", async ({
