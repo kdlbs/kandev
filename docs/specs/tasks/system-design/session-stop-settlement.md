@@ -16,6 +16,7 @@ owners:
 | -------- | ----------------------- |
 | .1       | `orchestrator.Service.reapPromptUnreadyExecution` with the exact `executionTeardownClaim` |
 | .2       | `orchestrator.Service.StopSession` and `settleExecutionLessSessionStop` |
+| .3       | `settleExecutionLessSessionStop`, `retireExecutionActivityAndPublish`, `settleBackgroundWorkLocked` |
 
 ## Completed teardown owner
 
@@ -51,6 +52,32 @@ to close. Other states, admission contention, and newly observed executions
 retain the original error. Runtime teardown is never performed under these
 settlement guards.
 
+## Orphaned background activity
+
+An execution-less stop is the only stop path that publishes no
+`agent.stopped` event, so it is also the only one that never retires
+in-memory turn activity. A successful settlement therefore reconciles that
+activity while it still holds both guards and the confirmed runtime absence.
+It collects the distinct non-empty execution IDs that own background
+registrations, tool ownership, or execution claims in the session's
+`turnActivity`, and calls `retireExecutionActivityAndPublish` for each one.
+That function keeps a record that a prompt or dispatch token still uses, so
+the successor fences stay in force. The derived `active_subagent_count`
+then follows the remaining registrations. Retirement uses
+`context.WithoutCancel(ctx)` so request cancellation does not interrupt it.
+
+Next, it calls
+`settleBackgroundWorkLocked(cleanupCtx, sessionID, "")` under the lifecycle
+lock it already holds, where `cleanupCtx` comes from the bounded
+`backgroundWorkCleanupContext(ctx)`. This lets settlement finish if the stop
+request is cancelled after turn closure. The settler keeps the existing liveness
+probe, execution-identity recheck, and retained-owner guards from the
+[background work design](../../agents/system-design/background-work.md). A
+live or uncertain probe leaves durable rows open. Settlement errors are
+logged by the existing settler and never turn the successful stop into a
+failure. Registrations without an execution ID are out of scope: every
+production registration path carries the stream payload's execution ID.
+
 ## Verification
 
 Orchestrator tests cover a completed teardown owner during prompt-readiness
@@ -65,3 +92,9 @@ A channel-coordinated lock-order regression drives `StopSession` against the
 real `StartCreatedSession` entry point under the existing inverse-order guard
 ownership. It verifies that settlement yields, the launch crosses its lifecycle
 boundary, the captured turn remains open, and no guard reference leaks.
+
+Execution-less stop tests also register subagent and shell work for a dead
+execution and check that a settled stop clears `ActiveSubagentCount` and
+settles the open durable rows. In the same scenario, a registration owned by a
+newly registered execution, a refused state, or a live liveness probe keeps
+its work.
