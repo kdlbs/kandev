@@ -38,8 +38,14 @@ export async function exerciseSSHTrustReview(page: Page, baseUrl: string, touch:
   });
   await page.goto(`/settings/executors/ssh-connections?id=${route.destination.id}&section=access`);
   const inspect = page.getByRole("button", { name: "Inspect host key", exact: true });
-  if (touch) await inspect.tap();
-  else await inspect.click();
+  const details = page.getByRole("button", { name: "Host details", exact: true });
+  if (touch) {
+    await details.tap();
+    await inspect.tap();
+  } else {
+    await details.click();
+    await inspect.click();
+  }
   try {
     await expect(page.getByRole("status")).toContainText("Reading the server fingerprint");
   } finally {

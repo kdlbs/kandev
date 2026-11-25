@@ -81,7 +81,7 @@ func newObservedSSHExecutor(t *testing.T) (*SSHExecutor, *observer.ObservedLogs)
 	if err != nil {
 		t.Fatalf("observer logger: %v", err)
 	}
-	return NewSSHExecutor(nil, nil, nil, log), logs
+	return newRetainedWireSSHTestExecutor(log), logs
 }
 
 // newTrackedSSHSessionWithForwarder inserts a session with both a real
@@ -629,7 +629,7 @@ func TestSSHKeepaliveHealthyTransportKeepsAnsweringPastTwiceTheInterval(t *testi
 	withSSHKeepaliveTuning(t, 5*time.Millisecond, 200*time.Millisecond) // unresponsive threshold 10ms, deadline far out of reach
 
 	server := newFakeSSHServer(t, nil)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	cleanupCalls, stopCalls := 0, 0
 	exec.cleanupScript = func(context.Context, *ssh.Client, string, map[string]interface{}, map[string]string, SSHRemotePlatform, string, string) error {
 		cleanupCalls++
@@ -664,7 +664,7 @@ func TestSSHKeepaliveHealthyTransportKeepsAnsweringPastTwiceTheInterval(t *testi
 }
 
 func TestSSHExecutorCreateInstanceRefusesATransportLostSession(t *testing.T) {
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	exec.sessions["instance-1"] = &sshSessionState{
 		authToken:     "resumed-token",
 		transportLost: true,
@@ -690,7 +690,7 @@ func TestSSHExecutorBuildInstanceForLostRaceReturnsCompleteResumeMetadata(t *tes
 	}
 	t.Cleanup(func() { _ = fwd.Close() })
 
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	existing := &sshSessionState{
 		target:        &SSHTarget{Host: "build.example", Port: 22, User: "deploy", PinnedFingerprint: "SHA256:x"},
 		forwarder:     fwd,
@@ -764,7 +764,7 @@ func TestSSHExecutorBuildInstanceForLostRaceReusesAResumedWinnersProcess(t *test
 	resumedClient := agentctl.NewClient(sshAgentctlLoopbackHost, fwd.LocalPort(), newTestLogger(),
 		agentctl.WithExecutionID("previous-instance"), agentctl.WithAuthToken("resumed-token"))
 
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	existing := &sshSessionState{
 		target:         &SSHTarget{Host: "build.example", Port: 22, User: "deploy", PinnedFingerprint: "SHA256:x"},
 		forwarder:      fwd,
@@ -813,7 +813,7 @@ func TestSSHExecutorResumeRemoteInstanceInsertIfAbsentUnderRace(t *testing.T) {
 		return sshOut("/home/kandev")
 	})
 	server.forwardTo(strings.TrimPrefix(control.URL, "http://"))
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	t.Cleanup(func() { _ = exec.Close() })
 
 	metadata := sshConnectionMetadata(t, server)
@@ -859,7 +859,7 @@ func TestSSHExecutorResumeRemoteInstanceInsertIfAbsentUnderRace(t *testing.T) {
 
 // @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.4
 func TestSSHExecutorResetTrackedManagedBrokerResumeLosesRaceReturnsSuccess(t *testing.T) {
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	preflightCalls, stopCalls := 0, 0
 	brokerPreflight := func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error {
 		preflightCalls++
@@ -895,7 +895,7 @@ func TestSSHExecutorResetTrackedManagedBrokerResumeAbandonsAWedgedPreflight(t *t
 	client := server.dial(t)
 	server.setSilent(true)
 
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	state := &sshSessionState{client: client, remoteDir: "/remote/session", pid: 4242}
 	exec.sessions["instance-1"] = state
 
@@ -932,7 +932,7 @@ func TestSSHExecutorStopInstanceOnAHealthyTransportDoesNotDeclareLoss(t *testing
 	withSSHKeepaliveTuning(t, 5*time.Millisecond, 200*time.Millisecond)
 
 	server := newFakeSSHServer(t, nil)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	client := server.dial(t)
 	state := newTrackedSSHSession(exec, "instance-1", client)
 
@@ -955,7 +955,7 @@ func TestSSHExecutorStopInstanceSkipsRemoteCommandsWhenTransportUnresponsive(t *
 	withSSHKeepaliveTuning(t, 5*time.Millisecond, 200*time.Millisecond) // unresponsive threshold 10ms, well under the 200ms deadline
 
 	server := newFakeSSHServer(t, nil)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	cleanupCalls, stopCalls := 0, 0
 	exec.cleanupScript = func(context.Context, *ssh.Client, string, map[string]interface{}, map[string]string, SSHRemotePlatform, string, string) error {
 		cleanupCalls++
@@ -997,7 +997,7 @@ func TestSSHExecutorStopInstanceAbandonsARemoteCommandThatWedgesAfterTheReading(
 	withSSHRemoteCleanupTimeouts(t, 20*time.Millisecond, 20*time.Millisecond, sshBrokerPreflightTimeout)
 
 	server := newFakeSSHServer(t, nil)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	client := server.dial(t)
 	server.setSilent(true) // the transport wedges; with no watchdog, the reading alone can't know that (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.8's last sentence)
 	stopCalls := 0
@@ -1056,7 +1056,7 @@ func TestSSHExecutorCloseDoesNotWaitForTheNextProbe(t *testing.T) {
 	withSSHKeepaliveTuning(t, 500*time.Millisecond, 5*time.Second)
 
 	server := newFakeSSHServer(t, nil)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	client := server.dial(t)
 	newTrackedSSHSession(exec, "instance-1", client)
 
@@ -1073,7 +1073,7 @@ func TestSSHExecutorCloseDoesNotWaitForTheNextProbe(t *testing.T) {
 
 // @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.7
 func TestSSHExecutorGetRemoteStatusReportsTransportLoss(t *testing.T) {
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	exec.sessions["i"] = &sshSessionState{
 		target:        &SSHTarget{Host: "build.example"},
 		pid:           4242,

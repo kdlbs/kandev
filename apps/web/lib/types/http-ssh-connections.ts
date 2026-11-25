@@ -30,6 +30,9 @@ export type ManagedSSHConnection = {
   version: number;
   revision: number;
   verified_route?: string;
+  imported_pending?: boolean;
+  known_hosts_pending?: boolean;
+  repair_reason?: string;
 };
 export type SSHRoute = {
   latest_enrollment?: SSHEnrollment;
@@ -78,17 +81,4 @@ export type SSHPreflight = {
   stamp: string;
   ready: boolean;
   checks: { code: string; hop: string }[];
-};
-export type SSHAdoptionTarget = {
-  host: string;
-  port: number;
-  user: string;
-  fingerprint: string;
-  identity_kind: string;
-  identity_reference: string;
-};
-export type SSHAdoptionPreview = {
-  config_digest: string;
-  destination: SSHAdoptionTarget;
-  bastion?: SSHAdoptionTarget;
 };

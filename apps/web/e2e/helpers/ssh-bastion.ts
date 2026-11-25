@@ -35,17 +35,21 @@ export type SSHBastionHandles = {
 
 const BASTION_BASE_PORT = 23000;
 
-export function startBastionAndTarget(workerIndex: number, workDir: string): SSHBastionHandles {
+export function startBastionAndTarget(
+  workerIndex: number,
+  workDir: string,
+  { separateIdentities = false } = {},
+): SSHBastionHandles {
   fs.mkdirSync(workDir, { recursive: true });
   const networkName = `kandev-e2e-ssh-net-${E2E_DOCKER_SCOPE}-${workerIndex}`;
   ensureNetwork(networkName);
 
-  // The SSH executor's ProxyJump string doesn't carry a separate identity for
-  // the bastion (matching OpenSSH semantics — per-host identities come from
-  // ~/.ssh/config or ssh-agent). For these tests we share one keypair across
-  // bastion + target so a single -i flag authenticates both hops.
-  const sharedIdentityFile = path.join(workDir, "shared_id_ed25519");
-  generateKeypair(sharedIdentityFile);
+  const bastionIdentityFile = path.join(workDir, "bastion_id_ed25519");
+  const targetIdentityFile = separateIdentities
+    ? path.join(workDir, "target_id_ed25519")
+    : bastionIdentityFile;
+  generateKeypair(bastionIdentityFile);
+  if (separateIdentities) generateKeypair(targetIdentityFile);
 
   const bastionPort = BASTION_BASE_PORT + workerIndex * 2;
   const bastion = launchInNetwork({
@@ -54,7 +58,7 @@ export function startBastionAndTarget(workerIndex: number, workDir: string): SSH
     networkName,
     hostPort: bastionPort,
     workDir: path.join(workDir, "bastion"),
-    identityFile: sharedIdentityFile,
+    identityFile: bastionIdentityFile,
   });
 
   const target = launchInNetwork({
@@ -63,7 +67,7 @@ export function startBastionAndTarget(workerIndex: number, workDir: string): SSH
     networkName,
     hostPort: null, // not reachable from host
     workDir: path.join(workDir, "target"),
-    identityFile: sharedIdentityFile,
+    identityFile: targetIdentityFile,
   });
 
   return {
@@ -137,15 +141,19 @@ function launchInNetwork(opts: LaunchOpts): SSHServerHandle {
 
   // For the bastion, wait for its published port to open and grab the host
   // fingerprint. For the target, we don't expose anything on the host, so
-  // grab the fingerprint from inside the network via a one-shot helper
-  // container on the same network.
+  // read its public host key from the disposable target itself.
   let hostFingerprint = "";
   if (opts.hostPort !== null) {
     waitForTCPOpen("127.0.0.1", opts.hostPort);
     hostFingerprint = scanFingerprintViaHost("127.0.0.1", opts.hostPort);
   } else {
     waitForTCPOpenInsideNetwork(opts.networkName, opts.name, 22);
-    hostFingerprint = scanFingerprintInsideNetwork(opts.networkName, opts.name);
+    const publicHostKey = execFileSync(
+      "docker",
+      ["exec", containerId, "cat", "/etc/ssh/ssh_host_ed25519_key.pub"],
+      { encoding: "utf8" },
+    );
+    hostFingerprint = parseFingerprint(publicHostKey);
   }
 
   return {
@@ -232,39 +240,6 @@ function scanFingerprintViaHost(host: string, port: number): string {
     spawnSync("sleep", ["0.3"]);
   }
   throw new Error(`scanFingerprintViaHost: empty output (stderr=${lastErr})`);
-}
-
-function scanFingerprintInsideNetwork(networkName: string, targetName: string): string {
-  // openssh-client is the package that ships ssh-keyscan on Alpine. (The
-  // historical "openssh-keyscan" name doesn't exist in repos.) Pin to a
-  // known-good Alpine and surface install/keyscan stderr so failures are
-  // diagnosable instead of empty. Retry on empty output — sshd accepts TCP
-  // before completing host-key negotiation on a cold container, mirroring
-  // the same flake guard the host-side scanFingerprintViaHost helper uses.
-  const deadline = Date.now() + 15_000;
-  let lastErr = "";
-  while (Date.now() < deadline) {
-    const res = spawnSync(
-      "docker",
-      [
-        "run",
-        "--rm",
-        "--network",
-        networkName,
-        "alpine:3.20",
-        "sh",
-        "-c",
-        `apk add --no-cache openssh-client >/dev/null 2>&1 && ssh-keyscan -t ed25519 ${targetName}`,
-      ],
-      { encoding: "utf8" },
-    );
-    if (res.stdout?.trim()) {
-      return parseFingerprint(res.stdout);
-    }
-    lastErr = `status=${res.status}, stderr=${res.stderr ?? ""}`;
-    spawnSync("sleep", ["0.3"]);
-  }
-  throw new Error(`scanFingerprintInsideNetwork: empty output after retry (${lastErr})`);
 }
 
 function parseFingerprint(keyscanOutput: string): string {

@@ -2,6 +2,7 @@ package sshconnections
 
 import (
 	"context"
+	"errors"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -18,6 +19,9 @@ func (s *Service) BindExecutorIn(ctx context.Context, tx *sqlx.Tx, executorID, e
 		return err
 	}
 	id := config[ConnectionConfigKey]
+	if !validExecutorBindingSelection(executorType, id, config) {
+		return ErrInvalidRoute
+	}
 	if id == "" && existing == 0 {
 		return nil
 	}
@@ -31,6 +35,10 @@ func (s *Service) BindExecutorIn(ctx context.Context, tx *sqlx.Tx, executorID, e
 		}
 		return audit(ctx, tx, actor, executorID, "executor.unbind", "saved")
 	}
+	preserve, err := preserveMigratedBindingIn(ctx, tx, executorID, config)
+	if err != nil || preserve {
+		return err
+	}
 	route, err := readyExecutorRouteIn(ctx, tx, executorID, executorType, config)
 	if err != nil {
 		return err
@@ -43,30 +51,71 @@ func (s *Service) BindExecutorIn(ctx context.Context, tx *sqlx.Tx, executorID, e
 	return audit(ctx, tx, actor, executorID, "executor.bind", "saved")
 }
 
+func validExecutorBindingSelection(executorType, id string, config map[string]string) bool {
+	if executorType != executorKindSSH {
+		return id == ""
+	}
+	return id != "" && !hasInlineSSHConfig(config)
+}
+
 func readyExecutorRouteIn(ctx context.Context, tx *sqlx.Tx, executorID, executorType string, config map[string]string) (Route, error) {
 	if executorType != executorKindSSH || executorID == "" {
 		return Route{}, ErrInvalidRoute
 	}
-	for _, key := range []string{sshHostConfigKey, "ssh_port", "ssh_user", "ssh_host_alias", "ssh_host_fingerprint", "ssh_identity_source", "ssh_identity_file", "ssh_proxy_jump"} {
-		if _, present := config[key]; present {
-			return Route{}, ErrInvalidRoute
-		}
+	if hasInlineSSHConfig(config) {
+		return Route{}, ErrInvalidRoute
 	}
 	route, err := routeIn(ctx, tx, config[ConnectionConfigKey])
 	if err != nil {
 		return Route{}, err
 	}
-	if route.Destination.VerifiedRoute != route.Stamp || config["ssh_connection_stamp"] != route.Stamp {
+	if config["ssh_connection_stamp"] != route.Stamp {
 		return Route{}, ErrInvalidRoute
+	}
+	return route, checkVerifiedRouteIn(ctx, tx, route)
+}
+
+func checkVerifiedRouteIn(ctx context.Context, tx *sqlx.Tx, route Route) error {
+	if route.Destination.VerifiedRoute != route.Stamp {
+		return ErrInvalidRoute
 	}
 	if route.Bastion != nil {
 		bastion, err := routeIn(ctx, tx, route.Bastion.ID)
 		if err != nil {
-			return Route{}, err
+			return err
 		}
 		if bastion.Destination.VerifiedRoute != bastion.Stamp {
-			return Route{}, ErrInvalidRoute
+			return ErrInvalidRoute
 		}
 	}
-	return route, nil
+	return nil
+}
+
+func hasInlineSSHConfig(config map[string]string) bool {
+	for _, key := range migrationInlineKeys {
+		if _, present := config[key]; present {
+			return true
+		}
+	}
+	return false
+}
+
+func preserveMigratedBindingIn(ctx context.Context, tx *sqlx.Tx, executorID string, config map[string]string) (bool, error) {
+	migration, err := migrationIn(ctx, tx, executorID)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if migration.Verified || migration.ConnectionID != config[ConnectionConfigKey] || migration.RouteStamp != config["ssh_connection_stamp"] {
+		return false, nil
+	}
+	return executorRefMatchesIn(ctx, tx, executorID, migration.ConnectionID, migration.RouteStamp)
+}
+
+func executorRefMatchesIn(ctx context.Context, tx *sqlx.Tx, executorID, id, stamp string) (bool, error) {
+	var count int
+	err := tx.GetContext(ctx, &count, tx.Rebind(`SELECT COUNT(*) FROM ssh_connection_refs WHERE owner_type='executor' AND owner_id=? AND connection_id=? AND route_stamp=?`), executorID, id, stamp)
+	return count == 1, err
 }

@@ -45,17 +45,12 @@ func TestSSHTaskDirReclaimerMapsTargetAndResultAndClosesClient(t *testing.T) {
 	}
 	client := ssh.NewClient(testSSHConn{Conn: clientConn}, nil, nil)
 
-	var gotConfig lifecycle.SSHConnConfig
-	var gotTarget *lifecycle.SSHTarget
+	var gotRequest SSHTaskDirReclaimRequest
 	var gotClient *ssh.Client
 	reclaimer := &sshTaskDirReclaimer{
-		resolveTarget: func(config lifecycle.SSHConnConfig) (*lifecycle.SSHTarget, error) {
-			gotConfig = config
-			return &lifecycle.SSHTarget{Host: "resolved.example", Port: 2200, User: "resolved-user"}, nil
-		},
-		dial: func(_ context.Context, target *lifecycle.SSHTarget) (*ssh.Client, error) {
-			gotTarget = target
-			return client, nil
+		open: func(_ context.Context, request SSHTaskDirReclaimRequest) (*ssh.Client, func(), error) {
+			gotRequest = request
+			return client, func() { _ = client.Close() }, nil
 		},
 		reclaim: func(_ context.Context, got *ssh.Client, shell, root, taskDir string) (lifecycle.SSHReclaimOutcome, lifecycle.SSHReclaimVerdict, error) {
 			gotClient = got
@@ -87,13 +82,10 @@ func TestSSHTaskDirReclaimerMapsTargetAndResultAndClosesClient(t *testing.T) {
 	if gotClient != client {
 		t.Fatal("reclaim did not receive the dialled client")
 	}
-	if gotTarget == nil || gotTarget.Host != "resolved.example" || gotTarget.Port != 2200 || gotTarget.User != "resolved-user" {
-		t.Fatalf("resolved target = %+v", gotTarget)
-	}
-	if gotConfig.Host != "build.example" || gotConfig.Port != 22 || gotConfig.User != "builder" ||
-		gotConfig.IdentitySource != lifecycle.SSHIdentitySourceFile || gotConfig.IdentityFile != "/home/builder/.ssh/id_ed25519" ||
-		gotConfig.ProxyJump != "bastion.example" || gotConfig.PinnedFingerprint != "SHA256:pinned" {
-		t.Fatalf("resolved config = %+v", gotConfig)
+	if gotRequest.Host != "build.example" || gotRequest.Port != 22 || gotRequest.User != "builder" ||
+		gotRequest.IdentitySource != "file" || gotRequest.IdentityFile != "/home/builder/.ssh/id_ed25519" ||
+		gotRequest.ProxyJump != "bastion.example" || gotRequest.HostFingerprint != "SHA256:pinned" {
+		t.Fatalf("retained route request = %+v", gotRequest)
 	}
 	if result != (SSHTaskDirReclaimResult{SkipReason: "unpushed_commits", Detail: "2 commits"}) {
 		t.Fatalf("runtime result = %+v, want safety skip", result)

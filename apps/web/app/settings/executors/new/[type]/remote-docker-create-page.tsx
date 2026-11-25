@@ -18,7 +18,7 @@ import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
 import { testRemoteDockerConnection } from "@/lib/api/domains/remote-docker-api";
 import { settingsActionClassName } from "@/components/settings/settings-control";
-import { buildSSHExecutorConfig } from "./ssh-config";
+import { buildInlineSSHExecutorConfig } from "./ssh-config";
 import type { Executor } from "@/lib/types/http";
 
 const EXECUTORS_ROUTE = "/settings/executors";
@@ -43,7 +43,7 @@ export function RemoteDockerCreatePage() {
         name: cfg.name,
         ...(owner ? { owner_user_id: owner } : {}),
         type: "remote_docker",
-        config: buildSSHExecutorConfig(cfg),
+        config: buildInlineSSHExecutorConfig(cfg),
       });
       // The hub lists profiles, not bare executors, so an executor whose
       // default profile failed is stored but invisible: the administrator sees

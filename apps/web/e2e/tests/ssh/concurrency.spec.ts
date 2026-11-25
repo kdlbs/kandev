@@ -133,6 +133,11 @@ test.describe("ssh executor — concurrency", () => {
     );
     await waitForLatestSessionDone(apiClient, task.id, 1, "Launch before drop");
 
+    const config = (await apiClient.getExecutor(seedData.sshExecutorId)).config!;
+    const binding = {
+      ssh_connection_id: config.ssh_connection_id,
+      expected_stamp: config.ssh_connection_stamp,
+    };
     dropTrafficToPort22(seedData.sshTarget);
     try {
       // The TCP SYN to the sshd container is silently dropped by iptables,
@@ -145,11 +150,7 @@ test.describe("ssh executor — concurrency", () => {
         () =>
           apiClient.testSSHConnection({
             name: "I4 drop probe",
-            host: seedData.sshTarget.host,
-            port: seedData.sshTarget.port,
-            user: seedData.sshTarget.user,
-            identity_source: "file",
-            identity_file: seedData.sshTarget.identityFile,
+            ...binding,
           }),
         5_000,
       );
@@ -166,11 +167,7 @@ test.describe("ssh executor — concurrency", () => {
         async () => {
           const r = await apiClient.testSSHConnection({
             name: "I4 restore probe",
-            host: seedData.sshTarget.host,
-            port: seedData.sshTarget.port,
-            user: seedData.sshTarget.user,
-            identity_source: "file",
-            identity_file: seedData.sshTarget.identityFile,
+            ...binding,
           });
           return r.success;
         },

@@ -25,7 +25,7 @@ export function ManagerHeader({
   return (
     <div className="space-y-4 min-w-0">
       <SettingsPageHeader
-        title={<span className="break-words">{name}</span>}
+        title={<span className="[overflow-wrap:anywhere]">{name}</span>}
         description={
           <span className="flex flex-wrap items-center gap-2 [overflow-wrap:anywhere]">
             <ManagerStatus manager={manager} navigation={n} />
@@ -42,7 +42,7 @@ export function ManagerHeader({
         <div className="flex min-w-0 flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
           <SettingsTabsList
             ariaLabel={t("settings:sshManager.title")}
-            className="w-full md:w-fit"
+            className="w-full max-md:grid max-md:grid-cols-2 md:w-fit"
           />
           {!details && <ManagerActions manager={manager} navigation={n} details={false} />}
         </div>

@@ -41,8 +41,7 @@ func TestHandshakeWithDeadlineClosesConnectionsWhenDeadlinesAreUnsupported(t *te
 		}
 	case <-time.After(500 * time.Millisecond):
 		_ = clientConn.Close()
-		<-done
-		t.Fatal("handshake did not stop when its context deadline expired")
+		t.Fatalf("handshake did not stop at the deadline, closing the connection returned %v", <-done)
 	}
 }
 

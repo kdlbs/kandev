@@ -30,17 +30,25 @@ export type SSHOperation = {
   error?: string;
   hop?: "bastion" | "destination";
 };
+type SSHOperationContext = Omit<SSHOperation, "status" | "error" | "hop">;
+
 function operationHop(error: unknown): SSHOperation["hop"] {
   if (!(error instanceof ApiError) || !error.body || typeof error.body !== "object") return;
   const hop = "hop" in error.body ? error.body.hop : undefined;
   return hop === "bastion" || hop === "destination" ? hop : undefined;
 }
+
+function sshOperationFailure(error: unknown): Pick<SSHOperation, "error" | "hop"> {
+  const hop = operationHop(error);
+  return { error: sshManagerError(error), ...(hop ? { hop } : {}) };
+}
+
 export function useSSHConnections() {
   const [operation, setOperation] = useState<SSHOperation | null>(null);
   const [identities, setIdentities] = useState<SSHIdentity[]>([]);
   const [routes, setRoutes] = useState<SSHRoute[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busyKind, setBusyKind] = useState<SSHOperation["kind"] | "change" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
   const pending = useRef(false);
@@ -72,44 +80,43 @@ export function useSSHConnections() {
       controller.abort();
     };
   }, [reload]);
+  const recordFailure = useCallback(
+    async (cause: unknown, context?: SSHOperationContext) => {
+      const errorCode = sshManagerError(cause);
+      if (alive.current && errorCode === "ssh_resource_in_use")
+        await reload().catch(() => undefined);
+      if (!alive.current || context?.kind === "preflight") return;
+      setError(errorCode);
+      if (context) setOperation({ ...context, status: "failed", ...sshOperationFailure(cause) });
+    },
+    [reload],
+  );
   const perform = useCallback(
-    async <T>(
-      run: () => Promise<T>,
-      refresh = true,
-      context?: Omit<SSHOperation, "status" | "error" | "hop">,
-    ): Promise<T> => {
+    async <T>(run: () => Promise<T>, refresh = true, context?: SSHOperationContext): Promise<T> => {
       // Admission must precede React's next render, including same-tick submissions.
       if (pending.current) throw new Error();
       pending.current = true;
-      setBusy(true);
-      setError(null);
-      setOperation(context ? { ...context, status: "pending" } : null);
+      setBusyKind(context?.kind ?? "change");
+      const showManagerFeedback = context?.kind !== "preflight";
+      if (showManagerFeedback) {
+        setError(null);
+        setOperation(context ? { ...context, status: "pending" } : null);
+      }
       try {
         const value = await run();
         if (refresh) await reload();
-        if (alive.current && context) setOperation({ ...context, status: "succeeded" });
+        if (alive.current && showManagerFeedback && context)
+          setOperation({ ...context, status: "succeeded" });
         return value;
       } catch (e) {
-        if (alive.current && sshManagerError(e) === "ssh_resource_in_use") {
-          await reload().catch(() => undefined);
-        }
-        if (alive.current) {
-          setError(sshManagerError(e));
-          if (context)
-            setOperation({
-              ...context,
-              status: "failed",
-              error: sshManagerError(e),
-              ...(operationHop(e) ? { hop: operationHop(e) } : {}),
-            });
-        }
+        await recordFailure(e, context);
         throw e;
       } finally {
         pending.current = false;
-        if (alive.current) setBusy(false);
+        if (alive.current) setBusyKind(null);
       }
     },
-    [reload],
+    [recordFailure, reload],
   );
   const authentication = useSSHAuthentication(
     (run, route) => perform(run, true, operationContext("test", route)),
@@ -121,7 +128,8 @@ export function useSSHConnections() {
     identities,
     routes,
     loaded,
-    busy,
+    busy: busyKind !== null,
+    checkingSetup: busyKind === "preflight",
     error,
     reload: () => perform(() => reload(), false),
     ...connectionCommands(perform),
@@ -133,7 +141,7 @@ export type SSHManager = ReturnType<typeof useSSHConnections>;
 type SSHPerform = <T>(
   run: () => Promise<T>,
   refresh?: boolean,
-  context?: Omit<SSHOperation, "status" | "error" | "hop">,
+  context?: SSHOperationContext,
 ) => Promise<T>;
 function operationContext(kind: SSHOperation["kind"], route: SSHRoute) {
   return { kind, connectionId: route.destination.id, stamp: route.stamp };

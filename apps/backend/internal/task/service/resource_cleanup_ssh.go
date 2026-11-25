@@ -17,18 +17,23 @@ import (
 // re-declared here as literals because the task service does not import the
 // lifecycle package, the same way buildSSHLiveStatus already reads them.
 const (
-	sshMetaHost            = "ssh_host"
-	sshMetaHostAlias       = "ssh_host_alias"
-	sshMetaPort            = "ssh_port"
-	sshMetaUser            = "ssh_user"
-	sshMetaHostFingerprint = "ssh_host_fingerprint"
-	sshMetaIdentitySource  = "ssh_identity_source"
-	sshMetaIdentityFile    = "ssh_identity_file"
-	sshMetaProxyJump       = "ssh_proxy_jump"
-	sshMetaShell           = "ssh_shell"
-	sshMetaWorkdirRoot     = "ssh_workdir_root"
-	sshMetaRemoteTaskDir   = "ssh_remote_task_dir"
-	sshMetaReclaimTaskDir  = "ssh_reclaim_task_dir"
+	sshMetaConnectionID              = "ssh_connection_id"
+	sshMetaRouteStamp                = "ssh_route_stamp"
+	sshMetaIdentityGeneration        = "ssh_identity_generation"
+	sshMetaBastionIdentityGeneration = "ssh_bastion_identity_generation"
+	sshMetaHost                      = "ssh_host"
+	sshMetaHostAlias                 = "ssh_host_alias"
+	sshMetaPort                      = "ssh_port"
+	sshMetaUser                      = "ssh_user"
+	sshMetaHostFingerprint           = "ssh_host_fingerprint"
+	sshMetaIdentitySource            = "ssh_identity_source"
+	sshMetaIdentityAgent             = "ssh_identity_agent"
+	sshMetaIdentityFile              = "ssh_identity_file"
+	sshMetaProxyJump                 = "ssh_proxy_jump"
+	sshMetaShell                     = "ssh_shell"
+	sshMetaWorkdirRoot               = "ssh_workdir_root"
+	sshMetaRemoteTaskDir             = "ssh_remote_task_dir"
+	sshMetaReclaimTaskDir            = "ssh_reclaim_task_dir"
 
 	// sshReclaimEnabledValue is the only value that opts a profile in. It is
 	// compared, never displayed, and is written by the executor-profile
@@ -52,16 +57,23 @@ const (
 // mutated so the job stays self-contained across a backend restart, exactly
 // like the session, worktree and environment records beside it.
 type sshReclaimTarget struct {
-	Host            string `json:"host"`
-	Port            int    `json:"port,omitempty"`
-	User            string `json:"user,omitempty"`
-	HostFingerprint string `json:"host_fingerprint,omitempty"`
-	IdentitySource  string `json:"identity_source,omitempty"`
-	IdentityFile    string `json:"identity_file,omitempty"`
-	ProxyJump       string `json:"proxy_jump,omitempty"`
-	Shell           string `json:"shell,omitempty"`
-	WorkdirRoot     string `json:"workdir_root"`
-	TaskDir         string `json:"task_dir"`
+	ConnectionID              string `json:"connection_id,omitempty"`
+	RouteStamp                string `json:"route_stamp,omitempty"`
+	IdentityGeneration        string `json:"identity_generation,omitempty"`
+	BastionIdentityGeneration string `json:"bastion_identity_generation,omitempty"`
+	HostAlias                 string `json:"host_alias,omitempty"`
+	LegacyRouteRecorded       bool   `json:"legacy_route_recorded,omitempty"`
+	IdentityAgent             string `json:"identity_agent,omitempty"`
+	Host                      string `json:"host"`
+	Port                      int    `json:"port,omitempty"`
+	User                      string `json:"user,omitempty"`
+	HostFingerprint           string `json:"host_fingerprint,omitempty"`
+	IdentitySource            string `json:"identity_source,omitempty"`
+	IdentityFile              string `json:"identity_file,omitempty"`
+	ProxyJump                 string `json:"proxy_jump,omitempty"`
+	Shell                     string `json:"shell,omitempty"`
+	WorkdirRoot               string `json:"workdir_root"`
+	TaskDir                   string `json:"task_dir"`
 	// Enabled records the profile's opt-in as it stood when the directory was
 	// launched. The profile is the sole source of truth; a task can never set
 	// it, because the executor projection treats the key as authoritative.
@@ -96,16 +108,23 @@ func (t sshReclaimTarget) usable() bool {
 // reclamation attempt. It deliberately mirrors the SSH connection tuple rather
 // than importing the lifecycle types, keeping the dependency one-directional.
 type SSHTaskDirReclaimRequest struct {
-	Host            string
-	Port            int
-	User            string
-	HostFingerprint string
-	IdentitySource  string
-	IdentityFile    string
-	ProxyJump       string
-	Shell           string
-	WorkdirRoot     string
-	TaskDir         string
+	ConnectionID              string
+	RouteStamp                string
+	IdentityGeneration        string
+	BastionIdentityGeneration string
+	HostAlias                 string
+	LegacyRouteRecorded       bool
+	IdentityAgent             string
+	Host                      string
+	Port                      int
+	User                      string
+	HostFingerprint           string
+	IdentitySource            string
+	IdentityFile              string
+	ProxyJump                 string
+	Shell                     string
+	WorkdirRoot               string
+	TaskDir                   string
 }
 
 // SSHTaskDirReclaimResult reports what an attempt did. Removed and SkipReason
@@ -182,17 +201,24 @@ func containsRemoteDir(targets []sshReclaimTarget, candidate sshReclaimTarget) b
 // reclamation target. Pure function so the projection contract is unit-testable.
 func sshReclaimTargetFromMetadata(md map[string]interface{}) sshReclaimTarget {
 	return sshReclaimTarget{
-		Host:            strings.TrimSpace(mdString(md, sshMetaHost)),
-		Port:            mdInt(md, sshMetaPort),
-		User:            strings.TrimSpace(mdString(md, sshMetaUser)),
-		HostFingerprint: strings.TrimSpace(mdString(md, sshMetaHostFingerprint)),
-		IdentitySource:  strings.TrimSpace(mdString(md, sshMetaIdentitySource)),
-		IdentityFile:    strings.TrimSpace(mdString(md, sshMetaIdentityFile)),
-		ProxyJump:       strings.TrimSpace(mdString(md, sshMetaProxyJump)),
-		Shell:           strings.TrimSpace(mdString(md, sshMetaShell)),
-		WorkdirRoot:     strings.TrimSpace(mdString(md, sshMetaWorkdirRoot)),
-		TaskDir:         strings.TrimSpace(mdString(md, sshMetaRemoteTaskDir)),
-		Enabled:         strings.TrimSpace(mdString(md, sshMetaReclaimTaskDir)) == sshReclaimEnabledValue,
+		ConnectionID:              mdString(md, sshMetaConnectionID),
+		RouteStamp:                mdString(md, sshMetaRouteStamp),
+		IdentityGeneration:        mdString(md, sshMetaIdentityGeneration),
+		BastionIdentityGeneration: mdString(md, sshMetaBastionIdentityGeneration),
+		HostAlias:                 mdString(md, sshMetaHostAlias),
+		LegacyRouteRecorded:       true,
+		IdentityAgent:             mdString(md, sshMetaIdentityAgent),
+		Host:                      strings.TrimSpace(mdString(md, sshMetaHost)),
+		Port:                      mdInt(md, sshMetaPort),
+		User:                      strings.TrimSpace(mdString(md, sshMetaUser)),
+		HostFingerprint:           strings.TrimSpace(mdString(md, sshMetaHostFingerprint)),
+		IdentitySource:            strings.TrimSpace(mdString(md, sshMetaIdentitySource)),
+		IdentityFile:              strings.TrimSpace(mdString(md, sshMetaIdentityFile)),
+		ProxyJump:                 strings.TrimSpace(mdString(md, sshMetaProxyJump)),
+		Shell:                     strings.TrimSpace(mdString(md, sshMetaShell)),
+		WorkdirRoot:               strings.TrimSpace(mdString(md, sshMetaWorkdirRoot)),
+		TaskDir:                   strings.TrimSpace(mdString(md, sshMetaRemoteTaskDir)),
+		Enabled:                   strings.TrimSpace(mdString(md, sshMetaReclaimTaskDir)) == sshReclaimEnabledValue,
 	}
 }
 
@@ -261,16 +287,23 @@ func (s *Service) reclaimSSHTaskDirs(
 
 func (s *Service) reclaimOneSSHTaskDir(ctx context.Context, taskID string, target *sshReclaimTarget) error {
 	result, err := s.sshTaskDirReclaimer.ReclaimTaskDir(ctx, SSHTaskDirReclaimRequest{
-		Host:            target.Host,
-		Port:            target.Port,
-		User:            target.User,
-		HostFingerprint: target.HostFingerprint,
-		IdentitySource:  target.IdentitySource,
-		IdentityFile:    target.IdentityFile,
-		ProxyJump:       target.ProxyJump,
-		Shell:           target.Shell,
-		WorkdirRoot:     target.WorkdirRoot,
-		TaskDir:         target.TaskDir,
+		ConnectionID:              target.ConnectionID,
+		RouteStamp:                target.RouteStamp,
+		IdentityGeneration:        target.IdentityGeneration,
+		BastionIdentityGeneration: target.BastionIdentityGeneration,
+		HostAlias:                 target.HostAlias,
+		LegacyRouteRecorded:       target.LegacyRouteRecorded,
+		IdentityAgent:             target.IdentityAgent,
+		Host:                      target.Host,
+		Port:                      target.Port,
+		User:                      target.User,
+		HostFingerprint:           target.HostFingerprint,
+		IdentitySource:            target.IdentitySource,
+		IdentityFile:              target.IdentityFile,
+		ProxyJump:                 target.ProxyJump,
+		Shell:                     target.Shell,
+		WorkdirRoot:               target.WorkdirRoot,
+		TaskDir:                   target.TaskDir,
 	})
 	if err != nil {
 		s.recordSSHReclaimOutcome(target, sshReclaimOutcomeFailed, "", err.Error())

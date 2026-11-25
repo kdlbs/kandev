@@ -13,17 +13,6 @@ import { cn } from "@/lib/utils";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { settingsActionClassName } from "../settings-control";
 
-export function AccessSurface({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={cn("min-w-0 rounded-xl border bg-card p-4 md:p-5", className)}>{children}</div>
-  );
-}
 export function AccessHeading({ title, description }: { title: string; description?: ReactNode }) {
   return (
     <div className="space-y-2">
@@ -35,7 +24,7 @@ export function AccessHeading({ title, description }: { title: string; descripti
         {title}
       </h3>
       {description && (
-        <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
+        <p className="max-w-prose text-sm leading-relaxed text-muted-foreground">{description}</p>
       )}
     </div>
   );
@@ -45,29 +34,32 @@ export function AccessStatus({
   title,
   children,
   pending = false,
+  staticMessage = false,
 }: {
   tone?: "neutral" | "success" | "warning" | "error";
   title: string;
   children?: ReactNode;
   pending?: boolean;
+  staticMessage?: boolean;
 }) {
   let Icon = tone === "neutral" ? IconInfoCircle : IconAlertTriangle;
   if (pending) Icon = IconLoader2;
   else if (tone === "success") Icon = IconCheck;
+  const role = tone === "error" ? "alert" : "status";
   return (
-    <div role={tone === "error" ? "alert" : "status"} className="flex min-w-0 items-start gap-3">
+    <div role={staticMessage ? undefined : role} className="flex min-w-0 items-start gap-2">
       <span
         className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground",
-          tone === "success" && "bg-success/10 text-green-800 dark:text-green-300",
-          tone === "warning" && "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-          tone === "error" && "bg-destructive/10 text-destructive",
+          "flex size-5 shrink-0 items-center justify-center text-muted-foreground",
+          tone === "success" && "text-green-800 dark:text-green-300",
+          tone === "warning" && "text-amber-700 dark:text-amber-300",
+          tone === "error" && "text-destructive",
         )}
       >
         <Icon aria-hidden className={cn("size-4", pending && "motion-safe:animate-spin")} />
       </span>
-      <div className="min-w-0 space-y-1 pt-1">
-        <p className="text-sm font-medium">{title}</p>
+      <div className="min-w-0 space-y-1">
+        <p className="text-sm font-medium leading-5">{title}</p>
         {children && (
           <div className="text-sm leading-relaxed text-muted-foreground">{children}</div>
         )}

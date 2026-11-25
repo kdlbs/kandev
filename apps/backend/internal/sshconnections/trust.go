@@ -51,6 +51,7 @@ func (s *Service) Trust(ctx context.Context, id, stamp, token, fingerprint strin
 		c.Version++
 		c.Revision++
 		c.VerifiedRoute = ""
+		c.KnownHostsPending = false
 		if err = putConnection(ctx, tx, c); err != nil {
 			return err
 		}

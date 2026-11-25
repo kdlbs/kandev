@@ -37,7 +37,7 @@ func TestSSHRecoveryReattachesRecordedRemoteProcessWithoutStartingWork(t *testin
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
 	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 	metadata[MetadataKeySSHAgentctlInstanceID] = "native-execution-id"
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	recovery, ok := interface{}(exec).(DetailedRecoveryBackend)
 	if !ok {
@@ -214,7 +214,7 @@ func TestSSHRecoveryReadsLegacyControlPortFromExactSessionLog(t *testing.T) {
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
 	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 	metadata[MetadataKeySSHAgentctlInstanceID] = "native-execution-id"
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	recovery, ok := interface{}(exec).(DetailedRecoveryBackend)
 	if !ok {
 		t.Fatal("SSH recovery is not wired to detailed candidate outcomes")
@@ -291,7 +291,7 @@ func TestSSHRecoveryKeepsUnprovenRemoteOwnerRetryable(t *testing.T) {
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
 	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 	metadata[MetadataKeySSHAgentctlInstanceID] = "native-execution-id"
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	recovery, ok := interface{}(exec).(DetailedRecoveryBackend)
 	if !ok {
@@ -332,7 +332,7 @@ func TestSSHRecoveryDoesNotReplaceProvenMissingRemoteProcess(t *testing.T) {
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
 	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 	metadata[MetadataKeySSHAgentctlInstanceID] = "native-execution-id"
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	recovery, ok := interface{}(exec).(DetailedRecoveryBackend)
 	if !ok {

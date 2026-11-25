@@ -4,15 +4,22 @@ import (
 	"context"
 	"errors"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/sshconnections"
+	"github.com/kandev/kandev/internal/sshtransport"
 	"github.com/kandev/kandev/internal/task/models"
 	"golang.org/x/crypto/ssh"
+	"strconv"
 	"testing"
 )
 
 type managedSSHTestResolver struct {
 	admitted, dialed bool
 	dialErr          error
+}
+
+func (m *managedSSHTestResolver) AdmitSavedRuntime(ctx context.Context, session string) (sshconnections.RuntimeSnapshot, error) {
+	return m.AdmitRuntime(ctx, session, "connection", "")
 }
 
 func (m *managedSSHTestResolver) AdmitRuntime(_ context.Context, session, id, stamp string) (sshconnections.RuntimeSnapshot, error) {
@@ -119,5 +126,107 @@ func TestManagedSSHStartupRecoveryUsesRetainedIdentityWithoutLegacyFallback(t *t
 				t.Fatalf("managed recovery used inline legacy credentials: %v", commands)
 			}
 		})
+	}
+}
+
+func TestLegacySSHNewLaunchCannotDialInlineRoute(t *testing.T) {
+	server := newFakeSSHServer(t, func(_, _ string) sshExecResult {
+		return sshExecResult{ExitCode: 1}
+	})
+	executor := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	_, client, err := executor.dialSession(context.Background(), "session", sshConnectionMetadata(t, server), true)
+	if client != nil {
+		_ = client.Close()
+	}
+	if !errors.Is(err, sshconnections.ErrInvalidRoute) {
+		t.Fatalf("new inline launch must fail before dialing, got %v", err)
+	}
+}
+
+type retainedWireSSHTestResolver struct {
+	*sshconnections.Service
+}
+
+func (r retainedWireSSHTestResolver) DialRetainedLegacySession(ctx context.Context, _ string, target sshtransport.SSHTarget) (*ssh.Client, error) {
+	return r.DialRetainedLegacy(ctx, target)
+}
+
+func newRetainedWireSSHTestExecutor(log *logger.Logger) *SSHExecutor {
+	executor := NewSSHExecutor(nil, nil, nil, log)
+	executor.SetManagedConnections(retainedWireSSHTestResolver{Service: sshconnections.NewService(true, nil, nil)})
+	return executor
+}
+
+type launchWireSSHTestResolver struct {
+	*sshconnections.Service
+	target sshtransport.SSHTarget
+}
+
+func (r launchWireSSHTestResolver) AdmitSavedRuntime(_ context.Context, sessionID string) (sshconnections.RuntimeSnapshot, error) {
+	return sshconnections.RuntimeSnapshot{
+		SessionID: sessionID,
+		Route: sshconnections.Route{
+			Destination: sshconnections.Connection{
+				ID: "fixture-connection", Host: r.target.Host, Port: r.target.Port, User: r.target.User, Fingerprint: r.target.PinnedFingerprint,
+			},
+			Stamp: "fixture-route",
+		},
+		IdentityGeneration: "fixture-generation",
+	}, nil
+}
+
+func (r launchWireSSHTestResolver) DialRuntime(ctx context.Context, _ sshconnections.RuntimeSnapshot) (*ssh.Client, error) {
+	return DialSSH(ctx, &r.target)
+}
+
+func wireSavedSSHLaunch(executor *SSHExecutor, metadata map[string]interface{}) {
+	port, _ := strconv.Atoi(getMetadataString(metadata, MetadataKeySSHPort))
+	executor.SetManagedConnections(launchWireSSHTestResolver{target: sshtransport.SSHTarget{
+		Host: getMetadataString(metadata, MetadataKeySSHHost), Port: port, User: getMetadataString(metadata, MetadataKeySSHUser),
+		PinnedFingerprint: getMetadataString(metadata, MetadataKeySSHHostFingerprint),
+		IdentitySource:    SSHIdentitySource(getMetadataString(metadata, MetadataKeySSHIdentitySource)),
+		IdentityFile:      getMetadataString(metadata, MetadataKeySSHIdentityFile),
+	}})
+}
+
+func TestRetainedSSHMetadataKeepsOriginalBinding(t *testing.T) {
+	request := &LaunchRequest{
+		ExecutorType:        string(models.ExecutorTypeSSH),
+		PreviousExecutionID: "prior",
+		Metadata: map[string]interface{}{
+			MetadataKeySSHRemoteSessionDir: "/original/session",
+			MetadataKeySSHConnectionID:     "original",
+			MetadataKeySSHRouteStamp:       "original-route-stamp",
+		},
+		ExecutorConfig: map[string]string{MetadataKeySSHConnectionID: "replacement"},
+	}
+	metadata := buildLaunchMetadata(request, "", "", "")
+	if metadata[MetadataKeySSHConnectionID] != "original" || metadata[MetadataKeySSHRouteStamp] != "original-route-stamp" {
+		t.Fatalf("retained SSH route changed: %+v", metadata)
+	}
+	request.PreviousExecutionID = ""
+	metadata = buildLaunchMetadata(request, "", "", "")
+	if metadata[MetadataKeySSHConnectionID] != "replacement" || metadata[MetadataKeySSHRouteStamp] != nil {
+		t.Fatalf("fresh SSH launch received retained route metadata: %+v", metadata)
+	}
+}
+
+func TestRetainedSSHStopOwnerRejectsRouteChange(t *testing.T) {
+	original := &models.ExecutorRunning{
+		AgentExecutionID: "execution",
+		TaskID:           "task",
+		SessionID:        "session",
+		ExecutorID:       "executor",
+		Runtime:          agentruntime.RuntimeSSH,
+		Metadata: map[string]interface{}{
+			MetadataKeySSHConnectionID: "connection",
+			MetadataKeySSHRouteStamp:   "original",
+		},
+	}
+	replacement := *original
+	replacement.Metadata = cloneSSHMetadata(original.Metadata)
+	replacement.Metadata[MetadataKeySSHRouteStamp] = "replacement"
+	if !samePersistedSSHStopOwner(original, original) || samePersistedSSHStopOwner(original, &replacement) {
+		t.Fatalf("changed route was treated as the same SSH stop owner")
 	}
 }

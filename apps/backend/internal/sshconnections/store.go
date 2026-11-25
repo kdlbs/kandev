@@ -21,6 +21,7 @@ func NewStore(db *sqlx.DB) (*Store, error) {
 		`CREATE TABLE IF NOT EXISTS ssh_connections (id TEXT PRIMARY KEY, data TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS ssh_identities (id TEXT PRIMARY KEY, data TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS ssh_connection_refs (owner_type TEXT NOT NULL, owner_id TEXT NOT NULL, connection_id TEXT NOT NULL, route_stamp TEXT NOT NULL, PRIMARY KEY (owner_type,owner_id))`,
+		`CREATE TABLE IF NOT EXISTS ssh_migrations (executor_id TEXT PRIMARY KEY, data TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS ssh_connection_audit (id TEXT PRIMARY KEY, actor TEXT NOT NULL, entity_id TEXT NOT NULL, operation TEXT NOT NULL, result TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
 	}
 	for _, q := range schema {
@@ -156,12 +157,18 @@ func saveConnectionIn(ctx context.Context, tx *sqlx.Tx, c *Connection, expected 
 	c.Fingerprint = old.Fingerprint
 	c.PublicKey = old.PublicKey
 	c.VerifiedRoute = old.VerifiedRoute
+	c.ImportedPending = old.ImportedPending
+	c.KnownHostsPending = old.KnownHostsPending
+	c.RepairReason = old.RepairReason
 	if old.ID == "" || !sameTransport(old, *c) {
 		if err = routeInUse(ctx, tx, c.ID, true); err != nil {
 			return err
 		}
 		c.Revision++
 		c.VerifiedRoute = ""
+		c.ImportedPending = false
+		c.KnownHostsPending = false
+		c.RepairReason = ""
 		if endpointChanged(old, *c) {
 			c.Fingerprint = ""
 			c.PublicKey = ""

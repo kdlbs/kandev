@@ -1,8 +1,12 @@
 export type SSHIdentitySource = "agent" | "file";
 
 export interface SSHTestRequest {
-  ssh_connection_id?: string;
-  expected_stamp?: string;
+  ssh_connection_id: string;
+  expected_stamp: string;
+  name: string;
+}
+
+export interface RemoteDockerSSHTestRequest {
   name: string;
   host_alias?: string;
   host?: string;

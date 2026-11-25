@@ -8,7 +8,7 @@ import { ConnectionDetails } from "./connection-details";
 import { ConnectionOverview } from "./connection-overview";
 import { ConnectionAccess } from "./connection-access";
 import type { RemedyAction } from "./diagnostic-issues";
-import { PrerequisitePanel } from "./prerequisite-panel";
+import { focusSetupChecks, PrerequisitePanel } from "./prerequisite-panel";
 
 export function ManagerDetail({
   manager,
@@ -73,11 +73,18 @@ export function ManagerDetail({
             manager={manager}
             onEdit={n.edit}
             onBastion={() => remedy("access", "bastion")}
+            onNewConnection={n.create}
+            onSetupChecks={focusSetupChecks}
+            setupChecks={
+              <PrerequisitePanel
+                key={route.stamp}
+                route={route}
+                manager={manager}
+                onRemedy={remedy}
+                focusOnOpen={n.focusSetupChecks}
+              />
+            }
           />
-        );
-      if (n.section === "diagnostics")
-        return (
-          <PrerequisitePanel key={route.stamp} route={route} manager={manager} onRemedy={remedy} />
         );
       return (
         <ConnectionOverview

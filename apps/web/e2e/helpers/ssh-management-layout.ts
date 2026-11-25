@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
 
-export async function seedSSHLayout(baseUrl: string) {
+export async function seedSSHLayout(baseUrl: string, name = "Layout connection") {
   const post = async (path: string, body: unknown) => {
     const response = await fetch(`${baseUrl}/api/v1/ssh/managed${path}`, {
       method: "POST",
@@ -21,7 +21,7 @@ export async function seedSSHLayout(baseUrl: string) {
     request_id: randomUUID(),
     expected_version: 0,
     connection: {
-      name: "Layout connection",
+      name,
       host: "layout.invalid",
       port: 22,
       user: "deploy",
@@ -41,12 +41,13 @@ export async function exerciseSSHLayout(page: Page, baseUrl: string, mobile: boo
   await expect(page.getByRole("heading", { name: "Layout connection", exact: true })).toBeVisible();
   await expect(page.getByText("deploy@layout.invalid:22", { exact: true })).toBeVisible();
   await expect(page.getByLabel("SSH password", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Delete connection", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Delete connection", exact: true })).toBeVisible();
   const edit = page.getByRole("button", { name: "Edit", exact: true });
   const box = await edit.boundingBox();
   expect(box).not.toBeNull();
   if (mobile) expect(box!.height).toBeGreaterThanOrEqual(44);
   else expect(Math.abs(box!.height - 28)).toBeLessThanOrEqual(1);
+  await assertSSHOverviewColumns(page);
   await page.screenshot({ path: test.info().outputPath("ssh-overview.png"), fullPage: true });
   await edit.click();
   await expect(page.getByLabel("Host", { exact: true })).toHaveValue("layout.invalid");
@@ -71,12 +72,86 @@ export async function exerciseSSHLayout(page: Page, baseUrl: string, mobile: boo
   await expect(row).toHaveCount(1);
   await expect(row).toContainText("deploy@layout.invalid:22");
   await expect(row).toBeFocused();
+  const collection = await page.getByRole("tabpanel").locator(":scope > *").boundingBox();
+  expect(collection).not.toBeNull();
   if (await page.evaluate(() => navigator.maxTouchPoints > 0)) await row.tap();
   else await row.press("Enter");
   await expect(
     page.getByRole("heading", { name: "Renamed layout connection", exact: true }),
   ).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Diagnostics", exact: true })).toHaveCount(0);
+  for (const name of ["Overview", "Access"]) {
+    await page.getByRole("tab", { name, exact: true }).click();
+    const panel = page.getByRole("tabpanel", { name, exact: true });
+    const content = await panel.locator(":scope > *").boundingBox();
+    expect(content).not.toBeNull();
+    expect(Math.abs(content!.x - collection!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(content!.width - collection!.width)).toBeLessThanOrEqual(1);
+    await assertNoDocumentHorizontalOverflow(page);
+  }
+}
+
+// @covers AC-EXECUTORS-SSH-CONNECTIONS-004.20
+async function assertSSHOverviewColumns(page: Page) {
+  const overview = page.getByTestId("ssh-connection-overview");
+  const endpoint = await overview
+    .getByRole("heading", { name: "Connection details" })
+    .boundingBox();
+  const identity = await overview
+    .getByRole("heading", { name: "Identity and route" })
+    .boundingBox();
+  const body = await overview.boundingBox();
+  const remove = await page
+    .getByRole("button", { name: "Delete connection", exact: true })
+    .boundingBox();
+  expect(endpoint).not.toBeNull();
+  expect(identity).not.toBeNull();
+  expect(body).not.toBeNull();
+  expect(remove).not.toBeNull();
+  if (body!.width >= 864) {
+    expect(Math.abs(endpoint!.y - identity!.y)).toBeLessThanOrEqual(1);
+    expect(identity!.x).toBeGreaterThan(endpoint!.x);
+  } else {
+    expect(identity!.y).toBeGreaterThan(endpoint!.y);
+    expect(Math.abs(endpoint!.x - identity!.x)).toBeLessThanOrEqual(1);
+  }
+  if (!page.viewportSize() || page.viewportSize()!.width >= 768) {
+    expect(Math.abs(remove!.x + remove!.width - body!.x - body!.width)).toBeLessThanOrEqual(1);
+  }
+}
+
+export async function exerciseSSHOverviewBreakpoint(page: Page, baseUrl: string) {
+  const name = "LongConnectionName".repeat(6);
+  const { route } = await seedSSHLayout(baseUrl, name);
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await page.goto(`/settings/executors/ssh-connections?id=${route.destination.id}`);
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+  const overview = page.getByTestId("ssh-connection-overview");
+  const sidebar = page.getByTestId("app-sidebar");
+  for (const control of ["Collapse sidebar", "Expand sidebar"]) {
+    await expect(sidebar.getByRole("button", { name: control, exact: true })).toBeVisible();
+    const reference = (await overview.boundingBox())!;
+    const inset = page.viewportSize()!.width - reference.width;
+    for (const width of [863, 864]) {
+      await page.setViewportSize({ width: width + Math.round(inset), height: 900 });
+      await expect(overview).toHaveCSS("width", `${width}px`);
+      await assertSSHOverviewColumns(page);
+      await assertNoDocumentHorizontalOverflow(page);
+    }
+    await sidebar.getByRole("button", { name: control, exact: true }).click();
+    await page.setViewportSize({ width: 1100, height: 900 });
+  }
+  // A 1920 × 900 desktop at 200% zoom exposes a 960 × 450 CSS pixel viewport.
+  await page.setViewportSize({ width: 960, height: 450 });
+  await assertSSHOverviewColumns(page);
   await assertNoDocumentHorizontalOverflow(page);
+  const scroller = page.getByTestId("settings-scroll-container");
+  await expect(scroller).toHaveCSS("overflow-y", "auto");
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollHeight > element.clientHeight))
+    .toBe(true);
+  await page.getByRole("button", { name: "Set up access", exact: true }).scrollIntoViewIfNeeded();
+  await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 }
 
 export async function exerciseSSHCollection(page: Page, baseUrl: string) {
@@ -129,17 +204,15 @@ export async function exerciseSSHIdentityRemoval(page: Page, baseUrl: string, to
   const identity = await response.json();
   await page.goto(`/settings/executors/ssh-connections?tab=identities&id=${identity.id}`);
   await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
-  const more = page.getByRole("button", { name: "More actions", exact: true });
+  const remove = page.getByRole("button", { name: "Delete identity", exact: true });
   const activate = (locator: import("@playwright/test").Locator) =>
     touch ? locator.tap() : locator.click();
-  await activate(more);
-  await activate(page.getByRole("menuitem", { name: "Delete identity", exact: true }));
+  await activate(remove);
   const confirmation = page.getByRole("dialog", { name: "Delete identity", exact: true });
   await expect(confirmation).toBeVisible();
   await activate(confirmation.getByRole("button", { name: "Cancel", exact: true }));
-  await expect(more).toBeFocused();
-  await activate(more);
-  await activate(page.getByRole("menuitem", { name: "Delete identity", exact: true }));
+  await expect(remove).toBeFocused();
+  await activate(remove);
   const deleted = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname.endsWith(`/identities/${identity.id}`) &&

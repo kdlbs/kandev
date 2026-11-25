@@ -4,8 +4,9 @@ import {
   exerciseSSHLayout,
   exerciseSSHCollection,
   exerciseSSHIdentityRemoval,
+  exerciseSSHOverviewBreakpoint,
 } from "../../helpers/ssh-management-layout";
-for (const width of [767, 768, 1280]) {
+for (const width of [767, 768, 1280, 1440, 1920]) {
   test(`focused SSH overview and edit at ${width}px`, async ({ backend, testPage }) => {
     const release = await backend.useEnv({ KANDEV_FEATURES_SSH_CONNECTION_MANAGER: "true" });
     try {
@@ -17,6 +18,19 @@ for (const width of [767, 768, 1280]) {
     }
   });
 }
+
+test("SSH overview follows the available pane width with either sidebar state", async ({
+  backend,
+  testPage,
+}) => {
+  const release = await backend.useEnv({ KANDEV_FEATURES_SSH_CONNECTION_MANAGER: "true" });
+  try {
+    await exerciseSSHOverviewBreakpoint(testPage, backend.baseUrl);
+  } finally {
+    await testPage.close();
+    await release();
+  }
+});
 
 test("coarse tablet SSH overview and edit", async ({ backend, testPage, tabletTestPage }) => {
   const release = await backend.useEnv({ KANDEV_FEATURES_SSH_CONNECTION_MANAGER: "true" });

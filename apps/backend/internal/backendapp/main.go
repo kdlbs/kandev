@@ -721,6 +721,7 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Worktree Manager...")
 
+	services.Task.SetSSHTaskDirReclaimer(newSSHTaskDirReclaimerAdapter(log, services.SSHConnections))
 	worktreeMgr, worktreeCleanup, err := provideWorktreeManager(dbPool, cfg, log, lifecycleMgr, services.Task)
 	if err != nil {
 		log.Error("Failed to initialize worktree manager", zap.Error(err))

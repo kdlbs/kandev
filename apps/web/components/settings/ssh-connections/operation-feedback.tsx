@@ -10,18 +10,49 @@ export function currentOperation(manager: SSHManager, route: SSHRoute): SSHOpera
     ? operation
     : null;
 }
+export function isTrustInUse(operation: Pick<SSHOperation, "kind" | "status" | "error"> | null) {
+  return (
+    operation?.kind === "trust" &&
+    operation.status === "failed" &&
+    operation.error === "ssh_resource_in_use"
+  );
+}
+
 export function OperationFeedback({
   manager,
   route,
   kind,
+  changedHost = false,
 }: {
   manager: SSHManager;
   route: SSHRoute;
   kind?: SSHOperation["kind"];
+  changedHost?: boolean;
 }) {
-  const { t } = useTranslation();
   const operation = currentOperation(manager, route);
   if (!operation || (kind && operation.kind !== kind)) return null;
+  return <OperationResult operation={operation} changedHost={changedHost} />;
+}
+
+export function OperationResult({
+  operation,
+  changedHost = false,
+}: {
+  operation: Pick<SSHOperation, "kind" | "status" | "error" | "hop">;
+  changedHost?: boolean;
+}) {
+  const { t } = useTranslation();
+  if (isTrustInUse(operation)) {
+    return (
+      <AccessStatus tone="error" title={t("settings:sshManager.experience.trustInUse")}>
+        {t(
+          changedHost
+            ? "settings:sshManager.experience.trustInUseHelp"
+            : "settings:sshManager.experience.trustInUseRetry",
+        )}
+      </AccessStatus>
+    );
+  }
   if (operation.status === "succeeded") {
     if (operation.kind !== "test") return null;
     return <AccessStatus tone="success" title={t("settings:sshManager.ready")} />;

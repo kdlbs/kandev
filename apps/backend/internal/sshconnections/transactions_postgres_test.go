@@ -160,9 +160,9 @@ func TestPostgresBindingAndRuntimeTransactions(t *testing.T) {
 		}
 	}
 	for _, q := range []string{
-		`CREATE TABLE executors(id TEXT PRIMARY KEY,config TEXT,deleted_at TIMESTAMP)`,
+		`CREATE TABLE executors(id TEXT PRIMARY KEY,config TEXT,deleted_at TIMESTAMP,type TEXT DEFAULT 'ssh')`,
 		`CREATE TABLE task_sessions(id TEXT PRIMARY KEY,executor_id TEXT,task_id TEXT)`,
-		`INSERT INTO executors VALUES ('executor','{"ssh_connection_id":"target"}',NULL)`,
+		`INSERT INTO executors (id,config,deleted_at) VALUES ('executor','{"ssh_connection_id":"target","ssh_connection_stamp":"` + route.Stamp + `"}',NULL)`,
 		`INSERT INTO task_sessions VALUES ('session','executor','task')`,
 	} {
 		if _, err = s.store.db.Exec(q); err != nil {
@@ -212,10 +212,6 @@ func TestPostgresBindingAndRuntimeTransactions(t *testing.T) {
 	}
 }
 
-func TestPostgresAdoptionTransactions(t *testing.T) {
-	s, ctx := postgresIdentityService(t)
-	testAdoptionTransactions(t, s, ctx)
-}
 func TestPostgresEnrollmentJournal(t *testing.T) {
 	s, ctx := postgresIdentityService(t)
 	testEnrollmentJournal(t, s, ctx)

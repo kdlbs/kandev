@@ -32,7 +32,7 @@ func transportFailure(err error) *ProbeFailure {
 	case errors.As(err, &credential):
 		out.Code = credential.Code
 	case errors.As(err, &changed):
-		out.Code = "ssh_host_key_changed"
+		out.Code = codeHostKeyChanged
 	case strings.Contains(err.Error(), "unable to authenticate"):
 		out.Code = "ssh_authentication_rejected"
 	}

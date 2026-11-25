@@ -10,18 +10,11 @@ owners:
 
 ## Overview
 
-An administrator can establish reusable SSH access starting without a local key
-or agent, then attach that connection to executor profiles. Executors owns the
-identity-to-host connection and its lifecycle. Workspace secrets supplies
-storage protection; authentication supplies management and task permissions.
-
-Source: [issue #3735](https://github.com/kdlbs/kandev/issues/3735).
-The maintainer selected unattended key availability, administrator-managed
-installation-wide connections, and assisted enrollment on 2026-09-19.
-This extends the [SSH executor](ssh-executor.md) behind the experimental
-SSH Connection Manager feature flag, which remains off by default. Existing
-external-file and agent modes retain their current contract. Implementation
-and validation records live in the linked plans.
+An administrator can establish shared SSH access without a local key or agent.
+Executors owns connections, workspace secrets protects storage, and authentication
+controls permissions. The experimental manager extends the [SSH executor](ssh-executor.md)
+and defaults to off. The maintainer selected unattended access and assisted
+enrollment for installation-wide connections in [issue #3735](https://github.com/kdlbs/kandev/issues/3735).
 
 ## Terms
 
@@ -181,7 +174,7 @@ and validation records live in the linked plans.
   from connection management to the initiating managed SSH executor editor in
   the same browser session shall preserve its non-secret draft. Only an explicit
   selection may change the draft connection; executor testing and saving shall
-  remain separate actions. Reload may discard unsaved executor drafts; secrets
+  remain separate. A successful executor test shall identify what passed with text and a check mark. Reload may discard unsaved executor drafts; secrets
   shall never be included in navigation or draft recovery state.
 
 - **AC-EXECUTORS-SSH-CONNECTIONS-004.8:** Connection and identity collections
@@ -195,7 +188,7 @@ and validation records live in the linked plans.
   its endpoint, identity, optional bastion, and current saved verification state
   as a readable overview. Metadata fields shall become editable through an
   explicit Edit action. A verified connection shall not initially display
-  bootstrap credential fields, a raw public-key block, or a destructive action.
+  bootstrap credential fields or a raw public-key block. Delete shall require confirmation.
 - **AC-EXECUTORS-SSH-CONNECTIONS-004.10:** Incomplete setup shall identify the
   next permitted step and distinguish saving details, trusting a host, and
   testing access. Key installation shall be an explicit optional action.
@@ -231,7 +224,6 @@ and validation records live in the linked plans.
 #### Enrollment and diagnostics revision
 
 Implemented by the [experience package](../../../plans/ssh-access-experience/plan.md).
-Earlier criteria remain accepted.
 
 - **AC-EXECUTORS-SSH-CONNECTIONS-004.15:** Access setup shall show one current
   task, completed prerequisites, and one primary action. Optional installation
@@ -244,8 +236,7 @@ Earlier criteria remain accepted.
   changed server key shall show both values and a blocking warning. Review
   alone shall not submit. Changing its target or leaving review shall invalidate
   confirmation and clear bootstrap secrets.
-- **AC-EXECUTORS-SSH-CONNECTIONS-004.17:** Each operation shall show progress
-  and its result beside the initiating task. Unknown intermediate progress
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.17:** Keep progress and results in the initiating row. Unknown intermediate progress
   shall not be fabricated. Failed, installed-but-unverified, and unknown
   enrollment outcomes shall offer distinct recovery actions. Only current
   verified access shall receive the green SSH success treatment.
@@ -255,33 +246,25 @@ Earlier criteria remain accepted.
   as an empty successful report. No reported setup problems shall not imply a
   successful live SSH test. Unreported individual checks shall not be shown as
   passed. Unknown codes shall retain a safe fallback and recovery path.
-- **AC-EXECUTORS-SSH-CONNECTIONS-004.19:** Desktop and phone shall support the
-  same method, review, result, and recovery steps. Phone shall show one active
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.19:** Desktop and phone shall share method, review, result and recovery steps. Phone shall show one active
   step with full-width choices, labelled wrapping evidence, one page scroller,
   and a reachable primary action. Keyboard focus shall follow deliberate step
   changes without being moved by background results. Loading, failure, long
   translations, and reduced motion shall preserve the same hierarchy.
 
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.20:** Wide panes shall align detail headers,
+  tabs and body to the list gutters. Access shall own setup checks and login, each
+  with its own result. Narrow panes shall support one column.
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.21:** After trust, group testing and eligible
+  installation together. Show available recovery actions beside a rejected login.
+
 ### REQ-EXECUTORS-SSH-CONNECTIONS-005: Compatibility and rollout
 
-**Intent:** Introduce managed access without replacing working operator configuration.
+**Intent:** Move existing SSH executors to shared connections while preserving their identities, access boundaries and saved trust. The [migration requirements](ssh-connection-migration.md) govern upgrades.
 
-- **AC-EXECUTORS-SSH-CONNECTIONS-005.1:** Existing agent/file profiles, config
-  aliases, IdentityAgent overrides, and ProxyJump settings shall continue to
-  work unchanged. No private key shall be automatically copied into Kandev.
-- **AC-EXECUTORS-SSH-CONNECTIONS-005.2:** Converting a legacy direct or single-hop profile
-  shall require an administrator action, preserve the exact resolved endpoint
-  and existing destination pin, and pass current connection/executor checks
-  before binding. A single-hop conversion shall separately resolve and confirm
-  the bastion identity and explicitly trust its host fingerprint; it shall not
-  carry forward legacy acceptance of an unknown bastion key.
-  Profiles shall not be merged because their host names match. Failed or
-  unsupported conversion shall leave the original profile operational.
-- **AC-EXECUTORS-SSH-CONNECTIONS-005.3:** The feature shall ship disabled in
-  all runtime profiles. When disabled, new management, probes, enrollment,
-  managed bindings, and managed runtime connections shall fail before secret
-  resolution or remote work; legacy profiles shall retain existing behavior.
-  Saved managed records shall remain available when re-enabled.
+- **AC-EXECUTORS-SSH-CONNECTIONS-005.1:** Import the existing agent or file reference, resolved alias and supported single-hop route. Keep all private key material at its existing location.
+- **AC-EXECUTORS-SSH-CONNECTIONS-005.2:** Convert each old executor once, independently of remote availability. Preserve its destination pin and require trusted evidence for each bastion. A complete route shall pass its fresh checks on first use. An incomplete route shall open in the ordinary shared editor for repair.
+- **AC-EXECUTORS-SSH-CONNECTIONS-005.3:** Enable SSH executors in all shipped runtime profiles. An explicit disable shall allow offline conversion and prevent remote work, credential resolution and management operations. Saved connections shall remain available after re-enablement.
 - **AC-EXECUTORS-SSH-CONNECTIONS-005.4:** Administrator mutations, trust
   decisions, enrollment results, and managed authentication failures shall
   produce attributable audit records without private keys, passwords, or
@@ -293,7 +276,7 @@ Earlier criteria remain accepted.
   identity or result in a successful connection status.
 - **AC-EXECUTORS-SSH-CONNECTIONS-005.6:** Existing SSH management bookmarks
   shall open the equivalent nested settings view, preserving the selected tab,
-  entity, creation state, and pending adoption or bastion-return context. The
+  entity, creation state, and pending bastion-return context. The
   redirect shall not create records, trust hosts, enroll keys, or bind profiles.
   Feature and administrator restrictions shall apply at both locations.
 
@@ -303,8 +286,8 @@ Per-user/workspace sharing policies, per-use passphrase unlock, private-key
 export, automatic remote revocation or rotation, certificate authorities,
 cloud-provider enrollment APIs, hardware-key generation, general interactive
 keyboard authentication, sudo, custom AuthorizedKeysCommand management, and
-chained ProxyJump connections are excluded. Single-hop ProxyJump and explicit
-legacy conversion are included. The first managed
+chained ProxyJump connections are excluded. Single-hop ProxyJump and automatic
+executor migration are included. The first managed
 connection consumer is SSH; implementing the remote Docker runtime itself
 remains [#3710](https://github.com/kdlbs/kandev/issues/3710).
 

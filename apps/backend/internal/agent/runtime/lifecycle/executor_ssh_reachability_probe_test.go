@@ -312,54 +312,6 @@ func TestProbeSSHHostCancelledContextProducesNoObservation(t *testing.T) {
 	}
 }
 
-func TestSSHTargetFromExecutorConfig(t *testing.T) {
-	newTestHomeDir(t)
-
-	t.Run("a valid config resolves", func(t *testing.T) {
-		target, err := SSHTargetFromExecutorConfig(map[string]string{
-			"ssh_host":             "target.internal",
-			"ssh_port":             "2222",
-			"ssh_user":             "deploy",
-			"ssh_identity_source":  "file",
-			"ssh_identity_file":    "/keys/id_ed25519",
-			"ssh_host_fingerprint": "SHA256:abc",
-		})
-		if err != nil {
-			t.Fatalf("SSHTargetFromExecutorConfig: %v", err)
-		}
-		if target.Host != "target.internal" || target.Port != 2222 || target.User != "deploy" {
-			t.Fatalf("target = %+v", target)
-		}
-		if target.PinnedFingerprint != "SHA256:abc" {
-			t.Fatalf("PinnedFingerprint = %q", target.PinnedFingerprint)
-		}
-	})
-
-	t.Run("a nil config fails resolution", func(t *testing.T) {
-		if _, err := SSHTargetFromExecutorConfig(nil); err == nil {
-			t.Fatal("expected an error for a nil config")
-		}
-	})
-
-	t.Run("an invalid port fails resolution", func(t *testing.T) {
-		if _, err := SSHTargetFromExecutorConfig(map[string]string{
-			"ssh_host": "target.internal",
-			"ssh_port": "not-a-port",
-		}); err == nil {
-			t.Fatal("expected an error for an invalid port")
-		}
-	})
-
-	t.Run("a missing pinned fingerprint fails resolution", func(t *testing.T) {
-		if _, err := SSHTargetFromExecutorConfig(map[string]string{
-			"ssh_host": "target.internal",
-			"ssh_user": "deploy",
-		}); err == nil {
-			t.Fatal("expected an error when the pinned host fingerprint is missing")
-		}
-	})
-}
-
 func TestSanitizeSSHReachabilityMessageBoundsAndRedacts(t *testing.T) {
 	secret := "ssh: unable to authenticate, password=super-secret-token " + strings.Repeat("x", 700)
 	got := SanitizeSSHReachabilityMessage(errors.New(secret))

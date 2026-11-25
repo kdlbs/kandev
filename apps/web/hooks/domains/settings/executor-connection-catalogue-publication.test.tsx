@@ -1,5 +1,6 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
+import { defaultFeatureFlags } from "@/lib/state/slices/features/types";
 import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   SettingsSaveProvider,
@@ -14,6 +15,7 @@ import {
   executor,
   form,
   json,
+  managedTransport,
   OTHER,
   OWNER,
   profile,
@@ -23,6 +25,7 @@ import {
 
 const NEW_DESTINATION = "destination-new-owner-profile";
 const DOCKERFILE = "FROM alpine";
+const replacementConnection = "replacement";
 
 afterEach(disposeFixtures);
 
@@ -41,7 +44,12 @@ function mountCaller(fixture: ReturnType<typeof transport>, remote = false) {
     return <Destinations />;
   }
   const view = render(
-    <StateProvider initialState={{ executors: { items: fixture.seed } }}>
+    <StateProvider
+      initialState={{
+        executors: { items: fixture.seed },
+        features: { ...defaultFeatureFlags, sshConnectionManager: true },
+      }}
+    >
       <SettingsSaveProvider>
         {remote ? <RemoteConnection /> : <SSHExecutorPage executorId={OWNER} />}
         <Observe />
@@ -50,7 +58,25 @@ function mountCaller(fixture: ReturnType<typeof transport>, remote = false) {
   );
   return { view, capture };
 }
-async function editAndTrust(view: ReturnType<typeof render>) {
+async function editAndTest(view: ReturnType<typeof render>, remote = false) {
+  if (!remote) {
+    const name = await view.findByLabelText("Name", { exact: true });
+    const picker = view.getByLabelText("Shared connection");
+    await waitFor(() =>
+      expect(picker.querySelector(`option[value="${replacementConnection}"]`)).toBeTruthy(),
+    );
+    fireEvent.change(name, { target: { value: form.name } });
+    fireEvent.change(picker, { target: { value: replacementConnection } });
+    const test = view.getByRole("button", { name: "Test executor", exact: true });
+    await waitFor(() => expect(test.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(test);
+    await waitFor(() =>
+      expect(view.getByRole("button", { name: "Save changes" }).hasAttribute("disabled")).toBe(
+        false,
+      ),
+    );
+    return;
+  }
   await waitFor(() => expect(view.getByTestId("ssh-input-name")).toBeTruthy());
   fireEvent.change(view.getByTestId("ssh-input-name"), { target: { value: form.name } });
   fireEvent.click(view.getAllByTestId("ssh-test-button")[0]);
@@ -76,10 +102,10 @@ async function startCoordinated(
 }
 
 // @covers AC-EXECUTORS-PROFILE-EDITOR-001.21 through .24
-it("SSH page shows the normalized pin after coordinated save", async () => {
-  const fixture = transport();
+it("SSH page shows the selected shared connection after coordinated save", async () => {
+  const fixture = managedTransport();
   const { view, capture } = mountCaller(fixture);
-  await editAndTrust(view);
+  await editAndTest(view);
   const { completion } = await startCoordinated(fixture, capture);
   act(() => {
     createDestination(capture.store);
@@ -95,8 +121,23 @@ it("SSH page shows the normalized pin after coordinated save", async () => {
     expect((await completion).canLeave).toBe(true);
   });
   await waitFor(() =>
-    expect(view.getByTestId("ssh-fingerprint-pinned-value").textContent).toBe("SHA256:normalized"),
+    expect((view.getByLabelText("Name", { exact: true }) as HTMLInputElement).value).toBe(
+      "Normalized host",
+    ),
   );
+  await waitFor(() =>
+    expect((view.getByLabelText("Shared connection") as HTMLSelectElement).value).toBe(
+      replacementConnection,
+    ),
+  );
+  expect(fixture.payload).toEqual({
+    name: form.name,
+    config: {
+      ssh_connection_id: replacementConnection,
+      ssh_connection_stamp: replacementConnection,
+      ssh_shell: "bash",
+    },
+  });
   expect(view.getByTestId(NEW_DESTINATION).textContent).toContain("new-owner");
   expect(view.getByTestId(`destination-${OWNER}-profile`).textContent).toContain(
     "Current destination",
@@ -120,7 +161,7 @@ it("Remote Docker section retains config and normalized pin", async () => {
     mcp_policy: "kept",
   };
   const { view, capture } = mountCaller(fixture, true);
-  await editAndTrust(view);
+  await editAndTest(view, true);
   const { completion } = await startCoordinated(fixture, capture);
   act(() => {
     createDestination(capture.store);
@@ -164,9 +205,11 @@ it("Remote Docker section retains config and normalized pin", async () => {
 it.each([false, true])(
   "PATCH rejection preserves live state and recoverable rendered draft (remote %s)",
   async (remote) => {
-    const fixture = transport([executor(OWNER, remote ? "remote_docker" : "ssh"), executor(OTHER)]);
+    const fixture = remote
+      ? transport([executor(OWNER, "remote_docker"), executor(OTHER)])
+      : managedTransport();
     const { view, capture } = mountCaller(fixture, remote);
-    await editAndTrust(view);
+    await editAndTest(view, remote);
     let completion!: ReturnType<typeof capture.coordinator.saveAll>;
     await act(async () => {
       completion = capture.coordinator.saveAll();
@@ -180,10 +223,11 @@ it.each([false, true])(
       expect((await completion).canLeave).toBe(false);
     });
     expect(capture.store.getState().executors.items).toBe(live);
-    expect((view.getByTestId("ssh-input-name") as HTMLInputElement).value).toBe(form.name);
-    expect(view.getByTestId("ssh-connection-card").getAttribute("data-settings-dirty")).toBe(
-      "true",
-    );
+    const name = remote
+      ? view.getByTestId("ssh-input-name")
+      : view.getByLabelText("Name", { exact: true });
+    expect((name as HTMLInputElement).value).toBe(form.name);
+    expect(name.closest('[data-settings-dirty="true"]')).toBeTruthy();
     expect(capture.coordinator.contributorStates.some((entry) => entry.saveFailed)).toBe(true);
     expect(view.getByTestId(NEW_DESTINATION)).toBeTruthy();
     expect(fixture.calls).not.toContain("GET /api/v1/executors");

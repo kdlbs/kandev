@@ -1,112 +1,88 @@
-import { test, expect } from "../../fixtures/ssh-test-base";
 import fs from "node:fs";
 import path from "node:path";
+import { test, expect } from "../../fixtures/ssh-test-base";
+import {
+  insertLegacySSHFixture,
+  managedSSHRequest,
+  readSSHRoute,
+} from "../../helpers/ssh-managed-fixture";
+import type { SSHIdentity, SSHRoute } from "../../../lib/types/http-ssh-connections";
 
-/**
- * ~/.ssh/config inheritance: alias → HostName / Port / User / IdentityFile /
- * ProxyJump. Explicit form values always win. Unknown alias falls back to
- * alias-as-hostname.
- *
- * Each test writes a fresh ~/.ssh/config into the worker's HOME (the
- * fixture's tmpDir is the backend's HOME by construction). The backend
- * reads from $HOME/.ssh/config the same way a user's terminal does.
- *
- * Covers e2e-plan.md group M (M1–M6).
- */
-test.describe("ssh ~/.ssh/config inheritance", () => {
-  test("alias resolves HostName from ~/.ssh/config", async ({ apiClient, seedData, backend }) => {
-    const sshConfigDir = path.join(backend.tmpDir, ".ssh");
-    fs.mkdirSync(sshConfigDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(sshConfigDir, "config"),
-      [
-        "Host alias-m1",
-        `  HostName ${seedData.sshTarget.host}`,
-        `  Port ${seedData.sshTarget.port}`,
-        `  User ${seedData.sshTarget.user}`,
-        `  IdentityFile ${seedData.sshTarget.identityFile}`,
-        "  IdentitiesOnly yes",
-        "",
-      ].join("\n"),
-      { mode: 0o600 },
-    );
-
-    const result = await apiClient.testSSHConnection({
-      name: "M1 alias HostName",
-      host_alias: "alias-m1",
+// @covers AC-EXECUTORS-SSH-MIGRATION-001.3, AC-EXECUTORS-SSH-MIGRATION-001.4
+test("upgrade resolves saved aliases, preserves explicit overrides and flags an unknown alias", async ({
+  backend,
+  apiClient,
+  seedData,
+}) => {
+  const target = seedData.sshTarget;
+  const dir = path.join(backend.tmpDir, ".ssh");
+  const file = path.join(dir, "config");
+  const previous = fs.existsSync(file) ? fs.readFileSync(file) : undefined;
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(
+    file,
+    [
+      "",
+      "Host inherited-fixture",
+      `  HostName ${target.host}`,
+      `  User ${target.user}`,
+      `  Port ${target.port}`,
+      `  IdentityFile ${target.identityFile}`,
+      "Host overridden-fixture",
+      `  HostName ${target.host}`,
+      "  User unused",
+      "  Port 1",
+      "  IdentityFile /unavailable/fixture",
+      "",
+    ].join("\n"),
+    { mode: 0o600 },
+  );
+  try {
+    const routes = [
+      insertLegacySSHFixture(backend.tmpDir, "Inherited", {
+        ssh_host_alias: "inherited-fixture",
+        ssh_host_fingerprint: target.hostFingerprint,
+      }),
+      insertLegacySSHFixture(backend.tmpDir, "Explicit", {
+        ssh_host_alias: "overridden-fixture",
+        ssh_user: target.user,
+        ssh_port: String(target.port),
+        ssh_identity_source: "file",
+        ssh_identity_file: target.identityFile,
+        ssh_host_fingerprint: target.hostFingerprint,
+      }),
+    ];
+    const missing = insertLegacySSHFixture(backend.tmpDir, "Missing alias", {
+      ssh_host_alias: "no-such-fixture",
     });
-    expect(result.success).toBe(true);
-    expect(result.fingerprint).toBe(seedData.sshTarget.hostFingerprint);
-  });
-
-  test("explicit form port wins over the alias' Port", async ({ apiClient, seedData, backend }) => {
-    const sshConfigDir = path.join(backend.tmpDir, ".ssh");
-    fs.mkdirSync(sshConfigDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(sshConfigDir, "config"),
-      [
-        "Host alias-m2",
-        `  HostName ${seedData.sshTarget.host}`,
-        "  Port 1", // intentionally wrong; the form value should win
-        `  User ${seedData.sshTarget.user}`,
-        `  IdentityFile ${seedData.sshTarget.identityFile}`,
-        "",
-      ].join("\n"),
-      { mode: 0o600 },
-    );
-
-    const result = await apiClient.testSSHConnection({
-      name: "M2 form port wins",
-      host_alias: "alias-m2",
-      port: seedData.sshTarget.port,
-    });
-    expect(result.success).toBe(true);
-  });
-
-  test("explicit form IdentityFile wins over the alias' IdentityFile", async ({
-    apiClient,
-    seedData,
-    backend,
-  }) => {
-    const sshConfigDir = path.join(backend.tmpDir, ".ssh");
-    fs.mkdirSync(sshConfigDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(sshConfigDir, "config"),
-      [
-        "Host alias-m3",
-        `  HostName ${seedData.sshTarget.host}`,
-        `  Port ${seedData.sshTarget.port}`,
-        `  User ${seedData.sshTarget.user}`,
-        "  IdentityFile /tmp/does-not-exist",
-        "",
-      ].join("\n"),
-      { mode: 0o600 },
-    );
-
-    const result = await apiClient.testSSHConnection({
-      name: "M3 form key wins",
-      host_alias: "alias-m3",
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
-    });
-    expect(result.success).toBe(true);
-  });
-
-  test("unknown alias falls back to using the alias string as the hostname", async ({
-    apiClient,
-  }) => {
-    // 127.0.0.1 is a hostname that resolves. Even with no matching Host
-    // block, ResolveSSHTarget treats the alias as a literal host.
-    const result = await apiClient.testSSHConnection({
-      name: "M5 alias as hostname",
-      host_alias: "127.0.0.1",
-      port: 1, // refused — we just want to prove the resolve target step accepts the alias
-      user: "kandev",
-      identity_source: "agent",
-    });
-    // Resolve target should succeed (no "host is required"), the failure
-    // should be at handshake time.
-    expect(result.steps[0]?.name).toBe("Resolve target");
-    expect(result.steps[0]?.success).toBe(true);
-  });
+    await backend.restart();
+    for (const { executorId } of routes) {
+      const executor = await apiClient.getExecutor(executorId);
+      const route = await readSSHRoute(backend.baseUrl, executor.config!.ssh_connection_id);
+      expect(route.destination).toMatchObject({
+        host: target.host,
+        port: target.port,
+        user: target.user,
+        fingerprint: target.hostFingerprint,
+      });
+      const identity = await managedSSHRequest<SSHIdentity>(
+        backend.baseUrl,
+        `/identities/${route.destination.identity_id}`,
+      );
+      expect(identity).toMatchObject({ kind: "file", reference: target.identityFile });
+      const verified = await managedSSHRequest<SSHRoute>(
+        backend.baseUrl,
+        `/connections/${route.destination.id}/test`,
+        { expected_stamp: route.stamp },
+      );
+      expect(verified.destination.verified_route).toBe(verified.stamp);
+    }
+    const executor = await apiClient.getExecutor(missing.executorId);
+    const unavailable = await readSSHRoute(backend.baseUrl, executor.config!.ssh_connection_id);
+    expect(unavailable.destination.repair_reason).toBe("ssh_migration_alias_missing");
+    expect(unavailable.destination.verified_route).toBeFalsy();
+  } finally {
+    if (previous) fs.writeFileSync(file, previous);
+    else fs.rmSync(file, { force: true });
+  }
 });

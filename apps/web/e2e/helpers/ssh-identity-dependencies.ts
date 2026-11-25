@@ -37,9 +37,7 @@ export async function exerciseSSHIdentityDependencies(
   await page.goto(`/settings/executors/ssh-connections?tab=identities&id=${identity.id}`);
   const dependency = page.getByRole("link", { name: "Connection: Build server", exact: true });
   await expect(dependency).toBeVisible();
-  await page.getByRole("button", { name: "More actions", exact: true }).click();
-  await expect(page.getByRole("menuitem", { name: "Delete identity", exact: true })).toBeDisabled();
-  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Delete identity", exact: true })).toBeDisabled();
   if (touch)
     expect((await requireBox(dependency, "dependency link")).height).toBeGreaterThanOrEqual(44);
   await assertNoDocumentHorizontalOverflow(page);

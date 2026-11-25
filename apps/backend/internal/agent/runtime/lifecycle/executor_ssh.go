@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/sshconnections"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -183,44 +184,6 @@ func (r *SSHExecutor) closeSSHClient(client *ssh.Client) error {
 	return client.Close()
 }
 
-// targetFromMetadata builds an SSHTarget from the executor metadata
-// propagated via buildLaunchMetadata (req.ExecutorConfig keys merged in).
-func (r *SSHExecutor) targetFromMetadata(md map[string]interface{}) (*SSHTarget, error) {
-	host := getMetadataString(md, MetadataKeySSHHost)
-	hostAlias := getMetadataString(md, MetadataKeySSHHostAlias)
-	if host == "" && hostAlias == "" {
-		return nil, errors.New("ssh executor: host (or host_alias) is required in executor config")
-	}
-	port := 0
-	if p := getMetadataString(md, MetadataKeySSHPort); p != "" {
-		// Reject malformed / out-of-range ports loudly instead of silently
-		// falling back to 22 — that fallback would mask an obviously bad
-		// config (e.g. ssh_port="abc" or ssh_port="0") and route every
-		// launch through a port the user never meant to use.
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 1 || n > 65535 {
-			return nil, fmt.Errorf("ssh executor: invalid ssh_port %q (must be 1-65535)", p)
-		}
-		port = n
-	}
-	identitySource := SSHIdentitySource(getMetadataString(md, MetadataKeySSHIdentitySource))
-	identityFile := getMetadataString(md, MetadataKeySSHIdentityFile)
-	cfg := SSHConnConfig{
-		HostAlias:         hostAlias,
-		Host:              host,
-		Port:              port,
-		User:              getMetadataString(md, MetadataKeySSHUser),
-		IdentitySource:    identitySource,
-		IdentityFile:      identityFile,
-		ProxyJump:         getMetadataString(md, MetadataKeySSHProxyJump),
-		PinnedFingerprint: getMetadataString(md, MetadataKeySSHHostFingerprint),
-	}
-	if cfg.PinnedFingerprint == "" {
-		return nil, errors.New("ssh executor: host_fingerprint is required — open the SSH executor connection settings, run Test connection, and trust the host")
-	}
-	return ResolveSSHTarget(cfg)
-}
-
 // workdirRoot returns the per-profile or per-executor workdir root (defaults
 // to ~/.kandev). Per-profile wins over per-executor.
 func (r *SSHExecutor) workdirRoot(md map[string]interface{}) string {
@@ -262,6 +225,10 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 
 	target, client, err := r.dialSession(baseCtx, req.SessionID, req.Metadata, true)
 	if err != nil {
+		var migrationFailure *sshconnections.ProbeFailure
+		if errors.As(err, &migrationFailure) {
+			return nil, fmt.Errorf("ssh: connect to %s: %w", migrationFailure.Hop, err)
+		}
 		// Classified from this launch's own attempt, never from a stored
 		// reachability record — that record can predate this dial by a full
 		// probe interval and would misattribute a stale cause to a fresh

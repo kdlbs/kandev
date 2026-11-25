@@ -67,13 +67,10 @@ func TestExecutorBindingIsAtomicAndProtectsConnections(t *testing.T) {
 	if err = s.store.DeleteConnection(ctx, c.ID, c.Version); !errors.Is(err, ErrInUse) {
 		t.Fatalf("bound deletion: %v", err)
 	}
-	if err = bind(context.Background(), nil, false); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("unauthorized unbind: %v", err)
+	if err = bind(ctx, nil, false); !errors.Is(err, ErrInvalidRoute) {
+		t.Fatalf("SSH executor accepted unbind: %v", err)
 	}
-	if err = bind(ctx, nil, false); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.store.DeleteConnection(ctx, c.ID, c.Version); err != nil {
-		t.Fatal(err)
+	if err = s.store.DeleteConnection(ctx, c.ID, c.Version); !errors.Is(err, ErrInUse) {
+		t.Fatalf("rejected update removed binding: %v", err)
 	}
 }

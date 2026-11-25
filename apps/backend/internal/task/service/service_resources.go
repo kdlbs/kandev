@@ -2301,6 +2301,9 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if executor.Type == models.ExecutorTypePluginRemote {
 		return s.createPluginExecutorProfile(ctx, executor, req)
 	}
+	if err := validateSSHProfileTransport(executor.Type, req.Config); err != nil {
+		return nil, err
+	}
 	if executor.Type == models.ExecutorTypeKubernetes {
 		if err := validateKubernetesProfileConfig(req.Config); err != nil {
 			return nil, err
@@ -2365,6 +2368,9 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	}
 	if executor.Type == models.ExecutorTypePluginRemote {
 		return s.updatePluginExecutorProfile(ctx, profile, executor, req)
+	}
+	if err := validateSSHProfileTransport(executor.Type, req.Config); err != nil {
+		return nil, err
 	}
 	if executor.Type == models.ExecutorTypeKubernetes {
 		config := profile.Config

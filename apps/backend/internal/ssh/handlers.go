@@ -140,13 +140,6 @@ type TestRequest struct {
 	Stamp        string `json:"expected_stamp,omitempty"`
 	ConnectionID string `json:"ssh_connection_id,omitempty"`
 	Name         string `json:"name"`
-	HostAlias    string `json:"host_alias,omitempty"`
-	Host         string `json:"host,omitempty"`
-	Port         int    `json:"port,omitempty"`
-	User         string `json:"user,omitempty"`
-	IdentitySrc  string `json:"identity_source,omitempty"` // "agent" or "file"
-	IdentityFile string `json:"identity_file,omitempty"`
-	ProxyJump    string `json:"proxy_jump,omitempty"`
 }
 
 // TestStep is one entry in the test result step list.
@@ -158,8 +151,7 @@ type TestStep struct {
 	Error      string `json:"error,omitempty"`
 }
 
-// TestResult is the response of POST /api/v1/ssh/test. The UI requires
-// `success` and `fingerprint` before letting the user tick "Trust this host".
+// TestResult describes the executor platform checks on a trusted connection.
 type TestResult struct {
 	Success         bool       `json:"success"`
 	Fingerprint     string     `json:"fingerprint,omitempty"`
@@ -426,30 +418,6 @@ func readinessShellForRequest(shell string, platform lifecycle.SSHRemotePlatform
 	return lifecycle.SSHDefaultShellForPlatform(platform)
 }
 
-// resolveSSHTarget looks up the executor by id and projects its config
-// into an SSHTarget. Shared across probe entry points.
-func (h *Handler) resolveSSHTarget(ctx context.Context, executorID string) (*lifecycle.SSHTarget, int, error) {
-	executor, err := h.executorFetcher.GetExecutor(ctx, executorID)
-	if err != nil {
-		// Genuine "row doesn't exist" → 404. Transport-level failures
-		// (storage outage, context cancel, …) keep their server-error
-		// shape so the UI can distinguish "executor was deleted" from
-		// "the lookup itself just broke".
-		if errors.Is(err, models.ErrExecutorNotFound) {
-			return nil, http.StatusNotFound, fmt.Errorf("executor %q not found: %w", executorID, err)
-		}
-		return nil, http.StatusInternalServerError, fmt.Errorf("look up executor %q: %w", executorID, err)
-	}
-	if executor == nil || executor.Type != models.ExecutorTypeSSH {
-		return nil, http.StatusBadRequest, fmt.Errorf("executor %q is not an SSH executor", executorID)
-	}
-	target, err := lifecycle.SSHTargetFromExecutorConfig(executor.Config)
-	if err != nil {
-		return nil, http.StatusBadRequest, err
-	}
-	return target, http.StatusOK, nil
-}
-
 // --- WS handlers ---
 
 func (h *Handler) wsTest(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -483,10 +451,7 @@ func (h *Handler) wsListSessions(ctx context.Context, msg *ws.Message) (*ws.Mess
 
 // --- Business logic ---
 
-// runTest performs the SSH-test sequence: dial without a pinned fingerprint
-// (so the host key is observed but not yet trusted), probe remote OS/arch,
-// then dry-run the agentctl-upload-or-skip step. The UI gates the "Trust this
-// host" checkbox on result.Success && result.Fingerprint != "".
+// runTest checks the remote platform using the selected connection revision.
 func (h *Handler) runTest(ctx context.Context, req TestRequest) *TestResult {
 	start := time.Now()
 	result := &TestResult{}
@@ -512,54 +477,6 @@ func (h *Handler) runTest(ctx context.Context, req TestRequest) *TestResult {
 
 	result.Success = true
 	return finalize()
-}
-
-func (h *Handler) testResolveTarget(req TestRequest, result *TestResult) (*lifecycle.SSHTarget, error) {
-	if req.ConnectionID != "" {
-		result.Error = "managed connection requires the connection manager"
-		return nil, errors.New(result.Error)
-	}
-	target, err := lifecycle.ResolveSSHTarget(lifecycle.SSHConnConfig{
-		HostAlias:      req.HostAlias,
-		Host:           req.Host,
-		Port:           req.Port,
-		User:           req.User,
-		IdentitySource: lifecycle.SSHIdentitySource(req.IdentitySrc),
-		IdentityFile:   req.IdentityFile,
-		ProxyJump:      req.ProxyJump,
-		// Deliberately empty PinnedFingerprint — first-connect / test mode.
-	})
-	if err != nil {
-		result.Steps = append(result.Steps, TestStep{Name: "Resolve target", Success: false, Error: err.Error()})
-		result.Error = err.Error()
-		return nil, err
-	}
-	result.Steps = append(result.Steps, TestStep{
-		Name:    "Resolve target",
-		Success: true,
-		Output:  fmt.Sprintf("%s@%s:%d (identity=%s)", target.User, target.Host, target.Port, target.IdentitySource),
-	})
-	return target, nil
-}
-
-func (h *Handler) testHandshake(
-	ctx context.Context, target *lifecycle.SSHTarget, result *TestResult,
-) (*ssh.Client, error) {
-	stepStart := time.Now()
-	client, err := lifecycle.DialSSH(ctx, target)
-	step := TestStep{Name: "SSH handshake", DurationMs: time.Since(stepStart).Milliseconds()}
-	if err != nil {
-		step.Success = false
-		step.Error = err.Error()
-		result.Steps = append(result.Steps, step)
-		result.Error = err.Error()
-		return nil, err
-	}
-	step.Success = true
-	result.Fingerprint = target.ObservedFingerprint
-	step.Output = "fingerprint=" + result.Fingerprint
-	result.Steps = append(result.Steps, step)
-	return client, nil
 }
 
 func (h *Handler) testProbeAndPlatform(ctx context.Context, client *ssh.Client, result *TestResult) (lifecycle.SSHRemotePlatform, error) {

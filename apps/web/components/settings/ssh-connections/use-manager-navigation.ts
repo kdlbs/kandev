@@ -4,7 +4,11 @@ import { sshConnectionSettingsPath } from "@/lib/settings/ssh-connection-setting
 export function useManagerNavigation() {
   const router = useRouter();
   const search = useSearchParams();
+  const section = search.get("section");
   const identities = search.get("tab") === "identities";
+  const selected = search.get("id");
+  const legacyReview =
+    !identities && Boolean(selected && search.get("adopt_connection") === selected);
   const path = (changes: Parameters<typeof sshConnectionSettingsPath>[1]) =>
     sshConnectionSettingsPath(search, changes);
   const list = { id: null, new: null, select_identity: null, mode: null, section: null };
@@ -27,9 +31,11 @@ export function useManagerNavigation() {
   return {
     identities,
     editing: search.get("mode") === "edit" || Boolean(search.get("select_identity")),
-    section: ["access", "diagnostics"].includes(search.get("section") ?? "")
-      ? search.get("section")!
-      : "overview",
+    section:
+      section === "access" || section === "diagnostics" || (!section && legacyReview)
+        ? "access"
+        : "overview",
+    focusSetupChecks: section === "diagnostics",
     edit: () => router.push(path({ mode: "edit", section: null })),
     cancelEdit: () => router.push(path({ mode: null, section: null, select_identity: null })),
     openRemedy: (
@@ -41,11 +47,8 @@ export function useManagerNavigation() {
     setSection: (section: string) => router.push(path({ section, mode: null })),
     saved: (id: string, ready: boolean) =>
       router.push(path({ ...list, id, section: ready ? null : "access" })),
-    selected: search.get("id"),
+    selected,
     creating: search.get("new") === "1",
-    adoptExecutor: search.get("adopt_executor"),
-    adoptDigest: search.get("adopt_digest"),
-    adoptConnection: search.get("adopt_connection"),
     returnConnection: search.get("return_connection"),
     select: (id: string) => router.push(path({ ...list, id })),
     back: () =>
@@ -82,6 +85,7 @@ export function useManagerNavigation() {
           ...list,
           tab: "connections",
           id: search.get("return_connection"),
+          section: "access",
           return_connection: null,
         }),
       ),

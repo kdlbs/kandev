@@ -6,7 +6,11 @@ import Link from "@/components/routing/app-link";
 import { sshConnectionSettingsPath } from "@/lib/settings/ssh-connection-settings-routes";
 import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
 import type { ManagerNavigation } from "./use-manager-navigation";
-import { connectionState, connectionDiscriminator } from "./connection-presentation";
+import {
+  connectionEndpoint,
+  connectionState,
+  connectionDiscriminator,
+} from "./connection-presentation";
 import { SettingsGroup } from "../settings-group";
 
 export function ConnectionCollection({
@@ -33,7 +37,7 @@ export function ConnectionCollection({
     : manager.routes.map((route) => ({
         id: route.destination.id,
         name: route.destination.name,
-        description: `${route.destination.user}@${route.destination.host}:${route.destination.port}`,
+        description: connectionEndpoint(route.destination),
         detail: [
           manager.identities.find((i) => i.id === route.destination.identity_id)?.label,
           route.bastion?.name,

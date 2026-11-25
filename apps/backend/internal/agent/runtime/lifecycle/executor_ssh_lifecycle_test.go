@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
+	"github.com/kandev/kandev/internal/sshconnections"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -82,107 +84,6 @@ func TestSSHExecutorStaticSurface(t *testing.T) {
 	instances, err := exec.RecoverInstances(context.Background(), nil)
 	if err != nil || instances != nil {
 		t.Fatalf("RecoverInstances() = %v, %v; want nil, nil", instances, err)
-	}
-}
-
-func TestSSHExecutorTargetFromMetadata(t *testing.T) {
-	t.Run("maps every connection field", func(t *testing.T) {
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
-		target, err := exec.targetFromMetadata(map[string]interface{}{
-			MetadataKeySSHHost:            "build.example",
-			MetadataKeySSHPort:            "2222",
-			MetadataKeySSHUser:            "deploy",
-			MetadataKeySSHHostFingerprint: "SHA256:pinned",
-			MetadataKeySSHIdentitySource:  string(SSHIdentitySourceFile),
-			MetadataKeySSHIdentityFile:    "/keys/id_ed25519",
-			MetadataKeySSHProxyJump:       "bastion.example",
-		})
-		if err != nil {
-			t.Fatalf("targetFromMetadata: %v", err)
-		}
-		if target.Host != "build.example" || target.Port != 2222 || target.User != "deploy" {
-			t.Fatalf("target = %+v", target)
-		}
-		if target.PinnedFingerprint != "SHA256:pinned" {
-			t.Fatalf("PinnedFingerprint = %q", target.PinnedFingerprint)
-		}
-		if target.IdentitySource != SSHIdentitySourceFile || target.IdentityFile != "/keys/id_ed25519" {
-			t.Fatalf("identity = %q / %q", target.IdentitySource, target.IdentityFile)
-		}
-		if target.ProxyJump != "bastion.example" {
-			t.Fatalf("ProxyJump = %q", target.ProxyJump)
-		}
-	})
-
-	t.Run("host alias alone is accepted", func(t *testing.T) {
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
-		target, err := exec.targetFromMetadata(map[string]interface{}{
-			MetadataKeySSHHostAlias:       "prod-box",
-			MetadataKeySSHUser:            "deploy",
-			MetadataKeySSHHostFingerprint: "SHA256:pinned",
-			MetadataKeySSHIdentitySource:  string(SSHIdentitySourceAgent),
-		})
-		if err != nil {
-			t.Fatalf("targetFromMetadata: %v", err)
-		}
-		if target.Host != "prod-box" {
-			t.Fatalf("Host = %q, want the alias used as hostname", target.Host)
-		}
-	})
-
-	tests := []struct {
-		name     string
-		metadata map[string]interface{}
-		wantErr  string
-	}{
-		{
-			name:     "host is required",
-			metadata: map[string]interface{}{MetadataKeySSHHostFingerprint: "SHA256:x"},
-			wantErr:  "host (or host_alias) is required",
-		},
-		{
-			name: "fingerprint is required",
-			metadata: map[string]interface{}{
-				MetadataKeySSHHost: "build.example",
-			},
-			wantErr: "host_fingerprint is required",
-		},
-		{
-			name: "non-numeric port is rejected loudly",
-			metadata: map[string]interface{}{
-				MetadataKeySSHHost:            "build.example",
-				MetadataKeySSHPort:            "abc",
-				MetadataKeySSHHostFingerprint: "SHA256:x",
-			},
-			wantErr: `invalid ssh_port "abc"`,
-		},
-		{
-			name: "port zero is rejected rather than defaulted to 22",
-			metadata: map[string]interface{}{
-				MetadataKeySSHHost:            "build.example",
-				MetadataKeySSHPort:            "0",
-				MetadataKeySSHHostFingerprint: "SHA256:x",
-			},
-			wantErr: `invalid ssh_port "0"`,
-		},
-		{
-			name: "out-of-range port is rejected",
-			metadata: map[string]interface{}{
-				MetadataKeySSHHost:            "build.example",
-				MetadataKeySSHPort:            "70000",
-				MetadataKeySSHHostFingerprint: "SHA256:x",
-			},
-			wantErr: `invalid ssh_port "70000"`,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
-			_, err := exec.targetFromMetadata(tc.metadata)
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("error = %v, want %q", err, tc.wantErr)
-			}
-		})
 	}
 }
 
@@ -372,6 +273,7 @@ func TestSSHExecutorCreateInstanceProvisionsAndTracksTheSession(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Close() })
 
 	metadata := sshConnectionMetadata(t, harness.server)
+	wireSavedSSHLaunch(exec, metadata)
 	metadata[MetadataKeySetupScript] = "echo prepared"
 	metadata[MetadataKeyBaseBranch] = "main"
 	metadata[MetadataKeyWorktreeBranch] = "feature/task-1"
@@ -583,12 +485,14 @@ func TestSSHExecutorCreateInstanceRejectsUnsupportedRemotePlatform(t *testing.T)
 	})
 	exec := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
 
+	metadata := sshConnectionMetadata(t, server)
+	wireSavedSSHLaunch(exec, metadata)
 	var failedSteps []PrepareStep
 	_, err := exec.CreateInstance(context.Background(), &ExecutorCreateRequest{
 		InstanceID: "instance-1",
 		TaskID:     "task-1",
 		SessionID:  "session-1",
-		Metadata:   sshConnectionMetadata(t, server),
+		Metadata:   metadata,
 		OnProgress: func(step PrepareStep, _, _ int) {
 			if step.Status == PrepareStepFailed {
 				failedSteps = append(failedSteps, step)
@@ -615,7 +519,7 @@ func TestSSHExecutorCreateInstanceRejectsBadConnectionMetadata(t *testing.T) {
 		InstanceID: "instance-1",
 		Metadata:   map[string]interface{}{MetadataKeySSHHost: "build.example"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "host_fingerprint is required") {
+	if err == nil || !errors.Is(err, sshconnections.ErrInvalidRoute) {
 		t.Fatalf("error = %v", err)
 	}
 }

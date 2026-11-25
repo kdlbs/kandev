@@ -41,12 +41,12 @@ func openWireService(t *testing.T, root string) *Service {
 
 func wireRuntimeSnapshot(t *testing.T, s *Service, ctx context.Context, route Route) RuntimeSnapshot {
 	t.Helper()
-	for _, query := range []string{`CREATE TABLE executors(id TEXT PRIMARY KEY, config TEXT, deleted_at TIMESTAMP)`, `CREATE TABLE task_sessions(id TEXT PRIMARY KEY,executor_id TEXT,task_id TEXT NOT NULL DEFAULT 'fixture-task')`, `INSERT INTO task_sessions(id,executor_id) VALUES ('session','executor')`} {
+	for _, query := range []string{`CREATE TABLE executors(id TEXT PRIMARY KEY, config TEXT, deleted_at TIMESTAMP,type TEXT DEFAULT 'ssh')`, `CREATE TABLE task_sessions(id TEXT PRIMARY KEY,executor_id TEXT,task_id TEXT NOT NULL DEFAULT 'fixture-task')`, `INSERT INTO task_sessions(id,executor_id) VALUES ('session','executor')`} {
 		if _, err := s.store.db.Exec(query); err != nil {
 			t.Fatal(err)
 		}
 	}
-	config, err := json.Marshal(map[string]string{ConnectionConfigKey: route.Destination.ID})
+	config, err := json.Marshal(map[string]string{ConnectionConfigKey: route.Destination.ID, "ssh_connection_stamp": route.Stamp})
 	if err != nil {
 		t.Fatal(err)
 	}

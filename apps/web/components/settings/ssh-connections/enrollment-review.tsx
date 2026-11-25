@@ -1,4 +1,7 @@
 "use client";
+import type { ReactNode } from "react";
+import { Button } from "@kandev/ui/button";
+import { settingsActionClassName } from "../settings-control";
 import { useTranslation } from "react-i18next";
 import type { SSHRoute, SSHIdentity } from "@/lib/types/http-ssh-connections";
 import { AccessHeading, EvidenceRow } from "./access-primitives";
@@ -8,20 +11,34 @@ export function EnrollmentReview({
   identity,
   method,
   bootstrapLabel,
+  onBack,
+  onInstall,
+  busy,
+  step,
+  actions,
+  children,
 }: {
   route: SSHRoute;
   identity: SSHIdentity;
   method: EnrollmentMethod;
   bootstrapLabel?: string;
+  onBack: () => void;
+  onInstall: () => void;
+  busy: boolean;
+  step: "review" | "pending" | "result";
+  actions?: ReactNode;
+  children?: ReactNode;
 }) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-4">
+    <section className="space-y-4" aria-label={t("settings:sshManager.enrollment.title")}>
       <AccessHeading
         title={t("settings:sshManager.experience.reviewInstallation")}
-        description={t("settings:sshManager.enrollment.confirmHelp")}
+        description={
+          step === "review" ? t("settings:sshManager.enrollment.confirmHelp") : undefined
+        }
       />
-      <dl className="divide-y divide-border/60">
+      <dl className="divide-y divide-border/60" hidden={step !== "review"}>
         <EvidenceRow
           label={t("settings:sshManager.experience.account")}
           value={`${route.destination.user}@${route.destination.host}:${route.destination.port}`}
@@ -52,6 +69,25 @@ export function EnrollmentReview({
           }
         />
       </dl>
-    </div>
+      <div className="flex flex-col-reverse gap-2 border-t pt-4 md:flex-row md:flex-wrap md:justify-end">
+        <Button
+          variant="ghost"
+          className={settingsActionClassName(step === "review" ? undefined : "hidden")}
+          onClick={onBack}
+          hidden={step !== "review"}
+        >
+          {t("common:back")}
+        </Button>
+        <Button
+          className={settingsActionClassName("aria-disabled:opacity-50")}
+          aria-disabled={busy}
+          onClick={onInstall}
+        >
+          {t("settings:sshManager.enrollment.install")}
+        </Button>
+        {actions}
+      </div>
+      {children}
+    </section>
   );
 }

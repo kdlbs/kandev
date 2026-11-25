@@ -1,9 +1,14 @@
 import { expect, it } from "vitest";
-import { buildSSHExecutorConfig, parseSSHExecutorConfig } from "./ssh-config";
+import {
+  buildInlineSSHExecutorConfig,
+  buildSSHExecutorConfig,
+  parseInlineSSHExecutorConfig,
+  parseManagedSSHExecutorConfig,
+} from "./ssh-config";
 
 it("preserves legacy inline fields and leaves inherited ports unspecified", () => {
   expect(
-    buildSSHExecutorConfig({
+    buildInlineSSHExecutorConfig({
       name: "legacy",
       identity_source: "file",
       host_alias: " build ",
@@ -21,7 +26,7 @@ it("preserves legacy inline fields and leaves inherited ports unspecified", () =
     ssh_proxy_jump: "gateway",
     ssh_host_fingerprint: "SHA256:fixture",
   });
-  expect(parseSSHExecutorConfig("legacy", { ssh_host_alias: "build" }).port).toBeUndefined();
+  expect(parseInlineSSHExecutorConfig("legacy", { ssh_host_alias: "build" }).port).toBeUndefined();
 });
 
 it("managed bindings exclude inline routing and preserve the checked route stamp", () => {
@@ -34,7 +39,7 @@ it("managed bindings exclude inline routing and preserve the checked route stamp
     host_fingerprint: "ignored",
   });
   expect(config).toEqual({ ssh_connection_id: "managed", ssh_connection_stamp: "checked" });
-  expect(parseSSHExecutorConfig("shared", config)).toMatchObject({
+  expect(parseManagedSSHExecutorConfig("shared", config)).toMatchObject({
     connection_id: "managed",
     connection_stamp: "checked",
   });

@@ -16,7 +16,7 @@ func managedSSHProbe(services *Services) reachabilitypkg.ManagedProbe {
 	return func(ctx context.Context, id string) agentruntime.SSHProbeOutcome {
 		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		_, target, cleanup, err := services.SSHConnections.OpenExecutor(probeCtx, id)
+		_, target, cleanup, err := services.SSHConnections.OpenExecutorProbe(probeCtx, id)
 		if err == nil {
 			defer cleanup()
 			return agentruntime.SSHProbeOutcome{Success: true, Host: target.Host}

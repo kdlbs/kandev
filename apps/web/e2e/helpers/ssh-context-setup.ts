@@ -77,7 +77,20 @@ export async function exerciseSSHExplicitSelection(page: Page, touch: boolean) {
   await page.route("**/api/v1/ssh/managed/connections", (route) =>
     route.fulfill({ json: [{ destination, stamp: "ready-ui-stamp" }] }),
   );
-  await page.route("**/api/v1/ssh/test", (route) => route.fulfill({ json: { success: true } }));
+  let testSucceeded = false;
+  await page.route("**/api/v1/ssh/test", (route) =>
+    route.fulfill({
+      json: testSucceeded
+        ? {
+            success: true,
+            platform: "linux/amd64",
+            git_version: "git version 2.44.0",
+            agentctl_action: "needs_upload",
+            steps: [],
+          }
+        : { success: false, steps: [{ name: "Verify platform", success: false }] },
+    }),
+  );
   await page.goto("/settings/executors/new/ssh");
   await page.getByLabel("Name", { exact: true }).fill("Preserved executor");
   await page.getByRole("button", { name: "Manage connections", exact: true }).click();
@@ -96,7 +109,19 @@ export async function exerciseSSHExplicitSelection(page: Page, touch: boolean) {
   await expect(picker).toBeFocused();
   const save = page.getByRole("button", { name: "Save", exact: true });
   await expect(save).toBeDisabled();
-  await page.getByRole("button", { name: "Test executor", exact: true }).click();
+  const testExecutor = page.getByRole("button", { name: "Test executor", exact: true });
+  await testExecutor.click();
+  await expect(page.getByRole("alert").filter({ hasText: "Executor test failed" })).toContainText(
+    "The remote operating system or architecture is unsupported.",
+  );
+  await expect(save).toBeDisabled();
+  testSucceeded = true;
+  await testExecutor.click();
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "SSH login succeeded and the remote platform is supported." }),
+  ).toBeVisible();
   await expect(save).toBeEnabled();
   expect(writes).toEqual([]);
   await page.getByRole("button", { name: "Manage connections", exact: true }).click();

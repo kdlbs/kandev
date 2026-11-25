@@ -5,15 +5,17 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/secrets"
+	"golang.org/x/crypto/ssh"
 	"sync"
 )
 
 type Service struct {
-	receiptsMu sync.Mutex
-	receipts   map[string]receipt
-	enabled    bool
-	store      *Store
-	vault      *secrets.SSHIdentityVault
+	receiptsMu             sync.Mutex
+	receipts               map[string]receipt
+	enabled                bool
+	store                  *Store
+	vault                  *secrets.SSHIdentityVault
+	migrationPlatformCheck func(context.Context, *ssh.Client) error
 }
 
 func NewService(enabled bool, store *Store, vault *secrets.SSHIdentityVault) *Service {

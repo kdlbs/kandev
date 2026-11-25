@@ -56,12 +56,8 @@ func sshExecutor(id string, status models.ExecutorStatus, config map[string]stri
 	return &models.Executor{ID: id, Type: models.ExecutorTypeSSH, Status: status, Config: config}
 }
 
-func resolvableSSHConfig() map[string]string {
-	return map[string]string{
-		"ssh_host":             "10.0.0.1",
-		"ssh_user":             "deploy",
-		"ssh_host_fingerprint": "SHA256:test",
-	}
+func boundSSHConfig() map[string]string {
+	return map[string]string{"ssh_connection_id": "shared-connection", "ssh_connection_stamp": "shared-route"}
 }
 
 // fakeReachabilityProber models the exact guarantee *reachability.Poller
@@ -170,8 +166,8 @@ func TestProbeReachability_CoalescesConcurrentProbes(t *testing.T) {
 }
 
 // @covers AC-EXECUTORS-SSH-REACHABILITY-002.5
-func TestGetReachability_NoRecordAndResolvableConfigReturnsUnknown(t *testing.T) {
-	executor := sshExecutor("exec-1", models.ExecutorStatusActive, resolvableSSHConfig())
+func TestGetReachability_NoRecordAndSavedBindingReturnsUnknown(t *testing.T) {
+	executor := sshExecutor("exec-1", models.ExecutorStatusActive, boundSSHConfig())
 	fetcher := &fakeReachabilityExecutorFetcher{executors: map[string]*models.Executor{"exec-1": executor}}
 	lister := &fakeReachabilityLister{}
 	h := NewHandler(nil, fetcher, nil, nil, testHandlerLogger(), lister, nil)
@@ -196,12 +192,11 @@ func TestGetReachability_NoRecordAndResolvableConfigReturnsUnknown(t *testing.T)
 
 // @covers AC-EXECUTORS-SSH-REACHABILITY-002.5
 //
-// An ssh executor whose config cannot resolve a target (no ssh_host here)
-// must answer 200 with reason "config", never 400 — resolveSSHTarget's own
-// 400-on-unresolvable-config mapping does not apply to the reachability
-// routes.
-func TestGetReachability_NoRecordAndUnresolvableConfigReturnsReasonConfig(t *testing.T) {
-	executor := sshExecutor("exec-1", models.ExecutorStatusActive, map[string]string{})
+// An archived inline configuration cannot act as a saved connection.
+func TestGetReachability_NoRecordAndInlineConfigReturnsReasonConfig(t *testing.T) {
+	executor := sshExecutor("exec-1", models.ExecutorStatusActive, map[string]string{
+		"ssh_host": "archived.example", "ssh_user": "builder", "ssh_host_fingerprint": "SHA256:archive",
+	})
 	fetcher := &fakeReachabilityExecutorFetcher{executors: map[string]*models.Executor{"exec-1": executor}}
 	lister := &fakeReachabilityLister{}
 	h := NewHandler(nil, fetcher, nil, nil, testHandlerLogger(), lister, nil)
@@ -222,7 +217,7 @@ func TestGetReachability_NoRecordAndUnresolvableConfigReturnsReasonConfig(t *tes
 }
 
 func TestGetReachability_ReturnsStoredRecordVerbatim(t *testing.T) {
-	executor := sshExecutor("exec-1", models.ExecutorStatusActive, resolvableSSHConfig())
+	executor := sshExecutor("exec-1", models.ExecutorStatusActive, boundSSHConfig())
 	fetcher := &fakeReachabilityExecutorFetcher{executors: map[string]*models.Executor{"exec-1": executor}}
 	stored := &models.ExecutorReachability{
 		ExecutorID: "exec-1",
@@ -284,8 +279,8 @@ func TestGetReachability_WrongTypeExecutorReturns400(t *testing.T) {
 // The list route orders by executor_id ascending, includes a deactivated
 // ssh executor's retained record, and omits non-ssh executors entirely.
 func TestListReachability_OrdersFiltersAndIncludesDeactivated(t *testing.T) {
-	sshA := sshExecutor("ssh-b", models.ExecutorStatusActive, resolvableSSHConfig())
-	sshB := sshExecutor("ssh-a", models.ExecutorStatusDisabled, resolvableSSHConfig())
+	sshA := sshExecutor("ssh-b", models.ExecutorStatusActive, boundSSHConfig())
+	sshB := sshExecutor("ssh-a", models.ExecutorStatusDisabled, boundSSHConfig())
 	nonSSH := &models.Executor{ID: "local-1", Type: models.ExecutorTypeLocal, Status: models.ExecutorStatusActive}
 	fetcher := &fakeReachabilityExecutorFetcher{}
 	lister := &fakeReachabilityLister{
@@ -318,7 +313,7 @@ func TestListReachability_OrdersFiltersAndIncludesDeactivated(t *testing.T) {
 //
 // A POST against a deactivated ssh executor answers 409 without probing.
 func TestProbeReachability_InactiveExecutorReturns409WithoutProbing(t *testing.T) {
-	executor := sshExecutor("exec-1", models.ExecutorStatusDisabled, resolvableSSHConfig())
+	executor := sshExecutor("exec-1", models.ExecutorStatusDisabled, boundSSHConfig())
 	fetcher := &fakeReachabilityExecutorFetcher{executors: map[string]*models.Executor{"exec-1": executor}}
 	prober := &fakeReachabilityProber{gate: make(chan struct{})}
 	close(prober.gate) // would return immediately if ever called
@@ -364,8 +359,8 @@ func TestProbeReachability_WrongTypeExecutorReturns400(t *testing.T) {
 }
 
 func TestExecutorOwnershipReachabilityOmitsInaccessibleExecutors(t *testing.T) {
-	shared := sshExecutor("shared", models.ExecutorStatusActive, resolvableSSHConfig())
-	private := sshExecutor("private", models.ExecutorStatusActive, resolvableSSHConfig())
+	shared := sshExecutor("shared", models.ExecutorStatusActive, boundSSHConfig())
+	private := sshExecutor("private", models.ExecutorStatusActive, boundSSHConfig())
 	private.OwnerUserID = "alice"
 	fetcher := &fakeReachabilityExecutorFetcher{executors: map[string]*models.Executor{"shared": shared}}
 	lister := &fakeReachabilityLister{executors: []*models.Executor{shared, private}}

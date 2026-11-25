@@ -13,11 +13,10 @@ import { useSaveExecutorConnection } from "@/hooks/domains/settings/use-save-exe
 import { SSHConnectionEditor } from "@/components/settings/ssh-connections/executor-editor";
 import { SSHSessionsCard } from "@/components/settings/ssh-sessions-card";
 import { SSHReachabilityCard } from "@/components/settings/ssh-reachability-card";
-import { listSSHSessions } from "@/lib/api/domains/ssh-api";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import {
   buildSSHExecutorConfig,
-  parseSSHExecutorConfig,
+  parseManagedSSHExecutorConfig,
 } from "@/app/settings/executors/new/[type]/ssh-config";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 
@@ -118,22 +117,24 @@ function SSHExecutorView({
   executor: LoadedExecutor;
   onSaved: () => void | Promise<void>;
 }) {
-  const initial = parseSSHExecutorConfig(executor.name, executor.config);
-  const sessionCount = useRunningSessionCount(executor.id);
-  const handleSave = useSaveExecutorConnection(executor.id, buildSSHExecutorConfig, onSaved);
+  const initial = parseManagedSSHExecutorConfig(executor.name, executor.config);
+  const buildConfig = useCallback(
+    (cfg: Parameters<typeof buildSSHExecutorConfig>[0]) => ({
+      ...executor.config,
+      ...buildSSHExecutorConfig(cfg),
+    }),
+    [executor.config],
+  );
+  const handleSave = useSaveExecutorConnection(executor.id, buildConfig, onSaved);
 
   return (
     <div className="space-y-8">
       <SSHExecutorHeader executorName={executor.name} />
       <SSHConnectionEditor
-        executorId={executor.id}
-        // The `key` forces a fresh form state when the executor reloads with
-        // updated config so the user sees the new pinned fingerprint.
-        key={`${executor.id}:${executor.config?.ssh_host_fingerprint ?? "none"}`}
+        key={`${executor.id}:${initial.connection_id ?? ""}:${initial.connection_stamp ?? ""}`}
         initial={initial}
         onSave={handleSave}
         coordinatedSaveId={`ssh-executor:${executor.id}`}
-        runningSessionCount={sessionCount}
       />
       <SSHReachabilityCard executorId={executor.id} />
       <SSHSessionsCard executorId={executor.id} />
@@ -170,22 +171,4 @@ function SSHExecutorHeader({ executorName }: { executorName: string }) {
       <Separator />
     </>
   );
-}
-
-function useRunningSessionCount(executorId: string): number {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
-    listSSHSessions(executorId)
-      .then((rows) => {
-        if (!cancelled) setCount(rows.length);
-      })
-      .catch(() => {
-        if (!cancelled) setCount(0);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [executorId]);
-  return count;
 }

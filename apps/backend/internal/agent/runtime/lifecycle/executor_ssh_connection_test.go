@@ -121,24 +121,6 @@ func TestResolveSSHTarget_AliasInfersHostName(t *testing.T) {
 	}
 }
 
-func TestSSHExecutorTargetFromMetadataMissingFingerprintNamesConnectionSettings(t *testing.T) {
-	exec := &SSHExecutor{}
-	_, err := exec.targetFromMetadata(map[string]interface{}{
-		MetadataKeySSHHost:           "example.com",
-		MetadataKeySSHUser:           "alice",
-		MetadataKeySSHIdentitySource: string(SSHIdentitySourceAgent),
-	})
-	if err == nil {
-		t.Fatal("expected missing host_fingerprint error")
-	}
-	msg := err.Error()
-	for _, want := range []string{"host_fingerprint is required", "SSH executor connection settings", "Test connection", "trust the host"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("error message %q missing %q", msg, want)
-		}
-	}
-}
-
 func TestNormalizeSSHRemotePlatform(t *testing.T) {
 	cases := []struct {
 		name     string

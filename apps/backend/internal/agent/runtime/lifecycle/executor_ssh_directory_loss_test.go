@@ -47,7 +47,7 @@ func TestSSHDirectoryLossReconciliationOriginalProcessAndRetry(t *testing.T) {
 	server := directoryLossServer(t, owner.TaskDir, owner.SessionDir)
 	receipt := testSSHLaunchReceiptForServer(t, server, 4242)
 
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	var calls []sshlaunch.ReconcileRequest
 	exec.reconcileRemote = func(_ context.Context, _ *ssh.Client, req sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 		calls = append(calls, req)
@@ -88,7 +88,7 @@ func TestSSHDirectoryLossReconciliationOriginalProcessAndRetry(t *testing.T) {
 		sshScriptRule{match: "test -d '" + owner.SessionDir + "'", result: sshFail("")},
 		sshScriptRule{match: "rm -rf '" + owner.SessionDir + "'", result: sshOK},
 	).handle)
-	retryExec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	retryExec := newRetainedWireSSHTestExecutor(newTestLogger())
 	retryCalls := 0
 	retryExec.reconcileRemote = func(_ context.Context, _ *ssh.Client, req sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 		retryCalls++
@@ -122,7 +122,7 @@ func TestSSHDirectoryLossReconciliationPreservesUnknown(t *testing.T) {
 	t.Run("legacy record without launch proof stays unresolved", func(t *testing.T) {
 		server := directoryLossServer(t, owner.TaskDir, owner.SessionDir)
 		receipt := testSSHLaunchReceiptForServer(t, server, 4242)
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		calls := 0
 		exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 			calls++
@@ -145,7 +145,7 @@ func TestSSHDirectoryLossReconciliationPreservesUnknown(t *testing.T) {
 	t.Run("unresolved helper result preserves the recorded owner", func(t *testing.T) {
 		server := directoryLossServer(t, owner.TaskDir, owner.SessionDir)
 		receipt := testSSHLaunchReceiptForServer(t, server, 4242)
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 			return sshlaunch.Unresolved(sshlaunch.ReasonTerminationUnconfirmed, "still alive")
 		}
@@ -166,7 +166,7 @@ func TestSSHDirectoryLossReconciliationPreservesUnknown(t *testing.T) {
 	t.Run("a receipt for another pid never dispatches", func(t *testing.T) {
 		server := directoryLossServer(t, owner.TaskDir, owner.SessionDir)
 		otherPID := testSSHLaunchReceiptForServer(t, server, 4343)
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		calls := 0
 		exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 			calls++
@@ -193,7 +193,7 @@ func TestSSHDirectoryLossReconciliationNotSelectedForOtherVerificationErrors(t *
 		sshScriptRule{match: "cat -- '" + owner.SessionDir + "/agentctl.pid'", result: sshOut("9999")},
 	).handle)
 	receipt := testSSHLaunchReceiptForServer(t, server, 4242)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	calls := 0
 	exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 		calls++
@@ -259,7 +259,7 @@ func TestSSHReceiptValidationPrecedesDestructiveBranches(t *testing.T) {
 			receipt := testSSHLaunchReceiptForServer(t, server, 4242)
 			metadata := sshLaunchStopMetadata(t, server, receipt)
 			metadata = mutate(t, metadata, receipt)
-			exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+			exec := newRetainedWireSSHTestExecutor(newTestLogger())
 			exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 				t.Fatal("a malformed or foreign receipt must not reach the helper")
 				return sshlaunch.ReconcileResult{}
@@ -293,7 +293,7 @@ func TestSSHPresentDirectoryVerifiesBirthIdentityBeforeLegacyStop(t *testing.T) 
 	metadata := sshLaunchStopMetadata(t, server, receipt)
 
 	t.Run("identity conflict refuses the legacy kill and removal", func(t *testing.T) {
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		exec.reconcileRemote = func(_ context.Context, _ *ssh.Client, req sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 			require.Equal(t, sshlaunch.ReconcileModeVerify, req.Mode)
 			return sshlaunch.Unresolved(sshlaunch.ReasonIdentityConflict, "recorded process identity changed")
@@ -311,7 +311,7 @@ func TestSSHPresentDirectoryVerifiesBirthIdentityBeforeLegacyStop(t *testing.T) 
 	})
 
 	t.Run("verified identity permits the guarded legacy stop", func(t *testing.T) {
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		exec.reconcileRemote = func(_ context.Context, _ *ssh.Client, req sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 			require.Equal(t, sshlaunch.ReconcileModeVerify, req.Mode)
 			return sshlaunch.ReconcileResult{Outcome: sshlaunch.OutcomeVerified}
@@ -339,7 +339,7 @@ func TestSSHRecoveryRejectsAReplacementProcess(t *testing.T) {
 		AgentExecutionID: "execution-1", PID: 4242,
 		TransientAuthToken: "token", Metadata: metadata,
 	}
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 		return sshlaunch.Unresolved(sshlaunch.ReasonIdentityConflict, "recorded process identity changed")
 	}
@@ -359,7 +359,7 @@ func TestSSHAbandonedReceiptRetainsSurvivingChildEvidence(t *testing.T) {
 		sshScriptRule{match: "test -d '" + owner.SessionDir + "'", result: sshFail("")},
 	).handle)
 	receipt := testSSHLaunchReceiptForServer(t, server, 4242)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 		return sshlaunch.Unresolved(sshlaunch.ReasonTerminationUnconfirmed, "a session child survived the controller")
 	}
@@ -386,7 +386,7 @@ func TestSSHAbandonedReceiptRequiresPidfileProofBeforeRemoval(t *testing.T) {
 			sshScriptRule{match: "rm -rf '" + owner.SessionDir + "'", result: sshOK},
 		).handle)
 		receipt := testSSHLaunchReceiptForServer(t, server, 4242)
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 			return sshlaunch.ReconcileResult{Outcome: sshlaunch.OutcomeAbsent}
 		}
@@ -406,7 +406,7 @@ func TestSSHAbandonedReceiptRequiresPidfileProofBeforeRemoval(t *testing.T) {
 			sshScriptRule{match: "test -d '" + owner.SessionDir + "'", result: sshFail("")},
 		).handle)
 		receipt := testSSHLaunchReceiptForServer(t, server, 4242)
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 			return sshlaunch.ReconcileResult{Outcome: sshlaunch.OutcomeAbsent}
 		}
@@ -435,7 +435,7 @@ func TestSSHRecoveryReportsAbsentController(t *testing.T) {
 		Runtime: agentruntime.RuntimeSSH, AgentExecutionID: "execution-1", PID: 4242,
 		TransientAuthToken: "token", Metadata: metadata,
 	}
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
 		return sshlaunch.ReconcileResult{Outcome: sshlaunch.OutcomeAbsent}
 	}

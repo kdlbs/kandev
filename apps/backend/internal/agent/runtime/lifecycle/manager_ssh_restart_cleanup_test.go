@@ -35,7 +35,7 @@ func TestStopAgentWithReasonReapsPersistedSSHAgentctlAfterRestart(t *testing.T) 
 	).handle)
 	log := newTestRegistryLogger()
 	registry := NewExecutorRegistry(log)
-	registry.Register(NewSSHExecutor(nil, nil, nil, log))
+	registry.Register(newRetainedWireSSHTestExecutor(log))
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -94,7 +94,7 @@ func TestStopAgentWithReasonPersistedSSHBackendShutdownWithoutForcePreservesRemo
 	server := newFakeSSHServer(t, nil)
 	log := newTestRegistryLogger()
 	registry := NewExecutorRegistry(log)
-	registry.Register(NewSSHExecutor(nil, nil, nil, log))
+	registry.Register(newRetainedWireSSHTestExecutor(log))
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -126,7 +126,7 @@ func TestStopAgentWithReasonPropagatesPersistedSSHStopFailure(t *testing.T) {
 	).handle)
 	log := newTestRegistryLogger()
 	registry := NewExecutorRegistry(log)
-	registry.Register(NewSSHExecutor(nil, nil, nil, log))
+	registry.Register(newRetainedWireSSHTestExecutor(log))
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"

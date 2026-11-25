@@ -88,7 +88,7 @@ func TestManagedSSHOrphanSweepNeverFallsBackToInlineSettings(t *testing.T) {
 			scheduler := NewOrphanSweepScheduler(store, store, 3600, logger.Default(), nil, managed)
 			scheduler.runSweep(context.Background(), executor)
 			_, ran := server.lastCommandContaining("/fixture-home/.kandev/tasks")
-			if ran != (mode == "legacy") {
+			if ran {
 				t.Fatalf("inline inventory ran=%v, mode=%s", ran, mode)
 			}
 		})

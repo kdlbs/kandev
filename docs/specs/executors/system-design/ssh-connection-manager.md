@@ -19,8 +19,7 @@ Executors owns connections and identity metadata. The existing secrets package
 owns encryption, authz owns authorization, and task/runtime services retain
 control of task admission, lifetime, and recovery.
 
-Implementation status is tracked in the linked plans. Preserve the
-[legacy SSH contract](ssh-executor.md) until a profile is explicitly converted.
+The [cutover design](ssh-connection-migration.md) governs upgrades from saved inline executors and recovery of retained sessions.
 
 ## Requirement mapping
 
@@ -72,9 +71,7 @@ consumer regressions. Do not copy a second SSH stack. Agentctl upload, shell
 probes, repository preparation, session lifetime, and credential-copy logic
 stay in lifecycle. Reuse the existing single-hop tunnel machinery for managed
 routes, with explicit independent bastion and destination authentication and
-pinned host policies. Preserve the legacy known_hosts/unknown-host behavior
-only for unconverted legacy profiles; managed routes never inherit its
-unknown-bastion acceptance. No agent forwarding or key upload to the bastion.
+pinned host policies. Imported bastions require positive trust for the original host and port. No agent forwarding or key upload to the bastion.
 
 Transport's proposed handshake contract takes an explicit resolved target,
 host-key policy, and an auth source producing signers/auth methods plus a
@@ -207,7 +204,6 @@ managed namespace preserves that API and prevents route-registration conflicts.
 | `POST /connections/:id/test` | expected route stamp; pinned authentication result for the whole route |
 | `POST /connections/:id/enroll` | expected route stamp, request UUID, destination key fingerprint, bootstrap mode |
 | `GET /connections/:id/enrollments/:request_id` | Admin sanitized operation result |
-| `POST /executors/:id/adopt-connection` | expected executor config digest and ready connection ID/route stamp |
 
 Create operations also carry a caller-generated idempotency UUID scoped to
 actor and operation; repeated generation cannot accidentally issue a different
@@ -326,7 +322,7 @@ replayed. User cancellation may stop transport but cannot promise remote rollbac
 ## Runtime binding and compatibility
 
 Add `ssh_connection_id` as the exclusive connection selector in executor Config.
-Existing profiles retain their inline fields. A managed binding cannot also
+Existing executors acquire a shared connection during startup. A managed binding cannot also
 contain inline auth/target/pin values. Profile-specific shell, preparation,
 agent selection, and workdir settings remain on their current objects.
 
@@ -351,22 +347,7 @@ Identity deletion checks connection and retained-runtime references, including
 older generations, so a changed selection cannot orphan a still-recorded key.
 Deletion never cascades across profiles or remote machines.
 
-Explicit adoption previews the legacy resolved endpoint, identity source, pin,
-and affected profile. Create a separate connection per selected legacy profile;
-keep legacy pin exactly, require trust when absent, and retest. Final adoption
-atomically checks the original config digest and ready connection revision,
-then replaces only inline connection fields. Failure leaves the profile intact;
-new unused connection records can remain visible for retry or deletion.
-For single-hop adoption, resolve the bastion separately using the existing
-alias/literal rules, preview both targets and identities, then explicitly
-observe/confirm the bastion pin and test the entire route. An existing
-known_hosts match can be shown as evidence but is not silent managed approval;
-legacy unknown-host acceptance is never copied. Create a distinct direct
-bastion record unless the administrator explicitly selects an existing record
-whose resolved endpoint, user and identity match. Bind only after both route
-revisions and the unchanged original executor config digest are verified.
-Chained/unsupported settings leave the original profile untouched.
-Unconverted resumable runtimes keep their legacy metadata path.
+The [automatic migration](ssh-connection-migration.md) imports saved transport settings, checks pinned routes at first use and protects retained session evidence. Conversion and verification have separate transactions.
 
 Remote Docker now uses the shared transport. Preserve its external file/agent
 behavior; managed Remote Docker binding is outside this package. External key
@@ -421,27 +402,7 @@ is complete; the [UX package](../../../plans/ssh-connections-ux/plan.md) is pend
 
 ## Rollout
 
-Proposed identity: `features.sshConnectionManager`, environment
-`KANDEV_FEATURES_SSH_CONNECTION_MANAGER`, config field `SSHConnectionManager`,
-JSON key `sshConnectionManager`. Keep the typed registry/config and frontend defaults;
-prod/dev/e2e defaults are false. Metadata declares restart required because
-startup wires services and recovery. Tests explicitly enable in disposable
-instances; do not enable the whole E2E profile.
-
-Gate new HTTP/service entry points, boot/settings metadata, executor binding
-validation, runtime resolution (including background reconnect/probes), and
-legacy HTTP/WS managed-selector adapters. When off, legacy behavior remains,
-managed operations fail before reading secrets or dialing, and metadata is
-retained. In-flight established transports are not retroactively revoked;
-normal stop can close an already-held transport without resolving credentials.
-After restart with the flag off, managed runtimes require re-enablement for
-reconnect or remote cleanup; do not fall back to legacy fields. Backend shutdown
-may close local resources. No disabled startup enrollment replay or probes.
-
-Schema initialization is additive and safe with the gate off; migration must not
-create identities or adopt profiles. Promotion and eventual retirement follow
-the runtime-feature-flags skill. This package defines a default-off release,
-not a release date or automatic promotion.
+`features.sshConnectionManager` controls SSH executor availability in every runtime profile. The shipped default is on. An explicit environment or stored operator override takes precedence. The restart-required setting gates SSH management and remote operations. Offline conversion runs before consumers start, including when SSH is disabled. Re-enable the switch and restart to resume remote use.
 
 ## Validation and delivery
 
@@ -450,7 +411,7 @@ all ACs to proposed tests and commands. Include SQLite/PostgreSQL transactions,
 HTTP/service/WS authorization, auth-setup continuity, restart recovery without
 SSH_AUTH_SOCK, host-key change at either hop before its password/signing, distinct identities,
 bastion replacement after destination observation, chain/cycle rejection, duplicate/stale
-requests, locked/unsafe authorized_keys, redaction, profile adoption, retained
+requests, locked/unsafe authorized_keys, redaction, automatic migration, retained
 runtime revision mismatches, and flag-disabled side-effect prevention.
 
 Browser tests use the real backend. Identity/settings/mobile tests need no

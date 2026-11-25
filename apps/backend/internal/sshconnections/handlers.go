@@ -10,13 +10,12 @@ import (
 )
 
 // RegisterRoutes exposes only administrative operations. Disabled installations
-// register no manager routes and retain all legacy SSH endpoints.
+// register no manager routes.
 func RegisterRoutes(router *gin.Engine, s *Service) {
 	if s == nil || !s.enabled {
 		return
 	}
 	group := router.Group("/api/v1/ssh/managed", authz.RequireOrgScope(authz.ScopeOrgConfigManage))
-	registerAdoptionRoutes(group, s)
 	group.GET("/identities", func(c *gin.Context) { value, err := s.ListIdentities(c.Request.Context()); respond(c, value, err) })
 	group.POST("/identities", func(c *gin.Context) {
 		var req CreateIdentityRequest

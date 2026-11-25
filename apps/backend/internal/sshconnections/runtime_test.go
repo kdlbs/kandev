@@ -9,7 +9,7 @@ import (
 
 func TestRuntimeAdmissionPinsRouteAndRequiresSavedBinding(t *testing.T) {
 	s, ctx := identityService(t)
-	for _, q := range []string{`CREATE TABLE executors(id TEXT PRIMARY KEY, config TEXT, deleted_at TIMESTAMP)`, `CREATE TABLE task_sessions(id TEXT PRIMARY KEY,executor_id TEXT)`, `INSERT INTO executors(id,config) VALUES ('executor','{"ssh_connection_id":"target"}')`, `INSERT INTO task_sessions(id,executor_id) VALUES ('session','executor')`} {
+	for _, q := range []string{`CREATE TABLE executors(id TEXT PRIMARY KEY, config TEXT, deleted_at TIMESTAMP,type TEXT DEFAULT 'ssh')`, `CREATE TABLE task_sessions(id TEXT PRIMARY KEY,executor_id TEXT)`, `INSERT INTO executors(id,config) VALUES ('executor','{"ssh_connection_id":"target"}')`, `INSERT INTO task_sessions(id,executor_id) VALUES ('session','executor')`} {
 		if _, err := s.store.db.Exec(q); err != nil {
 			t.Fatal(err)
 		}
@@ -32,6 +32,9 @@ func TestRuntimeAdmissionPinsRouteAndRequiresSavedBinding(t *testing.T) {
 		}
 		c = r.Destination
 		c.VerifiedRoute = r.Stamp
+		if _, e = tx.Exec(`UPDATE executors SET config=? WHERE id='executor'`, `{"ssh_connection_id":"target","ssh_connection_stamp":"`+r.Stamp+`"}`); e != nil {
+			return e
+		}
 		return putConnection(ctx, tx, c)
 	}); err != nil {
 		t.Fatal(err)

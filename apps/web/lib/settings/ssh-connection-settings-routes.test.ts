@@ -3,13 +3,10 @@ import { sshConnectionSettingsPath } from "./ssh-connection-settings-routes";
 
 // @covers AC-EXECUTORS-SSH-CONNECTIONS-005.6
 describe("SSH setup links", () => {
-  it("keeps adoption and bastion context across identity creation and return", () => {
+  it("keeps bastion context across identity creation and return", () => {
     const state = new URLSearchParams({
       tab: "connections",
       id: "target/a",
-      adopt_executor: "executor/a",
-      adopt_digest: "digest",
-      adopt_connection: "target/a",
       return_connection: "outer",
     });
     const created = new URL(
@@ -35,7 +32,9 @@ describe("SSH setup links", () => {
   });
   it("does not propagate unrecognized or credential-bearing query fields", () => {
     const href = sshConnectionSettingsPath(
-      new URLSearchParams("password=secret&tab=identities&id=a"),
+      new URLSearchParams(
+        "password=secret&adopt_executor=executor&adopt_digest=digest&tab=identities&id=a",
+      ),
     );
     expect(href).toBe("/settings/executors/ssh-connections?tab=identities&id=a");
   });

@@ -251,3 +251,33 @@ it("keeps active test feedback pending through reload and rejects duplicate admi
   });
   expect(result.current.operation?.status).toBe("succeeded");
 });
+
+it("keeps setup check feedback separate from the live login result", async () => {
+  const route = { destination: { id: "route" }, stamp: "revision" } as SSHRoute;
+  vi.mocked(api.testManagedSSH).mockRejectedValue(
+    new ApiError("Rejected", 422, { error: "ssh_authentication_rejected", hop: "destination" }),
+  );
+  vi.mocked(api.preflightManagedSSH)
+    .mockResolvedValueOnce({ stamp: route.stamp, checks: [], ready: true })
+    .mockRejectedValueOnce(new ApiError("Unavailable", 503, { error: "ssh_operation_failed" }));
+  const { result } = renderHook(useSSHConnections);
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  await act(async () => {
+    await expect(result.current.test(route)).rejects.toThrow();
+  });
+  const login = result.current.operation;
+  expect(login).toMatchObject({ kind: "test", status: "failed", hop: "destination" });
+
+  await act(async () => {
+    await result.current.preflight(route);
+  });
+  expect(result.current.operation).toEqual(login);
+  expect(result.current.error).toBe("ssh_authentication_rejected");
+
+  await act(async () => {
+    await expect(result.current.preflight(route)).rejects.toThrow();
+  });
+  expect(result.current.operation).toEqual(login);
+  expect(result.current.error).toBe("ssh_authentication_rejected");
+  expect(result.current.busy).toBe(false);
+});

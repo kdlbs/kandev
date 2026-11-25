@@ -15,6 +15,23 @@ type RuntimeSnapshot struct {
 	BastionIdentityGeneration string
 }
 
+// AdmitSavedRuntime selects the current executor binding owned by an
+// authorized session. Launch metadata cannot choose that binding.
+func (s *Service) AdmitSavedRuntime(ctx context.Context, sessionID string) (RuntimeSnapshot, error) {
+	if !s.enabled {
+		return RuntimeSnapshot{}, ErrDisabled
+	}
+	var data string
+	if err := s.store.db.GetContext(ctx, &data, s.store.db.Rebind(`SELECT e.config FROM executors e JOIN task_sessions s ON s.executor_id=e.id WHERE s.id=? AND e.type='ssh' AND e.deleted_at IS NULL`), sessionID); err != nil {
+		return RuntimeSnapshot{}, ErrInvalidRoute
+	}
+	var config map[string]string
+	if json.Unmarshal([]byte(data), &config) != nil || hasInlineSSHConfig(config) {
+		return RuntimeSnapshot{}, ErrInvalidRoute
+	}
+	return s.AdmitRuntime(ctx, sessionID, config[ConnectionConfigKey], "")
+}
+
 // AdmitRuntime is an internal lifecycle capability, reached after task/session
 // authorization. The saved session binding, never caller routing fields, selects
 // credentials. A durable reference protects the route before any remote effects.
@@ -24,6 +41,11 @@ func (s *Service) AdmitRuntime(ctx context.Context, sessionID, id, stamp string)
 	}
 	if sessionID == "" || id == "" {
 		return RuntimeSnapshot{}, ErrInvalidRoute
+	}
+	if stamp == "" {
+		if err := s.verifyMigratedRuntime(ctx, sessionID, id); err != nil {
+			return RuntimeSnapshot{}, err
+		}
 	}
 	var snapshot RuntimeSnapshot
 	err := s.store.write(ctx, func(tx *sqlx.Tx) error {
@@ -57,11 +79,11 @@ func (s *Service) AdmitRuntime(ctx context.Context, sessionID, id, stamp string)
 }
 func validateRuntimeBinding(ctx context.Context, tx *sqlx.Tx, sessionID, id string, route Route) error {
 	var data string
-	if err := tx.GetContext(ctx, &data, tx.Rebind(`SELECT e.config FROM executors e JOIN task_sessions s ON s.executor_id=e.id WHERE s.id=? AND e.deleted_at IS NULL`), sessionID); err != nil {
+	if err := tx.GetContext(ctx, &data, tx.Rebind(`SELECT e.config FROM executors e JOIN task_sessions s ON s.executor_id=e.id WHERE s.id=? AND e.type='ssh' AND e.deleted_at IS NULL`), sessionID); err != nil {
 		return ErrInvalidRoute
 	}
 	var config map[string]string
-	if json.Unmarshal([]byte(data), &config) != nil || config[ConnectionConfigKey] != id {
+	if json.Unmarshal([]byte(data), &config) != nil || config[ConnectionConfigKey] != id || config["ssh_connection_stamp"] != route.Stamp || hasInlineSSHConfig(config) {
 		return ErrInvalidRoute
 	}
 	if route.Destination.VerifiedRoute != route.Stamp {
@@ -105,11 +127,12 @@ func (s *Service) DialRuntime(ctx context.Context, snapshot RuntimeSnapshot) (*s
 	}
 	client, err := s.dialProtectedRoute(ctx, current.Route)
 	if err != nil {
-		s.releasePendingRuntime(ctx, snapshot.SessionID)
+		s.releasePendingRuntime(ctx, snapshot)
 		return nil, err
 	}
 	if err = s.confirmRuntime(ctx, snapshot); err != nil {
 		_ = client.Close()
+		s.releasePendingRuntime(ctx, snapshot)
 		return nil, err
 	}
 	return client, nil
@@ -145,22 +168,37 @@ func (s *Service) ValidateSession(ctx context.Context, sessionID string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	var row struct {
-		ID     string `db:"id"`
-		Type   string `db:"type"`
-		Config string `db:"config"`
+		ID      string `db:"id"`
+		Type    string `db:"type"`
+		Config  string `db:"config"`
+		Runtime string `db:"runtime"`
 	}
-	if err = tx.GetContext(ctx, &row, tx.Rebind(`SELECT e.id,e.type,e.config FROM executors e JOIN task_sessions s ON s.executor_id=e.id WHERE s.id=? AND e.deleted_at IS NULL`), sessionID); err != nil {
+	query := tx.Rebind(`SELECT COALESCE(e.id,'') AS id, COALESCE(e.type,'') AS type, COALESCE(e.config,'{}') AS config,
+		COALESCE(r.runtime,'') AS runtime FROM task_sessions s
+		LEFT JOIN executors e ON s.executor_id=e.id AND e.deleted_at IS NULL
+		LEFT JOIN executors_running r ON s.id=r.session_id WHERE s.id=?`)
+	if err = tx.GetContext(ctx, &row, query, sessionID); err != nil {
 		return ErrNotFound
+	}
+	if row.Type != executorKindSSH && row.Runtime != executorKindSSH {
+		return nil
+	}
+	if !s.enabled {
+		return ErrDisabled
+	}
+	if row.Runtime == executorKindSSH {
+		// The runtime's retained snapshot is checked by reconnect admission.
+		return nil
 	}
 	var config map[string]string
 	if err = json.Unmarshal([]byte(row.Config), &config); err != nil {
 		return ErrInvalidRoute
 	}
-	if config[ConnectionConfigKey] == "" {
-		return nil
+	if config[ConnectionConfigKey] == "" || hasInlineSSHConfig(config) {
+		return ErrInvalidRoute
 	}
-	if !s.enabled {
-		return ErrDisabled
+	if preserve, err := preserveMigratedBindingIn(ctx, tx, row.ID, config); err != nil || preserve {
+		return err
 	}
 	_, err = readyExecutorRouteIn(ctx, tx, row.ID, row.Type, config)
 	return err
@@ -175,16 +213,25 @@ func (s *Service) confirmRuntime(ctx context.Context, snapshot RuntimeSnapshot) 
 		if count != 1 {
 			return ErrConflict
 		}
+		var pending int
+		if err := tx.GetContext(ctx, &pending, tx.Rebind(`SELECT COUNT(*) FROM ssh_connection_refs WHERE owner_type='runtime_pending' AND owner_id=?`), snapshot.SessionID); err != nil {
+			return err
+		}
+		if pending != 0 {
+			if err := validateRuntimeBinding(ctx, tx, snapshot.SessionID, snapshot.Destination.ID, snapshot.Route); err != nil {
+				return err
+			}
+		}
 		_, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE ssh_connection_refs SET owner_type='runtime' WHERE owner_type='runtime_pending' AND owner_id=?`), snapshot.SessionID)
 		return err
 	})
 }
 
-func (s *Service) releasePendingRuntime(ctx context.Context, sessionID string) {
+func (s *Service) releasePendingRuntime(ctx context.Context, snapshot RuntimeSnapshot) {
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	_ = s.store.write(cleanupCtx, func(tx *sqlx.Tx) error {
-		_, err := tx.ExecContext(cleanupCtx, tx.Rebind(`DELETE FROM ssh_connection_refs WHERE owner_type='runtime_pending' AND owner_id=?`), sessionID)
+		_, err := tx.ExecContext(cleanupCtx, tx.Rebind(`DELETE FROM ssh_connection_refs WHERE owner_type='runtime_pending' AND owner_id=? AND connection_id=? AND route_stamp=?`), snapshot.SessionID, snapshot.Destination.ID, snapshot.Stamp)
 		return err
 	})
 }

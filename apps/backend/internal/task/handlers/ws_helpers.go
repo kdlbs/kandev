@@ -34,7 +34,7 @@ func wsDeleteWithActiveSessionCheck(
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 	if err := deleteFn(ctx, req.ID); err != nil {
-		if _, code, message := executorOwnershipError(err); code != "" {
+		if _, code, message := executorResourceError(err); code != "" {
 			return ws.NewError(msg.ID, msg.Action, code, message, nil)
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {

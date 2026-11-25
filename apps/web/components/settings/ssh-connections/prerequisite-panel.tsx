@@ -5,17 +5,25 @@ import { Button } from "@kandev/ui/button";
 import type { SSHRoute, SSHPreflight } from "@/lib/types/http-ssh-connections";
 import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
 import { settingsActionClassName } from "../settings-control";
-import { AccessHeading, AccessStatus, AccessSurface } from "./access-primitives";
-import { OperationFeedback } from "./operation-feedback";
+import { SettingsGroup } from "../settings-group";
+import { AccessStatus } from "./access-primitives";
 import { DiagnosticIssues, type RemedyAction } from "./diagnostic-issues";
+const setupHeadingId = "ssh-setup-checks-heading";
+
+export function focusSetupChecks() {
+  document.getElementById(setupHeadingId)?.focus();
+}
+
 export function PrerequisitePanel({
   route,
   manager,
   onRemedy,
+  focusOnOpen,
 }: {
   route: SSHRoute;
   manager: SSHManager;
   onRemedy?: RemedyAction;
+  focusOnOpen?: boolean;
 }) {
   const { t } = useTranslation();
   const [report, setReport] = useState<{
@@ -33,6 +41,9 @@ export function PrerequisitePanel({
       active.current = false;
     };
   }, []);
+  useEffect(() => {
+    if (focusOnOpen) focusSetupChecks();
+  }, [focusOnOpen]);
   const check = async () => {
     if (pending.current || manager.busy) return;
     pending.current = true;
@@ -50,61 +61,48 @@ export function PrerequisitePanel({
   };
   const current = report?.stamp === route.stamp ? report : undefined;
   return (
-    <div className="max-w-3xl space-y-6">
-      <AccessSurface className="space-y-6">
-        <AccessHeading
-          title={t("settings:sshManager.experience.setup")}
-          description={t("settings:sshManager.experience.setupScope")}
-        />
+    <SettingsGroup
+      title={
+        <span id={setupHeadingId} tabIndex={-1} className="outline-none">
+          {t("settings:sshManager.experience.setup")}
+        </span>
+      }
+      description={t("settings:sshManager.experience.setupScope")}
+      frame="none"
+      action={
         <Button
+          variant="outline"
           className={settingsActionClassName("max-md:w-full")}
           disabled={manager.busy || current?.state === "pending"}
           onClick={() => void check()}
         >
           {t("settings:sshManager.preflight")}
         </Button>
-        {current?.state === "pending" && (
-          <AccessStatus pending title={t("settings:sshManager.experience.pending.preflight")} />
-        )}
-        {current?.state === "failed" && (
-          <AccessStatus tone="error" title={t("settings:sshManager.experience.failed.preflight")}>
-            {t("settings:sshManager.errors.ssh_operation_failed")}
-          </AccessStatus>
-        )}
-        {current?.result && (
-          <div className="space-y-5 border-t pt-5">
-            <AccessStatus
-              tone={current.result.checks.length ? "warning" : "neutral"}
-              title={
-                current.result.checks.length
-                  ? t("settings:sshManager.experience.issueCount", {
-                      count: current.result.checks.length,
-                    })
-                  : t("settings:sshManager.experience.noSetupIssues")
-              }
-            />
-            <DiagnosticIssues checks={current.result.checks} onRemedy={onRemedy} />
-          </div>
-        )}
-      </AccessSurface>
-      <section className="space-y-4 px-1">
-        <AccessHeading
-          title={t("settings:sshManager.experience.liveTest")}
-          description={t("settings:sshManager.experience.liveTestHelp")}
-        />
-        <OperationFeedback manager={manager} route={route} kind="test" />
-        <Button
-          variant="outline"
-          className={settingsActionClassName("max-md:w-full")}
-          disabled={manager.busy}
-          onClick={() => void manager.test(route).catch(() => undefined)}
-        >
-          {t("settings:sshManager.test")}
-        </Button>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          {t("settings:sshManager.executorReadiness")}
-        </p>
-      </section>
-    </div>
+      }
+    >
+      {current?.state === "pending" && (
+        <AccessStatus pending title={t("settings:sshManager.experience.pending.preflight")} />
+      )}
+      {current?.state === "failed" && (
+        <AccessStatus tone="error" title={t("settings:sshManager.experience.failed.preflight")}>
+          {t("settings:sshManager.errors.ssh_operation_failed")}
+        </AccessStatus>
+      )}
+      {current?.result && (
+        <div className="space-y-4">
+          <AccessStatus
+            tone={current.result.checks.length ? "warning" : "success"}
+            title={
+              current.result.checks.length
+                ? t("settings:sshManager.experience.issueCount", {
+                    count: current.result.checks.length,
+                  })
+                : t("settings:sshManager.experience.noSetupIssues")
+            }
+          />
+          <DiagnosticIssues checks={current.result.checks} onRemedy={onRemedy} />
+        </div>
+      )}
+    </SettingsGroup>
   );
 }

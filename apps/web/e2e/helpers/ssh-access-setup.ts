@@ -59,16 +59,15 @@ export async function exerciseSSHAccess(page: Page, baseUrl: string, touch: bool
   await activate(page.getByRole("tab", { name: "Access", exact: true }));
   await expect(page.getByRole("button", { name: "Install public key", exact: true })).toBeVisible();
   await expect(page.getByLabel("SSH password", { exact: true })).toHaveCount(0);
-  await activate(page.getByRole("tab", { name: "Diagnostics", exact: true }));
-  await expect(
-    page.getByRole("button", { name: "Check prerequisites", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Diagnostics", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Check setup", exact: true })).toBeVisible();
+  await activate(page.getByRole("tab", { name: "Overview", exact: true }));
   await activate(page.getByRole("tab", { name: "Access", exact: true }));
   await dwell(
     page,
     250,
     "negative-assertion",
-    "opening or revisiting access and diagnostics must not invoke any SSH operation",
+    "opening or revisiting Access must not invoke any SSH operation",
   );
   expect(operations).toEqual([]);
   await activate(page.getByRole("button", { name: "Install public key", exact: true }));
@@ -85,6 +84,8 @@ export async function exerciseSSHAccess(page: Page, baseUrl: string, touch: bool
     await page.screenshot({ path: test.info().outputPath(`ssh-install-choice-${theme}.png`) });
   }
   const password = page.getByLabel("SSH password", { exact: true });
+  await assertEnrollmentLayout(page, password, touch);
+  expect(operations).toEqual([]);
   await password.fill("discarded-ui-password");
   await activate(page.getByRole("tab", { name: "Overview", exact: true }));
   await expect(password).toHaveCount(0);
@@ -130,13 +131,17 @@ export async function exerciseSSHAccess(page: Page, baseUrl: string, touch: bool
   await expect(
     page.getByText("Key installed and remote access verified.", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Test SSH access", exact: true })).toBeFocused();
+  await expect(
+    confirmation.getByRole("button", { name: "Install public key", exact: true }),
+  ).toBeFocused();
   expect(installs).toBe(1);
   await assertNoDocumentHorizontalOverflow(page);
   await page.screenshot({
     path: test.info().outputPath("ssh-access-verified.png"),
     fullPage: true,
   });
+  await activate(page.getByRole("button", { name: "Close setup", exact: true }));
+  await expect(page.getByRole("button", { name: "Install public key", exact: true })).toBeFocused();
   await activate(page.getByRole("button", { name: "Install public key", exact: true }));
   await activate(page.getByRole("radio", { name: "Password", exact: true }));
   await expect(password).toHaveValue("");
@@ -163,7 +168,9 @@ export async function exerciseSSHAccess(page: Page, baseUrl: string, touch: bool
     await uncertain.scrollIntoViewIfNeeded();
     await page.screenshot({ path: test.info().outputPath(`ssh-install-unknown-${theme}.png`) });
   }
+
   expect(installs).toBe(2);
+  await exerciseRejectedLogin(page, route.destination.id, activate, operations);
   await page.evaluate(() => {
     document.cookie = "kandev_locale=pseudo; path=/; max-age=31536000; SameSite=Lax";
   });
@@ -180,4 +187,87 @@ export async function exerciseSSHAccess(page: Page, baseUrl: string, touch: bool
   ).toBeVisible();
   await assertNoDocumentHorizontalOverflow(page);
   await page.screenshot({ path: test.info().outputPath("ssh-install-pseudo.png") });
+}
+
+async function assertEnrollmentLayout(page: Page, password: Locator, touch: boolean) {
+  const methods = page.getByRole("radiogroup", { name: "Identity source", exact: true });
+  const choices = methods.getByRole("radio");
+  const rows = async () =>
+    choices.evaluateAll((radios) =>
+      radios.map((radio) => radio.closest("label")!.getBoundingClientRect().top),
+    );
+  if (touch) {
+    const positions = await rows();
+    expect(new Set(positions).size).toBe(3);
+    const review = page.getByRole("button", { name: "Review installation", exact: true });
+    const close = page.getByRole("button", { name: "Close setup", exact: true });
+    expect((await close.boundingBox())!.y).toBeGreaterThan((await review.boundingBox())!.y);
+    expect((await close.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    return;
+  }
+  await expect.poll(async () => new Set(await rows()).size).toBe(1);
+  // Change the available pane independently of the viewport and pointer.
+  const frame = page.getByTestId("ssh-connection-detail");
+  const rootFont = await page.evaluate(() =>
+    parseFloat(getComputedStyle(document.documentElement).fontSize),
+  );
+  async function resizeFrame(rem: number) {
+    const paneWidth = await frame.evaluate((element, width) => {
+      (element as HTMLElement).style.width = `${width}px`;
+      return parseFloat(getComputedStyle(element).width);
+    }, rem * rootFont);
+    expect(paneWidth).toBe(rem * rootFont);
+  }
+  await password.fill("disposable-layout-password");
+  await password.focus();
+  try {
+    await resizeFrame(53.9375);
+    await expect.poll(async () => new Set(await rows()).size).toBe(3);
+    await resizeFrame(54);
+    await expect.poll(async () => new Set(await rows()).size).toBe(1);
+    await expect(password).toHaveCount(1);
+    await expect(password).toHaveValue("disposable-layout-password");
+    await expect(password).toBeFocused();
+    await expect(methods.getByRole("radio", { checked: true })).toHaveAttribute(
+      "value",
+      "password",
+    );
+    await expect(page.locator("#ssh-enrollment-identity")).toHaveCount(0);
+  } finally {
+    await frame.evaluate((element) => (element as HTMLElement).style.removeProperty("width"));
+    await password.fill("");
+  }
+}
+
+async function exerciseRejectedLogin(
+  page: Page,
+  connectionId: string,
+  activate: (locator: Locator) => Promise<void>,
+  operations: string[],
+) {
+  await page.route(`**/connections/${connectionId}/test`, (request) =>
+    request.fulfill({
+      status: 400,
+      json: { error: "ssh_authentication_rejected", hop: "destination" },
+    }),
+  );
+  const testAccess = page.getByRole("button", { name: "Test SSH access", exact: true });
+  await activate(testAccess);
+  await expect(testAccess).toBeFocused();
+  const failure = page.getByRole("alert").filter({ hasText: "SSH access could not be verified" });
+  await expect(failure).toContainText("rejected this identity");
+  const install = page.getByRole("button", { name: "Install public key", exact: true });
+  const setup = page.getByRole("button", { name: "SSH setup", exact: true });
+  await expect(install).toBeEnabled();
+  await expect(setup).toBeEnabled();
+  await activate(setup);
+  await expect(
+    page.getByRole("heading", { name: "SSH setup", exact: true }).locator("span"),
+  ).toBeFocused();
+  await expect(failure).toBeVisible();
+  expect(operations.map((url) => new URL(url).pathname.split("/").at(-1))).toEqual([
+    "enroll",
+    "enroll",
+    "test",
+  ]);
 }

@@ -11,7 +11,9 @@ func newSSHConnections(cfg *config.Config, repos *Repositories) *sshconnections.
 	if !cfg.Features.SSHConnectionManager {
 		return nil
 	}
-	return sshconnections.NewService(true, repos.SSHConnections, repos.SSHIdentityVault)
+	service := sshconnections.NewService(true, repos.SSHConnections, repos.SSHIdentityVault)
+	service.SetMigrationPlatformCheck(agentruntime.CheckSSHRemotePlatform)
+	return service
 }
 
 func managedSSHRuntime(services *Services) agentruntime.ManagedSSHConnections {

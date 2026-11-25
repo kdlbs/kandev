@@ -1,7 +1,9 @@
 const returnLabel = "settings:sshManager.binding.returnToExecutor";
 const manageLabel = "settings:sshManager.binding.manage";
 const unsavedName = "Unsaved name";
+const testLabel = "settings:sshManager.binding.test";
 const nameLabel = "settings:sshManager.label";
+const readyLabel = "settings:sshManager.binding.executorReady";
 import { defaultFeatureFlags } from "@/lib/state/slices/features/types";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -73,7 +75,8 @@ function setup(existing = false, unrelated = false) {
   fixture.unrelated = unrelated;
   fixture.name = "Original";
   fixture.save.mockReset();
-  fixture.test.mockResolvedValue({ success: true });
+  fixture.test.mockReset();
+  fixture.test.mockResolvedValue({ success: true, git_version: "git version 2.44.0", steps: [] });
   window.history.replaceState({}, "", existing ? existingEditor : editor);
   return render(
     <StateProvider
@@ -102,8 +105,8 @@ it.each([false, true])("preserves the draft without saving (existing=%s)", async
 });
 it("requires a new executor check after an explicit connection selection", async () => {
   setup();
-  click("settings:sshManager.binding.test");
-  await screen.findByText("settings:sshManager.binding.executorReady");
+  click(testLabel);
+  await screen.findByText(readyLabel);
   click(manageLabel);
   click("settings:sshManager.binding.useConnection");
   expect(
@@ -184,9 +187,103 @@ it("clears the returned continuation after a successful explicit save", async ()
   click(manageLabel);
   click(returnLabel);
   expect(screen.getByTestId("setup-draft").textContent).not.toBe("null");
-  click("settings:sshManager.binding.test");
-  await screen.findByText("settings:sshManager.binding.executorReady");
+  click(testLabel);
+  await screen.findByText(readyLabel);
   click("common:save");
   await waitFor(() => expect(screen.getByTestId("setup-draft").textContent).toBe("null"));
   expect(fixture.save).toHaveBeenCalledTimes(1);
+});
+
+it("reports the failed platform check, then shows a successful retry with unconfirmed Git", async () => {
+  setup();
+  fixture.test
+    .mockResolvedValueOnce({
+      success: false,
+      steps: [{ name: "Verify platform", success: false, error: "raw server output" }],
+    })
+    .mockResolvedValueOnce({ success: true, steps: [], agentctl_action: "skipped" });
+
+  click(testLabel);
+  const failure = await screen.findByRole("alert");
+  expect(failure.textContent).toContain("settings:sshManager.binding.testPlatformFailed");
+  expect(failure.textContent).not.toContain("raw server output");
+  const save = screen.getByRole("button", { name: "common:save" });
+  expect(save.hasAttribute("disabled")).toBe(true);
+
+  click(testLabel);
+  const success = await screen.findByText(readyLabel);
+  expect(success.closest('[role="status"]')?.textContent).toContain(
+    "settings:sshManager.binding.testGitUnconfirmed",
+  );
+  expect(success.closest('[role="status"]')?.textContent).toContain(
+    "settings:sshManager.binding.testHelperUnconfirmed",
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(save.hasAttribute("disabled")).toBe(false);
+});
+
+it("opens Access for the existing imported binding without changing its selection", () => {
+  const route = routes[0];
+  const original = route.destination.verified_route;
+  route.destination.verified_route = undefined;
+  try {
+    setup(true);
+    click("settings:sshManager.binding.review");
+    const query = new URLSearchParams(window.location.search);
+    expect(query.get("id")).toBe("first");
+    expect(query.get("section")).toBe("access");
+    expect(fixture.save).not.toHaveBeenCalled();
+  } finally {
+    route.destination.verified_route = original;
+  }
+});
+
+it.each([false, true])(
+  "lets an existing complete import run a diagnostic test (deferred bastion trust=%s)",
+  async (hasBastion) => {
+    const target = routes[0].destination;
+    const original = target.verified_route;
+    target.verified_route = undefined;
+    target.imported_pending = true;
+    routes[0].bastion = hasBastion
+      ? { ...target, id: "bastion", fingerprint: "", known_hosts_pending: true }
+      : undefined;
+    try {
+      setup(true);
+      expect(screen.getByText("settings:sshManager.binding.imported")).toBeTruthy();
+      expect(
+        screen.queryByRole("button", { name: "settings:sshManager.binding.review" }),
+      ).toBeNull();
+      click(testLabel);
+      await screen.findByText(readyLabel);
+      expect(fixture.test).toHaveBeenCalledWith({
+        name: "Original",
+        ssh_connection_id: "first",
+        expected_stamp: "first",
+      });
+      expect(fixture.save).not.toHaveBeenCalled();
+    } finally {
+      target.verified_route = original;
+      target.imported_pending = undefined;
+      routes[0].bastion = undefined;
+    }
+  },
+);
+
+it("shows the original alias when the imported destination is unresolved", () => {
+  const original = routes[0].destination;
+  routes[0].destination = {
+    ...original,
+    host: "",
+    alias: "legacy-production",
+    repair_reason: "ssh_migration_alias_missing",
+    verified_route: undefined,
+  };
+  try {
+    setup(true);
+    expect(screen.getByText("legacy-production")).toBeTruthy();
+    expect(screen.getByRole("button", { name: testLabel }).hasAttribute("disabled")).toBe(true);
+  } finally {
+    routes[0].destination = original;
+  }
 });

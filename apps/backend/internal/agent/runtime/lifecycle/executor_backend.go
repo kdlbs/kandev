@@ -325,6 +325,7 @@ const (
 	MetadataKeySSHProxyJump            = "ssh_proxy_jump"
 	MetadataKeySSHIdentitySource       = "ssh_identity_source"
 	MetadataKeySSHIdentityFile         = "ssh_identity_file"
+	MetadataKeySSHIdentityAgent        = "ssh_identity_agent"
 	// MetadataKeyRemoteDockerAgentctlInstanceID is the actual agentctl
 	// instance ID inside the remote container. It can differ from the backend
 	// execution ID when a live same-session process is adopted, so recovery
@@ -397,6 +398,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHProxyJump:            true,
 	MetadataKeySSHIdentitySource:       true,
 	MetadataKeySSHIdentityFile:         true,
+	MetadataKeySSHIdentityAgent:        true,
 	MetadataKeySSHShell:                true,
 	MetadataKeySSHReclaimTaskDir:       true,
 	MetadataKeySSHLaunchReceipt:        true,
@@ -568,29 +570,12 @@ func IsSessionScopedMetadataKey(key string) bool {
 	return sessionScopedMetadataKeys[key]
 }
 
-// sshWorkspaceFallbackKeys are the STABLE SSH executor-config keys projected
-// into workspace metadata as a fallback for terminal / workspace-restore when
-// no live ExecutorRunning record exists. This is deliberately a connection +
-// per-profile allowlist and MUST NOT include the session-scoped runtime keys
-// (remote session dir, agentctl port/PID/URL, local forward port) — projecting
-// a stale one would make the lifecycle manager try to reattach to a dead remote
-// agentctl instance instead of creating a fresh one. It mirrors
-// trustedExecutorConfigKeys (the connection-routing set targetFromMetadata
-// reads) plus the two per-profile keys the terminal path needs (workdir root,
-// login shell). Notably it includes ssh_host_alias so alias-only executors
-// (host read from ~/.ssh/config) survive restore.
+// SSH workspace fallback supplies the shared connection selector and shell
+// settings when there is no retained runtime.
 var sshWorkspaceFallbackKeys = map[string]bool{
-	MetadataKeySSHConnectionID:    true,
-	MetadataKeySSHHost:            true,
-	MetadataKeySSHHostAlias:       true,
-	MetadataKeySSHPort:            true,
-	MetadataKeySSHUser:            true,
-	MetadataKeySSHHostFingerprint: true,
-	MetadataKeySSHIdentitySource:  true,
-	MetadataKeySSHIdentityFile:    true,
-	MetadataKeySSHProxyJump:       true,
-	MetadataKeySSHWorkdirRoot:     true,
-	MetadataKeySSHShell:           true,
+	MetadataKeySSHConnectionID: true,
+	MetadataKeySSHWorkdirRoot:  true,
+	MetadataKeySSHShell:        true,
 }
 
 // FilterSSHWorkspaceFallbackConfig returns the subset of a stored SSH executor

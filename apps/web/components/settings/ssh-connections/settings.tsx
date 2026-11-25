@@ -5,11 +5,11 @@ import { Button } from "@kandev/ui/button";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useSSHConnections, type SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
+import { cn } from "@/lib/utils";
 import { SettingsTabs, SettingsTabsPanel } from "../settings-tabs";
 import { settingsActionClassName } from "../settings-control";
 import { useManagerNavigation, type ManagerNavigation } from "./use-manager-navigation";
 import { SetupReturnActions } from "./setup-return-actions";
-import { AdoptionFinish } from "./adoption";
 import { ManagerDetail } from "./manager-detail";
 import { ConnectionCollection } from "./connection-collection";
 import { ManagerHeader } from "./manager-header";
@@ -28,7 +28,7 @@ function SSHConnectionsContent() {
   const details = n.creating || Boolean(n.selected);
   const detailTabs = details && !n.identities;
   const tabs = detailTabs
-    ? ["overview", "access", "diagnostics"].map((id) => ({
+    ? ["overview", "access"].map((id) => ({
         id,
         label: t(`settings:sshManager.ui.${id}`),
       }))
@@ -48,7 +48,7 @@ function SSHConnectionsContent() {
         else n.showConnections();
       }}
     >
-      <div className="space-y-8 min-w-0 pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div {...managerFrameProps(n)}>
         {details && (
           <Button
             variant="ghost"
@@ -66,7 +66,7 @@ function SSHConnectionsContent() {
         <ManagerHeader manager={manager} navigation={n} />
         <ManagerContext manager={manager} navigation={n} />
         <ManagerError manager={manager} />
-        {manager.busy && !manager.operation && (
+        {manager.busy && !manager.checkingSetup && !manager.operation && (
           <p role="status" className="text-sm text-muted-foreground">
             {t("settings:sshManager.ui.working")}
           </p>
@@ -87,6 +87,17 @@ function SSHConnectionsContent() {
       </div>
     </SettingsTabs>
   );
+}
+
+function managerFrameProps(n: ManagerNavigation) {
+  const savedConnection = Boolean(n.selected && !n.creating && !n.identities);
+  return {
+    className: cn(
+      "space-y-8 min-w-0 pb-[max(2rem,env(safe-area-inset-bottom))]",
+      savedConnection && "@container/ssh-detail w-full",
+    ),
+    "data-testid": savedConnection ? "ssh-connection-detail" : undefined,
+  };
 }
 
 function ManagerContext({
@@ -115,14 +126,6 @@ function ManagerContext({
           {t("settings:sshManager.returnToDestination")}
         </Button>
       )}
-      {!n.creating &&
-        !n.editing &&
-        route &&
-        route.destination.id === n.adoptConnection &&
-        n.adoptExecutor &&
-        n.adoptDigest && (
-          <AdoptionFinish executorId={n.adoptExecutor} digest={n.adoptDigest} route={route} />
-        )}
     </>
   );
 }

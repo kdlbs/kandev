@@ -1,6 +1,6 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
-import type { SSHTestRequest, SSHTestResult } from "@/lib/types/http-ssh";
+import type { RemoteDockerSSHTestRequest, SSHTestResult } from "@/lib/types/http-ssh";
 
 /**
  * Runs the remote Docker executor's connection test.
@@ -14,7 +14,7 @@ import type { SSHTestRequest, SSHTestResult } from "@/lib/types/http-ssh";
  * only supplies the method and body.
  */
 export async function testRemoteDockerConnection(
-  request: SSHTestRequest,
+  request: RemoteDockerSSHTestRequest,
   options?: ApiRequestOptions,
 ): Promise<SSHTestResult> {
   return fetchJson<SSHTestResult>("/api/v1/remote-docker/test", {

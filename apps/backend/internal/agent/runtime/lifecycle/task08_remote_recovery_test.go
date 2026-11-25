@@ -647,7 +647,7 @@ func TestExplicitStopOfPendingRemoteExecutionStopsExactPersistedOwnerAndClearsGu
 	).handle)
 	log := newTestRegistryLogger()
 	registry := NewExecutorRegistry(log)
-	registry.Register(NewSSHExecutor(nil, nil, nil, log))
+	registry.Register(newRetainedWireSSHTestExecutor(log))
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"

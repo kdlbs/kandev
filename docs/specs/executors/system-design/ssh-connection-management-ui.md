@@ -19,9 +19,7 @@ Executors owns reusable SSH access. This interaction design complements the
 The implemented [navigation](../../../plans/ssh-connections-executor-navigation/plan.md),
 [UX](../../../plans/ssh-connections-ux/plan.md), and
 [discovery/status](../../../plans/ssh-discovery-status/plan.md) packages record
-prior decisions and validation. The November 15 lab includes the discovery
-card, leading controls, and green ready badge. The proposed experience revision
-below is unimplemented and changes enrollment/diagnostics presentation only.
+prior decisions and validation. See the [desktop layout](../../../plans/ssh-desktop-layout/plan.md) and [state and recovery revision](../../../plans/ssh-settings-state-revision/plan.md).
 
 ## Requirement mapping
 
@@ -83,7 +81,7 @@ Flat mode retains its existing flat navigation and the Executors content card.
 No SSH records are fetched just to render navigation. See
 [Task 04](../../../plans/ssh-access-experience/task-04-sidebar-entry.md).
 
-Keep existing `tab=connections|identities`, `id`, `new`, adoption, bastion-return,
+Keep existing `tab=connections|identities`, `id`, `new`, bastion-return,
 and identity-return parameters. Extend the central
 `sshConnectionSettingsPath` helper with validated public view parameters:
 `section=overview|access|diagnostics` and `mode=edit`. The central route helper
@@ -147,7 +145,7 @@ no management hook.
 ## Saved overview and metadata editing
 
 The detail header shows the resource name, endpoint description, text status,
-and a visible actions menu. Header tabs are Overview, Access, and Diagnostics.
+and Edit and Delete actions. Header tabs are Overview and Access.
 Overview is a readable summary, with Connection and Identity/Route groups.
 Each group stays expanded; do not convert every section into an accordion.
 
@@ -170,7 +168,7 @@ existing unsaved-change guard. No second local metadata Save button is added.
 After a successful metadata save, return to overview for a ready route or Access
 for incomplete setup. Never silently run an authentication check.
 
-Delete lives in a visible overflow menu with its existing confirmation. Explain
+Delete opens its existing confirmation directly from the header. Explain
 reference conflicts and route to current dependents. Do not render a red button
 inside the routine connection form. An identity's dependents remain visible in
 its overview even when deletion is refused.
@@ -188,7 +186,7 @@ diagnostic forms at once. The steps are not a persisted wizard.
 | No trusted host key | Inspect host key | Independent verification guidance |
 | Fresh observation | Trust this host key in the inline review | Cancel observation |
 | Trusted, not checked | Test SSH access | Install public key using existing access; diagnostics |
-| Authentication rejected | Retry after correction | Diagnostics or explicitly open Install public key |
+| Authentication rejected | Retry after correction | Check setup or explicitly open Install public key |
 | Current stamp verified | Test SSH access | Host details, copy public key, explicit Install public key |
 | Changed key or stale stamp | Blocking explanation and fresh inspection | Edit/reload, no credential fallback |
 
@@ -198,8 +196,8 @@ Full fingerprints remain available in labelled details and always appear in
 trust/change confirmations. A changed-key warning shows old and new values and
 never collapses behind optional help.
 
-Diagnostics owns `PrerequisitePanel` and its hop-specific results. Opening it
-does not run preflight. Its explicit Check prerequisites command is separate
+Access owns `PrerequisitePanel` and its hop-specific results. Previous Diagnostics links open the checks in Access. Opening it
+does not run preflight. Its explicit Check setup command is separate
 from SSH authentication. Keep the executor-readiness distinction visible near
 results, with optional longer explanation in `SettingsInfo`.
 
@@ -237,9 +235,9 @@ Keep the reviewed identity and bastion return behavior. Contextual creation
 first saves non-secret connection metadata through the coordinator, then opens
 the focused related form. Failed save stays in place. Success selects the new
 identity as an unsaved connection draft; Cancel preserves the old selection.
-Preserve outer adoption/bastion context and consume return selections once.
+Preserve outer bastion context and consume return selections once.
 Read-only identity remedies carry allowlisted `return_section` context to return
-to Access or Diagnostics without opening the connection editor.
+to Access without opening the connection editor.
 
 `SSHSetupContinuationProvider` remains in the persistent settings shell outside
 the pathname-keyed save provider. Its typed in-memory executor continuation
@@ -300,37 +298,17 @@ executor setup instructions with implementation. No new telemetry is needed.
 
 ## Verification and delivery
 
-The [plan](../../../plans/ssh-connections-ux/plan.md) maps the new ACs and the
-existing safety criteria to sequential work orders. Unit tests cover view-state
-derivation, route allowlists, coordinated edits and secret cleanup even for
-visited tabs. Desktop/phone browser checks prove the actual hierarchy, focus,
-touch geometry, long labels, pseudo locale, and explicit commands. Existing
-real OpenSSH enrollment/adoption scenarios remain required compatibility proof.
+Use disposable backend and OpenSSH fixtures for browser and real SSH checks.
+The [UX plan](../../../plans/ssh-connections-ux/plan.md) records baseline
+navigation, draft, permissions, accessibility and compatibility coverage.
 
-Use disposable backend/SSH fixtures. Preserve the running main instance and
-the user's current lab during implementation and verification. Updating that
-lab or publishing this revision requires a later request. No new ADR is needed:
-this revision preserves the accepted ownership, custody, and API boundaries.
+## Access experience
 
+The [experience package](../../../plans/ssh-access-experience/plan.md) records
+the November 15 baseline. The desktop revision adds AC-004.20 and AC-004.21.
+Host trust, credential custody and enrollment keep their existing service owners.
 
-## Access experience revision (2026-11-15)
-
-This implemented section defines the current Access, enrollment and diagnostic
-presentation. See the [experience package](../../../plans/ssh-access-experience/plan.md)
-for verification evidence.
-AC-004.15 through AC-004.19 belong to REQ-EXECUTORS-SSH-CONNECTIONS-004.
-AC-002.2/002.3 and AC-003.1 through 003.6 remain security constraints.
-Collections, route ownership, metadata saving, executor return, and identity
-custody keep their accepted contracts. No new ADR or backend API is needed.
-
-### Evidence and visual direction
-
-Live desktop and Pixel 5 inspection on 2026-11-15 confirmed repeated enrollment
-headings, competing Access and authorization cards, a narrow fingerprint-heavy
-confirmation popover, and diagnostics reduced to a button and issue bullets.
-`connection-access.tsx`, `connection-trust.tsx`, `enrollment-panel.tsx`, and
-`prerequisite-panel.tsx` establish those compositions. The existing package
-improved discovery but did not give these operation states sufficient hierarchy.
+### Visual direction
 
 Use the existing `SettingsGroup`/`SettingsRow` anatomy from
 `editors-settings.tsx`: one heading, a quiet surface, and row separators.
@@ -339,8 +317,13 @@ results, but its individual bordered rows and reported step timings are not
 copied. SSH does not return that evidence. `kanban-with-preview.tsx` supplies
 phone direct navigation; `mobile-menu-sheet.tsx` supplies bounded temporary
 picker geometry.
-The access body and diagnostic report use a leading-aligned `w-full max-w-3xl`
-column under the unchanged manager header. Keep one bordered main surface with
+Use the same left and right Settings gutters for the collection and saved
+connection details, from Back through the active panel.
+Measure the frame with a named inline-size container. At 54rem of available
+content, place overview endpoint and identity groups side by side. Access keeps setup checks
+with the login controls. On phone, stack them in source order.
+Use peer Settings groups for both checks. Keep each action and its result together.
+Keep forms and paragraphs at a readable measure within the shared frame. Keep one bordered main surface with
 16px content padding, 24px between semantic sections, and subtle row dividers.
 Do not nest result cards inside status cards. Use shared heading/body/meta type
 styles, Tabler outline icons, and existing radius/color tokens. Use normal
@@ -351,27 +334,30 @@ Keep existing tokens and control sizes. Do not change global primitives.
 
 ### Access composition and trust review
 
-Retain Overview, Access, and Diagnostics navigation. Access has three compact
+Retain Overview and Access navigation. Access has three compact
 milestones: Connection details, Server trust, SSH access. They describe evidence,
 not required enrollment steps. Installation is optional under SSH access.
-Desktop shows a compact horizontal summary above one active surface. Phone shows
-only the current milestone title and a short completed-prerequisite summary;
-it does not squeeze three step labels into a horizontal strip. Completed facts
-remain available through Host details/Identity links, without expanded forms.
+Use standard Settings rows. Keep completed facts compact. Expand the current row
+for inspection, review and feedback. On phone, lead with the active task and fold
+completed facts into Host details.
 
 Incomplete metadata offers Edit connection. Missing identity offers identity
 selection through the connection editor. Missing or unready bastion links to
 that bastion's Access view, preserving existing return context. A trusted but
-unchecked route offers Test SSH access, with Install public key as a quieter
-alternative. A ready route shows one green result and Test SSH access, with
+unchecked route offers Test SSH access with the eligible Install public key
+button directly beside it, before host details. After an authentication
+rejection, group the installation and diagnostics remedies with the error.
+Trust and rejection alone cannot establish the remote authorization state. A ready route shows one green result and Test SSH access, with
 Host details and Install public key as secondary actions. Do not demand
 installation from a user who already has working access.
 
 Inspect host key shows a local pending indicator, then replaces its task body
 with an inline review: destination account, hop, observed server fingerprint,
 and independent comparison guidance. Changed keys additionally show the saved
-fingerprint, observed fingerprint, and an always-visible warning. Trust this
-server is the explicit commit action; Back discards the observation. Do not add
+fingerprint, observed fingerprint, and an always-visible warning. A trust conflict (`ssh_resource_in_use`) keeps both values visible. Explain that the
+saved key is in use. Offer New connection for the replacement host. Open the existing
+create flow with a fresh draft, without a pin or copied observation. The operator
+inspects and confirms the new host independently. Trust this server is the explicit commit action; Back discards the observation. Do not add
 another popover after this already complete review. No credentials reach the
 untrusted hop. Preserve the receipt, actor, expiry, and route-stamp checks in
 `manager.trust`. An expired receipt offers Inspect again, not blind retry.
@@ -393,8 +379,13 @@ It shows its own concise progress label only while active, replacing the Access
 milestones. Back to access is visible. Do not mount an ordinary Access test
 button and a competing enrollment form together.
 
-Choose access presents three full-width radio rows with a title and one-line
-explanation: Password, Existing identity, Install manually. The method is not
+Choose access presents one native radio group. At 54rem of available content
+show three equal columns with wrapping labels and descriptions. Below that
+width show full-width rows. Use one set of controls across sizes to preserve
+the selection, focused field and typed credential across resize. Keep the
+selected field below the choices, followed by Close setup and Review installation
+in the same footer. In review, keep Back adjacent to Install public key.
+The options are Password, Existing identity, Install manually. The method is not
 preselected. Selection expands only that method's fields in the same surface.
 The two assisted choices explain that existing access to the destination account
 is required. Password means the destination account's SSH password used once,
@@ -453,7 +444,7 @@ readiness. It does not perform a fresh network login or test executor tools.
 `SSHPreflight.checks` contains failures only. No per-check durations or successful
 steps exist. Preserve the API and do not manufacture a checklist of green rows.
 
-The Diagnostics view has a heading, a one-sentence scope description, Check
+The setup group in Access has a heading, a one-sentence scope description, Check
 setup, and one result region. Before running, state Not checked in this view.
 Pending replaces the previous current report with Checking setup; optionally
 retain it only under an explicitly Previous result disclosure. A request error
@@ -507,7 +498,7 @@ cause before the remedy. Do not depend on a toast or color to convey completion.
 
 ### Mobile, keyboard, localization, and proof
 
-Desktop uses the bounded reading column; phone below 768px uses full-width
+Desktop uses the shared detail frame described above. Phone below 768px uses full-width
 content, one focused step and vertically stacked labelled values. The settings
 shell remains the sole page scroller. Main actions follow the current task,
 full-width on phone, with safe-area clearance and no fixed bar that covers the

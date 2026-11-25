@@ -11,8 +11,11 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/sshtransport"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	"golang.org/x/crypto/ssh"
+	"strconv"
 )
 
 // schedulerTestStore is a fake sshOrphanSweepExecutorStore +
@@ -116,42 +119,42 @@ func stubSSHAgentSocket(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", sock)
 }
 
-func slowDialExecutor(id, addr string) *models.Executor {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		panic(err)
-	}
-	return &models.Executor{
-		ID:   id,
-		Type: models.ExecutorTypeSSH,
-		Config: map[string]string{
-			"ssh_host":             host,
-			"ssh_port":             port,
-			"ssh_host_fingerprint": "SHA256:deadbeef",
-			"ssh_user":             "kandev",
-			"ssh_identity_source":  string(SSHIdentitySourceAgent),
-		},
-	}
+type sweepOpenFunc func(context.Context, string) (*ssh.Client, *sshtransport.SSHTarget, func(), error)
+
+func (f sweepOpenFunc) OpenExecutor(ctx context.Context, id string) (*ssh.Client, *sshtransport.SSHTarget, func(), error) {
+	return f(ctx, id)
 }
 
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.13
 func TestOrphanSweepSchedulerCoalescesConcurrentTriggersForSameExecutor(t *testing.T) {
-	// slowDialExecutor selects the ssh-agent identity source, so dialSSH must
-	// resolve a real agent socket before it ever reaches the network — without
-	// this, buildAuthMethods fails closed on a missing SSH_AUTH_SOCK and the
-	// sweep never dials, so acceptCount stays 0 and the test times out on an
-	// ambient-environment difference rather than the coalescing behavior it
-	// means to cover. The socket only needs to accept the connection: the
-	// agent protocol itself is never exercised because newHangingSSHListener
-	// never completes the handshake that would call its Signers().
-	stubSSHAgentSocket(t)
-
 	addr, acceptCount := newHangingSSHListener(t)
-	executor := slowDialExecutor("executor-1", addr)
+	executor := &models.Executor{ID: "executor-1", Type: models.ExecutorTypeSSH, Config: map[string]string{
+		MetadataKeySSHConnectionID: "saved-connection",
+	}}
 	store := &schedulerTestStore{executor: executor}
+	host, rawPort, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(rawPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := &SSHTarget{
+		Host: host, Port: port, User: "kandev", PinnedFingerprint: "SHA256:deadbeef",
+		IdentitySource: SSHIdentitySourceFile, IdentityFile: writeTestIdentityFile(t),
+	}
+	opener := sweepOpenFunc(func(ctx context.Context, _ string) (*ssh.Client, *sshtransport.SSHTarget, func(), error) {
+		client, err := DialSSH(ctx, target)
+		return client, target, func() {
+			if client != nil {
+				_ = client.Close()
+			}
+		}, err
+	})
 
 	eventBus := bus.NewMemoryEventBus(logger.Default())
-	scheduler := NewOrphanSweepScheduler(store, store, 3600, logger.Default(), nil, nil)
+	scheduler := NewOrphanSweepScheduler(store, store, 3600, logger.Default(), nil, opener)
 	scheduler.Start(context.Background(), eventBus)
 	defer scheduler.Stop()
 

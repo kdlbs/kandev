@@ -2,7 +2,13 @@
 import { useTranslation } from "react-i18next";
 import type { SSHRoute } from "@/lib/types/http-ssh-connections";
 import { AccessStatus } from "./access-primitives";
-export function EnrollmentStatus({ latest }: { latest: SSHRoute["latest_enrollment"] }) {
+export function EnrollmentStatus({
+  latest,
+  staticMessage,
+}: {
+  latest: SSHRoute["latest_enrollment"];
+  staticMessage?: boolean;
+}) {
   const { t } = useTranslation();
   if (!latest) return null;
   let tone: "success" | "error" | "warning" = "warning";
@@ -11,6 +17,7 @@ export function EnrollmentStatus({ latest }: { latest: SSHRoute["latest_enrollme
   return (
     <AccessStatus
       tone={tone}
+      staticMessage={staticMessage}
       pending={latest.state === "started"}
       title={t(`settings:sshManager.enrollment.states.${latest.state}`)}
     >

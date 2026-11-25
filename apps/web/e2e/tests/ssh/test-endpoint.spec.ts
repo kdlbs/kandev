@@ -1,28 +1,25 @@
+import type { ApiClient } from "../../helpers/api-client";
 import { test, expect } from "../../fixtures/ssh-test-base";
 import { execInContainer } from "../../helpers/ssh";
 import { waitForSessionDone } from "../../helpers/session";
 
-/**
- * HTTP contract for POST /api/v1/ssh/test. The endpoint dials the host with a
- * permissive host-key callback (records the fingerprint but does not pin it),
- * runs uname / platform / git probes, and reports whether agentctl is already
- * cached on the remote. Drives the "Test Connection" UI flow.
- *
- * Covers e2e-plan.md group F (F1–F6).
- */
+async function executorTestRequest(apiClient: ApiClient, id: string) {
+  const config = (await apiClient.getExecutor(id)).config!;
+  return {
+    ssh_connection_id: config.ssh_connection_id,
+    expected_stamp: config.ssh_connection_stamp,
+  };
+}
+
 test.describe("ssh test-endpoint contract", () => {
   // F2 — happy-path step ordering against a reachable sshd container.
-  test("returns step ordering Resolve target -> SSH handshake -> Probe remote -> Verify platform -> Verify agentctl cache", async ({
+  test("checks SSH, the remote platform, and the agentctl cache in order", async ({
     apiClient,
     seedData,
   }) => {
     const result = await apiClient.testSSHConnection({
       name: "F2",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
+      ...(await executorTestRequest(apiClient, seedData.sshExecutorId)),
     });
 
     expect(result.success).toBe(true);
@@ -33,7 +30,6 @@ test.describe("ssh test-endpoint contract", () => {
 
     const stepNames = result.steps.map((s) => s.name);
     expect(stepNames).toEqual([
-      "Resolve target",
       "SSH handshake",
       "Probe remote",
       "Verify platform",
@@ -44,50 +40,35 @@ test.describe("ssh test-endpoint contract", () => {
     }
   });
 
-  // F1 — invalid body shape returns 400 (FastAPI/gin produces a structured error).
-  test("rejects malformed body with 400", async ({ apiClient }) => {
+  test("rejects a non-object body with 400", async ({ apiClient }) => {
     const res = await apiClient.rawRequest("POST", "/api/v1/ssh/test", "not json");
     expect(res.status).toBe(400);
   });
 
-  // F3 — host required either directly or via host_alias. ResolveSSHTarget short-circuits.
-  test("Resolve target step fails when both host and host_alias are empty", async ({
-    apiClient,
-  }) => {
-    const result = await apiClient.testSSHConnection({
-      name: "F3",
-      user: "kandev",
-      identity_source: "agent",
-    });
-
-    expect(result.success).toBe(false);
-    expect(result.steps[0]?.name).toBe("Resolve target");
-    expect(result.steps[0]?.success).toBe(false);
-    expect(result.steps[0]?.error).toMatch(/host is required/i);
-    // Should not have proceeded to handshake / probe steps.
-    expect(result.steps.length).toBe(1);
+  test("rejects inline and mixed target selectors", async ({ apiClient, seedData }) => {
+    const saved = await executorTestRequest(apiClient, seedData.sshExecutorId);
+    for (const body of [
+      { name: "inline", host: "example.invalid" },
+      { ...saved, host: "example.invalid" },
+    ]) {
+      const response = await apiClient.rawRequest("POST", "/api/v1/ssh/test", body);
+      expect(response.status).toBe(400);
+    }
   });
 
-  // F4 — handshake against a closed port surfaces verbatim, no probe steps emitted.
-  test("handshake failure short-circuits with no probe steps", async ({ apiClient, seedData }) => {
+  test("rejects a stale revision without reaching the remote platform", async ({
+    apiClient,
+    seedData,
+  }) => {
+    const request = await executorTestRequest(apiClient, seedData.sshExecutorId);
     const result = await apiClient.testSSHConnection({
-      name: "F4",
-      host: "127.0.0.1",
-      port: 1, // reserved, refused
-      user: "kandev",
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
+      name: "stale",
+      ...request,
+      expected_stamp: "stale",
     });
-
     expect(result.success).toBe(false);
-    const stepNames = result.steps.map((s) => s.name);
-    expect(stepNames).toContain("Resolve target");
-    expect(stepNames).toContain("SSH handshake");
-    expect(stepNames).not.toContain("Probe remote");
-    expect(stepNames).not.toContain("Verify platform");
-    const handshake = result.steps.find((s) => s.name === "SSH handshake");
-    expect(handshake?.success).toBe(false);
-    expect(handshake?.error).toMatch(/tcp dial|connection refused|handshake/i);
+    expect(result.steps ?? []).toEqual([]);
+    expect(result.error).toBe("ssh_resource_changed");
   });
 
   // F5 — agentctl cache step states (cached vs upload-on-launch).
@@ -110,11 +91,7 @@ test.describe("ssh test-endpoint contract", () => {
     // on the first real launch below).
     const before = await apiClient.testSSHConnection({
       name: "F5-before",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
+      ...(await executorTestRequest(apiClient, seedData.sshExecutorId)),
     });
     expect(before.success).toBe(true);
     expect(before.agentctl_action).toBe("needs_upload");
@@ -150,11 +127,7 @@ test.describe("ssh test-endpoint contract", () => {
         async () => {
           const after = await apiClient.testSSHConnection({
             name: "F5-after",
-            host: seedData.sshTarget.host,
-            port: seedData.sshTarget.port,
-            user: seedData.sshTarget.user,
-            identity_source: "file",
-            identity_file: seedData.sshTarget.identityFile,
+            ...(await executorTestRequest(apiClient, seedData.sshExecutorId)),
           });
           expect(after.success).toBe(true);
           return after.agentctl_action;
@@ -181,15 +154,11 @@ test.describe("ssh test-endpoint contract", () => {
   }) => {
     const payload = {
       name: "F6",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identity_source: "file" as const,
-      identity_file: seedData.sshTarget.identityFile,
+      ...(await executorTestRequest(apiClient, seedData.sshExecutorId)),
     };
     const http = await apiClient.testSSHConnection(payload);
     expect(http.success).toBe(true);
-    expect(http.steps.length).toBeGreaterThanOrEqual(5);
+    expect(http.steps.length).toBeGreaterThanOrEqual(4);
 
     // Hit the WS dispatcher entry directly so a regression in the gateway
     // (e.g. the action handler diverging from the HTTP route) is caught

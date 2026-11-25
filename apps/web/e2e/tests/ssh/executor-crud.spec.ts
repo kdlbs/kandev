@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
+import { createTestedSSHRoute, sshBinding } from "../../helpers/ssh-managed-fixture";
 import type { ApiClient } from "../../helpers/api-client";
 
 async function waitForSSHSession(apiClient: ApiClient, executorId: string, taskId: string) {
@@ -22,24 +23,25 @@ async function waitForSSHSession(apiClient: ApiClient, executorId: string, taskI
  * Covers e2e-plan.md group D (D1–D7).
  */
 test.describe("ssh executor CRUD", () => {
-  test("POST /api/v1/executors with type=ssh persists host_fingerprint in Config", async ({
+  test("persists the selected shared connection and rejects inline SSH writes", async ({
     apiClient,
     seedData,
   }) => {
-    const exec = await apiClient.createSSHExecutor("D1 manual create", {
-      ssh_host: seedData.sshTarget.host,
-      ssh_port: String(seedData.sshTarget.port),
-      ssh_user: seedData.sshTarget.user,
-      ssh_identity_source: "file",
-      ssh_identity_file: seedData.sshTarget.identityFile,
-      ssh_host_fingerprint: seedData.sshTarget.hostFingerprint,
-    });
+    const saved = (await apiClient.getExecutor(seedData.sshExecutorId)).config!;
+    const binding = {
+      ssh_connection_id: saved.ssh_connection_id,
+      ssh_connection_stamp: saved.ssh_connection_stamp,
+    };
+    const exec = await apiClient.createSSHExecutor("Shared SSH", binding);
     expect(exec.type).toBe("ssh");
+    expect((await apiClient.getExecutor(exec.id)).config).toEqual(binding);
 
-    const persisted = await apiClient.getExecutor(exec.id);
-    expect(persisted.config?.ssh_host_fingerprint).toBe(seedData.sshTarget.hostFingerprint);
-    expect(persisted.config?.ssh_host).toBe(seedData.sshTarget.host);
-    expect(persisted.config?.ssh_user).toBe(seedData.sshTarget.user);
+    const inline = { ssh_host: seedData.sshTarget.host };
+    await expect(apiClient.createSSHExecutor("Old SSH client", inline)).rejects.toThrow();
+    await expect(
+      apiClient.updateExecutor(exec.id, { config: { ...binding, ...inline } }),
+    ).rejects.toThrow();
+    expect((await apiClient.getExecutor(exec.id)).config).toEqual(binding);
   });
 
   test("listExecutors returns the ssh row with the right type", async ({ apiClient, seedData }) => {
@@ -95,8 +97,9 @@ test.describe("ssh executor CRUD", () => {
     expect(row, "session should still be reported as active after rename").toBeDefined();
   });
 
-  test("changing executor config does not change live session's metadata snapshot", async ({
+  test("changing a shared binding preserves the live session snapshot", async ({
     apiClient,
+    backend,
     seedData,
   }) => {
     const task = await apiClient.createTaskWithAgent(
@@ -123,21 +126,14 @@ test.describe("ssh executor CRUD", () => {
     expect(beforeRow).toBeDefined();
     const originalHost = beforeRow!.host;
 
-    // Bait: change the executor's host to something different. The live
-    // session must keep its snapshot. Restore the original config in a
-    // try/finally so any subsequent spec in this worker that reuses
-    // seedData.sshExecutorId sees a working executor — without restore,
-    // later launches would dial 10.255.255.1 and hang.
+    const original = (await apiClient.getExecutor(seedData.sshExecutorId)).config;
+    const replacement = await createTestedSSHRoute(backend.baseUrl, "Separate connection", {
+      ...seedData.sshTarget,
+      host: "localhost",
+    });
     try {
       await apiClient.updateExecutor(seedData.sshExecutorId, {
-        config: {
-          ssh_host: "10.255.255.1",
-          ssh_port: String(seedData.sshTarget.port),
-          ssh_user: seedData.sshTarget.user,
-          ssh_identity_source: "file",
-          ssh_identity_file: seedData.sshTarget.identityFile,
-          ssh_host_fingerprint: seedData.sshTarget.hostFingerprint,
-        },
+        config: sshBinding(replacement),
       });
 
       const after = await apiClient.listSSHSessions(seedData.sshExecutorId);
@@ -145,16 +141,7 @@ test.describe("ssh executor CRUD", () => {
       expect(afterRow).toBeDefined();
       expect(afterRow!.host).toBe(originalHost);
     } finally {
-      await apiClient.updateExecutor(seedData.sshExecutorId, {
-        config: {
-          ssh_host: seedData.sshTarget.host,
-          ssh_port: String(seedData.sshTarget.port),
-          ssh_user: seedData.sshTarget.user,
-          ssh_identity_source: "file",
-          ssh_identity_file: seedData.sshTarget.identityFile,
-          ssh_host_fingerprint: seedData.sshTarget.hostFingerprint,
-        },
-      });
+      await apiClient.updateExecutor(seedData.sshExecutorId, { config: original });
     }
   });
 

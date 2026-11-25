@@ -83,25 +83,30 @@ func TestConnectionHTTPReadAndDelete(t *testing.T) {
 }
 
 func TestManagedSSHResponsesUseDestinationWireKey(t *testing.T) {
-	for name, value := range map[string]any{
-		"route":    Route{Destination: Connection{Host: "fixture.example"}},
-		"adoption": AdoptionPreview{Destination: AdoptionTarget{Host: "fixture.example"}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			body, err := json.Marshal(value)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var response map[string]json.RawMessage
-			if err := json.Unmarshal(body, &response); err != nil {
-				t.Fatal(err)
-			}
-			if _, ok := response["destination"]; !ok {
-				t.Fatalf("missing destination wire key: %s", body)
-			}
-			if _, ok := response["Destination"]; ok {
-				t.Fatal("exported Go field name leaked into wire response")
-			}
-		})
+	value := Route{Destination: Connection{Host: "fixture.example"}}
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := response["destination"]; !ok {
+		t.Fatalf("missing destination wire key: %s", body)
+	}
+	if _, ok := response["Destination"]; ok {
+		t.Fatal("exported Go field name leaked into wire response")
+	}
+}
+
+func TestCutoverRetiresAdoptionEndpoints(t *testing.T) {
+	router := managerRouter(NewService(true, nil, nil), nil)
+	for path, method := range map[string]string{"adoption-preview": "GET", "adoption-drafts": "POST", "adopt-connection": "POST"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(method, "/api/v1/ssh/managed/executors/old/"+path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s returned %d", path, rec.Code)
+		}
 	}
 }

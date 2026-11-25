@@ -29,6 +29,7 @@ afterEach(cleanup);
 const methodLabel = "settings:sshManager.experience.methodPassword";
 const passwordLabel = "settings:sshManager.enrollment.password";
 const installLabel = "settings:sshManager.ui.installKey";
+const fixturePassword = "fixture-only-secret";
 function setup() {
   const route: SSHRoute = {
     destination: {
@@ -103,7 +104,7 @@ it("clears secrets when leaving and reopening a previously visited Access view",
   fireEvent.click(screen.getByRole("button", { name: installLabel }));
   fireEvent.click(screen.getByRole("radio", { name: methodLabel }));
   fireEvent.change(screen.getByLabelText(passwordLabel), {
-    target: { value: "fixture-only-secret" },
+    target: { value: fixturePassword },
   });
   result.section("overview");
   expect(screen.queryByLabelText(passwordLabel)).toBeNull();
@@ -129,22 +130,51 @@ it("replaces verified enrollment with its result and permits deliberate fresh se
   fireEvent.click(screen.getByRole("button", { name: installLabel }));
   fireEvent.click(screen.getByRole("radio", { name: methodLabel }));
   fireEvent.change(screen.getByLabelText(passwordLabel), {
-    target: { value: "fixture-only-secret" },
+    target: { value: fixturePassword },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "settings:sshManager.experience.reviewInstallation" }),
+  );
+  const confirm = screen.getByRole("button", { name: "settings:sshManager.enrollment.install" });
+  confirm.focus();
+  fireEvent.click(confirm);
+  await screen.findByText("settings:sshManager.enrollment.states.verified");
+  expect(screen.queryByLabelText(passwordLabel)).toBeNull();
+  expect(document.activeElement).toBe(confirm);
+  fireEvent.click(screen.getByRole("button", { name: "settings:sshManager.ui.cancelInstall" }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: installLabel }));
+  fireEvent.click(screen.getByRole("button", { name: installLabel }));
+  expect(screen.queryByLabelText(passwordLabel)).toBeNull();
+});
+it("tests access once and focuses its live test control after an uncertain installation", async () => {
+  const { manager, route } = setup();
+  vi.mocked(manager.test).mockResolvedValue(route);
+  vi.mocked(manager.enroll).mockResolvedValue({
+    request_id: "attempt",
+    connection_id: "target",
+    stamp: "stamp",
+    key_fingerprint: "key-pin",
+    created_at: "2026-10-26T00:00:00Z",
+    state: "outcome_unknown",
+  });
+  fireEvent.click(screen.getByRole("button", { name: installLabel }));
+  fireEvent.click(screen.getByRole("radio", { name: methodLabel }));
+  fireEvent.change(screen.getByLabelText(passwordLabel), {
+    target: { value: fixturePassword },
   });
   fireEvent.click(
     screen.getByRole("button", { name: "settings:sshManager.experience.reviewInstallation" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "settings:sshManager.enrollment.install" }));
-  await waitFor(() => expect(screen.queryByLabelText(passwordLabel)).toBeNull());
-  expect(screen.getByText("settings:sshManager.enrollment.states.verified")).toBeTruthy();
-  await waitFor(() =>
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "settings:sshManager.test" }),
-    ),
-  );
-  fireEvent.click(screen.getByRole("button", { name: installLabel }));
-  expect(screen.queryByLabelText(passwordLabel)).toBeNull();
+  await screen.findByText("settings:sshManager.enrollment.states.outcome_unknown");
+  const recovery = screen.getByRole("button", { name: "settings:sshManager.test" });
+  fireEvent.click(recovery);
+  const testAction = screen.getByRole("button", { name: "settings:sshManager.test" });
+  expect(document.activeElement).toBe(testAction);
+  expect(testAction).not.toBe(recovery);
+  expect(manager.test).toHaveBeenCalledExactlyOnceWith(route);
 });
+
 it("does not reopen credentials when a dismissed attempt completes later", async () => {
   const result = setup();
   let finish!: (value: SSHEnrollment) => void;
@@ -156,7 +186,7 @@ it("does not reopen credentials when a dismissed attempt completes later", async
   fireEvent.click(screen.getByRole("button", { name: installLabel }));
   fireEvent.click(screen.getByRole("radio", { name: methodLabel }));
   fireEvent.change(screen.getByLabelText(passwordLabel), {
-    target: { value: "fixture-only-secret" },
+    target: { value: fixturePassword },
   });
   fireEvent.click(
     screen.getByRole("button", { name: "settings:sshManager.experience.reviewInstallation" }),
@@ -190,6 +220,9 @@ it("returns keyboard focus after trust changes the saved route stamp", async () 
     result.refresh();
     return result.route;
   });
+  fireEvent.click(
+    screen.getByRole("button", { name: "settings:sshManager.experience.hostDetails" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "settings:sshManager.observe" }));
   const confirm = await screen.findByRole("button", { name: "settings:sshManager.trust" });
   fireEvent.click(confirm);

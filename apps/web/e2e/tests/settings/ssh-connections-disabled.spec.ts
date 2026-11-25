@@ -23,12 +23,17 @@ test("disabled SSH management rejects direct API access and does not load creden
         credentialRequests.push(request.url());
       }
     });
-    for (const path of ["/settings/ssh-connections", "/settings/executors/ssh-connections"]) {
+    for (const path of [
+      "/settings/ssh-connections",
+      "/settings/executors/ssh-connections",
+      "/settings/executors/new/ssh",
+    ]) {
       await testPage.goto(path);
       await expect(
         testPage.getByText("SSH connection management is not available.", { exact: true }),
       ).toBeVisible();
     }
+    await expect(testPage.getByLabel("Host", { exact: true })).toHaveCount(0);
     expect(credentialRequests).toEqual([]);
   } finally {
     await testPage.close();

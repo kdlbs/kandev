@@ -2199,101 +2199,21 @@ func TestAbandonOpenTurns_IterationCap(t *testing.T) {
 	}
 }
 
-func TestMergeExecutorConfigMetadata(t *testing.T) {
-	// Fixture values — arbitrary test inputs, not real host config.
-	const (
-		execHost   = "ssh.example.com"
-		execUser   = "agent"
-		execFP     = "SHA256:test-fingerprint"
-		liveHost   = "live-host-from-running-record"
-		staleHost  = "stale-host-from-executor"
-		droppedKey = "not_a_persistent_key"
-	)
-
-	// SSH connection keys from the executor record must be projected when absent.
-	info := &lifecycle.WorkspaceInfo{}
+func TestMergeExecutorConfigMetadataOnlyProjectsSharedConnectionAndOptions(t *testing.T) {
+	info := &lifecycle.WorkspaceInfo{Metadata: map[string]interface{}{lifecycle.MetadataKeySSHShell: "zsh"}}
 	mergeExecutorConfigMetadata(info, map[string]string{
-		lifecycle.MetadataKeySSHHost:            execHost,
-		lifecycle.MetadataKeySSHUser:            execUser,
-		lifecycle.MetadataKeySSHHostFingerprint: execFP,
-		droppedKey:                              "dropme",
+		lifecycle.MetadataKeySSHConnectionID:      "shared-connection",
+		lifecycle.MetadataKeySSHShell:             "bash",
+		lifecycle.MetadataKeySSHHost:              "stale.example",
+		lifecycle.MetadataKeySSHHostAlias:         "stale-alias",
+		lifecycle.MetadataKeySSHRemoteAgentctlPID: "9999",
 	})
-	if got := info.Metadata[lifecycle.MetadataKeySSHHost]; got != execHost {
-		t.Fatalf("ssh_host = %v, want %q", got, execHost)
-	}
-	if got := info.Metadata[lifecycle.MetadataKeySSHHostFingerprint]; got != execFP {
-		t.Fatalf("ssh_host_fingerprint = %v, want %q", got, execFP)
-	}
-	if _, ok := info.Metadata[droppedKey]; ok {
-		t.Fatal("non-persistent key should be filtered out")
-	}
-
-	// Existing (live running-record) values must win over executor config.
-	info2 := &lifecycle.WorkspaceInfo{Metadata: map[string]interface{}{
-		lifecycle.MetadataKeySSHHost: liveHost,
-	}}
-	mergeExecutorConfigMetadata(info2, map[string]string{
-		lifecycle.MetadataKeySSHHost: staleHost,
-		lifecycle.MetadataKeySSHUser: execUser,
-	})
-	if got := info2.Metadata[lifecycle.MetadataKeySSHHost]; got != liveHost {
-		t.Fatalf("ssh_host = %v, want %q (existing must win)", got, liveHost)
-	}
-	if got := info2.Metadata[lifecycle.MetadataKeySSHUser]; got != execUser {
-		t.Fatalf("ssh_user = %v, want %q (absent key should be filled)", got, execUser)
-	}
-
-	// Empty config is a no-op.
-	info3 := &lifecycle.WorkspaceInfo{}
-	mergeExecutorConfigMetadata(info3, nil)
-	if len(info3.Metadata) != 0 {
-		t.Fatalf("empty config should not create metadata, got %v", info3.Metadata)
-	}
-
-	// Alias-only executors (host read from ~/.ssh/config) must have their alias
-	// projected — otherwise targetFromMetadata still throws "host (or host_alias)
-	// is required". Regression guard for the FilterPersistentMetadata gap.
-	const execAlias = "my-remote-box"
-	info4 := &lifecycle.WorkspaceInfo{}
-	mergeExecutorConfigMetadata(info4, map[string]string{
-		lifecycle.MetadataKeySSHHostAlias: execAlias,
-		lifecycle.MetadataKeySSHShell:     "zsh",
-	})
-	if got := info4.Metadata[lifecycle.MetadataKeySSHHostAlias]; got != execAlias {
-		t.Fatalf("ssh_host_alias = %v, want %q (alias-only executor must survive)", got, execAlias)
-	}
-	if got := info4.Metadata[lifecycle.MetadataKeySSHShell]; got != "zsh" {
-		t.Fatalf("ssh_shell = %v, want zsh (per-profile key should project)", got)
-	}
-
-	// Session-scoped runtime keys must NEVER be projected from executor config —
-	// projecting a stale one would make restore reattach to a dead remote
-	// agentctl instance instead of creating a fresh one.
-	info5 := &lifecycle.WorkspaceInfo{}
-	mergeExecutorConfigMetadata(info5, map[string]string{
-		lifecycle.MetadataKeySSHHost:               execHost,
-		lifecycle.MetadataKeySSHRemoteAgentctlPort: "40123",
-		lifecycle.MetadataKeySSHRemoteAgentctlPID:  "9999",
-		lifecycle.MetadataKeySSHRemoteSessionDir:   "/home/agent/.kandev/sessions/old",
-	})
-	for _, k := range []string{
-		lifecycle.MetadataKeySSHRemoteAgentctlPort,
-		lifecycle.MetadataKeySSHRemoteAgentctlPID,
-		lifecycle.MetadataKeySSHRemoteSessionDir,
-	} {
-		if _, ok := info5.Metadata[k]; ok {
-			t.Errorf("session-scoped key %q must NOT be projected from executor config", k)
-		}
-	}
-	if got := info5.Metadata[lifecycle.MetadataKeySSHHost]; got != execHost {
-		t.Fatalf("ssh_host = %v, want %q (connection key should still project)", got, execHost)
+	if len(info.Metadata) != 2 || info.Metadata[lifecycle.MetadataKeySSHConnectionID] != "shared-connection" ||
+		info.Metadata[lifecycle.MetadataKeySSHShell] != "zsh" {
+		t.Fatalf("unexpected fallback metadata: %v", info.Metadata)
 	}
 }
 
-// TestGetWorkspaceInfoForSession_SSHConfigProjectedWhenNoRunningRecord exercises
-// the end-to-end fallback: a completed SSH session with no ExecutorRunning
-// record must still surface the executor's ssh_host so a terminal / restore
-// does not fail with "host (or host_alias) is required in executor config".
 func TestGetWorkspaceInfoForSession_SSHConfigProjectedWhenNoRunningRecord(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -2301,20 +2221,18 @@ func TestGetWorkspaceInfoForSession_SSHConfigProjectedWhenNoRunningRecord(t *tes
 	setupTestTask(t, repo)
 	now := time.Now().UTC()
 
-	const execHost = "ssh.example.com"
+	const connectionID = "shared-connection"
 	if err := repo.CreateExecutor(ctx, &models.Executor{
-		ID:   "ssh-exec-1",
-		Name: "my-ssh-host",
-		Type: models.ExecutorTypeSSH,
-		Config: map[string]string{
-			lifecycle.MetadataKeySSHHost:            execHost,
-			lifecycle.MetadataKeySSHUser:            "agent",
-			lifecycle.MetadataKeySSHHostFingerprint: "SHA256:test-fingerprint",
-		},
+		ID:        "ssh-exec-1",
+		Name:      "my-ssh-host",
+		Type:      models.ExecutorTypeSSH,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("failed to create ssh executor: %v", err)
+	}
+	if _, err := repo.DB().ExecContext(ctx, `UPDATE executors SET config=? WHERE id='ssh-exec-1'`, `{"ssh_connection_id":"`+connectionID+`"}`); err != nil {
+		t.Fatal(err)
 	}
 
 	// Completed session pointing at the SSH executor, with NO ExecutorRunning record.
@@ -2339,7 +2257,7 @@ func TestGetWorkspaceInfoForSession_SSHConfigProjectedWhenNoRunningRecord(t *tes
 	if info.ExecutorType != string(models.ExecutorTypeSSH) {
 		t.Fatalf("ExecutorType = %q, want ssh", info.ExecutorType)
 	}
-	if got, _ := info.Metadata[lifecycle.MetadataKeySSHHost].(string); got != execHost {
-		t.Fatalf("ssh_host = %v, want %q (executor config must be projected as fallback)", info.Metadata[lifecycle.MetadataKeySSHHost], execHost)
+	if got := info.Metadata[lifecycle.MetadataKeySSHConnectionID]; got != connectionID {
+		t.Fatalf("connection = %v, want %q", got, connectionID)
 	}
 }

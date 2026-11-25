@@ -101,6 +101,7 @@ it("admits only one install and clears credential controls while it is pending",
   fireEvent.click(install);
   fireEvent.click(install);
   expect(enroll).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: finalLabel })).toBe(install);
   expect(screen.queryByLabelText(passwordLabel)).toBeNull();
   await act(async () => {
     finish({ state: "outcome_unknown", stamp: route.stamp } as SSHEnrollment);
@@ -162,5 +163,19 @@ it("drops the reviewed password when the selected key fingerprint changes", () =
   expect(screen.queryByRole("button", { name: finalLabel })).toBeNull();
   choosePassword();
   expect((screen.getByLabelText(passwordLabel) as HTMLInputElement).value).toBe("");
+  expect(enroll).not.toHaveBeenCalled();
+});
+
+it("keeps a focused password draft across a phone layout change before review", () => {
+  const { enroll, manager, rerender } = setup();
+  choosePassword();
+  const password = screen.getByLabelText(passwordLabel);
+  fireEvent.change(password, { target: { value: "draft-password" } });
+  password.focus();
+  viewport.isMobile = true;
+  rerender(<EnrollmentPanel route={route} manager={manager} />);
+  expect(screen.getByLabelText(passwordLabel)).toBe(password);
+  expect((password as HTMLInputElement).value).toBe("draft-password");
+  expect(document.activeElement).toBe(password);
   expect(enroll).not.toHaveBeenCalled();
 });

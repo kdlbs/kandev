@@ -326,6 +326,15 @@ var sshStopOwnerMetadataKeys = []string{
 	MetadataKeySSHPort,
 	MetadataKeySSHUser,
 	MetadataKeySSHHostFingerprint,
+	MetadataKeySSHConnectionID,
+	MetadataKeySSHRouteStamp,
+	MetadataKeySSHIdentityGeneration,
+	MetadataKeySSHBastionIdentityGeneration,
+	MetadataKeySSHHostAlias,
+	MetadataKeySSHIdentitySource,
+	MetadataKeySSHIdentityFile,
+	MetadataKeySSHIdentityAgent,
+	MetadataKeySSHProxyJump,
 	MetadataKeySSHLaunchReceipt,
 }
 

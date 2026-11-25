@@ -23,10 +23,8 @@ type persistedSSHCleanupStore interface {
 // stopPersistedSSHExecution handles the restart-only case where the
 // authoritative executors_running row survived but process-local lifecycle
 // state (the SSH client, forwarder, and remote pid tracked by SSHExecutor)
-// did not. Unlike Kubernetes, an SSH connection is fully described by the
-// row's own persisted metadata (host, port, user, fingerprint, remote pid,
-// remote session dir — see persistentMetadataKeys), so no reconciliation
-// against a "current" executor config is needed before dispatching the stop.
+// did not. The retained record must prove the original controller and route
+// before dispatching a remote stop.
 // The caller that owns task cleanup remains responsible for deleting the row
 // after this exact remote teardown succeeds.
 func (m *Manager) stopPersistedSSHExecution(

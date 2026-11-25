@@ -3,7 +3,9 @@ package sshconnections
 const (
 	identityFile                  = "file"
 	sshHostConfigKey              = "ssh_host"
+	codeHostKeyChanged            = "ssh_host_key_changed"
 	codeAgentUnavailable          = "ssh_agent_unavailable"
+	codeKeyFileUnavailable        = "ssh_key_file_unavailable"
 	enrollmentStarted             = "started"
 	enrollmentPassword            = "password"
 	hopBastion                    = "bastion"

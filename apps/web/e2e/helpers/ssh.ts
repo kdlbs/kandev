@@ -183,7 +183,7 @@ export function dumpRemoteLogs(handle: SSHServerHandle, label: string): string |
  * Does NOT return the new fingerprint. ssh-keyscan and the Go ssh client
  * negotiate different host-key types in some configurations, so the
  * fingerprint reported by keyscan won't always match what kandev observes
- * — callers must hit /api/v1/ssh/test to learn the canonical value.
+ * — inspect the managed connection to learn which key was presented.
  */
 export function regenerateHostKey(handle: SSHServerHandle): void {
   execInContainer(handle, [

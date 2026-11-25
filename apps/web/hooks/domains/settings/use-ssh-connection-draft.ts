@@ -38,7 +38,12 @@ export function useConnectionDraft(route: SSHRoute | undefined, manager: SSHMana
   const saveDraft = async () => {
     const saved = await manager.saveConnection({
       request_id: requestId,
-      connection: form,
+      connection: {
+        ...form,
+        imported_pending: undefined,
+        known_hosts_pending: undefined,
+        repair_reason: undefined,
+      },
       expected_version: baseline.version,
     });
     flushSync(() => {

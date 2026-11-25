@@ -1,5 +1,5 @@
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
-import { buildSSHExecutorConfig } from "@/app/settings/executors/new/[type]/ssh-config";
+import { buildInlineSSHExecutorConfig } from "@/app/settings/executors/new/[type]/ssh-config";
 
 // The executor config keys the connection form owns. Every one is rewritten on
 // save, so a field the form cleared is removed rather than kept from before.
@@ -28,5 +28,5 @@ export function remoteDockerConnectionConfig(
   const kept = Object.fromEntries(
     Object.entries(existing).filter(([key]) => !SSH_CONNECTION_KEYS.includes(key)),
   );
-  return { ...kept, ...buildSSHExecutorConfig(cfg) };
+  return { ...kept, ...buildInlineSSHExecutorConfig(cfg) };
 }

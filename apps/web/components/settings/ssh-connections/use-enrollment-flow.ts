@@ -4,12 +4,7 @@ import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
 import type { SSHEnrollment, SSHIdentity, SSHRoute } from "@/lib/types/http-ssh-connections";
 import { generateUUID } from "@/lib/uuid";
 import type { EnrollmentMethod } from "./enrollment-methods";
-export function useEnrollmentFlow(
-  route: SSHRoute,
-  identity: SSHIdentity,
-  manager: SSHManager,
-  onCompleted?: (result: SSHEnrollment) => void,
-) {
+export function useEnrollmentFlow(route: SSHRoute, identity: SSHIdentity, manager: SSHManager) {
   const [step, setStep] = useState<"choose" | "review" | "pending" | "result">("choose");
   const [method, setMethod] = useState<EnrollmentMethod>("");
   const [password, setPassword] = useState("");
@@ -31,7 +26,7 @@ export function useEnrollmentFlow(
     setResult(undefined);
   };
   const boundary = useConfirmationBoundary(
-    step === "choose" || step === "review",
+    step === "review",
     `${route.stamp}:${identity.fingerprint}`,
     back,
   );
@@ -69,7 +64,6 @@ export function useEnrollmentFlow(
       if (!active.current) return;
       setResult(completed);
       setStep("result");
-      if (completed.state === "verified") onCompleted?.(completed);
     } catch {
       if (active.current) {
         setFailed(true);

@@ -21,18 +21,7 @@ import type { Executor } from "@/lib/types/http";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 
-/**
- * SSH-specific "new executor" flow. Renders just the SSHConnectionCard;
- * Save POSTs to /api/v1/executors with type=ssh and the freshly-pinned
- * fingerprint, then immediately creates a default profile under it (the
- * /settings/executors index lists profiles, so an executor with no
- * profile would otherwise be invisible). Routes to the profile-edit page
- * after both writes succeed — that's where the user picks the shell,
- * probes for installed agents, and tunes per-task config (workdir,
- * prepare script, credentials). The host-level executor page
- * (/settings/executors/ssh/:id) remains reachable for re-trust and
- * sessions inspection.
- */
+/** Creates a shared SSH binding and its default executor profile. */
 export function SSHCreatePage() {
   const router = useRouter();
   const store = useAppStoreApi();

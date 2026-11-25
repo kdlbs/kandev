@@ -129,7 +129,7 @@ var registrations = []runtimeFlagRegistration{
 		definition: RuntimeFlagDefinition{
 			Key: "features.sshConnectionManager", EnvVar: "KANDEV_FEATURES_SSH_CONNECTION_MANAGER",
 			Kind: KindFeature, Label: "SSH connection manager",
-			Description: "Enables managed SSH identities, trusted connections, and host enrollment.",
+			Description: "Enables SSH executors, connection management, and host enrollment. Disabling this blocks SSH executor launches and remote recovery.",
 			Stability:   StabilityExperimental, RiskLevel: RiskHigh,
 			RiskDescription: "Stores encrypted SSH credentials and authorizes remote access. Back up the database and matching master key together.",
 			RestartRequired: true, Mutable: true,

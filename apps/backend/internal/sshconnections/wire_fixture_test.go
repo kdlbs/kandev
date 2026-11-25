@@ -2,7 +2,9 @@ package sshconnections
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
 	"io"
@@ -27,6 +29,7 @@ type wireHost struct {
 	listener               net.Listener
 	config                 *ssh.ServerConfig
 	fingerprint            string
+	publicHostKey          ssh.PublicKey
 	forwardAddress         string
 	forwardPort            uint32
 	passwordCalls          atomic.Int32
@@ -56,7 +59,7 @@ func newWireHost(t *testing.T, authorized string) *wireHost {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &wireHost{home: t.TempDir(), listener: listener, fingerprint: ssh.FingerprintSHA256(signer.PublicKey()), clients: make(map[net.Conn]bool), accepted: make(chan struct{})}
+	h := &wireHost{home: t.TempDir(), listener: listener, fingerprint: ssh.FingerprintSHA256(signer.PublicKey()), publicHostKey: signer.PublicKey(), clients: make(map[net.Conn]bool), accepted: make(chan struct{})}
 	h.writeKeys(t, authorized)
 	h.config = &ssh.ServerConfig{PasswordCallback: func(_ ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 		h.passwordCalls.Add(1)
@@ -97,6 +100,21 @@ func newWireHost(t *testing.T, authorized string) *wireHost {
 		h.workers.Wait()
 	})
 	return h
+}
+
+func (h *wireHost) addECDSAHostKey(t *testing.T) {
+	t.Helper()
+	private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.config.AddHostKey(signer)
 }
 
 func (h *wireHost) keysPath() string { return filepath.Join(h.home, ".ssh", "authorized_keys") }
@@ -248,7 +266,7 @@ func (h *wireHost) lastKey() string {
 	return h.keyFingerprints[len(h.keyFingerprints)-1]
 }
 
-func (h *wireHost) changeHostKey(t *testing.T) {
+func (h *wireHost) changeHostKey(t *testing.T) string {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -266,4 +284,5 @@ func (h *wireHost) changeHostKey(t *testing.T) {
 	}
 	config.AddHostKey(signer)
 	h.config = config
+	return ssh.FingerprintSHA256(signer.PublicKey())
 }

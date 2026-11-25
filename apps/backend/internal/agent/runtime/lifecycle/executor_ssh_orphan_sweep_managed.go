@@ -16,20 +16,9 @@ type ManagedSSHExecutorConnection interface {
 }
 
 func (s *OrphanSweepScheduler) openConnection(ctx context.Context, executor *models.Executor) (*ssh.Client, func(), error) {
-	if executor.Config[MetadataKeySSHConnectionID] != "" {
-		if s.managed == nil {
-			return nil, nil, sshconnections.ErrDisabled
-		}
-		client, _, cleanup, err := s.managed.OpenExecutor(ctx, executor.ID)
-		return client, cleanup, err
+	if s.managed == nil {
+		return nil, nil, sshconnections.ErrDisabled
 	}
-	target, err := SSHTargetFromExecutorConfig(executor.Config)
-	if err != nil {
-		return nil, nil, err
-	}
-	client, err := dialSSH(ctx, target)
-	if err != nil {
-		return nil, nil, err
-	}
-	return client, func() { _ = client.Close() }, nil
+	client, _, cleanup, err := s.managed.OpenExecutor(ctx, executor.ID)
+	return client, cleanup, err
 }

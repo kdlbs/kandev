@@ -23,8 +23,6 @@ it("clears the previous record's editing and access state when selecting another
   expect(Object.fromEntries(url.searchParams)).toEqual({
     tab: "connections",
     id: "next",
-    adopt_executor: "executor",
-    adopt_digest: "digest",
   });
 });
 it("returns a newly created identity as an explicit unsaved edit", () => {
@@ -55,7 +53,25 @@ it("leaves the contextual identity selection when cancelling its edit", () => {
     return_connection: "outer",
   });
 });
-it("opens a bastion remedy and preserves the destination and executor context", () => {
+it("opens Access and focuses setup checks for a legacy diagnostics link", () => {
+  search = new URLSearchParams("id=target&section=diagnostics");
+  const { result } = renderHook(useManagerNavigation);
+  expect(result.current.section).toBe("access");
+  expect(result.current.focusSetupChecks).toBe(true);
+  expect(router.push).not.toHaveBeenCalled();
+});
+it("returns from a bastion remedy to Access", () => {
+  search = new URLSearchParams("id=bastion-id&section=access&return_connection=target");
+  const { result } = renderHook(useManagerNavigation);
+  act(() => result.current.returnToDestination());
+  const url = new URL(router.push.mock.calls[0][0], testOrigin);
+  expect(Object.fromEntries(url.searchParams)).toEqual({
+    tab: "connections",
+    id: "target",
+    section: "access",
+  });
+});
+it("opens a bastion remedy and preserves the destination context", () => {
   search = new URLSearchParams("id=target&section=diagnostics&adopt_executor=executor");
   const { result } = renderHook(useManagerNavigation);
   act(() => result.current.openRemedy("access", "bastion-id", "key-id", "target"));
@@ -65,7 +81,6 @@ it("opens a bastion remedy and preserves the destination and executor context", 
     id: "bastion-id",
     section: "access",
     return_connection: "target",
-    adopt_executor: "executor",
   });
 });
 it("opens an identity remedy with a route back to its connection", () => {
@@ -78,7 +93,6 @@ it("opens an identity remedy with a route back to its connection", () => {
     id: "key-id",
     return_identity_connection: "target",
     return_section: "diagnostics",
-    adopt_executor: "executor",
   });
 });
 it("returns from a diagnostic identity remedy to Diagnostics without opening an edit", () => {
@@ -92,6 +106,13 @@ it("returns from a diagnostic identity remedy to Diagnostics without opening an 
     tab: "connections",
     id: "target",
     section: "diagnostics",
-    adopt_executor: "executor",
   });
+});
+
+it("opens an old adoption link in normal Access and drops the obsolete action context", () => {
+  search = new URLSearchParams("id=target&adopt_executor=executor&adopt_connection=target");
+  const { result } = renderHook(useManagerNavigation);
+  expect(result.current.section).toBe("access");
+  act(() => result.current.select("another"));
+  expect(router.push.mock.calls[0][0]).toBe("/settings/executors/ssh-connections?id=another");
 });

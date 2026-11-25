@@ -24,7 +24,7 @@ func (f *fakeRuntimeSSHTaskDirReclaimer) ReclaimTaskDir(
 }
 
 func TestSSHTaskDirReclaimerAdapterRejectsMissingFingerprint(t *testing.T) {
-	adapter := newSSHTaskDirReclaimerAdapter(nil)
+	adapter := newSSHTaskDirReclaimerAdapter(nil, nil)
 	_, err := adapter.ReclaimTaskDir(context.Background(), taskservice.SSHTaskDirReclaimRequest{
 		Host: "build.example",
 	})

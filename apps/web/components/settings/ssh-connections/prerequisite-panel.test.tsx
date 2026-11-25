@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
 import type { SSHPreflight, SSHRoute } from "@/lib/types/http-ssh-connections";
@@ -28,8 +28,7 @@ it("does not claim live access from an empty local setup report", async () => {
   await screen.findByText(emptyLabel);
   expect(screen.queryByText("settings:sshManager.ready")).toBeNull();
   expect(test).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "settings:sshManager.test" }));
-  await waitFor(() => expect(test).toHaveBeenCalledTimes(1));
+  expect(screen.queryByRole("button", { name: "settings:sshManager.test" })).toBeNull();
 });
 it("discards a late report from a previous route", async () => {
   const { preflight, manager, onRemedy, rerender } = setup();

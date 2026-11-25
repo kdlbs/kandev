@@ -57,7 +57,7 @@ export async function exerciseSSHEnrollmentConfirmation(page: Page, identity: SS
   const password = page.getByLabel("SSH password", { exact: true });
   const install = page.getByRole("button", { name: "Review installation", exact: true });
   await password.fill("disposable-browser-password");
-  await install.click();
+  await password.press("Enter");
   const confirmation = page.getByRole("region", { name: "Authorize this key", exact: true });
   await expect(confirmation).toContainText("deploy@target.invalid:22");
   await expect(confirmation).toContainText("SHA256:fixture-host");
@@ -65,6 +65,7 @@ export async function exerciseSSHEnrollmentConfirmation(page: Page, identity: SS
   await confirmation.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Review installation" })).toHaveCount(0);
   await expect(password).toHaveValue("");
+  await expect(password).toBeFocused();
   expect(submissions).toBe(0);
   await password.fill("disposable-browser-password");
   await install.click();
@@ -80,5 +81,9 @@ export async function exerciseSSHEnrollmentConfirmation(page: Page, identity: SS
     page.getByRole("status").filter({ hasText: "The key may be installed" }),
   ).toBeVisible();
   expect(submissions).toBe(1);
+  await expect(confirmation).toBeVisible();
+  await page.getByRole("button", { name: "Close setup", exact: true }).click();
+  await expect(confirmation).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Install public key", exact: true })).toBeFocused();
   await assertNoDocumentHorizontalOverflow(page);
 }

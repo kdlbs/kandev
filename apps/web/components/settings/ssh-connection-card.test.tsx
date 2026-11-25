@@ -2,9 +2,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SettingsSaveProvider } from "./settings-save-provider";
 import { SSHConnectionCard, type SSHExecutorConfig } from "./ssh-connection-card";
-import { testSSHConnection } from "@/lib/api/domains/ssh-api";
+import { testRemoteDockerConnection } from "@/lib/api/domains/remote-docker-api";
 
-vi.mock("@/lib/api/domains/ssh-api", () => ({ testSSHConnection: vi.fn() }));
+vi.mock("@/lib/api/domains/remote-docker-api", () => ({ testRemoteDockerConnection: vi.fn() }));
 
 const initial: SSHExecutorConfig = {
   name: "Primary host",
@@ -15,7 +15,7 @@ const initial: SSHExecutorConfig = {
 
 describe("SSHConnectionCard", () => {
   it("uses the shared save action for an existing executor", async () => {
-    vi.mocked(testSSHConnection).mockResolvedValue({
+    vi.mocked(testRemoteDockerConnection).mockResolvedValue({
       success: true,
       fingerprint: "SHA256:old",
       steps: [],
@@ -27,6 +27,7 @@ describe("SSHConnectionCard", () => {
         <SSHConnectionCard
           initial={initial}
           onSave={onSave}
+          testConnection={testRemoteDockerConnection}
           coordinatedSaveId="ssh-executor:executor-1"
         />
       </SettingsSaveProvider>,

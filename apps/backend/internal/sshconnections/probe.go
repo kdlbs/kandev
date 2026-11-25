@@ -29,9 +29,17 @@ func (s *Service) readRoute(ctx context.Context, id, stamp string) (Route, error
 	}
 	return route, nil
 }
+func hopFromConnection(c Connection) sshtransport.Hop {
+	hop := sshtransport.Hop{Host: c.Host, Port: c.Port, User: c.User, Fingerprint: c.Fingerprint}
+	if key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(c.PublicKey)); err == nil && ssh.FingerprintSHA256(key) == c.Fingerprint {
+		hop.HostKeyTypes = []string{key.Type()}
+	}
+	return hop
+}
+
 func (s *Service) hop(ctx context.Context, c Connection) (sshtransport.Hop, func(), error) {
 	empty := func() {}
-	hop := sshtransport.Hop{Host: c.Host, Port: c.Port, User: c.User, Fingerprint: c.Fingerprint}
+	hop := hopFromConnection(c)
 	tx, err := s.store.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return hop, empty, err
@@ -64,7 +72,7 @@ func (s *Service) hop(ctx context.Context, c Connection) (sshtransport.Hop, func
 	auth, cleanup, err := sshtransport.Authentication(target)
 	if err != nil {
 		cleanup()
-		return hop, empty, &CredentialFailure{Code: "ssh_key_file_unavailable"}
+		return hop, empty, &CredentialFailure{Code: codeKeyFileUnavailable}
 	}
 	hop.Auth = auth
 	return hop, cleanup, nil
@@ -100,8 +108,7 @@ func (s *Service) Observe(ctx context.Context, id, stamp string) (Observation, e
 		return Observation{}, err
 	}
 	defer cleanup()
-	c := route.Destination
-	key, err := sshtransport.Observe(ctx, sshtransport.Hop{Host: c.Host, Port: c.Port, User: c.User}, b)
+	key, err := sshtransport.Observe(ctx, hopFromConnection(route.Destination), b)
 	if err != nil {
 		return Observation{}, transportFailure(err)
 	}

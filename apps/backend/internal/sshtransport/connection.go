@@ -21,6 +21,8 @@ import (
 
 const sshDialTimeout = 30 * time.Second
 
+const sshAuthSocketEnv = "SSH_AUTH_SOCK"
+
 var sshSystemConfigPath = filepath.Join(string(filepath.Separator), "etc", "ssh", "ssh_config")
 
 // SSHIdentitySource enumerates how kandev obtains an SSH credential.
@@ -73,9 +75,7 @@ type SSHConnConfig struct {
 func ResolveSSHTarget(cfg SSHConnConfig) (*SSHTarget, error) {
 	t := initialTargetFromConfig(cfg)
 	if alias := strings.TrimSpace(cfg.HostAlias); alias != "" {
-		if err := inheritFromSSHConfig(alias, t); err != nil {
-			return nil, err
-		}
+		inheritFromSSHConfig(loadEffectiveSSHConfig(), alias, t)
 	}
 	if err := applyTargetDefaults(t); err != nil {
 		return nil, err
@@ -109,8 +109,7 @@ func initialTargetFromConfig(cfg SSHConnConfig) *SSHTarget {
 // package's package-level Get/GetStrict use a sync.Once to load the config once
 // per process, which breaks tests (and any user who edits their config) — each
 // resolve should see the current on-disk state.
-func inheritFromSSHConfig(alias string, t *SSHTarget) error {
-	cfg := loadEffectiveSSHConfig()
+func inheritFromSSHConfig(cfg effectiveSSHConfig, alias string, t *SSHTarget) {
 	if t.Host == "" {
 		if v := lookupSSHConfig(cfg, alias, "HostName"); v != "" {
 			t.Host = strings.TrimSpace(v)
@@ -148,7 +147,6 @@ func inheritFromSSHConfig(alias string, t *SSHTarget) error {
 	if t.IdentitySource != SSHIdentitySourceFile {
 		t.IdentityAgent = strings.TrimSpace(lookupSSHConfig(cfg, alias, "IdentityAgent"))
 	}
-	return nil
 }
 
 type effectiveSSHConfig struct {
@@ -213,7 +211,7 @@ func applyTargetDefaults(t *SSHTarget) error {
 		t.User = current
 	}
 	if t.IdentitySource == "" {
-		if t.IdentityAgent != "" || os.Getenv("SSH_AUTH_SOCK") != "" {
+		if t.IdentityAgent != "" || os.Getenv(sshAuthSocketEnv) != "" {
 			t.IdentitySource = SSHIdentitySourceAgent
 		} else {
 			t.IdentitySource = SSHIdentitySourceFile
@@ -273,8 +271,8 @@ func expandIdentityAgent(value string, t *SSHTarget) (string, error) {
 		}
 		return socket, nil
 	}
-	if value == "SSH_AUTH_SOCK" {
-		return os.Getenv("SSH_AUTH_SOCK"), nil
+	if value == sshAuthSocketEnv {
+		return os.Getenv(sshAuthSocketEnv), nil
 	}
 	return value, nil
 }
@@ -384,7 +382,7 @@ func buildAuthMethods(target *SSHTarget) ([]ssh.AuthMethod, func(), error) {
 		}
 		sock := target.IdentityAgent
 		if sock == "" {
-			sock = os.Getenv("SSH_AUTH_SOCK")
+			sock = os.Getenv(sshAuthSocketEnv)
 		}
 		if sock == "" {
 			return nil, noop, errors.New("ssh-agent identity source selected but SSH_AUTH_SOCK is not set and IdentityAgent did not resolve to a socket; start an agent and add your key (ssh-add)")
@@ -668,8 +666,12 @@ func tofuLogOnlyCallback(proxyJump, _ string) ssh.HostKeyCallback {
 // `user@host:port` as a single hostname and the TCP dial fails on lookup.
 // Identity defaults flow from the target so the same key reaches the bastion.
 func resolveBastion(target *SSHTarget) (*SSHTarget, error) {
+	return resolveBastionWith(target, loadEffectiveSSHConfig, ResolveSSHTarget)
+}
+
+func resolveBastionWith(target *SSHTarget, load func() effectiveSSHConfig, resolve func(SSHConnConfig) (*SSHTarget, error)) (*SSHTarget, error) {
 	if user, host, port, ok := parseLiteralProxyJump(target.ProxyJump); ok {
-		bastion, err := ResolveSSHTarget(SSHConnConfig{
+		bastion, err := resolve(SSHConnConfig{
 			Host:           host,
 			Port:           port,
 			User:           user,
@@ -684,7 +686,7 @@ func resolveBastion(target *SSHTarget) (*SSHTarget, error) {
 
 	// A jump alias owns its explicitly configured auth. If it has no auth
 	// directive, retain Kandev's existing target-auth fallback behavior.
-	effective := loadEffectiveSSHConfig()
+	effective := load()
 	hasJumpIdentity := lookupSSHConfig(effective, target.ProxyJump, "IdentityFile") != "" ||
 		lookupSSHConfig(effective, target.ProxyJump, "IdentityAgent") != ""
 	cfg := SSHConnConfig{HostAlias: target.ProxyJump}
@@ -692,7 +694,7 @@ func resolveBastion(target *SSHTarget) (*SSHTarget, error) {
 		cfg.IdentitySource = target.IdentitySource
 		cfg.IdentityFile = target.IdentityFile
 	}
-	bastion, err := ResolveSSHTarget(cfg)
+	bastion, err := resolve(cfg)
 	if err == nil && !hasJumpIdentity && bastion.IdentitySource == SSHIdentitySourceAgent {
 		bastion.IdentityAgent = target.IdentityAgent
 	}

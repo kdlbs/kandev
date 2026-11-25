@@ -4,7 +4,6 @@ import type {
   EnrollSSHKey,
   SSHEnrollment,
   SSHPreflight,
-  SSHAdoptionPreview,
   SaveSSHConnection,
   SSHIdentity,
   SSHRoute,
@@ -82,33 +81,6 @@ export function enrollManagedSSH(route: SSHRoute, request: EnrollSSHKey): Promis
 }
 export function preflightManagedSSH(route: SSHRoute): Promise<SSHPreflight> {
   return mutate(`/connections/${encodeURIComponent(route.destination.id)}/preflight`, "POST", {
-    expected_stamp: route.stamp,
-  });
-}
-
-export function previewSSHAdoption(executorId: string): Promise<SSHAdoptionPreview> {
-  return fetchJson(`${root}/executors/${encodeURIComponent(executorId)}/adoption-preview`, {
-    cache: "no-store",
-  });
-}
-export function createSSHAdoptionDrafts(
-  executorId: string,
-  digest: string,
-  requestId: string,
-): Promise<SSHRoute> {
-  return mutate(`/executors/${encodeURIComponent(executorId)}/adoption-drafts`, "POST", {
-    expected_config_digest: digest,
-    request_id: requestId,
-  });
-}
-export function adoptSSHConnection(
-  executorId: string,
-  digest: string,
-  route: SSHRoute,
-): Promise<{ adopted: boolean }> {
-  return mutate(`/executors/${encodeURIComponent(executorId)}/adopt-connection`, "POST", {
-    expected_config_digest: digest,
-    connection_id: route.destination.id,
     expected_stamp: route.stamp,
   });
 }

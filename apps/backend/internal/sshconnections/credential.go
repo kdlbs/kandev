@@ -5,6 +5,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"net"
+	"os"
 	"time"
 )
 
@@ -15,6 +16,9 @@ func (e *CredentialFailure) Unwrap() error { return ErrCredential }
 
 func agentAuthentication(ctx context.Context, socket string) ([]ssh.AuthMethod, func(), error) {
 	empty := func() {}
+	if socket == "" {
+		socket = os.Getenv("SSH_AUTH_SOCK")
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	if parent, ok := ctx.Deadline(); ok && parent.Before(deadline) {
 		deadline = parent

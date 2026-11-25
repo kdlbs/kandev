@@ -1,164 +1,61 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
-import { regenerateHostKey, type SSHServerHandle } from "../../helpers/ssh";
-import type { ApiClient } from "../../helpers/api-client";
-import { waitForSessionDone } from "../../helpers/session";
+import { regenerateHostKey } from "../../helpers/ssh";
+import { waitForLatestSessionDone } from "../../helpers/session";
+import {
+  createTestedSSHRoute,
+  observeSSHRoute,
+  readSSHRoute,
+  sshBinding,
+} from "../../helpers/ssh-managed-fixture";
 
-async function waitForRotatedFingerprint(apiClient: ApiClient, target: SSHServerHandle) {
-  let fingerprint = "";
-  // TCP can accept connections before sshd finishes reloading its host keys.
-  await expect(async () => {
-    const result = await apiClient.testSSHConnection({
-      name: "Observe rotated host key",
-      host: target.host,
-      port: target.port,
-      user: target.user,
-      identity_source: "file",
-      identity_file: target.identityFile,
-    });
-    expect(result.success, result.error).toBe(true);
-    expect(result.fingerprint).toBeTruthy();
-    expect(result.fingerprint).not.toBe(target.hostFingerprint);
-    fingerprint = result.fingerprint!;
-  }).toPass({ timeout: 15_000 });
-  return fingerprint;
-}
-
-/**
- * Host-key rotation: regenerate the container's host key and assert
- * (1) the test endpoint surfaces the new fingerprint (no silent re-pin),
- * (2) a subsequent task launch against the still-pinned executor fails with
- * "host key changed", and (3) re-running Test Connection + re-trusting
- * restores function.
- *
- * Covers e2e-plan.md group K (K1–K4).
- */
-test.describe("ssh executor — host key rotation", () => {
-  // Each test mutates the worker-scoped sshd container's host key + the
-  // seeded executor's pinned fingerprint. After the test, refresh both so
-  // any later spec in the same worker that depends on seedData.sshTarget /
-  // seedData.sshExecutorId sees a coherent fingerprint.
-  test.afterEach(async ({ apiClient, seedData }) => {
-    const observed = await apiClient.testSSHConnection({
-      name: "K cleanup observe",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
-    });
-    if (observed.success && observed.fingerprint) {
-      seedData.sshTarget.hostFingerprint = observed.fingerprint;
-      await apiClient.updateExecutor(seedData.sshExecutorId, {
-        config: {
-          ssh_host: seedData.sshTarget.host,
-          ssh_port: String(seedData.sshTarget.port),
-          ssh_user: seedData.sshTarget.user,
-          ssh_identity_source: "file",
-          ssh_identity_file: seedData.sshTarget.identityFile,
-          ssh_host_fingerprint: observed.fingerprint,
-        },
-      });
-    }
-  });
-
-  test("regenerating the host key surfaces a new fingerprint on the next test", async ({
-    apiClient,
-    seedData,
-  }) => {
-    const before = seedData.sshTarget.hostFingerprint;
-    regenerateHostKey(seedData.sshTarget);
-
-    const fingerprint = await waitForRotatedFingerprint(apiClient, seedData.sshTarget);
-    expect(fingerprint).not.toBe(before);
-  });
-
-  test("launching against a stale pinned fingerprint fails with host-key-changed", async ({
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(180_000);
-    // Pin a deliberately wrong fingerprint to simulate the user having
-    // trusted an old key before the rekey.
-    await apiClient.updateExecutor(seedData.sshExecutorId, {
-      config: {
-        ssh_host: seedData.sshTarget.host,
-        ssh_port: String(seedData.sshTarget.port),
-        ssh_user: seedData.sshTarget.user,
-        ssh_identity_source: "file",
-        ssh_identity_file: seedData.sshTarget.identityFile,
-        ssh_host_fingerprint: "SHA256:was-the-old-key-but-no-more",
-      },
+test("rotation keeps the old pin until a replacement connection is verified and bound", async ({
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  test.setTimeout(240_000);
+  const old = (await apiClient.getExecutor(seedData.sshExecutorId)).config!;
+  const id = old.ssh_connection_id;
+  const route = await readSSHRoute(backend.baseUrl, id);
+  const startTask = (title: string) =>
+    apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+      executor_profile_id: seedData.sshExecutorProfileId,
     });
 
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "K2 stale fingerprint",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-        executor_profile_id: seedData.sshExecutorProfileId,
-      },
+  regenerateHostKey(seedData.sshTarget);
+  try {
+    await expect(async () => {
+      const observed = await observeSSHRoute(backend.baseUrl, route);
+      expect(observed.fingerprint).not.toBe(route.destination.fingerprint);
+    }).toPass({ timeout: 15_000 });
+    expect((await readSSHRoute(backend.baseUrl, id)).destination.fingerprint).toBe(
+      route.destination.fingerprint,
     );
 
-    // The launch fails at SSH dial time before any executor is recorded on
-    // the task environment — the host-key-changed error lands on the task
-    // session itself.
+    const failed = await startTask("Launch against stale SSH pin");
     await expect
       .poll(
         async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions[0]?.error_message ?? null;
+          const { sessions } = await apiClient.listTaskSessions(failed.id);
+          return sessions[0]?.error_message ?? "";
         },
         { timeout: 60_000 },
       )
-      .toMatch(/host key changed/i);
-  });
-
-  test("re-trusting the new fingerprint restores function", async ({ apiClient, seedData }) => {
-    test.setTimeout(240_000);
-    // Rotate, observe via kandev's probe (ssh-keyscan disagrees in some
-    // host-key configurations), re-trust.
-    regenerateHostKey(seedData.sshTarget);
-    const newFp = await waitForRotatedFingerprint(apiClient, seedData.sshTarget);
-
-    await apiClient.updateExecutor(seedData.sshExecutorId, {
-      config: {
-        ssh_host: seedData.sshTarget.host,
-        ssh_port: String(seedData.sshTarget.port),
-        ssh_user: seedData.sshTarget.user,
-        ssh_identity_source: "file",
-        ssh_identity_file: seedData.sshTarget.identityFile,
-        ssh_host_fingerprint: newFp,
-      },
-    });
-
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "K3 after re-trust",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-        executor_profile_id: seedData.sshExecutorProfileId,
-      },
+      .toMatch(/host.key.changed/i);
+  } finally {
+    const replacement = await createTestedSSHRoute(
+      backend.baseUrl,
+      "Replacement connection",
+      seedData.sshTarget,
     );
-    await expect
-      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.executor_type ?? null, {
-        timeout: 60_000,
-      })
-      .toBe("ssh");
+    await apiClient.updateExecutor(seedData.sshExecutorId, { config: sshBinding(replacement) });
+    seedData.sshTarget.hostFingerprint = replacement.destination.fingerprint;
+  }
 
-    if (!task.session_id) throw new Error("SSH re-trust task did not return a session_id");
-    await waitForSessionDone(
-      apiClient,
-      task.id,
-      task.session_id,
-      "SSH re-trust task should finish before teardown",
-    );
-  });
+  const task = await startTask("Launch against verified replacement");
+  await waitForLatestSessionDone(apiClient, task.id, 1, "Host-key rotation recovery");
 });
