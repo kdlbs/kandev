@@ -126,7 +126,7 @@ test.describe("Sidebar customization on phone", () => {
     const workspaceAction = plugins.getByTestId("e2e-sidebar-workspace-actions");
     await expect(workspaceAction).toHaveCount(1);
     await expect(menu.getByRole("link", { name: "Hello E2E", exact: true })).toHaveCount(1);
-    await expect(menu.getByRole("button", { name: "Canvases", exact: true })).toHaveCount(0);
+    await expect(menu.getByRole("button", { name: "Canvases", exact: true })).toHaveCount(1);
     await expect(menu.locator("[data-task-row-id]")).toHaveCount(3);
     for (const width of [360, 393, 767]) {
       await testPage.setViewportSize({ width, height: 851 });
