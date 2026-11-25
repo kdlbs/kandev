@@ -168,7 +168,7 @@ inputs in order, and preserves an explicit empty list.
 | --- | --- | --- | --- |
 | Creation and task events | AC 001.1, 001.3, 001.4: valid selections attach in order; rejected requests allocate no task and publish no `task.created`. | `TestHTTPCreateTaskRepositoryIDs` and `TestHTTPCreateTaskRepositoryIDsRejection`, in the handler command above. The success control proves task and event effects are reachable. | Passed. |
 | Project defaults | AC 001.2: omission and `null` use project sources; an empty ID list suppresses them. | `TestHTTPCreateTaskRepositoryIDsPresence`, in the handler command above. | Passed. |
-| Duplicate create retry | Existing `external_id` behavior remains on the same service path after request normalization. | `TestHTTPCreateTask_ExternalIDGoldenPath`, in the handler command above. | Passed. |
+| Duplicate create retry | An existing `external_id` returns its task before repository conversion or other request-specific validation. | `TestHTTPCreateTask_FoundOutcomeSkipsRepositoryValidationInRetry`, in the handler command above. | Passed. |
 | Entry paths | The changed contract is REST-only. The registered `/api/v1/tasks` route exercises normalization, service validation, and SQLite persistence. | All three new handler tests above. | Passed. |
 
 Pause/resume and restart recovery do not apply because validation is synchronous
@@ -185,3 +185,12 @@ instance, create a workspace, workflow, and two registered repositories. Send a
 raw `POST /api/v1/tasks` request with their IDs in `repository_ids`, then make
 sure that the response lists both repositories in the submitted order. Use the
 printed teardown command when finished.
+
+### PR review follow-up
+
+The initial regression test failed with HTTP 400 when a found `external_id`
+retry supplied `repository_ids: [""]`. The handler now checks for an existing
+identity before repository conversion; a miss continues through the existing
+validation path.
+
+- `(cd apps/backend && go test -trimpath -tags fts5 -count=1 ./internal/task/handlers -run '^(TestHTTPCreateTask_(FoundOutcomeSkipsRepositoryValidationInRetry|FoundSettledSkipsPostCreateWork|FoundUnsettledReportsIncomplete|InvalidExternalIDReturns400|ExternalIDGoldenPath)|TestHTTPCreateTaskRepositoryIDs(Presence|Rejection)?)$')`: passed.

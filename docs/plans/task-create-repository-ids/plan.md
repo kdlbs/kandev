@@ -43,7 +43,7 @@ to `repositories`. The regression test must send raw JSON to the route.
 ## Scope
 
 - REST task creation with ID-only repository selections.
-- Conflict responses, existing repository validation, and API documentation.
+- Conflict responses, existing repository validation, API documentation, and existing `external_id` retries before request-specific validation.
 
 ### Out of scope
 
@@ -52,7 +52,8 @@ to `repositories`. The regression test must send raw JSON to the route.
 
 ## Technical approach
 
-Expand the ID list in `httpCreateTask` before `convertCreateTaskRepositories`.
+Resolve an existing `external_id` in `httpCreateTask` before request-specific validation, including repository selection validation.
+On an identity miss, expand the ID list before `convertCreateTaskRepositories`.
 Keep presence through `convertTaskRepositories` so project source selection
 can distinguish an empty array from omission. Return the existing create
 rejection body for two arrays. The same normalized inputs drive the rest of
@@ -72,6 +73,7 @@ exercise HTTP, the task service, and SQLite.
 | `AC-TASKS-HTTP-REPOSITORY-SELECTION-001.1` | `TestHTTPCreateTaskRepositoryIDs` verifies stored repository IDs, order, and parity with canonical ID-only input. |
 | `AC-TASKS-HTTP-REPOSITORY-SELECTION-001.2` | `TestHTTPCreateTaskRepositoryIDsPresence` verifies project source selection for omission, null, and an explicit empty list. |
 | `AC-TASKS-HTTP-REPOSITORY-SELECTION-001.3`, `AC-TASKS-HTTP-REPOSITORY-SELECTION-001.4` | `TestHTTPCreateTaskRepositoryIDsRejection` verifies the conflict response, invalid payloads, and rejection of a mixed-workspace list before task allocation. |
+| Existing identity retry contract | `TestHTTPCreateTask_FoundOutcomeSkipsRepositoryValidationInRetry` verifies that an existing identity is returned before validating an empty repository ID. See the post-review handler command in the work order. |
 
 ## Work order
 

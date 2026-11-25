@@ -1216,6 +1216,23 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, rejectedCreateMessage("invalid payload"))
 		return
 	}
+	// Resolve an existing identity before validating request-specific fields so
+	// retries keep returning their original task when the payload has drifted.
+	if body.ExternalID != "" {
+		existing, found, err := h.service.FindTaskByExternalIDForCreate(c.Request.Context(), body.WorkspaceID, body.ExternalID)
+		if err != nil {
+			handleTaskCreateFailure(c, h.logger, err)
+			return
+		}
+		if found {
+			outcome := service.CreateTaskOutcomeFoundUnsettled
+			if existing.ExternalIDSettledAt != nil {
+				outcome = service.CreateTaskOutcomeFoundSettled
+			}
+			c.JSON(http.StatusOK, foundCreateTaskResponse(service.CreateTaskResult{Task: existing, Outcome: outcome}))
+			return
+		}
+	}
 	if body.Repositories != nil && body.RepositoryIDs != nil {
 		c.JSON(http.StatusBadRequest, rejectedCreateMessage("repositories and repository_ids cannot both be provided"))
 		return

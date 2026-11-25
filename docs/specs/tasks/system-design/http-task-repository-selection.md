@@ -25,6 +25,10 @@ Workspaces supply the registered repository identities and branch settings.
 `httpCreateTaskRequest` binds `repository_ids` to a `[]string` alongside the existing `repositories` slice.
 Each slice is nil for omission or JSON `null`. An empty array yields a non-nil slice.
 
+After JSON binding, `httpCreateTask` resolves a supplied `external_id` through `FindTaskByExternalIDForCreate` before request-specific validation.
+If the identity exists, the handler returns that task without validating repository selection or the other create fields.
+If the lookup misses, the handler continues with normal validation and `Service.CreateTask` repeats the lookup to cover a concurrent create.
+
 When only the ID slice is present, `httpCreateTask` allocates a `[]httpTaskRepositoryInput` of the same length.
 It copies each ID into `RepositoryID` at the same index and assigns the result to `body.Repositories`.
 An empty ID slice produces a non-nil empty selection. Each entry leaves branch and checkout options at their defaults.
@@ -36,13 +40,13 @@ Parent inheritance and branch selection follow the same service path as canonica
 
 ## Validation and allocation
 
-The handler rejects two non-nil slices before it calls `Service.CreateTask`.
+For an identity miss, the handler rejects two non-nil slices before it calls `Service.CreateTask`.
 It uses `rejectedCreateMessage` for HTTP 400 and names both fields in the error.
 Malformed JSON values use the existing binding error. Entries with an empty ID use the existing repository input error.
 
 The service checks workspace access and resolves repository references through the canonical path.
 For a new task, it prepares the full repository selection before inserting a task row or publishing `task.created`.
-Existing `external_id` winners still use the [task creation retry contract](external-id-idempotency.md) after successful request parsing.
+Existing `external_id` winners follow the [task creation retry contract](external-id-idempotency.md) and bypass request-specific validation after successful JSON binding.
 
 ## Related decision
 
