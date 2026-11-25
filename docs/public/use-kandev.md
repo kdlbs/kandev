@@ -61,6 +61,8 @@ kandev
 Scoop installs the native runtime bundle, so Node.js is not required to install or start Kandev. It
 is still needed for the agent CLIs Kandev installs through its own interface.
 
+If you use npm on Windows, set the same environment variable in PowerShell before you start Kandev.
+
 Stable package-manager and Desktop installs use the standard runtime. Local work starts without a
 remote-helper download. A remote task needs outbound HTTPS to `github.com` and
 `release-assets.githubusercontent.com` the first time it uses a remote platform. See the [CLI guide](cli.md#release-archive)
@@ -302,7 +304,7 @@ Use the example below with a test repository that has no `kandev-first-task.txt`
    ```text
    Create a file named kandev-first-task.txt in the repository root.
    Write one line: Hello from Kandev!
-   Run cat kandev-first-task.txt and report the output in chat.
+   Read the file. Report its contents in chat.
    Edit only this file. Leave the change uncommitted.
    ```
 
@@ -332,7 +334,7 @@ The dialog also supports multiple repositories, remote GitHub rows, and a single
 
 In the default **Development** workflow, the task moves to **Review** when the agent finishes its turn.
 For the example task, open **Changes**. Check that the agent added only `kandev-first-task.txt`.
-Run `cat kandev-first-task.txt` in the task terminal and check for `Hello from Kandev!`.
+Select the file. Check that it contains one line with `Hello from Kandev!`.
 If both checks pass, open the task's **Move to** action. Select **Done** and confirm the move.
 The task is complete when it reaches **Done** on the board. The example needs no pull request.
 

@@ -162,6 +162,8 @@ kandev
 
 Installs the native bundle — no Node.js required.
 
+For a local npm launch on Windows, set `$env:KANDEV_SERVER_HOST = "127.0.0.1"` in PowerShell first.
+
 ### NPX
 
 Run this command on macOS or Linux.
@@ -189,13 +191,13 @@ Follow the [first-task guide](docs/public/use-kandev.md#add-a-local-repository) 
 
 - `brew upgrade kandev`
 - `scoop update kandev`
-- `npx kandev@latest` (always uses the latest published version)
+- `KANDEV_SERVER_HOST=127.0.0.1 npx kandev@latest` (runs the latest stable version on macOS or Linux)
 - `npm install -g kandev@latest`
 
 To try the current prerelease from `main`, use npm's `nightly` tag:
 
 ```bash
-npx -y kandev@nightly
+KANDEV_SERVER_HOST=127.0.0.1 npx -y kandev@nightly
 # or
 npm install -g kandev@nightly
 ```
@@ -219,7 +221,7 @@ git clone git@github.com:kdlbs/kandev.git
 cd kandev
 
 # Start in production mode
-make start
+KANDEV_SERVER_HOST=127.0.0.1 make start
 ```
 
 **Prerequisites:** Go 1.26.0, Node.js 24, and pnpm 9.15.9 (pinned in `mise.toml`). Docker is optional and needed only for container runtimes.
