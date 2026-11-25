@@ -35,13 +35,21 @@ Use `Figtree` as the preferred UI family, falling back to Geist and system UI. U
 
 ## Layout
 
-The shell should be panel-first. Panels, sidebars, topbars, and dock headers define the working frame; content should not be wrapped in decorative cards unless a repeated item, modal, or tool needs a frame.
+### Workbench
+
+The workbench shell should be panel-first. Panels, sidebars, topbars, and dock headers define the working frame; content should not be wrapped in decorative cards unless a repeated item, modal, or tool needs a frame.
 
 - Use a unified topbar hierarchy: global orientation first, active task/session/workflow state second, primary scoped command third, secondary utilities last.
 - Avoid nested cards and floating section cards. Prefer full-width bands, split panes, table rows, list rows, and dock panels.
 - Keep gutters tight but intentional. Dense areas need clear alignment more than extra whitespace.
 - Preserve stable dimensions for toolbars, panel tabs, icon buttons, counters, and segmented controls so labels and loading states do not shift layout.
 - Prefer command menus, split buttons, segmented controls, popovers, and contextual panel headers over broad action strips.
+
+### Settings
+
+Use a page or section heading before each bordered settings group. Put related simple preferences in divided rows. Do not repeat a row label as a card title. Group related form fields by purpose inside one bordered surface; the automation editor's When and Then sections are examples. Keep one effective inset inside the border, with equal outer insets for the first and last rows.
+
+Resource lists and tables keep their existing interactions, headings, and actions. Specialized editors keep their existing layouts. See the [settings composition design](docs/specs/ui/system-design/settings-composition.md#shared-presentation-and-rollout) for details.
 
 ## Components
 
