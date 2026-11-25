@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import type { SeedData } from "../../fixtures/test-base";
+import { resetSeedRepositoryCheckout, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { waitForHttp } from "../../helpers/causal-waits";
@@ -61,9 +61,9 @@ export type HtmlDiffFixture = {
 };
 
 /**
- * Seeds an uncommitted HTML file with relative CSS and script assets in a
- * fresh task workspace. The diff row and the current workspace file then have
- * the same known contents until a test deliberately diverges them.
+ * Seeds an uncommitted HTML file with relative CSS and script assets. Each
+ * worker reuses its seeded repository, so restore its baseline before creating
+ * the task to prevent files from prior tests from leaking into this diff.
  */
 export async function createHtmlDiffTask({
   testPage,
@@ -82,6 +82,7 @@ export async function createHtmlDiffTask({
   fileName: string;
   entryContent: string;
 }): Promise<HtmlDiffFixture> {
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
   const filePath = `${HTML_PREVIEW_ROOT}/${fileName}`;
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
