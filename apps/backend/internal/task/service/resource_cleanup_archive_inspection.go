@@ -30,7 +30,7 @@ func (s *Service) captureCleanupIdentities(ctx context.Context, trees []*worktre
 			if errors.Is(err, context.Canceled) || !errors.As(err, &inspection) {
 				return nil, nil, err
 			}
-			failures[wt.ID] = "physical_identity_unavailable"
+			failures[wt.ID] = cleanupPhysicalIdentityUnavailable
 			s.logger.Warn("archive workspace inspection deferred", zap.String("task_id", wt.TaskID), zap.String("worktree_id", wt.ID), zap.String("stage", inspection.Stage), zap.String("reason", inspection.Reason))
 			continue
 		}

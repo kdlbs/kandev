@@ -120,6 +120,23 @@ func TestRemoteDockerRecoveryAttachesOnlyTheRecordedLiveContainerAndInstance(t *
 	require.Nil(t, fixture.remoteSession.takeAgentctlClient(), "discard closes the old attempt's authenticated client")
 }
 
+func TestRemoteDockerRecoveryAttachesStoppedAgentctlForLifecycleSettlement(t *testing.T) {
+	fixture := newRemoteDockerRecoveryFixture(t, "running", remoteDockerRecoveryInstance{agentStatus: "stopped"})
+
+	instances, outcomes := recoverRemoteDockerCandidates(t, fixture.executor, []*models.ExecutorRunning{
+		fixture.record("saved-token", ""),
+	})
+
+	require.Len(t, instances, 1, "the lifecycle manager must authenticate and inspect stopped-agent evidence")
+	require.Empty(t, outcomes)
+	status, err := instances[0].Client.GetStatus(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "stopped", status.AgentStatus)
+	require.True(t, fixture.statusWasChecked())
+	require.Zero(t, fixture.createInstanceCalls(), "recovery must not create another agentctl instance")
+	require.Zero(t, fixture.engineMutationCalls(), "recovery must not start or mutate the retained container")
+}
+
 func TestRemoteDockerRecoveryDoesNotStartStoppedContainer(t *testing.T) {
 	fixture := newRemoteDockerRecoveryFixture(t, "exited", remoteDockerRecoveryInstance{})
 
@@ -127,10 +144,28 @@ func TestRemoteDockerRecoveryDoesNotStartStoppedContainer(t *testing.T) {
 		fixture.record("saved-token", ""),
 	})
 	require.Empty(t, instances)
-	require.Equal(t, RecoveryOutcomeNoMatchingInstance, outcomes["session-1"])
+	require.Equal(t, RecoveryOutcomeRecordedResourceAbsent, outcomes["session-1"])
 	require.True(t, fixture.engineOnlyInspectedRecordedContainer())
 	require.Empty(t, fixture.controlRequests(), "a stopped container must not be started to inspect agentctl")
 	require.Zero(t, fixture.engineMutationCalls(), "startup must preserve, not restart, the stopped container")
+}
+
+func TestRemoteDockerRecoveryKeepsAmbiguousContainerStatesGuarded(t *testing.T) {
+	for _, state := range []string{"created", "paused", "restarting", "removing", "dead", "unknown"} {
+		t.Run(state, func(t *testing.T) {
+			fixture := newRemoteDockerRecoveryFixture(t, state, remoteDockerRecoveryInstance{})
+
+			instances, outcomes := recoverRemoteDockerCandidates(t, fixture.executor, []*models.ExecutorRunning{
+				fixture.record("saved-token", ""),
+			})
+
+			require.Empty(t, instances)
+			require.Equal(t, RecoveryOutcomeUnknown, outcomes["session-1"])
+			require.True(t, fixture.engineOnlyInspectedRecordedContainer())
+			require.Empty(t, fixture.controlRequests(), "ambiguous container state cannot authenticate a stopped association")
+			require.Zero(t, fixture.engineMutationCalls(), "recovery must not mutate an ambiguously stopped container")
+		})
+	}
 }
 
 func TestRemoteDockerRecoveryDoesNotRecreateMissingAgentctlInstance(t *testing.T) {
@@ -219,6 +254,7 @@ func recoverRemoteDockerCandidates(
 
 type remoteDockerRecoveryInstance struct {
 	missing               bool
+	agentStatus           string
 	requiredToken         string
 	instanceRequiredToken string
 	refreshedPort         int
@@ -532,7 +568,11 @@ func (h *remoteDockerRecoveryHTTP) serveInstance(
 	if !h.authorizedInstanceRequest(w, seen) {
 		return true
 	}
-	_ = json.NewEncoder(w).Encode(map[string]string{"agent_status": "running"})
+	status := h.config.agentStatus
+	if status == "" {
+		status = "running"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"agent_status": status})
 	return true
 }
 

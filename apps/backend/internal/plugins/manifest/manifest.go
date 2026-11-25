@@ -57,8 +57,9 @@ type Manifest struct {
 	AutomationConditions   []AutomationCondition   `yaml:"automation_conditions,omitempty" json:"automation_conditions,omitempty"`
 	NotificationFormatters []NotificationFormatter `yaml:"notification_formatters,omitempty" json:"notification_formatters,omitempty"`
 
-	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
-	Actions  []Action  `yaml:"actions,omitempty" json:"actions,omitempty"`
+	Webhooks         []Webhook         `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
+	Actions          []Action          `yaml:"actions,omitempty" json:"actions,omitempty"`
+	SidebarGroupings []SidebarGrouping `yaml:"sidebar_groupings,omitempty" json:"sidebar_groupings,omitempty"`
 	// RepositoryProviders declares provider IDs this plugin owns while active.
 	// Ownership is checked across active plugins by the runtime registry.
 	RepositoryProviders []string `yaml:"repository_providers,omitempty" json:"repository_providers,omitempty"`
@@ -353,6 +354,7 @@ type ReferenceSource struct {
 // optional/secondary when a bundle is declared: native routes come from the
 // bundle at runtime.
 type UISection struct {
+	FileViewers []FileViewer   `yaml:"file_viewers,omitempty" json:"file_viewers,omitempty"`
 	Pages       []UIPage       `yaml:"pages,omitempty" json:"pages,omitempty"`
 	Bundle      string         `yaml:"bundle,omitempty" json:"bundle,omitempty"`
 	Styles      []string       `yaml:"styles,omitempty" json:"styles,omitempty"`
@@ -416,4 +418,11 @@ func Parse(data []byte) (*Manifest, error) {
 		}
 	}
 	return &m, nil
+}
+
+// FileViewer declares the exact formats a native UI contribution can preview.
+type FileViewer struct {
+	ID         string   `yaml:"id" json:"id"`
+	Title      string   `yaml:"title" json:"title"`
+	Extensions []string `yaml:"extensions" json:"extensions"`
 }

@@ -32,6 +32,13 @@ Both `exit_code` and `signal` can be null. Null proves no outcome. A non-null
 signal proves the command was terminated by that signal and still carries no
 exit code.
 
+The managed 0.107.0 release uses the same launch suppression and reports the
+same null-code exit from `SessionBackgroundWork.taskEnded` on ACP v1. The
+managed 0.109.0 release retains that contract. Qualify each exact initialize
+identity with a separate launch and terminal fixture. The managed-default
+regression exercises the version returned by
+`agents.DefaultManagedNPMRuntimeVersion` against a qualified fixture.
+
 The inspected 0.81.2 bridge emits terminal-exit metadata with the launch result
 and has no equivalent retained-terminal path. The same metadata name therefore
 does not establish detached-command termination across all bridge versions.
@@ -50,8 +57,10 @@ agent information, the current tool update, and its tracked shell payload.
 For null-code termination, require all of these conditions:
 
 1. The configured provider uses the Claude dialect.
-2. Initialize identifies the exact inspected official bridge name and version
-   `0.97.0`. An unverified version retains the existing fallback.
+2. Initialize identifies the official bridge name and a fixture-qualified
+   release. The qualified releases in this repair are `0.97.0`, `0.107.0`,
+   and `0.109.0`.
+   An unverified version retains the existing fallback.
 3. The payload belongs to an already recognized detached shell in this session.
 4. The terminal envelope is an object with a nonempty `terminal_id` equal to the
    current `toolCallId`. The bridge uses this same ID for its display terminal.
@@ -101,6 +110,36 @@ workload. Existing terminal monotonicity rejects delayed nonterminal reopening.
 A terminal frame without its session's launch binding cannot settle another
 job. No event creates a prompt, changes a successor turn, or emits root completion.
 
+### Exit delivery after turn cancellation
+
+Chat Stop sends `session/cancel` to the current Claude bridge before it waits
+for notification processing. The bridge can report a detached shell's exit on
+the same connection after that request. Stop queues a FIFO cleanup barrier
+behind notifications already accepted from ACP, so a queued completed launch
+can establish its binding before the remaining tool calls are swept. The wait
+for this barrier is bounded by the caller's deadline and a short timeout; if
+the wait expires, the cleanup remains queued and still runs at the barrier.
+Pending Bash and foreground calls receive ordinary cancellation from that
+cleanup.
+When the qualified bridge confirms a detached launch, the adapter fills the
+existing workload ID with the launch tool-call ID. The durable row already
+uses that same ID. The cancel sweep keeps that entry in `activeToolCalls` for
+the current native session. A pending Bash request remains eligible for the
+ordinary cancel sweep, and its unconfirmed workload is ended by cancellation.
+The cancellation event carries an explicit `RunStateEnded` workload
+observation so projection does not infer `completed` from the normalized
+payload's ended marker.
+
+The existing exit handler consumes the entry on a terminal frame for the
+same native session and launch call. Native session replacement drops the
+old shell entries at the binding boundary. Tool starts and updates from an
+outgoing qualified Claude native session are rejected before payload shape or
+metadata can affect the current binding, including frames that omit shell
+metadata. This protects a reused tool-call ID from late old-session frames.
+Adapter close ends their lifetime.
+
+See the [turn cancellation fix plan](../../../plans/claude-shell-exit-after-cancel/plan.md).
+
 ## Existing desktop and phone behavior
 
 The existing shared running selector excludes `ended` rows. The chip decreases
@@ -122,10 +161,11 @@ repair a persisted `running` record.
 
 ## Verification
 
-Use sanitized frames from the [repair package](../../../plans/claude-background-terminal-exit/plan.md).
+Use sanitized frames from the [0.97.0 repair](../../../plans/claude-background-terminal-exit/plan.md)
+and the [managed-bridge repair](../../../plans/claude-background-job-settlement/plan.md).
 Adapter cases cover delayed null exit, numeric exit, fast completion, legacy
-launch exit, foreign/malformed evidence, duplicate exit, and late launch replay.
-Use two simultaneous jobs to prove that one exit retires only its matching job.
+launch exit, foreign or malformed evidence, duplicate exit, and late launch
+replay. Use two simultaneous jobs to prove exact settlement.
 
 An integration test carries the adapter event through the existing durable
 projection and publication path. It asserts `ended`, no exit code, preserved

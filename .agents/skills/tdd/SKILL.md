@@ -11,9 +11,8 @@ Use this procedure directly in the primary conversation for every code change,
 regardless of size. The user may switch that conversation to the lower-cost
 implementation model before beginning the Red-Green-Refactor cycle.
 
-Implement code changes using strict Red-Green-Refactor. Iron law: **no production code without a failing test first.**
-
-Wrote code before a test? Delete it. Start over from a failing test.
+Establish a failing test before changing production behavior. Use existing
+coverage to verify behavior-preserving changes.
 
 ## Related skills
 
@@ -23,7 +22,7 @@ Wrote code before a test? Delete it. Start over from a failing test.
 
 ## When to use
 
-- Bug fixes — write a test that reproduces the bug before fixing
+- Bug fixes that need a failing test to reproduce the regression
 - New functions, methods, or utilities
 - Refactoring existing logic that lacks tests
 
@@ -37,17 +36,20 @@ For UI rendering bugs, prefer extracting or using a pure helper and testing that
 
 ## Test-value gate
 
-Before adding or changing a test, answer these questions:
+Before adding a test case, search the owning suite and relevant coverage at
+other layers. For each new or changed assertion, answer these questions:
 
 1. What observable behavior, invariant, or independent contract does it protect?
-2. What credible regression makes its assertion fail?
-3. Why does existing coverage miss that regression?
+2. What specific regression would fail this assertion while existing tests pass?
+3. Can an existing case cover that regression with a small extension?
 4. Does it require a production export, flag, or injection hook that only tests use?
 
-Resolve a missing answer before writing the test. Prefer extending an existing
-case over repeating the same contract. Give each contract a primary test owner
-at the boundary that can expose its failure. Keep additional layers for distinct
-transport, lifecycle, platform, or input-handler risks.
+Run the existing case when it already catches the regression. Extend it when
+the new assertion fits the same scenario. Add a separate case only when it
+covers a distinct behavior or failure mode the current suite would otherwise
+miss. Choose the least expensive layer that can expose the failure. Use
+additional layers for distinct transport, lifecycle, platform, or input-handler
+risks.
 
 For test-only seams, first look for proof through an existing production boundary.
 Keep necessary performance instrumentation only with a named invariant and no simpler proof.
@@ -201,13 +203,16 @@ observable state assertion as the proof of behavior.
 
 ## Steps
 
-### 1. RED — Write a failing test
+### 1. RED — Establish a failing test
 
-1. Identify the single behavior to implement or bug to reproduce
-2. Write the **smallest test** that asserts the expected behavior — one assertion, clear name
-3. Run the test and confirm it **fails with the expected assertion error** (not a compile/import error)
+1. Identify the behavior to implement or the bug to reproduce.
+2. Reuse or extend the smallest suitable test. Add a case only when the
+   test-value gate identifies a distinct gap.
+3. Run the case and confirm it fails on the expected assertion. Fix compile
+   or import errors before evaluating the failure.
    For a brand-new Go package, create the package directory and minimal test package first, then run the focused package test so RED fails on behavior rather than package-selection or import errors.
-4. If it passes immediately, the test is not testing new behavior — revise it.
+4. If the case passes, check that the fixture reaches the affected path and
+   that the assertion exposes the intended regression.
    Exception: requested test-only contract coverage or an audit assertion repair
    can pass on the current head. Make no permanent production change.
    For an assertion repair, demonstrate RED with a deliberate mutation through

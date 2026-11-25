@@ -175,6 +175,10 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 import { AppSidebarFooter } from "./app-sidebar-footer";
 import { SettingsNavigationProvider } from "@/components/settings/settings-navigation-provider";
 
+vi.mock("@/components/settings/prompt-conflict-indicator", () => ({
+  PromptConflictIndicator: () => null,
+}));
+
 function renderFooter(collapsed = false, layoutManaged = false) {
   return render(
     <SettingsNavigationProvider>

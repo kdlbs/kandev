@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-29
-last_updated: 2026-09-29
+last_updated: 2026-11-22
 requirements:
   - REQ-COORDINATOR-GOALS-001
   - REQ-COORDINATOR-GOALS-002
@@ -350,6 +350,9 @@ Goal
   error state with a retry; a loading goal shows the page skeleton. Each
   measure shows its direction, "No direction yet" or "No baseline" as
   `GOALS-003.4` says.
+- `useAdoptedGoalForm` reconciles loaded goal data in a layout effect. On the
+  first successful read, React applies the draft and saved snapshot before
+  it paints the editable form (`001.9`).
 
 The setup's What it is for step reuses the same form component without the
 measures ([coordinators](coordinators.md#guided-setup)).

@@ -49,7 +49,7 @@ func TestAntigravityManagedCommandAdmission(t *testing.T) {
 	}
 	t.Setenv("PATH", conflictDir)
 	cfg := &InferenceConfigDTO{Command: []string{server}}
-	got, errText := resolveSpawnCommandContext(context.Background(), cfg)
+	got, errText := resolveSpawnCommandContext(context.Background(), "", cfg)
 	if errText != "" {
 		t.Fatalf("resolveSpawnCommandContext: %s", errText)
 	}
@@ -57,7 +57,7 @@ func TestAntigravityManagedCommandAdmission(t *testing.T) {
 		t.Fatalf("admitted command = %q, want managed %q", got, server)
 	}
 	untrusted := &InferenceConfigDTO{Command: []string{filepath.Join(conflictDir, artifact.ServerName)}}
-	if _, errText := resolveSpawnCommandContext(context.Background(), untrusted); errText == "" {
+	if _, errText := resolveSpawnCommandContext(context.Background(), "", untrusted); errText == "" {
 		t.Fatal("untrusted absolute runtime path was admitted")
 	}
 }

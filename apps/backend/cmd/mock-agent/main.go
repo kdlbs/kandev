@@ -50,23 +50,24 @@ var mcpServers map[string]mcpServerDef
 
 // mockAgent implements the acp.Agent interface for the mock agent.
 type mockAgent struct {
-	conn                           sessionUpdater
-	rawOut                         *serializedACPWriter
-	model                          string
-	copilotNativeSubscribed        bool
-	clientSupportsCompaction       bool
-	sessions                       map[acp.SessionId]bool
-	promptCancels                  map[acp.SessionId]context.CancelFunc
-	promptCancelHolds              map[acp.SessionId]chan struct{}
-	detachedWork                   map[acp.SessionId]map[*mockDetachedWork]struct{}
-	sessionMCPServers              map[acp.SessionId]map[string]mcpServerDef
-	sessionConfig                  map[acp.SessionId][]acp.SessionConfigOption
-	sessionModes                   map[acp.SessionId]acp.SessionModeId
-	commandsEmitted                map[acp.SessionId]bool
-	dynamicFallbackCounterSessions map[acp.SessionId]acp.SessionId
-	promptSuggestionSessions       map[acp.SessionId]bool
-	nextSessionID                  uint64
-	mu                             sync.Mutex
+	conn                               sessionUpdater
+	rawOut                             *serializedACPWriter
+	model                              string
+	copilotNativeSubscribed            bool
+	clientSupportsCompaction           bool
+	sessions                           map[acp.SessionId]bool
+	promptCancels                      map[acp.SessionId]context.CancelFunc
+	promptCancelHolds                  map[acp.SessionId]chan struct{}
+	detachedWork                       map[acp.SessionId]map[*mockDetachedWork]struct{}
+	sessionMCPServers                  map[acp.SessionId]map[string]mcpServerDef
+	sessionConfig                      map[acp.SessionId][]acp.SessionConfigOption
+	sessionModes                       map[acp.SessionId]acp.SessionModeId
+	commandsEmitted                    map[acp.SessionId]bool
+	copilotInterruptionRecoveryPending map[acp.SessionId]bool
+	dynamicFallbackCounterSessions     map[acp.SessionId]acp.SessionId
+	promptSuggestionSessions           map[acp.SessionId]bool
+	nextSessionID                      uint64
+	mu                                 sync.Mutex
 }
 
 var _ acp.Agent = (*mockAgent)(nil)
@@ -109,6 +110,11 @@ func main() {
 	mcpServers = parseMCPConfigFlag()
 	defer closeMCPClients()
 
+	version, input := inspectMockACPVersion(os.Stdin)
+	if version == 2 {
+		runACPPreviewFixture(input, os.Stdout)
+		return
+	}
 	ag := &mockAgent{
 		model:                          model,
 		sessions:                       make(map[acp.SessionId]bool),
@@ -122,7 +128,7 @@ func main() {
 	}
 	rawOut := newSerializedACPWriter(os.Stdout)
 	ag.rawOut = rawOut
-	asc := acp.NewAgentSideConnection(ag, rawOut, os.Stdin)
+	asc := acp.NewAgentSideConnection(ag, rawOut, input)
 	ag.conn = asc
 
 	<-asc.Done()
@@ -266,6 +272,9 @@ func mockSessionConfigOptions() []acp.SessionConfigOption {
 }
 
 func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
+	if os.Getenv("KANDEV_MOCK_PI_THINKING") == "true" {
+		return mockPiThinkingOptions(model)
+	}
 	modelCat := acp.SessionConfigOptionCategoryModel
 	modeCat := acp.SessionConfigOptionCategoryMode
 	thoughtCat := acp.SessionConfigOptionCategoryThoughtLevel
@@ -412,6 +421,11 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 	if err := mockContinuationRestoreFailure(req.SessionId); err != nil {
 		return acp.LoadSessionResponse{}, err
 	}
+	if mockMCPStartupReportEnabled() {
+		if err := a.emitMCPStartupReport(ctx, req.SessionId); err != nil {
+			return acp.LoadSessionResponse{}, err
+		}
+	}
 	if parseFailOnResumeFlag() {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: refusing resume for session %s (--fail-on-resume), exiting 1\n", os.Getpid(), req.SessionId)
 		os.Exit(1)
@@ -462,11 +476,38 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 	// Re-emit available commands after the session/load response flushes.
 	primeKandevMCPToolCatalog(ctx)
 	go a.emitAvailableCommandsAfterDelay(req.SessionId)
+	if err := a.emitCopilotInterruptionReplay(ctx, req.SessionId); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
 
 	return acp.LoadSessionResponse{
 		ConfigOptions: responseConfigOptions,
 		Modes:         mockSessionModes(currentMode),
 	}, nil
+}
+
+func mockMCPStartupReportEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("E2E_MOCK_AGENT_MCP_STARTUP_REPORT")), "true")
+}
+
+func (a *mockAgent) emitMCPStartupReport(ctx context.Context, sessionID acp.SessionId) error {
+	return a.conn.SessionUpdate(ctx, acp.SessionNotification{
+		SessionId: sessionID,
+		Update: acp.SessionUpdate{
+			ToolCall: &acp.SessionUpdateToolCall{
+				ToolCallId: "mcp_startup.e2e-server.550e8400-e29b-41d4-a716-446655440000",
+				Title:      "mcp__e2e-server__startup",
+				Kind:       acp.ToolKindOther,
+				Status:     acp.ToolCallStatusFailed,
+				Content: []acp.ToolCallContent{{
+					Content: &acp.ToolCallContentContent{
+						Type:    "content",
+						Content: acp.ContentBlock{Text: &acp.ContentBlockText{Type: "text", Text: "MCP server `e2e-server` failed to start: e2e startup report"}},
+					},
+				}},
+			},
+		},
+	})
 }
 
 // Prompt processes a user message and streams responses via SessionUpdate.
@@ -506,7 +547,13 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleCopilotNativeFixture(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
+	if resp, err, handled := a.handleCopilotInterruptionFixture(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)
+	if handled, commandErr := a.handleConfigurationCommandFeedback(promptCtx, req.SessionId, prompt); handled {
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, commandErr
+	}
 	if cancelHold != nil {
 		if acceptanceMarker != "" {
 			// The newline flushes the acceptance marker through lifecycle message buffering before the hold.
@@ -586,6 +633,52 @@ func (a *mockAgent) sessionModel(sessionID acp.SessionId) string {
 		}
 	}
 	return a.model
+}
+
+func (a *mockAgent) handleConfigurationCommandFeedback(
+	ctx context.Context,
+	sessionID acp.SessionId,
+	prompt string,
+) (bool, error) {
+	parts := strings.Fields(prompt)
+	if len(parts) != 2 || parts[0] != "/model" || parts[1] != string(modelSmart) {
+		return false, nil
+	}
+	timer := time.NewTimer(750 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return true, ctx.Err()
+	case <-timer.C:
+	}
+
+	a.mu.Lock()
+	previous, ok := a.sessionConfig[sessionID]
+	if !ok {
+		a.mu.Unlock()
+		return false, nil
+	}
+	mode := mockConfigOptionValue(previous, "mode")
+	options := mockSessionConfigOptionsForModel(string(modelSmart))
+	for i := range options {
+		if options[i].Select != nil && options[i].Select.Id == "mode" && mode != "" &&
+			mockConfigOptionContainsValue(options[i].Select.Options, mode) {
+			options[i].Select.CurrentValue = mode
+		}
+	}
+	a.sessionConfig[sessionID] = cloneSessionConfigOptions(options)
+	conn := a.conn
+	a.mu.Unlock()
+
+	if conn != nil {
+		_ = conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: sessionID,
+			Update: acp.SessionUpdate{
+				ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{ConfigOptions: cloneSessionConfigOptions(options)},
+			},
+		})
+	}
+	return true, nil
 }
 
 // Cancel handles session cancellation.

@@ -20,6 +20,21 @@ func (r *freshStartRotatingTokenStore) UpdateResumeToken(ctx context.Context, se
 	if err := r.Repository.UpdateResumeToken(ctx, sessionID, executionID, token, uuid); err != nil {
 		return err
 	}
+	return r.rotateAcceptedExecution(ctx, sessionID)
+}
+
+func (r *freshStartRotatingTokenStore) UpdateResumeTokenWithACPAdapterIdentity(
+	ctx context.Context,
+	sessionID, executionID, token, uuid string,
+	identity models.ACPAdapterIdentity,
+) error {
+	if err := r.Repository.UpdateResumeTokenWithACPAdapterIdentity(ctx, sessionID, executionID, token, uuid, identity); err != nil {
+		return err
+	}
+	return r.rotateAcceptedExecution(ctx, sessionID)
+}
+
+func (r *freshStartRotatingTokenStore) rotateAcceptedExecution(ctx context.Context, sessionID string) error {
 	r.accepted = true
 	running, err := r.GetExecutorRunningBySessionID(ctx, sessionID)
 	if err != nil {
@@ -140,6 +155,7 @@ func TestFreshStartCommitFirstGenerationCompatibility(t *testing.T) {
 	require.EqualValues(t, 1, current.Generation)
 	require.Equal(t, "native_started", current.CreationReason)
 	require.Equal(t, event.ACPSessionID, current.NativeSessionID)
+	require.Equal(t, event.AdapterVersion, current.AdapterVersion)
 }
 
 func TestFreshStartCommitStaleNativeAfterSuccessor(t *testing.T) {

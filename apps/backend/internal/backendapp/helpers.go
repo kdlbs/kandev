@@ -82,6 +82,7 @@ import (
 	"github.com/kandev/kandev/internal/profiles"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
+	"github.com/kandev/kandev/internal/promptsync"
 	"github.com/kandev/kandev/internal/quickterminal"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/runtimeflags"
@@ -1580,6 +1581,9 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	)
 	payload.RouteData = routeData
 	payload.Plugins = bootActivePlugins(p)
+	if canLoadTaskDetailFallback(req, p.authSvc) && p.services != nil && p.services.Plugins != nil {
+		payload.SidebarGroupings = p.services.Plugins.SidebarGroupingCatalog()
+	}
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
 	if err := webapp.NormalizeBootPayloadGraph(&payload); err != nil {
 		if p.log != nil {
@@ -1616,6 +1620,9 @@ func bootActivePlugins(p routeParams) []webapp.ActivePluginPayload {
 			Name:      rec.DisplayName,
 			BundleURL: pluginBundleURL(rec),
 			StyleURLs: pluginStyleURLs(rec),
+		}
+		for _, viewer := range rec.UI.FileViewers {
+			entry.FileViewers = append(entry.FileViewers, webapp.FileViewerPayload{ID: viewer.ID, Title: viewer.Title, Extensions: append([]string(nil), viewer.Extensions...)})
 		}
 		if rec.RepositoryProviders != nil {
 			providerIDs := make([]string, len(rec.RepositoryProviders))
@@ -2096,6 +2103,11 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered workflow sync handlers (HTTP)")
 	}
 
+	if p.services.PromptSync != nil {
+		promptsync.RegisterRoutes(p.router, p.services.PromptSync, p.log)
+		p.log.Debug("Registered prompt sync handlers (HTTP)")
+	}
+
 	if p.services.Automation != nil {
 		definitions, _ := p.agentSettingsRepo.(automation.MCPDefinitionReader)
 		policy, _ := p.agentSettingsRepo.(automation.MCPBuiltinPolicyReader)
@@ -2121,12 +2133,15 @@ func registerSecondaryRoutes(
 		conversationReaders := make([]plugins.ConversationReader, 0, 1)
 		if p.services.Task != nil {
 			conversationReaders = append(conversationReaders, p.services.Task)
+			p.services.Plugins.SetFilePreviewWorkspaceAuthorizer(p.services.Task.AuthorizeWorkspaceAccess)
+			wirePluginFilePreviews(p)
 			p.services.Plugins.SetCapabilityApprovalWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
 				return p.services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage)
 			})
 			p.services.Plugins.SetHumanInteractionResponseAuthorizer(func(ctx context.Context, workspaceID string) error {
 				return p.services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeSessionControl)
 			})
+			p.services.Plugins.SetLinkedUserResolver(pluginLinkedUserResolver(p.authSvc, p.services.User))
 		}
 		plugins.RegisterRoutes(
 			p.router,
@@ -2167,7 +2182,8 @@ func registerSecondaryRoutes(
 		automationSvc = p.services.Automation.Service
 	}
 	registerE2EResetRoutes(
-		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.services.Coordinator, p.eventBus,
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.services.Coordinator,
+		p.services.PromptSync, p.eventBus,
 		p.agentRuntimeAvailability, p.lifecycleMgr, p.services.DeliveryRetention, p.ctx, p.log,
 	)
 	registerE2ERuntimeUpdateRoutes(

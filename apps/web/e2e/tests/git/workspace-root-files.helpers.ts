@@ -10,6 +10,22 @@ import type { WsWatcher } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 const ROOT_FILE_CONTENT = "workspace-root-file-marker";
+export const WORKSPACE_ROOT_NESTED_FILE_PATH = "reports/daily/summary.md";
+export const WORKSPACE_ROOT_NESTED_FILE_CONTENT = "nested-workspace-root-file-marker";
+export const DEEP_TREE_LEVEL_COUNT = 32;
+
+export function deepRootDirectoryPath(level: number) {
+  return ["deep", ...deepTreeSegments(level)].join("/");
+}
+
+export function deepRootFilePath(level: number) {
+  const levelLabel = String(level).padStart(2, "0");
+  return `${deepRootDirectoryPath(level)}/file-${levelLabel}.txt`;
+}
+
+export function deepRootFileContent(level: number) {
+  return `deep-workspace-root-file-marker-${level}`;
+}
 
 export async function createWorkspaceRootFilesFixture({
   testPage,
@@ -17,12 +33,14 @@ export async function createWorkspaceRootFilesFixture({
   seedData,
   backend,
   watcher,
+  includeDeepTree = false,
 }: {
   testPage: import("@playwright/test").Page;
   apiClient: ApiClient;
   seedData: SeedData;
   backend: BackendContext;
   watcher: WsWatcher;
+  includeDeepTree?: boolean;
 }) {
   const gitEnv = makeGitEnv(backend.tmpDir);
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -68,12 +86,30 @@ export async function createWorkspaceRootFilesFixture({
   ]);
   expect(repoPaths.map((repoPath) => gitStatus(repoPath, gitEnv))).toEqual(["", ""]);
 
+  if (includeDeepTree) {
+    for (let level = 1; level <= DEEP_TREE_LEVEL_COUNT; level++) {
+      writeWorkspaceRootFile(
+        workspaceRoot,
+        deepRootFilePath(level),
+        `${deepRootFileContent(level)}\n`,
+      );
+    }
+  }
+
   await writeWorkspaceRootFileAndWait({
     watcher,
     sessionId: task.session_id,
     workspaceRoot,
     filePath: "dashboard.json",
     content: `${ROOT_FILE_CONTENT}\n`,
+    waitForListing: false,
+  });
+  await writeWorkspaceRootFileAndWait({
+    watcher,
+    sessionId: task.session_id,
+    workspaceRoot,
+    filePath: WORKSPACE_ROOT_NESTED_FILE_PATH,
+    content: `${WORKSPACE_ROOT_NESTED_FILE_CONTENT}\n`,
     waitForListing: false,
   });
   return { session, sessionId: task.session_id, repoPaths, gitEnv, workspaceRoot };
@@ -95,7 +131,23 @@ export async function expectRootFileUnstagedInRepository(
 }
 
 export function writeWorkspaceRootFile(workspaceRoot: string, filePath: string, content: string) {
-  fs.writeFileSync(path.join(workspaceRoot, filePath), content);
+  const absolutePath = path.join(workspaceRoot, filePath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, content);
+}
+
+export async function setChangesPanelLayout(page: Page, layout: "flat" | "tree") {
+  await page.evaluate((selectedLayout) => {
+    type E2EState = {
+      userSettings: { changesPanelLayout: "flat" | "tree"; [key: string]: unknown };
+      setUserSettings: (settings: E2EState["userSettings"]) => void;
+    };
+    const store = (window as Window & { __KANDEV_E2E_STORE__?: { getState: () => E2EState } })
+      .__KANDEV_E2E_STORE__;
+    if (!store) throw new Error("E2E store bridge missing");
+    const state = store.getState();
+    state.setUserSettings({ ...state.userSettings, changesPanelLayout: selectedLayout });
+  }, layout);
 }
 
 export async function writeWorkspaceRootFileAndWait({
@@ -139,6 +191,7 @@ export async function moveRootFileToSecondRepository(
   testPage: Page,
   rootFiles: Locator,
   input: "click" | "tap",
+  filePath: string,
   {
     watcher,
     sessionId,
@@ -150,7 +203,11 @@ export async function moveRootFileToSecondRepository(
     else await locator.click();
   };
 
-  await activate(rootFiles.getByRole("button", { name: "Show more actions" }));
+  await activate(
+    rootFiles
+      .getByTestId(`workspace-root-file-row-${filePath.replaceAll("/", "-")}`)
+      .getByRole("button", { name: "Show more actions" }),
+  );
   await activate(testPage.getByRole("menuitem", { name: "Move to repository..." }));
   const dialog = testPage.getByRole("dialog");
   await expect(dialog).toBeVisible();
@@ -165,8 +222,7 @@ export async function moveRootFileToSecondRepository(
 
   const renameResponse = watcher
     .waitForResponse("workspace.file.rename", {
-      requestWhere: (payload) =>
-        payload.session_id === sessionId && payload.old_path === "dashboard.json",
+      requestWhere: (payload) => payload.session_id === sessionId && payload.old_path === filePath,
     })
     .then(
       (frame) => ({ frame }),
@@ -174,7 +230,7 @@ export async function moveRootFileToSecondRepository(
     );
   const rootFileChange = expectSuccess
     ? watcher.waitForEvent("session.workspace.file.changes", {
-        where: (payload) => isRootFileChange(payload, sessionId, "dashboard.json"),
+        where: (payload) => isRootFileChange(payload, sessionId, filePath),
       })
     : undefined;
   const listingRefresh =
@@ -220,6 +276,10 @@ function gitStatus(repoPath: string, gitEnv: NodeJS.ProcessEnv) {
     env: gitEnv,
     encoding: "utf8",
   }).trim();
+}
+
+function deepTreeSegments(level: number) {
+  return Array.from({ length: level }, (_, index) => `level-${String(index + 1).padStart(2, "0")}`);
 }
 
 export const workspaceRootFileMarker = ROOT_FILE_CONTENT;

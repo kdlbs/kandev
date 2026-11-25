@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
 import type { Automation } from "@/lib/types/automation";
 import { AutomationPromptCard } from "./automation-prompt-card";
+import { scheduleBinding } from "./automation-schedule";
 import { nextFiring } from "./automation-rows";
 
 /**
@@ -30,16 +31,37 @@ import { nextFiring } from "./automation-rows";
 export function RunDetailDisclosure({
   automation,
   openRuns,
+  onEnableSchedule,
   className,
 }: {
   automation: Automation;
   /** Feeds the next-firing line, which is a fact about the automation's queue. */
   openRuns: number;
+  onEnableSchedule?: (triggerId: string) => Promise<void>;
   className?: string;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [enablingSchedule, setEnablingSchedule] = useState(false);
+  const [enableScheduleError, setEnableScheduleError] = useState(false);
   const next = nextFiring(automation, openRuns);
+  const { trigger, expression } = scheduleBinding(automation);
+  const canEnableSchedule = Boolean(
+    onEnableSchedule && automation.enabled && trigger && expression && !trigger.enabled,
+  );
+
+  const handleEnableSchedule = async () => {
+    if (!trigger || !onEnableSchedule || !canEnableSchedule || enablingSchedule) return;
+    setEnableScheduleError(false);
+    setEnablingSchedule(true);
+    try {
+      await onEnableSchedule(trigger.id);
+    } catch {
+      setEnableScheduleError(true);
+    } finally {
+      setEnablingSchedule(false);
+    }
+  };
 
   return (
     <div className={cn("flex flex-col", className)} data-testid="run-detail-disclosure">
@@ -57,17 +79,47 @@ export function RunDetailDisclosure({
       </Button>
       {open && (
         <div className="flex flex-col gap-2 px-2 pb-2 pt-1" data-testid="run-detail-panel">
-          <p
-            className={cn(
-              "text-xs",
-              next.kind === "reason"
-                ? "text-amber-600 dark:text-amber-500"
-                : "text-muted-foreground",
+          <div className="flex flex-col items-start gap-2">
+            <p
+              className={cn(
+                "text-xs",
+                next.kind === "reason"
+                  ? "text-amber-600 dark:text-amber-500"
+                  : "text-muted-foreground",
+              )}
+              data-testid="run-detail-next-run"
+            >
+              {next.text}
+            </p>
+            {canEnableSchedule && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="cursor-pointer"
+                  onClick={() => void handleEnableSchedule()}
+                  disabled={enablingSchedule}
+                  data-testid="enable-schedule-action"
+                >
+                  {t("automations:turnOnSchedule")}
+                </Button>
+                {enablingSchedule && (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    {t("automations:enablingSchedule")}
+                  </p>
+                )}
+                {enableScheduleError && (
+                  <p
+                    className="text-xs text-destructive"
+                    role="alert"
+                    data-testid="enable-schedule-error"
+                  >
+                    {t("automations:enableScheduleFailed")}
+                  </p>
+                )}
+              </>
             )}
-            data-testid="run-detail-next-run"
-          >
-            {next.text}
-          </p>
+          </div>
           <AutomationPromptCard prompt={automation.prompt ?? ""} />
         </div>
       )}

@@ -139,6 +139,9 @@ func (s *Service) recordBackgroundWorkObservationFromToolPayload(ctx context.Con
 			obs.OriginTurnID = s.nonCreatingActiveTurnID(ctx, payload.SessionID)
 		}
 	case payload.Data.Normalized != nil:
+		if isMonitorPresentationOnlyToolUpdate(payload) {
+			return
+		}
 		if isSubagentPresentationUpdate(payload) {
 			return
 		}
@@ -158,6 +161,15 @@ func (s *Service) recordBackgroundWorkObservationFromToolPayload(ctx context.Con
 			_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &published))
 		}
 	}
+}
+
+func isMonitorPresentationOnlyToolUpdate(payload *runtime.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil || payload.Data.Type != agentEventToolUpdate ||
+		payload.Data.BackgroundWork != nil || payload.Data.Normalized == nil {
+		return false
+	}
+	work := payload.Data.Normalized.BackgroundWork()
+	return work != nil && work.Kind == streams.BackgroundWorkKindMonitor && work.Ended
 }
 
 // BackgroundWorkSettler ends background workloads whose owning agent process

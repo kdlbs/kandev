@@ -33,6 +33,9 @@ type permissionResolver interface {
 	ResolveAgentPermission(
 		ctx context.Context, request orchestrator.ResolveAgentPermissionRequest,
 	) (*orchestrator.ResolveAgentPermissionResult, error)
+	// CancelAgentPermission dismisses a permission with the caller's audit
+	// fields (Source, ActorKind), unlike RespondToPermission, which records web.
+	CancelAgentPermission(ctx context.Context, request orchestrator.ResolveAgentPermissionRequest) error
 	// RespondToPermission is the exported wrapper that owns the cancel path;
 	// the orchestrator keeps its cancel helper unexported.
 	RespondToPermission(
@@ -61,21 +64,31 @@ func (a pluginsInteractionResponderAdapter) RespondToPermission(
 	if a.permissions == nil {
 		return status.Error(codes.Unimplemented, "permission responses are unavailable")
 	}
-	// A dismissal has no option to select, and the orchestrator keeps its
-	// cancel helper unexported, so route it through the exported wrapper
-	// rather than inventing an option id the agent never offered.
-	if in.Cancelled {
-		return permissionResolutionStatus(a.permissions.RespondToPermission(
-			ctx, in.TaskID, in.SessionID, in.RequestID, in.PendingID, "", true, false))
-	}
-	_, err := a.permissions.ResolveAgentPermission(ctx, orchestrator.ResolveAgentPermissionRequest{
+	request := orchestrator.ResolveAgentPermissionRequest{
 		TaskID:    in.TaskID,
 		SessionID: in.SessionID,
 		RequestID: in.RequestID,
 		PendingID: in.PendingID,
 		OptionID:  in.OptionID,
 		Source:    taskmodels.PermissionSourceAutomation,
-	})
+	}
+	// A linked user's decision is audited as that user (the context carries
+	// their identity) with the plugin as the carrying surface.
+	if in.LinkedUser {
+		request.Source = taskmodels.PermissionSourcePlugin
+		request.ActorKind = taskmodels.PermissionActorLinkedIdentity
+	}
+	if in.Cancelled {
+		// A dismissal has no option to select. Linked dismissals use the
+		// exported cancel path so their audit fields survive; other dismissals
+		// keep the existing wrapper.
+		if in.LinkedUser {
+			return permissionResolutionStatus(a.permissions.CancelAgentPermission(ctx, request))
+		}
+		return permissionResolutionStatus(a.permissions.RespondToPermission(
+			ctx, in.TaskID, in.SessionID, in.RequestID, in.PendingID, "", true, false))
+	}
+	_, err := a.permissions.ResolveAgentPermission(ctx, request)
 	return permissionResolutionStatus(err)
 }
 

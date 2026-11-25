@@ -10,6 +10,10 @@ import { readMonitorView } from "@/components/task/chat/types";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
 import { t } from "@/lib/i18n";
+import { useOptionalAppStore } from "@/components/state-provider";
+import type { WorkloadRunObservation } from "@/lib/types/background-work";
+
+const EMPTY_WORKLOADS: WorkloadRunObservation[] = [];
 
 type MonitorMessageProps = {
   comment: Message;
@@ -52,14 +56,27 @@ function pluralizeEventCount(n: number): string {
   return ` · ${t("task:eventCount", { count: n })}`;
 }
 
-function buildMonitorViewModel(comment: Message): MonitorViewModel {
+function buildMonitorViewModel(
+  comment: Message,
+  workloads: WorkloadRunObservation[],
+): MonitorViewModel {
   const metadata = comment.metadata as ToolCallMetadata | undefined;
   const view = readMonitorView(metadata?.normalized?.generic) ?? {};
+  const sourceCallId = metadata?.tool_call_id;
+  const matchingWorkload = sourceCallId
+    ? workloads.find(
+        (workload) => workload.kind === "monitor" && workload.source_call_id === sourceCallId,
+      )
+    : undefined;
   const command = view.command ?? "";
   const eventCount = view.event_count ?? 0;
   return {
     status: metadata?.status,
-    ended: view.ended === true,
+    ended:
+      view.ended === true ||
+      (matchingWorkload !== undefined &&
+        matchingWorkload.state !== "running" &&
+        matchingWorkload.state !== "waiting"),
     endReason: view.end_reason ?? "",
     eventCount,
     recentEvents: view.recent_events ?? [],
@@ -96,7 +113,11 @@ function MonitorHeader({ vm }: { vm: MonitorViewModel }) {
 }
 
 export const MonitorMessage = memo(function MonitorMessage({ comment }: MonitorMessageProps) {
-  const vm = buildMonitorViewModel(comment);
+  const workloads = useOptionalAppStore(
+    (state) => state.backgroundWork.workloadsBySessionId[comment.session_id] ?? EMPTY_WORKLOADS,
+    EMPTY_WORKLOADS,
+  );
+  const vm = buildMonitorViewModel(comment, workloads);
   // Auto-expand whenever there are events to surface — both during the
   // watch (so users see the stream live) and after it ends (so they can
   // review what happened). Empty Monitors collapse since there's nothing

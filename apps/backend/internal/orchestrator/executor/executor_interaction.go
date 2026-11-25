@@ -921,6 +921,20 @@ func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, se
 	if len(attachments) == 0 {
 		return prompt, nil
 	}
+	if v1.HasCommentAttachments(attachments) {
+		if remote, ok := e.agentManager.(interface {
+			PrepareRemotePassthroughCommentPrompt(context.Context, string, string, []v1.MessageAttachment) (string, bool, error)
+		}); ok {
+			rendered, handled, err := remote.PrepareRemotePassthroughCommentPrompt(ctx, session.ID, prompt, attachments)
+			if handled || err != nil {
+				return rendered, err
+			}
+		}
+		executorType, _ := session.ExecutorSnapshot["executor_type"].(string)
+		if session.ExecutionRuntime == string(agentruntime.RuntimeSSH) || executorType == string(models.ExecutorTypeSSH) {
+			return "", errors.New("SSH terminal attachment materialization is unavailable")
+		}
+	}
 	workDir := e.passthroughAttachmentWorkspace(ctx, session)
 	if workDir == "" {
 		return "", fmt.Errorf("passthrough attachments require a session workspace path")
@@ -940,11 +954,42 @@ func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, se
 		}
 		return "", fmt.Errorf("passthrough prompt has no usable attachments")
 	}
-	attachmentPrompt := strings.TrimSpace(agentctlshared.BuildAttachmentPrompt(saved, true))
+	prompt, ordinary, err := renderPassthroughCommentFiles(prompt, attachments, saved)
+	if err != nil {
+		return "", err
+	}
+	if len(ordinary) == 0 {
+		return prompt, nil
+	}
+	attachmentPrompt := strings.TrimSpace(agentctlshared.BuildAttachmentPrompt(ordinary, true))
 	if strings.TrimSpace(prompt) == "" {
 		return attachmentPrompt, nil
 	}
 	return prompt + "\n\n" + attachmentPrompt, nil
+}
+
+func renderPassthroughCommentFiles(prompt string, attachments []v1.MessageAttachment, saved []agentctlshared.SavedAttachment) (string, []agentctlshared.SavedAttachment, error) {
+	if !v1.HasCommentAttachments(attachments) {
+		return prompt, saved, nil
+	}
+	paths := make(map[string]agentctlshared.SavedAttachment, len(saved))
+	ordinary := make([]agentctlshared.SavedAttachment, 0, len(saved))
+	for _, file := range saved {
+		if file.CommentID == "" {
+			ordinary = append(ordinary, file)
+		} else {
+			paths[file.AttachmentID] = file
+		}
+	}
+	files := append([]v1.MessageAttachment(nil), attachments...)
+	for index, file := range files {
+		if saved, ok := paths[file.AttachmentID]; ok {
+			files[index].Name = saved.DisplayName
+			files[index].Path = saved.AbsPath
+		}
+	}
+	rendered, _, err := v1.RenderCommentFiles(prompt, files)
+	return rendered, ordinary, err
 }
 
 func (e *Executor) savePassthroughAttachments(

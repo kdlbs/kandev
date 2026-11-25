@@ -60,8 +60,8 @@ Resolve it for the runtime the execution resolved, not the requested executor ty
 Pass this value through the current `CommandOptions` and runtime-selection seams as needed.
 Other agents retain their existing fixed-package resolution.
 
-All OpenCode consumers must use this resolution: registry probes, host utilities, lifecycle profile resolution,
-standalone sessions, executor preflight/install, container and SSH commands, retry/cache repair,
+All OpenCode consumers must use this resolution: registry probes, host utilities, session-bound utility prompts,
+lifecycle profile resolution, standalone sessions, executor preflight/install, container and SSH commands, retry/cache repair,
 Settings preview and activation, and Kandev-created interactive CLI commands.
 For OpenCode the interactive CLI and ACP runtime come from the same distribution.
 Construct interactive commands without `acp` and retain their existing resume/model/prompt arguments.

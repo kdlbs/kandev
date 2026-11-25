@@ -15,10 +15,33 @@ var copilotBackgroundAgentID = regexp.MustCompile(
 
 func newCopilotACPDialect() acpDialect {
 	return acpDialect{
-		subagentFrame:   parseCopilotSubagentFrame,
-		subagentResult:  copilotSubagentResult,
-		subagentControl: copilotSubagentControl,
+		subagentFrame:        parseCopilotSubagentFrame,
+		subagentResult:       copilotSubagentResult,
+		subagentControl:      copilotSubagentControl,
+		configurationCommand: copilotConfigurationCommand,
 	}
+}
+
+func copilotConfigurationCommand(
+	message string,
+	models []modelInfo,
+	options []streams.ConfigOption,
+	commands []streams.AvailableCommand,
+) *configurationCommandSpec {
+	parts := strings.Fields(message)
+	if len(parts) == 3 && strings.EqualFold(parts[0], "/model") &&
+		strings.EqualFold(parts[1], "auto") && strings.EqualFold(parts[2], "hydrafusion") {
+		configID := modelConfigOptionID(options)
+		if modelIsAdvertised("auto", models, options) {
+			return &configurationCommandSpec{
+				configID:             configID,
+				requestedID:          "auto",
+				requested:            "Fusion High",
+				partialConfiguration: true,
+			}
+		}
+	}
+	return modelConfigurationCommand(message, models, options, commands)
 }
 
 func parseCopilotSubagentFrame(_ map[string]any, _ string, rawInput any) (subagentFrame, bool) {

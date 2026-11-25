@@ -414,7 +414,8 @@ test.describe("Mobile terminal key-bar — user flows", () => {
     }
   });
 
-  test("user navigates command history with the ↑ button", async ({
+  // @covers AC-CLI-MOBILE-PASSTHROUGH-NAV-001.11
+  test("user navigates command history with the ↑ and Enter buttons", async ({
     testPage,
     apiClient,
     seedData,
@@ -425,11 +426,12 @@ test.describe("Mobile terminal key-bar — user flows", () => {
 
     const keybar = new MobileTerminalKeybarPage(testPage);
     await expect(keybar.root).toBeVisible({ timeout: 10_000 });
+    await expect(keybar.root.getByTestId("keybar-scroll-cue")).toBeVisible();
     await waitForShellReady(testPage);
     await focusTerminalForTyping(testPage);
     await startReadlineShell(testPage);
     await testPage.keyboard.type("echo HISTORY_PROBE_782");
-    await testPage.keyboard.press("Enter");
+    await keybar.tap("enter");
     const lines = async () =>
       (await readTerminalBuffer(testPage)).split("\n").map((line) => line.trim());
     await expect.poll(lines).toContain("HISTORY_PROBE_782");

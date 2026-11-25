@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,7 +66,7 @@ func insertWorkflow(t *testing.T, db *sqlx.DB, id, name string) {
 // mockWorkflowProvider implements WorkflowProvider with in-memory state for tests.
 type mockWorkflowProvider struct {
 	workflows        []*taskmodels.Workflow
-	getWorkflowCalls int
+	getWorkflowCalls atomic.Int64
 	deleted          []string
 	// db mirrors the production task repository's workflow rows so the real
 	// step repository can lock and validate the owning workflow.
@@ -91,7 +92,7 @@ func (m *mockWorkflowProvider) ListWorkflows(_ context.Context, workspaceID stri
 }
 
 func (m *mockWorkflowProvider) GetWorkflow(_ context.Context, id string) (*taskmodels.Workflow, error) {
-	m.getWorkflowCalls++
+	m.getWorkflowCalls.Add(1)
 	for _, wf := range m.workflows {
 		if wf.ID == id {
 			return wf, nil

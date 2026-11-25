@@ -24,13 +24,13 @@ launching and streaming.
 
 ## Scope
 
-In scope: `apps/backend/internal/agent/runtime/lifecycle/types.go`
+Task 01 covers `apps/backend/internal/agent/runtime/lifecycle/types.go`
 (`AgentctlURL`, plus the URL publication in client replacement and detach),
 `manager_interaction.go` (`restoreRecoveredFailedExecution`), and a permanent
 unit test.
 
-Excluded: other lease users, the terminal stop path, and any change to the
-lease semantics of client replacement or detach.
+Task 02 covers synchronous agentctl requests during recovered delivery replay
+and the regression tests for the replay lease.
 
 ## Technical approach
 
@@ -45,13 +45,19 @@ lease semantics of client replacement or detach.
 - `restoreRecoveredFailedExecution` releases the lease right after
   `GetStatus`, before marking the execution ready.
 
+- Recovered delivery replay uses a short lease for each page read, delivery
+  status read, and synchronous acknowledgement. Each request checks the
+  original client before sending it.
+
 ## Work orders
 
 - [x] [Task 01: Keep agentctl URL reads off the client lease](task-01-agentctl-url-lease.md)
+- [x] [Task 02: Bound recovered delivery replay leases](task-02-replay-lease.md)
 
 ## Changed-path coverage
 
-The work order owns the lifecycle files above, the new
-`agentctl_url_lease_test.go`, `agentctl_url_persistence_test.go`,
-`agentctl_recovery_lease_test.go`, and the new agentctl client lease requirement
-and system design.
+Task 01 owns the lifecycle files in its scope and the URL, persistence, and
+recovery lease tests. Task 02 owns the replay, event preparation, and
+acknowledgement changes in lifecycle, the agentctl closed-client check, and
+`agentctl_replay_lease_test.go`. Both tasks update the client lease
+requirements and system design.

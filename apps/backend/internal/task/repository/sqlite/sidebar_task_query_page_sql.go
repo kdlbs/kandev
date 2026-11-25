@@ -221,6 +221,12 @@ func sidebarPageBuildContextFor(driver string, query models.SidebarTaskViewQuery
 	stateCTEs := sidebarStateCTEs(query)
 	activityCTEs, activityJoin := sidebarActivityCTEs(driver, query)
 	runningCTEs, runningJoin := sidebarRunningCTEs(driver, query)
+	if prefs.PluginGrouping != nil {
+		pluginCTEs, pluginJoin, pluginKey, pluginLabel, pluginOrder, pluginArgs := sidebarPluginGroupingCTEs(driver, query, prefs)
+		repositoryCTEs, repositoryJoin = pluginCTEs, pluginJoin
+		groupKey, groupLabel, groupOrder = pluginKey, pluginLabel, pluginOrder
+		args = append(pluginArgs, args...)
+	}
 	return sidebarPageBuildContext{
 		groupOrder: groupOrder, rootPathPart: rootPathPart, childPathPart: childPathPart,
 		rootPinExpr:     rootPinExpr,

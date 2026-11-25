@@ -15,6 +15,11 @@ A session is one agent conversation on a task. Use it to direct work, inspect ch
 
 ## Answer clarification questions
 
+After Copilot resumes a session with an interrupted tool call, Kandev adds a
+status row to the transcript. Select **Details** to read Copilot's warning.
+If the call was the pending Kandev question, skip it and send a prompt. For
+another or uncertain call, check its effects before retrying.
+
 Questions support links, bold, italic, strikethrough, inline code, paragraphs, and simple lists.
 Select an HTTP or HTTPS reference in question text to open it in another tab.
 Links inside answer choices select the choice.
@@ -23,6 +28,9 @@ To read an older question, open **Inbox > History** and expand its row.
 The expanded question supports the same formatting and reference links.
 Selecting a reference label in the collapsed summary expands the row.
 Opening a reference does not answer the question or change its status.
+
+Select **Open task** on an Inbox row for an available Quick Chat to open that
+conversation. Close Quick Chat to return to the same Inbox tab.
 
 Pending shared context supports paragraphs, line breaks, links, bold, italic,
 strikethrough, inline code, simple lists, and tables. Table overflow stays

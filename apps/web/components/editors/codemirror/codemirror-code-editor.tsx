@@ -73,6 +73,10 @@ function CodeMirrorOverlays({
       )}
       {state.textSelection && (
         <SelectionCommentSurface
+          key={`${state.commentScope}:${state.textSelection.startLine}:${state.textSelection.endLine}:${state.textSelection.text}`}
+          attachmentOptions={
+            state.attachmentTaskId ? { taskId: state.attachmentTaskId } : undefined
+          }
           selectedText={state.textSelection.text}
           contextLabel={lineRangeLabel(state.textSelection.startLine, state.textSelection.endLine)}
           position={state.textSelection.position}
@@ -83,6 +87,7 @@ function CodeMirrorOverlays({
       )}
       {state.commentView && (
         <CommentViewPopover
+          taskId={state.attachmentTaskId}
           comments={state.commentView.comments}
           position={state.commentView.position}
           onDelete={state.handleDeleteComment}

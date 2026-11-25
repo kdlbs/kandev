@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -92,7 +94,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		eventExecutionID,
 		payload.Data.PromptGeneration,
 	) {
-		s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
+		if eventType != streams.EventTypeMCPStartupWarning {
+			s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
+		}
 		s.logger.Debug("ignoring stream event for execution outside cancellation identity",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
@@ -134,6 +138,14 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		if eventType != streams.EventTypeUsageObservation {
 			return
 		}
+	}
+	if eventType == streams.EventTypeCopilotInterruptionNotice {
+		s.handleCopilotInterruptionStatus(ctx, payload)
+		return
+	}
+	if eventType == streams.EventTypeMCPStartupWarning {
+		s.handleCodexMCPStartupWarning(ctx, payload, eventExecutionID)
+		return
 	}
 	switch eventType {
 	case streams.EventTypeMessageChunk:
@@ -504,6 +516,9 @@ func (s *Service) completeTurnForStreamEvent(
 	if len(capturedTurnIDs) > 0 {
 		capturedTurnID = capturedTurnIDs[0]
 	}
+	if capturedTurnID != "" && payload.Data != nil && payload.Data.TurnID == capturedTurnID {
+		ctx = withConfigurationCommandResult(ctx, payload.Data.ConfigurationCommandResult)
+	}
 	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, payload.TaskID, payload.SessionID, capturedTurnID)
 	if capturedTurnID != "" {
 		// A durable turn ID is authoritative. If the event is stale and an
@@ -611,7 +626,9 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	if sessionID != "" && payload.Data.ACPSessionID != "" {
-		s.storeResumeTokenFromAgentEvent(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
+		s.storeResumeTokenFromStreamEvent(
+			ctx, taskID, sessionID, payload.ExecutionID, payload.AgentType, payload.Data.ACPSessionID, "", payload.AttemptID,
+		)
 	}
 	if sessionID == "" || s.messageCreator == nil {
 		return
@@ -870,14 +887,14 @@ func (s *Service) handleStreamingEventKind(
 	appendFn func(context.Context, string, string) error,
 	createFn func(context.Context, string, string, string, string, string) error,
 ) {
-	if payload.Data.Text == "" || payload.SessionID == "" {
+	if payload.SessionID == "" {
 		return
 	}
 	if payload.Data.CanonicalProjection {
 		s.publishCanonicalMessageEvent(ctx, payload)
 		return
 	}
-	if s.messageCreator == nil {
+	if payload.Data.Text == "" || s.messageCreator == nil {
 		return
 	}
 	messageID := payload.Data.MessageID
@@ -954,6 +971,52 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 		s.messageCreator.CreateAgentMessageStreaming)
 }
 
+func (s *Service) handleCopilotInterruptionStatus(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if payload == nil || payload.Data == nil || s.messageCreator == nil || payload.TaskID == "" ||
+		payload.SessionID == "" || payload.ExecutionID == "" || payload.Data.Text == "" {
+		return
+	}
+	noticeType := streams.CopilotInterruptionNoticeType(payload.Data.Data)
+	if noticeType == "" {
+		return
+	}
+	turnID := payload.Data.TurnID
+	if turnID == "" {
+		payload.Data.Type = "message_streaming"
+		payload.Data.MessageType = string(v1.MessageTypeMessage)
+		if payload.Data.MessageID == "" {
+			payload.Data.MessageID = copilotInterruptionMessageID(
+				payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration,
+			)
+		}
+		s.handleMessageStreamingEvent(ctx, payload)
+		return
+	}
+	messageID := copilotInterruptionMessageID(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration)
+	metadata := map[string]interface{}{
+		"variant": streams.EventTypeCopilotInterruptionNotice,
+		streams.AgentEventDataCopilotInterruptionNotice: noticeType,
+	}
+	if err := s.messageCreator.CreateSessionMessageIdempotent(
+		ctx, messageID, payload.TaskID, payload.Data.Text, payload.SessionID,
+		string(v1.MessageTypeStatus), turnID, metadata, false,
+	); err != nil {
+		s.logger.Error("failed to persist Copilot interruption status",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+	}
+}
+
+func copilotInterruptionMessageID(sessionID, executionID string, promptGeneration uint64) string {
+	identity := fmt.Sprintf("%s\x00%s\x00%d", sessionID, executionID, promptGeneration)
+	digest := sha256.Sum256([]byte(identity))
+	return "copilot-interruption-" + hex.EncodeToString(digest[:16])
+}
+
 // handleThinkingStreamingEvent handles streaming thinking events for real-time reasoning updates.
 // It creates a new thinking message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleThinkingStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
@@ -1027,17 +1090,19 @@ func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecyc
 	terminal := isTerminalToolStatus(status)
 	turnID := ""
 	if terminal {
-		var err error
-		turnID, err = s.peekActiveTurnID(ctx, payload.SessionID)
-		if err != nil {
-			s.logger.Warn("failed to look up active turn for terminal tool update",
-				zap.String("task_id", payload.TaskID),
-				zap.String("session_id", payload.SessionID),
-				zap.String("tool_call_id", payload.Data.ToolCallID),
-				zap.Error(err))
-			// Fail closed: without a confirmed active turn, this must be an
-			// update-only reconciliation and cannot wake a settled session.
-			turnID = ""
+		if !isMonitorPresentationOnlyToolUpdate(payload) {
+			var err error
+			turnID, err = s.peekActiveTurnID(ctx, payload.SessionID)
+			if err != nil {
+				s.logger.Warn("failed to look up active turn for terminal tool update",
+					zap.String("task_id", payload.TaskID),
+					zap.String("session_id", payload.SessionID),
+					zap.String("tool_call_id", payload.Data.ToolCallID),
+					zap.Error(err))
+				// Fail closed: without a confirmed active turn, this must be an
+				// update-only reconciliation and cannot wake a settled session.
+				turnID = ""
+			}
 		}
 	} else if s.messageCreator != nil {
 		// Only message creation needs a turn to attach a fallback-created
@@ -3581,7 +3646,10 @@ func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *li
 			lastMsgUUID = uuid
 		}
 	}
-	s.storeResumeTokenFromAgentEvent(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
+	s.storeResumeTokenFromStreamEvent(
+		ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.AgentType,
+		payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID,
+	)
 }
 
 func (s *Service) resolveCompleteEventTurnID(
@@ -3789,9 +3857,10 @@ func emptyTurnCompletionFromPayload(payload *lifecycle.AgentStreamEventPayload) 
 			ExecutionProfileID: payload.ExecutionProfileID,
 			PromptGeneration:   payload.Data.PromptGeneration,
 		},
-		stopReason:     extractStopReason(payload),
-		isError:        extractCompleteIsError(payload),
-		completeOutput: completeFrameCarriesOutput(payload),
+		stopReason:                 extractStopReason(payload),
+		isError:                    extractCompleteIsError(payload),
+		completeOutput:             completeFrameCarriesOutput(payload),
+		configurationCommandResult: payload.Data.ConfigurationCommandResult,
 	}
 }
 

@@ -327,9 +327,9 @@ func (s *Store) RecordSyncFailure(
 			failure_class = ?, consecutive_failures = ?, next_retry_at = ?, last_error_class = ?,
 			poll_suspended = ?, poll_suspension_reason = ?, updated_at = ?
 		WHERE workspace_id = ?
-	`), at, errMsg, string(directive.circuitClass), directive.consecutive,
-		directive.nextAttemptAt, directive.class, directive.suspended,
-		directive.suspensionReason, at, workspaceID)
+	`), at, errMsg, string(directive.CircuitClass), directive.Consecutive,
+		directive.NextAttemptAt, directive.Class, directive.Suspended,
+		directive.SuspensionReason, at, workspaceID)
 	return err
 }
 

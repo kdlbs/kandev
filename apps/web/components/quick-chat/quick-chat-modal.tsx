@@ -335,7 +335,7 @@ function QuickChatModalShell({
           <Dialog open={isOpen} onOpenChange={onOpenChange}>
             <DialogContent
               {...contentProps}
-              className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex min-h-0 flex-col gap-0 p-0 pt-safe pb-safe shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85dvh] sm:!max-h-[85dvh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
+              className="quick-chat-dialog left-0 top-0 !h-dvh !max-h-dvh !w-screen !max-w-none translate-x-0 translate-y-0 flex min-h-0 flex-col gap-0 p-0 pt-safe pb-safe shadow-2xl sm:top-1/2 sm:left-1/2 sm:!h-[85dvh] sm:!max-h-[85dvh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2"
               style={{ "--quick-chat-width": `${width}px` } as CSSProperties}
               showCloseButton={false}
               overlayClassName="bg-black/20 sm:bg-black/40 sm:backdrop-blur-sm"

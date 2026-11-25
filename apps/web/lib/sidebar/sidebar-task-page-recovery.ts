@@ -17,6 +17,7 @@ export const SIDEBAR_RECOVERY_ATTEMPT_DEADLINE_MS = 10_000;
 
 export type SidebarPageRecoveryCycle<T> = {
   promise: Promise<T>;
+  signal: AbortSignal;
   abort: () => void;
 };
 
@@ -90,5 +91,5 @@ export function startSidebarPageRecoveryCycle<T>({
     throw new TaskNavigationCycleDeadlineError();
   };
   const promise = run().finally(() => clock.dispose());
-  return { promise, abort: () => controller.abort() };
+  return { promise, signal: controller.signal, abort: () => controller.abort() };
 }

@@ -248,11 +248,28 @@ func (m *Manager) currentRemoteRecoveryOwner(
 			return nil, false
 		}
 	}
-	if !sameRemoteRecoveryOwner(entry.snapshot, current, entry.record) {
+	if !sameRemoteRecoveryOwner(entry.snapshot, current, entry.record) &&
+		!m.adoptStoppedRemoteInterruptionNotice(entry, current) {
 		m.removeRemoteRecovery(entry, true)
 		return nil, false
 	}
 	return current, true
+}
+
+func (m *Manager) adoptStoppedRemoteInterruptionNotice(
+	entry *remoteRecoveryRetry,
+	current *RemoteRecoverySnapshot,
+) bool {
+	if entry == nil || !stoppedRemoteOwnerMatchesSavedInterruptionNotice(entry.snapshot, current, entry.record) {
+		return false
+	}
+	m.remoteRecoveryMu.Lock()
+	defer m.remoteRecoveryMu.Unlock()
+	if m.remoteRecoveryPending[entry.record.SessionID] != entry || !entry.inProgress || entry.stopRequested {
+		return false
+	}
+	entry.snapshot = current
+	return true
 }
 
 func (m *Manager) remoteRecoveryExecutorRowMissing(ctx context.Context, sessionID string) bool {
@@ -345,62 +362,30 @@ func (m *Manager) attachRemoteRecovery(ctx context.Context, entry *remoteRecover
 	}
 }
 
-func (m *Manager) processRecoveredRemoteInstance(ctx context.Context, entry *remoteRecoveryRetry, ri *ExecutorInstance) error {
-	if err := m.proveRecoveredRemoteInstance(ctx, entry, ri); err != nil {
-		return err
-	}
-	current, err := m.remoteRecoverySnapshot(ctx, entry.record.SessionID)
-	if err != nil {
-		return fmt.Errorf("re-read remote owner before tracking: %w", err)
-	}
-	if !sameRemoteRecoveryOwner(entry.snapshot, current, entry.record) {
-		m.removeRemoteRecovery(entry, true)
-		return errRemoteRecoveryFenced
-	}
-	if err := validateRemoteRecoverySnapshot(current, entry.record); err != nil {
-		return err
-	}
-	if remoteRecoveryOwnerUnsupported(entry.record) {
-		return errors.New("run-owned remote recovery is unsupported by this task-session path")
-	}
-	execution, err := m.prepareRecoveredRemoteExecution(ctx, entry.record, current, ri)
-	if err != nil {
-		return fmt.Errorf("reconstruct recovered remote execution: %w", err)
-	}
-	return m.trackRecoveredRemoteExecution(ctx, entry, execution, ri)
-}
-
-func (m *Manager) proveRecoveredRemoteInstance(ctx context.Context, entry *remoteRecoveryRetry, ri *ExecutorInstance) error {
-	if entry == nil || entry.record == nil || entry.snapshot == nil || ri == nil {
-		return errors.New("remote recovery candidate is incomplete")
-	}
-	if ri.RuntimeName != entry.record.Runtime || ri.SessionID != entry.record.SessionID ||
-		ri.InstanceID != entry.record.AgentExecutionID || ri.TaskID != entry.record.TaskID {
-		return errors.New("runtime returned a different persisted remote execution identity")
-	}
-	if entry.snapshot.IsPassthrough && ri.RuntimeName == agentruntime.RuntimeSSH {
-		return m.captureRemotePassthroughEvidence(ctx, ri)
-	}
-	if entry.snapshot.RecoverySourcePresent {
-		if ri.expectedDeliveryStreamID != "" && ri.expectedDeliveryStreamID != entry.snapshot.RecoveryStreamID {
-			return errors.New("remote recovery stream expectation changed")
-		}
-		ri.expectedDeliveryStreamID = entry.snapshot.RecoveryStreamID
-	}
-	if err := m.captureAuthenticatedAgentSessionEvidence(ctx, ri); err != nil {
-		return fmt.Errorf("capture authenticated agent-session evidence: %w", err)
-	}
-	if err := validateRemoteRecoveryDeliveryEvidence(entry.snapshot, ri); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (m *Manager) prepareRecoveredRemoteExecution(
 	ctx context.Context,
 	record *models.ExecutorRunning,
 	snapshot *RemoteRecoverySnapshot,
 	ri *ExecutorInstance,
+) (*AgentExecution, error) {
+	return m.prepareRemoteExecution(ctx, record, snapshot, ri, false)
+}
+
+func (m *Manager) prepareStoppedRemoteExecution(
+	ctx context.Context,
+	record *models.ExecutorRunning,
+	snapshot *RemoteRecoverySnapshot,
+	ri *ExecutorInstance,
+) (*AgentExecution, error) {
+	return m.prepareRemoteExecution(ctx, record, snapshot, ri, true)
+}
+
+func (m *Manager) prepareRemoteExecution(
+	ctx context.Context,
+	record *models.ExecutorRunning,
+	snapshot *RemoteRecoverySnapshot,
+	ri *ExecutorInstance,
+	stopped bool,
 ) (*AgentExecution, error) {
 	if remoteRecoveryOwnerUnsupported(record) {
 		return nil, errors.New("run-owned remote execution requires its owner admission path")
@@ -455,13 +440,26 @@ func (m *Manager) prepareRecoveredRemoteExecution(
 	if err := m.reDeriveRecoveredAgentIdentity(ctx, execution); err != nil {
 		return nil, err
 	}
-	if err := m.restoreRecoveredDelivery(ctx, execution, ri); err != nil {
+	if err := m.restoreRemoteExecutionDelivery(ctx, execution, snapshot, ri, stopped); err != nil {
 		return nil, err
 	}
 	if err := m.restoreRecoveredSessionSettingsSource(ctx, execution); err != nil {
 		return nil, err
 	}
 	return execution, nil
+}
+
+func (m *Manager) restoreRemoteExecutionDelivery(
+	ctx context.Context,
+	execution *AgentExecution,
+	snapshot *RemoteRecoverySnapshot,
+	ri *ExecutorInstance,
+	stopped bool,
+) error {
+	if stopped {
+		return m.restoreStoppedRemoteDelivery(ctx, execution, snapshot, ri)
+	}
+	return m.restoreRecoveredDelivery(ctx, execution, ri)
 }
 
 func recoveredRemoteMetadata(record *models.ExecutorRunning, ri *ExecutorInstance) map[string]interface{} {
@@ -482,7 +480,9 @@ func applyRemoteLegacySessionEvidence(execution *AgentExecution, ri *ExecutorIns
 	}
 	execution.DeliveryIncarnationID = ri.agentSessionAssociation.IncarnationID
 	execution.DeliveryHarnessGeneration = ri.agentSessionAssociation.HarnessGeneration
-	execution.ACPSessionID = ri.agentSessionAssociation.NativeSessionID
+	if ri.agentSessionAssociation.NativeSessionID != "" {
+		execution.ACPSessionID = ri.agentSessionAssociation.NativeSessionID
+	}
 }
 
 func (m *Manager) trackRecoveredRemoteExecution(

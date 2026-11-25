@@ -142,7 +142,8 @@ Pending ownership and successful reattachment remain distinct. Reconciliation ob
 An old activity timestamp and an absent local attachment do not prove that a remote agent stopped. Recovery and settlement recheck the exact pending owner at their mutation boundary; no elapsed outage duration permits abandoning its turn.
 The existing remote-status loop retries a bounded, rotating set of records on its normal tick, with a deadline for each attempt. Shutdown cancels and joins the loop.
 Each attempt validates the durable execution, task, session, and environment before attachment and again before tracking. Stop, archive, cleanup, and ownership changes fence a stale attempt.
-Successful attachment shares startup's authenticated evidence and replay path. It clears pending recovery only after tracking succeeds.
+A surviving agent uses the same authenticated evidence and replay path in each attempt. Its pending recovery clears after tracking succeeds.
+An authenticated stopped agent in a retained environment uses the [stopped-agent disposition](durable-restart-reconciliation.md#stopped-agent-in-a-retained-remote-environment).
 An idle peer also requires a bounded, cancellable updates-stream connection before recovery-guard release and availability publication.
 A connection-attempt signal alone does not prove readiness; the idle adopted client must have its updates socket connected.
 An ordinary user message accepted during retryable reconciliation enters the existing durable queue with its recorded message and turn identity.
@@ -338,7 +339,7 @@ Old ambiguous records fail closed. Preserve journals, native state, and user edi
 Reuse existing agent_delivery_* metrics with bounded reasons; keep IDs out of metric labels.
 The [work package](../../../plans/durable-agent-reattachment/plan.md) owns implementation and validation.
 The [shutdown and recovery repair](../../../plans/agentctl-journal-shutdown-recovery/plan.md) owns the later closed-journal and missing-execution regressions.
-Detached MCP waiting/offline budgets and richer remote-working UI remain follow-up work.
+Detached MCP waiting and offline budgets are specified in [detached MCP call wait](detached-mcp-call-wait.md). Richer remote-working UI remains follow-up work.
 
 ## Pending backend retention extension
 

@@ -406,6 +406,20 @@ function mergeTurnsWindowAction(set: ImmerSet) {
     });
 }
 
+function createEmptyTurnNoticeClaimAction(set: ImmerSet) {
+  return (sessionId: string, turnId: string): boolean => {
+    let claimed = false;
+    set((draft) => {
+      const bySession = (draft.turns.emptyTurnNoticeTurnIdsBySession ??= {});
+      const turnIds = (bySession[sessionId] ??= {});
+      if (turnIds[turnId]) return;
+      turnIds[turnId] = true;
+      claimed = true;
+    });
+    return claimed;
+  };
+}
+
 /** Builds the turn store actions (upsert, completion, markers, snapshots). */
 export function buildTurnActions(set: ImmerSet) {
   return {
@@ -434,6 +448,7 @@ export function buildTurnActions(set: ImmerSet) {
         // value.
         Object.assign(existing, turn, { completed_at: existing.completed_at ?? turn.completed_at });
       }),
+    claimEmptyTurnNotice: createEmptyTurnNoticeClaimAction(set),
     /** Merges a complete turn snapshot and reconciles its marker atomically. */
     mergeTurnsSnapshot: mergeTurnsSnapshotAction(set),
     /** Merges a message-window turn snapshot without marking full history loaded. */
