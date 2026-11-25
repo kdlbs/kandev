@@ -1,12 +1,8 @@
 package lifecycle
 
 import (
-	"context"
 	"fmt"
-	"strconv"
 	"strings"
-
-	"golang.org/x/crypto/ssh"
 
 	"github.com/kandev/kandev/internal/scriptengine"
 )
@@ -99,8 +95,7 @@ Set-Location -LiteralPath $workspace
 {{repository.setup_script}}
 `
 
-func windowsBranchCheckoutPostlude() string {
-	return `
+const windowsBranchCheckoutPostlude = `
 # ---- kandev-managed: ensure session feature branch is checked out ----
 try {
   $__kWorktreeBranch = {{worktree.branch}}
@@ -132,21 +127,14 @@ try {
   }
 } catch {}
 `
-}
 
 func isBuiltinPOSIXSSHPrepareScript(script string) bool {
 	trimmed := strings.TrimSpace(script)
-	if trimmed == "" {
-		return false
-	}
 	builtin := strings.TrimSpace(defaultSSHPrepareScript)
 	return trimmed == builtin || strings.TrimSpace(repairLegacyFetchRefspec(trimmed)) == builtin
 }
 
-func (r *SSHExecutor) resolveWindowsPrepareScript(req *ExecutorCreateRequest, workspacePath, agentctlBin string) (string, error) {
-	if req == nil {
-		return "", fmt.Errorf("ssh: prepare request is required")
-	}
+func (r *SSHExecutor) resolveWindowsPrepareScript(req *ExecutorCreateRequest, workspacePath string) (string, error) {
 	script := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeySetupScript))
 	if script == "" || isBuiltinPOSIXSSHPrepareScript(script) {
 		script = defaultWindowsSSHPrepareScript
@@ -165,34 +153,24 @@ func (r *SSHExecutor) resolveWindowsPrepareScript(req *ExecutorCreateRequest, wo
 		}
 		script += "\n" + sshWindowsContributionDestinationScript(workspacePath, &destination)
 	}
-	return r.resolveWindowsSSHScript(req, workspacePath, agentctlBin, script)
+	return r.resolveWindowsSSHScript(req, workspacePath, script)
 }
 
-func (r *SSHExecutor) resolveWindowsSSHScript(req *ExecutorCreateRequest, workspacePath, agentctlBin, script string) (string, error) {
-	if req == nil {
-		return "", fmt.Errorf("ssh: script request is required")
-	}
+func (r *SSHExecutor) resolveWindowsSSHScript(req *ExecutorCreateRequest, workspacePath, script string) (string, error) {
 	cleanWorkspace := cleanWindowsRemotePath(workspacePath)
-	resolver := scriptengine.NewResolver().
-		WithStatic(sshStaticScriptPlaceholders()).
-		WithProvider(windowsWorkspaceProvider(cleanWorkspace)).
-		WithProvider(windowsGitIdentityProvider(req.Metadata)).
-		WithProvider(windowsGitHubAuthProvider(req.Env)).
-		WithProvider(scriptengine.AgentInstallProvider(r.collectAgentInstallScripts(req))).
-		WithProvider(windowsWorktreeProvider(
+	return resolveSSHScriptPlaceholders(script,
+		windowsWorkspaceProvider(cleanWorkspace),
+		windowsGitIdentityProvider(req.Metadata),
+		windowsGitHubAuthProvider(req.Env),
+		scriptengine.AgentInstallProvider(r.collectAgentInstallScripts(req)),
+		windowsWorktreeProvider(
 			cleanWorkspace,
 			getMetadataString(req.Metadata, MetadataKeyWorktreeID),
 			getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
 			getMetadataString(req.Metadata, MetadataKeyBaseBranch),
-		)).
-		WithProvider(windowsRepositoryProvider(req.Metadata))
-
-	resolved := resolver.Resolve(script)
-	if strings.Contains(resolved, "{{") {
-		return "", fmt.Errorf("ssh: unresolved prepare script placeholder")
-	}
-	_ = agentctlBin
-	return strings.TrimSpace(resolved), nil
+		),
+		windowsRepositoryProvider(req.Metadata),
+	)
 }
 
 func windowsWorkspaceProvider(workspacePath string) scriptengine.PlaceholderProvider {
@@ -287,51 +265,13 @@ func windowsGitHubAuthProvider(env map[string]string) scriptengine.PlaceholderPr
 	}
 }
 
-func (r *SSHExecutor) verifyWindowsPrimaryCheckout(ctx context.Context, client *ssh.Client, taskDir string, req *ExecutorCreateRequest, platform SSHRemotePlatform) error {
-	targetURL := getMetadataString(req.Metadata, "repository_clone_url")
-	if targetURL == "" {
-		return nil
-	}
-	shell := sshShellForRemote(req.Metadata, platform)
-	cleanTask := cleanWindowsRemotePath(taskDir)
-	canonCmd := fmt.Sprintf("[Console]::Out.Write((Get-Item -LiteralPath %s -Force).FullName)", powerShellQuote(cleanTask))
-	canonicalTaskDir, taskDirStderr, taskDirErr := runPowerShell(ctx, client, shell, canonCmd, true)
-	if taskDirErr != nil {
-		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(canonicalTaskDir, taskDirStderr, taskDirErr))
-		return fmt.Errorf("ssh: primary repository checkout is missing")
-	}
-	rootCmd := fmt.Sprintf("& git -C %s rev-parse --show-toplevel; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }", powerShellQuote(cleanTask))
-	root, rootStderr, rootErr := runPowerShell(ctx, client, shell, rootCmd, true)
-	if rootErr != nil || !sshRemotePathsEqual(root, canonicalTaskDir, platform) {
-		detail := sshCommandFailureDetail(root, rootStderr, rootErr)
-		if rootErr == nil {
-			detail = fmt.Sprintf("checkout root %q does not match task directory %q", strings.TrimSpace(root), strings.TrimSpace(canonicalTaskDir))
-		}
-		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, detail)
-		return fmt.Errorf("ssh: primary repository checkout is missing")
-	}
-	originCmd := fmt.Sprintf("& git -C %s config --get remote.origin.url; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }", powerShellQuote(cleanTask))
-	origin, originStderr, originErr := runPowerShell(ctx, client, shell, originCmd, true)
-	if originErr != nil || strings.TrimSpace(origin) != targetURL {
-		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(origin, originStderr, originErr))
-		return fmt.Errorf("ssh: primary repository origin does not match configured repository")
-	}
-	headCmd := fmt.Sprintf("& git -C %s rev-parse --verify HEAD; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }", powerShellQuote(cleanTask))
-	if head, headStderr, headErr := runPowerShell(ctx, client, shell, headCmd, true); headErr != nil {
-		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(head, headStderr, headErr))
-		return fmt.Errorf("ssh: primary repository has no checkout")
-	}
-	r.report(req.OnProgress, "Verifying primary checkout", PrepareStepCompleted, strings.TrimSpace(canonicalTaskDir))
-	return nil
-}
-
 func sshWindowsOrphanInventoryScript(resolvedRoot string) string {
 	tasksRoot := joinWindowsRemotePath(resolvedRoot, "tasks")
 	script := fmt.Sprintf(`$root = %s
-$procs = Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue
+$procs = Get-CimInstance -ClassName Win32_Process -Filter "Name = 'agentctl.exe'" -ErrorAction SilentlyContinue
 foreach ($p in $procs) {
   $cmd = [string]$p.CommandLine
-  if ($cmd -and $cmd.ToLowerInvariant().Contains('agentctl')) {
+  if ($cmd) {
     Write-Output ("PROC`+"`t"+`" + $p.ProcessId + "`+"`t"+`" + $p.ParentProcessId + "`+"`t"+`" + $cmd)
   }
 }
@@ -351,51 +291,6 @@ if (Test-Path -LiteralPath $root -PathType Container) {
 	return script
 }
 
-func parseSSHWindowsOrphanInventory(output, resolvedRoot string) sshOrphanInventory {
-	inv := sshOrphanInventory{
-		pidfilesByTask: map[string]map[int]string{},
-		taintedTasks:   map[string]bool{},
-	}
-	tasksRoot := joinWindowsRemotePath(resolvedRoot, "tasks")
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimRight(line, "\r")
-		fields := strings.SplitN(line, "\t", 4)
-		switch fields[0] {
-		case "PROC":
-			parseSSHWindowsOrphanProcLine(&inv, tasksRoot, fields)
-		case "PIDFILE":
-			parseSSHOrphanPidfileLine(&inv, fields)
-		}
-	}
-	return inv
-}
-
-func parseSSHWindowsOrphanProcLine(inv *sshOrphanInventory, tasksRoot string, fields []string) {
-	if len(fields) != 4 {
-		return
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(fields[1]))
-	if err != nil || pid <= 0 {
-		return
-	}
-	ppid, _ := strconv.Atoi(strings.TrimSpace(fields[2]))
-	command := fields[3]
-	if !strings.Contains(strings.ToLower(command), "agentctl") {
-		return
-	}
-	workdir, ok := extractWindowsFlagValue(command, "--workdir")
-	if !ok {
-		return
-	}
-	taskDir, taskID, ok := sshWindowsOrphanTaskIDFromWorkdir(tasksRoot, workdir)
-	if !ok {
-		return
-	}
-	inv.Processes = append(inv.Processes, sshOrphanProcessRecord{
-		PID: pid, PPID: ppid, TaskDir: taskDir, TaskID: taskID,
-	})
-}
-
 func sshWindowsOrphanTaskIDFromWorkdir(tasksRoot, workdir string) (string, string, bool) {
 	cleanRoot := cleanWindowsRemotePath(tasksRoot)
 	cleanWorkdir := cleanWindowsRemotePath(workdir)
@@ -408,20 +303,4 @@ func sshWindowsOrphanTaskIDFromWorkdir(tasksRoot, workdir string) (string, strin
 		return "", "", false
 	}
 	return "task-" + id, id, true
-}
-
-func stopSSHWindowsOrphanProcess(
-	ctx context.Context,
-	client *ssh.Client,
-	resolvedRoot string,
-	proc sshOrphanProcessRecord,
-	pidfileAttributed bool,
-	sessionID string,
-) error {
-	taskDirPath := joinWindowsRemotePath(resolvedRoot, "tasks", proc.TaskDir)
-	var sessionDir string
-	if pidfileAttributed && sessionID != "" {
-		sessionDir = joinWindowsRemotePath(taskDirPath, ".kandev", "sessions", sessionID)
-	}
-	return runWindowsStopScript(ctx, client, remoteWindowsOrphanStopScript(proc.PID, taskDirPath, sessionDir))
 }

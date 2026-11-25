@@ -43,13 +43,13 @@ func materializeSSHSkillManifest(
 	if workspace == nil {
 		return fmt.Errorf("SSH skill workspace is required")
 	}
-	trimmedTaskDir := strings.TrimSpace(taskDir)
-	if trimmedTaskDir == "" || !isRemoteAbsPath(trimmedTaskDir) {
+	// A Windows task directory, including a UNC share, stays in Windows form;
+	// the uploader converts it to an SFTP path at the boundary.
+	taskRoot := strings.TrimSpace(taskDir)
+	if isWindowsRemotePath(taskRoot) {
+		taskRoot = cleanWindowsRemotePath(taskRoot)
+	} else if taskRoot = path.Clean(taskRoot); taskRoot == "." || !path.IsAbs(taskRoot) {
 		return fmt.Errorf("SSH task directory must be absolute")
-	}
-	taskRoot, join, err := sshSkillTaskRoot(trimmedTaskDir)
-	if err != nil {
-		return err
 	}
 	var manifest skill.Manifest
 	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
@@ -63,38 +63,18 @@ func materializeSSHSkillManifest(
 	if !ok {
 		return fmt.Errorf("SSH skill manifest project directory is unsafe")
 	}
-	projectRoot := join(taskRoot, projectDir)
-	decisionRoot := join(projectRoot, skill.DirName(skill.ReservedDecisionSkillSlug))
+	projectRoot := joinRemotePath(taskRoot, projectDir)
+	decisionRoot := joinRemotePath(projectRoot, skill.DirName(skill.ReservedDecisionSkillSlug))
 	if err := workspace.RemoveAll(ctx, decisionRoot); err != nil {
 		return fmt.Errorf("remove stale SSH decision skill: %w", err)
 	}
-	return materializeSSHManifestSkills(ctx, workspace, projectRoot, join, manifest.Skills)
-}
-
-type sshSkillPathJoin func(base string, elems ...string) string
-
-func posixSkillPathJoin(base string, elems ...string) string {
-	return path.Join(append([]string{base}, elems...)...)
-}
-
-// sshSkillTaskRoot keeps a Windows task directory, including a UNC share, in
-// Windows form; the uploader converts it to an SFTP path at the boundary.
-func sshSkillTaskRoot(taskDir string) (string, sshSkillPathJoin, error) {
-	if isWindowsRemotePath(taskDir) {
-		return cleanWindowsRemotePath(taskDir), joinWindowsRemotePath, nil
-	}
-	taskRoot := path.Clean(taskDir)
-	if taskRoot == "." || !path.IsAbs(taskRoot) {
-		return "", nil, fmt.Errorf("SSH task directory must be absolute")
-	}
-	return taskRoot, posixSkillPathJoin, nil
+	return materializeSSHManifestSkills(ctx, workspace, projectRoot, manifest.Skills)
 }
 
 func materializeSSHManifestSkills(
 	ctx context.Context,
 	workspace sshSkillWorkspace,
 	projectRoot string,
-	join sshSkillPathJoin,
 	skills []skill.Skill,
 ) error {
 	claimed := make(map[string]string, len(skills))
@@ -107,7 +87,7 @@ func materializeSSHManifestSkills(
 			continue
 		}
 		claimed[dirName] = item.Slug
-		if err := writeSSHManifestSkill(ctx, workspace, projectRoot, join, item); err != nil {
+		if err := writeSSHManifestSkill(ctx, workspace, projectRoot, item); err != nil {
 			return err
 		}
 	}
@@ -118,11 +98,10 @@ func writeSSHManifestSkill(
 	ctx context.Context,
 	workspace sshSkillWorkspace,
 	projectRoot string,
-	join sshSkillPathJoin,
 	item skill.Skill,
 ) error {
-	root := join(projectRoot, skill.DirName(item.Slug))
-	if err := workspace.WriteFile(ctx, join(root, "SKILL.md"), []byte(item.Content), 0o644); err != nil {
+	root := joinRemotePath(projectRoot, skill.DirName(item.Slug))
+	if err := workspace.WriteFile(ctx, joinRemotePath(root, "SKILL.md"), []byte(item.Content), 0o644); err != nil {
 		return fmt.Errorf("write SSH skill %q: %w", item.Slug, err)
 	}
 	for _, support := range item.Files {
@@ -130,7 +109,7 @@ func writeSSHManifestSkill(
 		if !safe || relative == "SKILL.md" {
 			continue
 		}
-		if err := workspace.WriteFile(ctx, join(root, relative), []byte(support.Content), 0o644); err != nil {
+		if err := workspace.WriteFile(ctx, joinRemotePath(root, relative), []byte(support.Content), 0o644); err != nil {
 			return fmt.Errorf("write SSH skill support file %q: %w", support.Path, err)
 		}
 	}

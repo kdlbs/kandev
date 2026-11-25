@@ -121,20 +121,6 @@ func runPowerShellEnvelope(ctx context.Context, client *ssh.Client, shell string
 	return runSSHCommandStdin(ctx, client, cmd.line, strings.NewReader(cmd.stdin))
 }
 
-func runPowerShellEnvelopeBounded(
-	ctx context.Context,
-	client *ssh.Client,
-	shell string,
-	envelope powerShellEnvelope,
-	maxStdout int,
-) (string, string, bool, error) {
-	cmd, err := newPowerShellCommand(shell, envelope)
-	if err != nil {
-		return "", "", false, err
-	}
-	return runSSHCommandStdinBounded(ctx, client, cmd.line, strings.NewReader(cmd.stdin), maxStdout)
-}
-
 // powerShellSingleQuoteEscaper doubles every character PowerShell accepts as a
 // single quote, matching CodeGeneration.EscapeSingleQuotedStringContent.
 var powerShellSingleQuoteEscaper = strings.NewReplacer(

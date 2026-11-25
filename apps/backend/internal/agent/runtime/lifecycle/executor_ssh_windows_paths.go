@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"path"
 	"strings"
 )
 
@@ -58,11 +59,6 @@ func isWindowsUNCPath(p string) bool {
 	return next != '\\' && next != '/'
 }
 
-func isRemoteAbsPath(p string) bool {
-	trimmed := strings.TrimSpace(p)
-	return strings.HasPrefix(trimmed, "/") || isWindowsRemotePath(trimmed)
-}
-
 // cleanWindowsRemotePath normalizes a Windows drive or UNC path independently
 // of the control-plane OS. Drive letters are uppercased, separators become `\`,
 // and `.`/`..` segments are resolved without crossing the volume root.
@@ -80,13 +76,10 @@ func cleanWindowsRemotePath(p string) string {
 		return cleanWindowsRelativeSegments(replaced)
 	}
 	segments := resolveWindowsSegments(rest, true)
-	if strings.HasPrefix(prefix, `\\`) {
-		if len(segments) == 0 {
+	if len(segments) == 0 {
+		if strings.HasPrefix(prefix, `\\`) {
 			return prefix
 		}
-		return prefix + `\` + strings.Join(segments, `\`)
-	}
-	if len(segments) == 0 {
 		return prefix + `\`
 	}
 	return prefix + `\` + strings.Join(segments, `\`)
@@ -159,43 +152,12 @@ func joinWindowsRemotePath(base string, elems ...string) string {
 	return cleanWindowsRemotePath(strings.Join(all, `\`))
 }
 
-func joinRemotePath(platform SSHRemotePlatform, base string, elems ...string) string {
-	if isWindowsRemotePlatform(platform) || isWindowsRemotePath(base) {
+// joinRemotePath joins elems onto base in the path syntax of base.
+func joinRemotePath(base string, elems ...string) string {
+	if isWindowsRemotePath(base) {
 		return joinWindowsRemotePath(base, elems...)
 	}
-	out := strings.TrimRight(base, "/")
-	for _, elem := range elems {
-		trimmed := strings.Trim(elem, "/")
-		if trimmed == "" {
-			continue
-		}
-		if out == "" {
-			out = trimmed
-		} else {
-			out += "/" + trimmed
-		}
-	}
-	if out == "" && strings.HasPrefix(base, "/") {
-		return "/"
-	}
-	return out
-}
-
-func parentWindowsRemotePath(p string) string {
-	cleaned := cleanWindowsRemotePath(p)
-	prefix, rest := splitWindowsVolumePrefix(cleaned)
-	if prefix != "" && rest == "" {
-		return cleaned
-	}
-	idx := strings.LastIndexByte(cleaned, '\\')
-	if idx < 0 {
-		return ""
-	}
-	parent := cleaned[:idx]
-	if len(parent) == 2 && isASCIIAlpha(parent[0]) && parent[1] == ':' {
-		return parent + `\`
-	}
-	return parent
+	return path.Join(append([]string{base}, elems...)...)
 }
 
 // toSFTPPath converts a Windows remote path into the POSIX-rooted slash form
@@ -270,18 +232,9 @@ func sshRemotePathsEqual(left, right string, platform SSHRemotePlatform) bool {
 	return normLeft == normRight
 }
 
-// quoteWindowsArg quotes a single argument for Win32 CommandLineToArgvW,
-// leaving an argument without whitespace or quotes bare.
-func quoteWindowsArg(arg string) string {
-	if arg != "" && !strings.ContainsAny(arg, " \t\n\v\"") {
-		return arg
-	}
-	return quoteWindowsArgAlways(arg)
-}
-
-// quoteWindowsArgAlways quotes arg for CommandLineToArgvW even when it has no
+// quoteWindowsArg quotes arg for CommandLineToArgvW even when it has no
 // whitespace, which keeps cmd.exe metacharacters such as & literal.
-func quoteWindowsArgAlways(arg string) string {
+func quoteWindowsArg(arg string) string {
 	var b strings.Builder
 	b.WriteByte('"')
 	backslashes := 0

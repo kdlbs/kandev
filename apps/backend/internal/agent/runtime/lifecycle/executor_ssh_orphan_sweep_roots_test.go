@@ -90,6 +90,7 @@ func TestSSHOrphanWorkdirRoots(t *testing.T) {
 type orphanSweepRootTestStore struct {
 	profiles []*models.ExecutorProfile
 	task     *models.Task
+	sessions []*models.TaskSession
 }
 
 func (s *orphanSweepRootTestStore) GetTask(context.Context, string) (*models.Task, error) {
@@ -97,7 +98,7 @@ func (s *orphanSweepRootTestStore) GetTask(context.Context, string) (*models.Tas
 }
 
 func (s *orphanSweepRootTestStore) ListTaskSessions(context.Context, string) ([]*models.TaskSession, error) {
-	return nil, nil
+	return s.sessions, nil
 }
 
 func (s *orphanSweepRootTestStore) ListExecutorsRunningByTaskID(context.Context, string) ([]*models.ExecutorRunning, error) {

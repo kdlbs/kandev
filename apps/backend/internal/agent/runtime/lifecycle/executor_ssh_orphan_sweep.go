@@ -188,10 +188,9 @@ func sweepSSHExecutorOrphansUnderRoot(
 	log *logger.Logger,
 	acquireTaskFence func(taskID string) func(),
 ) error {
-	windowsRoot := isWindowsRemotePath(resolvedRoot)
 	var stdout string
 	var err error
-	if windowsRoot {
+	if isWindowsRemotePath(resolvedRoot) {
 		stdout, _, err = runPowerShell(ctx, client, defaultWindowsLoginShell, sshWindowsOrphanInventoryScript(resolvedRoot), false)
 	} else {
 		stdout, _, err = runSSHCommand(ctx, client, sshOrphanInventoryCommand(resolvedRoot))
@@ -199,12 +198,7 @@ func sweepSSHExecutorOrphansUnderRoot(
 	if err != nil {
 		return fmt.Errorf("ssh orphan sweep: inventory: %w", err)
 	}
-	var inventory sshOrphanInventory
-	if windowsRoot {
-		inventory = parseSSHWindowsOrphanInventory(stdout, resolvedRoot)
-	} else {
-		inventory = parseSSHOrphanInventory(stdout, resolvedRoot)
-	}
+	inventory := parseSSHOrphanInventory(stdout, resolvedRoot)
 	report.Found += len(inventory.Processes)
 
 	for _, proc := range inventory.Processes {
@@ -271,12 +265,6 @@ func recheckAndStopSSHOrphanProcess(
 	}
 	freshDecision := decideSSHOrphanProcess(proc.PID, sessionID, claimed, tainted, freshTaskCtx)
 	if freshDecision.Verdict == sshOrphanPreserve {
-		return freshDecision, nil
-	}
-	if isWindowsRemotePath(resolvedRoot) {
-		if err := stopSSHWindowsOrphanProcess(ctx, client, resolvedRoot, proc, claimed, sessionID); err != nil {
-			return freshDecision, fmt.Errorf("stop remote process: %w", err)
-		}
 		return freshDecision, nil
 	}
 	if err := stopSSHOrphanProcess(ctx, client, resolvedRoot, proc, claimed, sessionID); err != nil {
@@ -497,12 +485,12 @@ func parseSSHOrphanInventory(output, resolvedRoot string) sshOrphanInventory {
 		pidfilesByTask: map[string]map[int]string{},
 		taintedTasks:   map[string]bool{},
 	}
-	root := strings.TrimSuffix(resolvedRoot, "/") + "/tasks"
+	taskOf := sshOrphanTaskResolver(resolvedRoot)
 	for _, line := range strings.Split(output, "\n") {
-		fields := strings.SplitN(line, "\t", 4)
+		fields := strings.SplitN(strings.TrimRight(line, "\r"), "\t", 4)
 		switch fields[0] {
 		case "PROC":
-			parseSSHOrphanProcLine(&inv, root, fields)
+			parseSSHOrphanProcLine(&inv, taskOf, fields)
 		case "PIDFILE":
 			parseSSHOrphanPidfileLine(&inv, fields)
 		}
@@ -510,7 +498,30 @@ func parseSSHOrphanInventory(output, resolvedRoot string) sshOrphanInventory {
 	return inv
 }
 
-func parseSSHOrphanProcLine(inv *sshOrphanInventory, root string, fields []string) {
+// sshOrphanTaskResolver maps an agentctl command line to the task directory
+// name and task ID its --workdir names under resolvedRoot/tasks.
+func sshOrphanTaskResolver(resolvedRoot string) func(command string) (string, string, bool) {
+	if isWindowsRemotePath(resolvedRoot) {
+		tasksRoot := joinWindowsRemotePath(resolvedRoot, "tasks")
+		return func(command string) (string, string, bool) {
+			workdir, ok := windowsAgentctlWorkdir(command)
+			if !ok {
+				return "", "", false
+			}
+			return sshWindowsOrphanTaskIDFromWorkdir(tasksRoot, workdir)
+		}
+	}
+	root := strings.TrimSuffix(resolvedRoot, "/") + "/tasks"
+	return func(command string) (string, string, bool) {
+		workdir, ok := remoteCommandLineFlagValue(command, "--workdir")
+		if !ok {
+			return "", "", false
+		}
+		return sshOrphanTaskIDFromWorkdir(root, workdir)
+	}
+}
+
+func parseSSHOrphanProcLine(inv *sshOrphanInventory, taskOf func(string) (string, string, bool), fields []string) {
 	if len(fields) != 4 {
 		return
 	}
@@ -526,11 +537,7 @@ func parseSSHOrphanProcLine(inv *sshOrphanInventory, root string, fields []strin
 	if !strings.Contains(command, "agentctl") {
 		return
 	}
-	workdir, ok := remoteCommandLineFlagValue(command, "--workdir")
-	if !ok {
-		return
-	}
-	taskDir, taskID, ok := sshOrphanTaskIDFromWorkdir(root, workdir)
+	taskDir, taskID, ok := taskOf(command)
 	if !ok {
 		return
 	}
@@ -615,6 +622,14 @@ func stopSSHOrphanProcess(
 	pidfileAttributed bool,
 	sessionID string,
 ) error {
+	if isWindowsRemotePath(resolvedRoot) {
+		taskDirPath := joinWindowsRemotePath(resolvedRoot, "tasks", proc.TaskDir)
+		var sessionDir string
+		if pidfileAttributed && sessionID != "" {
+			sessionDir = joinWindowsRemotePath(taskDirPath, ".kandev", "sessions", sessionID)
+		}
+		return runWindowsStopScript(ctx, client, remoteWindowsOrphanStopScript(proc.PID, taskDirPath, sessionDir))
+	}
 	taskDirPath := strings.TrimSuffix(resolvedRoot, "/") + "/tasks/" + proc.TaskDir
 	var sessionDir string
 	if pidfileAttributed && sessionID != "" {

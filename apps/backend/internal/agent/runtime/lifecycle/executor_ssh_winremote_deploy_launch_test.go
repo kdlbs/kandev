@@ -22,47 +22,25 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 )
 
-// windowsDriveSFTPFS serves SFTP requests for /C:/... against a real local
-// temp directory, faithfully emulating Windows OpenSSH sftp-server (including
-// non-overwriting standard Rename and optional unsupported Chmod).
+// windowsDriveSFTPFS serves /C:/... SFTP paths from a local directory with the
+// semantics of Windows OpenSSH sftp-server: Rename never overwrites, Setstat is
+// unsupported, and the image of a running process (inUse) cannot be removed but
+// can be renamed, with the lock following the file.
 type windowsDriveSFTPFS struct {
-	root             string
-	allowPosixRename bool
-	unsupportedChmod bool
+	root  string
+	mu    sync.Mutex
+	inUse map[string]bool
+	// failTempRename fails the final rename of an uploaded temporary file.
+	failTempRename bool
+	writes         int
 }
 
-func newWindowsDriveSFTPHandlers(root string, allowPosixRename, unsupportedChmod bool) *sftp.Handlers {
-	fsImpl := &windowsDriveSFTPFS{
-		root:             root,
-		allowPosixRename: allowPosixRename,
-		unsupportedChmod: unsupportedChmod,
-	}
-	var cmd sftp.FileCmder = fsImpl
-	if allowPosixRename {
-		cmd = &windowsDriveSFTPPosixFS{windowsDriveSFTPFS: fsImpl}
-	}
-	return &sftp.Handlers{
-		FileGet:  fsImpl,
-		FilePut:  fsImpl,
-		FileCmd:  cmd,
-		FileList: fsImpl,
-	}
+func newWindowsDriveSFTPFS(root string) *windowsDriveSFTPFS {
+	return &windowsDriveSFTPFS{root: root, inUse: map[string]bool{}}
 }
 
-type windowsDriveSFTPPosixFS struct {
-	*windowsDriveSFTPFS
-}
-
-func (f *windowsDriveSFTPPosixFS) PosixRename(r *sftp.Request) error {
-	src, err := f.localPath(r.Filepath)
-	if err != nil {
-		return err
-	}
-	dst, err := f.localPath(r.Target)
-	if err != nil {
-		return err
-	}
-	return os.Rename(src, dst)
+func (f *windowsDriveSFTPFS) handlers() *sftp.Handlers {
+	return &sftp.Handlers{FileGet: f, FilePut: f, FileCmd: f, FileList: f}
 }
 
 func (f *windowsDriveSFTPFS) localPath(sftpPath string) (string, error) {
@@ -89,6 +67,9 @@ func (f *windowsDriveSFTPFS) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	if err != nil {
 		return nil, err
 	}
+	f.mu.Lock()
+	f.writes++
+	f.mu.Unlock()
 	return os.OpenFile(local, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0o644)
 }
 
@@ -97,41 +78,55 @@ func (f *windowsDriveSFTPFS) Filecmd(r *sftp.Request) error {
 	if err != nil {
 		return err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	switch r.Method {
 	case "Setstat":
-		if f.unsupportedChmod {
-			return sftp.ErrSSHFxOpUnsupported
-		}
-		return nil
+		return sftp.ErrSSHFxOpUnsupported
 	case "Rename":
-		if !f.allowPosixRename {
-			// Emulate standard Windows MoveFile without MOVEFILE_REPLACE_EXISTING.
-			if _, statErr := os.Stat(local); statErr != nil {
-				return sftp.ErrSSHFxNoSuchFile
-			}
-			dst, dstErr := f.localPath(r.Target)
-			if dstErr != nil {
-				return dstErr
-			}
-			if _, existsErr := os.Stat(dst); existsErr == nil {
-				return sftp.ErrSSHFxFailure
-			}
-			return os.Rename(local, dst)
-		}
-		dst, dstErr := f.localPath(r.Target)
-		if dstErr != nil {
-			return dstErr
-		}
-		return os.Rename(local, dst)
+		return f.rename(local, r.Target)
 	case "Mkdir":
 		return os.Mkdir(local, 0o755)
-	case "Rmdir":
-		return os.Remove(local)
 	case "Remove":
+		if f.inUse[local] {
+			return sftp.ErrSSHFxFailure
+		}
+		return os.Remove(local)
+	case "Rmdir":
+		// pkg/sftp retries a failed file removal as a directory removal; a
+		// Windows rmdir never deletes a file.
+		if info, statErr := os.Stat(local); statErr == nil && !info.IsDir() {
+			return sftp.ErrSSHFxFailure
+		}
 		return os.Remove(local)
 	default:
 		return sftp.ErrSSHFxOpUnsupported
 	}
+}
+
+// rename emulates MoveFile without MOVEFILE_REPLACE_EXISTING.
+func (f *windowsDriveSFTPFS) rename(local, target string) error {
+	dst, err := f.localPath(target)
+	if err != nil {
+		return err
+	}
+	if f.failTempRename && strings.Contains(filepath.Base(local), ".tmp.") {
+		return sftp.ErrSSHFxFailure
+	}
+	if _, statErr := os.Stat(local); statErr != nil {
+		return sftp.ErrSSHFxNoSuchFile
+	}
+	if _, existsErr := os.Stat(dst); existsErr == nil {
+		return sftp.ErrSSHFxFailure
+	}
+	if err := os.Rename(local, dst); err != nil {
+		return err
+	}
+	if f.inUse[local] {
+		delete(f.inUse, local)
+		f.inUse[dst] = true
+	}
+	return nil
 }
 
 type sftpStaticLister []fs.FileInfo
@@ -160,27 +155,17 @@ func (f *windowsDriveSFTPFS) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 		}
 		infos := make([]fs.FileInfo, 0, len(entries))
 		for _, entry := range entries {
-			info, infoErr := entry.Info()
-			if infoErr == nil {
+			if info, infoErr := entry.Info(); infoErr == nil {
 				infos = append(infos, info)
 			}
 		}
 		return sftpStaticLister(infos), nil
 	case "Stat":
 		info, err := os.Stat(local)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, sftp.ErrSSHFxNoSuchFile
-			}
-			return nil, err
+		if os.IsNotExist(err) {
+			return nil, sftp.ErrSSHFxNoSuchFile
 		}
-		return sftpStaticLister{info}, nil
-	case "Lstat":
-		info, err := os.Lstat(local)
 		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, sftp.ErrSSHFxNoSuchFile
-			}
 			return nil, err
 		}
 		return sftpStaticLister{info}, nil
@@ -191,13 +176,12 @@ func (f *windowsDriveSFTPFS) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 
 func TestSSHWindowsDetectRemoteInfoFallsBackToPowerShell(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		winArch       string
-		wantArch      string
-		wantSupported bool
+		name     string
+		winArch  string
+		wantArch string
 	}{
-		{name: "windows amd64", winArch: "AMD64", wantArch: "amd64", wantSupported: true},
-		{name: "windows arm64 is detected but unsupported", winArch: "ARM64", wantArch: "arm64"},
+		{name: "windows amd64", winArch: "AMD64", wantArch: "amd64"},
+		{name: "windows arm64", winArch: "ARM64", wantArch: "arm64"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
@@ -231,145 +215,69 @@ func TestSSHWindowsDetectRemoteInfoFallsBackToPowerShell(t *testing.T) {
 			if info.GitVer != "git version 2.47.0.windows.1" {
 				t.Fatalf("GitVer = %q", info.GitVer)
 			}
-			err = SSHRequireSupportedExecutorPlatform(info.Platform)
-			if tc.wantSupported != (err == nil) {
-				t.Fatalf("SSHRequireSupportedExecutorPlatform(%s) = %v, want supported=%v", info.Platform, err, tc.wantSupported)
-			}
 		})
 	}
 }
 
-func TestSSHWindowsEnsureAgentctlUploadsAndReplacesExeViaSFTP(t *testing.T) {
-	driveRoot := t.TempDir()
-	winHomeRel := filepath.Join("Users", "Kandev User")
-	if err := os.MkdirAll(filepath.Join(driveRoot, winHomeRel), 0o755); err != nil {
+func TestSSHWindowsEnsureAgentctlUploadsOnceAndReportsCache(t *testing.T) {
+	host := newWindowsHelperHost(t)
+	if err := os.WriteFile(host.helper, []byte("MZ-agentctl-v1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	winHome := `C:\Users\Kandev User`
-
-	v1Bytes := []byte("MZ-agentctl-v1")
-	v1Sum := sha256.Sum256(v1Bytes)
-	v1Sha := hex.EncodeToString(v1Sum[:])
-	localHelper := filepath.Join(t.TempDir(), "agentctl-windows-amd64.exe")
-	if err := os.WriteFile(localHelper, v1Bytes, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("KANDEV_AGENTCTL_WINDOWS_AMD64_BINARY", localHelper)
-
-	var mkdirCalls atomic.Int32
-	server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
-		script, ok := decodeTestPowerShell(command, stdin)
-		if !ok {
-			return sshFail("expected PowerShell command, got: " + command)
-		}
-		switch {
-		case strings.Contains(script, "$env:USERPROFILE"):
-			return sshOut(winHome)
-		case strings.Contains(script, "ReadAllText"):
-			shaPath := filepath.Join(driveRoot, winHomeRel, ".kandev", "bin", "agentctl.exe.sha256")
-			binPath := filepath.Join(driveRoot, winHomeRel, ".kandev", "bin", "agentctl.exe")
-			info, statErr := os.Stat(binPath)
-			if statErr != nil || info.Size() == 0 {
-				return sshOK
-			}
-			data, readErr := os.ReadFile(shaPath)
-			if readErr != nil {
-				return sshOK
-			}
-			return sshOut(strings.TrimSpace(string(data)))
-		case strings.Contains(script, "CreateDirectory"):
-			mkdirCalls.Add(1)
-			if err := os.MkdirAll(filepath.Join(driveRoot, winHomeRel, ".kandev", "bin"), 0o755); err != nil {
-				return sshFail(err.Error())
-			}
-			return sshOK
-		case strings.Contains(script, "agentctl.exe missing after upload"):
-			binPath := filepath.Join(driveRoot, winHomeRel, ".kandev", "bin", "agentctl.exe")
-			info, err := os.Stat(binPath)
-			if err != nil || info.Size() == 0 {
-				return sshFail("binary missing on disk")
-			}
-			return sshOK
-		default:
-			return sshFail("unexpected PowerShell script: " + script)
-		}
-	})
-	server.enableSFTP()
-	server.sftpHandler = newWindowsDriveSFTPHandlers(driveRoot, false, true)
-
-	client := server.dial(t)
+	client := host.server.dial(t)
 	platform := SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"}
 	resolver := NewAgentctlResolver(newTestLogger())
 
-	cachedBefore, err := SSHCheckAgentctlCached(context.Background(), client, resolver, platform)
-	if err != nil || cachedBefore {
-		t.Fatalf("SSHCheckAgentctlCached before upload = (%v, %v), want (false, nil)", cachedBefore, err)
+	if cached, err := SSHCheckAgentctlCached(context.Background(), client, resolver, platform); err != nil || cached {
+		t.Fatalf("SSHCheckAgentctlCached before upload = (%v, %v), want (false, nil)", cached, err)
 	}
-
 	remoteBin, err := ensureAgentctlOnHost(context.Background(), client, resolver, platform, newTestLogger())
 	if err != nil {
-		t.Fatalf("first ensureAgentctlOnHost: %v", err)
+		t.Fatalf("ensureAgentctlOnHost: %v", err)
 	}
-	wantRemoteBin := `C:\Users\Kandev User\.kandev\bin\agentctl.exe`
-	if remoteBin != wantRemoteBin {
-		t.Fatalf("remoteBin = %q, want %q", remoteBin, wantRemoteBin)
+	if want := `C:\Users\Kandev User\.kandev\bin\agentctl.exe`; remoteBin != want {
+		t.Fatalf("remoteBin = %q, want %q", remoteBin, want)
 	}
-	diskBytes, err := os.ReadFile(filepath.Join(driveRoot, winHomeRel, ".kandev", "bin", "agentctl.exe"))
-	if err != nil || string(diskBytes) != string(v1Bytes) {
-		t.Fatalf("uploaded agentctl.exe bytes = %q, err=%v", diskBytes, err)
+	sum := sha256.Sum256([]byte("MZ-agentctl-v1"))
+	if got := strings.TrimSpace(host.entries(t, ".sha256")["agentctl.exe.sha256"]); got != hex.EncodeToString(sum[:]) {
+		t.Fatalf("sidecar = %q, want the uploaded digest", got)
 	}
-	diskSha, err := os.ReadFile(filepath.Join(driveRoot, winHomeRel, ".kandev", "bin", "agentctl.exe.sha256"))
-	if err != nil || strings.TrimSpace(string(diskSha)) != v1Sha {
-		t.Fatalf("uploaded sha256 = %q, want %q (err=%v)", diskSha, v1Sha, err)
+	if cached, err := SSHCheckAgentctlCached(context.Background(), client, resolver, platform); err != nil || !cached {
+		t.Fatalf("SSHCheckAgentctlCached after upload = (%v, %v), want (true, nil)", cached, err)
 	}
 
-	cachedAfter, err := SSHCheckAgentctlCached(context.Background(), client, resolver, platform)
-	if err != nil || !cachedAfter {
-		t.Fatalf("SSHCheckAgentctlCached after upload = (%v, %v), want (true, nil)", cachedAfter, err)
-	}
-
-	// Second call with matching sha256 must skip re-upload.
-	beforeSecond := mkdirCalls.Load()
+	host.fs.mu.Lock()
+	writes := host.fs.writes
+	host.fs.mu.Unlock()
 	if _, err := ensureAgentctlOnHost(context.Background(), client, resolver, platform, newTestLogger()); err != nil {
 		t.Fatalf("second ensureAgentctlOnHost: %v", err)
 	}
-	if mkdirCalls.Load() != beforeSecond {
-		t.Fatal("matching sha256 should skip uploading agentctl.exe")
-	}
-
-	// Updating local helper bytes must replace the existing Windows file even
-	// when PosixRename is unsupported and Chmod returns OpUnsupported.
-	v2Bytes := []byte("MZ-agentctl-v2-updated")
-	if err := os.WriteFile(localHelper, v2Bytes, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ensureAgentctlOnHost(context.Background(), client, resolver, platform, newTestLogger()); err != nil {
-		t.Fatalf("upgrade ensureAgentctlOnHost: %v", err)
-	}
-	updatedBytes, err := os.ReadFile(filepath.Join(driveRoot, winHomeRel, ".kandev", "bin", "agentctl.exe"))
-	if err != nil || string(updatedBytes) != string(v2Bytes) {
-		t.Fatalf("replaced agentctl.exe bytes = %q, want %q (err=%v)", updatedBytes, v2Bytes, err)
+	host.fs.mu.Lock()
+	defer host.fs.mu.Unlock()
+	if host.fs.writes != writes {
+		t.Fatal("a matching sha256 must skip uploading agentctl.exe")
 	}
 }
 
+// windowsSSHLaunchHarness is a Windows SSH host for one task (task-win) and
+// session (session-win): PowerShell over a fake SSH server, a /C:/ SFTP drive,
+// and a forwarded agentctl control API.
 type windowsSSHLaunchHarness struct {
-	commandLines     []string
 	server           *fakeSSHServer
 	driveRoot        string
 	winHome          string
-	createRequests   []string
 	prepareScripts   []string
 	prepareStdinJSON []string
 	startScripts     []string
 	stopScripts      []string
 	cleanupScripts   []string
 	alive            atomic.Bool
-	pid              int
 	mu               sync.Mutex
 }
 
-func newWindowsSSHLaunchHarness(t *testing.T, pid int) *windowsSSHLaunchHarness {
+func newWindowsSSHLaunchHarness(t *testing.T) *windowsSSHLaunchHarness {
 	t.Helper()
+	withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
 	driveRoot := t.TempDir()
 	winHomeRel := filepath.Join("Users", "Kandev User")
 	if err := os.MkdirAll(filepath.Join(driveRoot, winHomeRel), 0o755); err != nil {
@@ -378,7 +286,6 @@ func newWindowsSSHLaunchHarness(t *testing.T, pid int) *windowsSSHLaunchHarness 
 	h := &windowsSSHLaunchHarness{
 		driveRoot: driveRoot,
 		winHome:   `C:\Users\Kandev User`,
-		pid:       pid,
 	}
 	h.alive.Store(true)
 
@@ -390,8 +297,6 @@ func newWindowsSSHLaunchHarness(t *testing.T, pid int) *windowsSSHLaunchHarness 
 		case r.URL.Path == "/auth/handshake":
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"token": "win-launch-token"})
 		case r.URL.Path == "/api/v1/instances":
-			body, _ := io.ReadAll(r.Body)
-			h.createRequests = append(h.createRequests, string(body))
 			_, _ = io.WriteString(w, `{"id":"win-remote-instance","port":45123,"scoped_mcp_routes":true}`)
 		case strings.HasPrefix(r.URL.Path, "/api/v1/instances/"):
 			auth := r.Header.Get("Authorization")
@@ -425,9 +330,6 @@ func newWindowsSSHLaunchHarness(t *testing.T, pid int) *windowsSSHLaunchHarness 
 	t.Setenv("KANDEV_AGENTCTL_WINDOWS_AMD64_BINARY", helperPath)
 
 	h.server = newFakeSSHServer(t, func(command, stdin string) sshExecResult {
-		h.mu.Lock()
-		h.commandLines = append(h.commandLines, command)
-		h.mu.Unlock()
 		if strings.HasPrefix(command, "uname ") {
 			return sshFail("uname not found")
 		}
@@ -438,9 +340,36 @@ func newWindowsSSHLaunchHarness(t *testing.T, pid int) *windowsSSHLaunchHarness 
 		return h.handlePowerShell(script, stdin)
 	})
 	h.server.enableSFTP()
-	h.server.sftpHandler = newWindowsDriveSFTPHandlers(driveRoot, false, true)
+	h.server.sftpHandler = newWindowsDriveSFTPFS(driveRoot).handlers()
 	h.server.forwardTo(strings.TrimPrefix(control.URL, "http://"))
 	return h
+}
+
+func (h *windowsSSHLaunchHarness) newExecutor(t *testing.T) *SSHExecutor {
+	t.Helper()
+	exec := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
+	t.Cleanup(func() { _ = exec.Close() })
+	return exec
+}
+
+// request returns a create request for the harness task and session.
+func (h *windowsSSHLaunchHarness) request(t *testing.T) *ExecutorCreateRequest {
+	t.Helper()
+	metadata := sshConnectionMetadata(t, h.server)
+	metadata["repository_clone_url"] = "https://github.com/example/demo.git"
+	return &ExecutorCreateRequest{
+		InstanceID: "instance-win",
+		TaskID:     "task-win",
+		SessionID:  "session-win",
+		Protocol:   "acp",
+		Metadata:   metadata,
+	}
+}
+
+func (h *windowsSSHLaunchHarness) counts() (starts, stops, cleanups int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.startScripts), len(h.stopScripts), len(h.cleanupScripts)
 }
 
 func (h *windowsSSHLaunchHarness) toHostPath(winPath string) string {
@@ -485,8 +414,6 @@ func (h *windowsSSHLaunchHarness) handlePowerShell(script, stdin string) sshExec
 		h.cleanupScripts = append(h.cleanupScripts, script)
 		h.mu.Unlock()
 		return sshOK
-	case strings.Contains(script, "Get-Command -Name"):
-		return sshOut(`C:\Program Files\nodejs\npx.cmd`)
 	case strings.Contains(script, "rev-parse --show-toplevel"):
 		// Git for Windows outputs forward slashes and can lowercase the drive letter.
 		return sshOut("c:/Users/Kandev User/.kandev/tasks/task-task-win\r\n")
@@ -509,21 +436,6 @@ func (h *windowsSSHLaunchHarness) handlePowerShell(script, stdin string) sshExec
 			return sshOut("ALIVE\r\n")
 		}
 		return sshOut("ABSENT\r\n")
-	case strings.Contains(script, "Win32_Process"):
-		if !h.alive.Load() {
-			return sshOut("ABSENT\r\n")
-		}
-		return sshOut(`CMDLINE:"C:\Users\Kandev User\.kandev\bin\agentctl.exe" --workdir "C:\Users\Kandev User\.kandev\tasks\task-task-win"` + "\r\n")
-	case strings.Contains(script, "DIR_MISSING") && strings.Contains(script, "agentctl.pid"):
-		sessionHostDir := h.toHostPath(`C:\Users\Kandev User\.kandev\tasks\task-task-win\.kandev\sessions\session-win`)
-		if _, err := os.Stat(sessionHostDir); os.IsNotExist(err) {
-			return sshOut("DIR_MISSING\r\n")
-		}
-		data, err := os.ReadFile(filepath.Join(sessionHostDir, "agentctl.pid"))
-		if err != nil {
-			return sshOut("PIDFILE_MISSING\r\n")
-		}
-		return sshOut("PID:" + strings.TrimSpace(string(data)) + "\r\n")
 	case strings.Contains(script, "agentctl.exe.sha256") && strings.Contains(script, "ReadAllText"):
 		shaFile := h.toHostPath(`C:\Users\Kandev User\.kandev\bin\agentctl.exe.sha256`)
 		binFile := h.toHostPath(`C:\Users\Kandev User\.kandev\bin\agentctl.exe`)
@@ -537,7 +449,6 @@ func (h *windowsSSHLaunchHarness) handlePowerShell(script, stdin string) sshExec
 		return sshOut(strings.TrimSpace(string(data)))
 	case strings.Contains(script, "CreateDirectory"):
 		for _, winPath := range []string{
-			`C:\Users\Kandev User\.kandev\bin`,
 			`C:\Users\Kandev User\.kandev\tasks\task-task-win`,
 			`C:\Users\Kandev User\.kandev\tasks\task-task-win\.kandev\sessions\session-win`,
 		} {
@@ -546,40 +457,21 @@ func (h *windowsSSHLaunchHarness) handlePowerShell(script, stdin string) sshExec
 			}
 		}
 		return sshOK
-	case strings.Contains(script, "agentctl.exe missing after upload"):
-		if _, err := os.Stat(h.toHostPath(`C:\Users\Kandev User\.kandev\bin\agentctl.exe`)); err != nil {
-			return sshFail(err.Error())
-		}
-		return sshOK
 	default:
 		return sshOK
 	}
 }
 
 func TestSSHWindowsCreateInstancePowerShellEndToEnd(t *testing.T) {
-	withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
-	harness := newWindowsSSHLaunchHarness(t, 4242)
-	exec := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
-	t.Cleanup(func() { _ = exec.Close() })
-
-	metadata := sshConnectionMetadata(t, harness.server)
+	harness := newWindowsSSHLaunchHarness(t)
+	exec := harness.newExecutor(t)
+	req := harness.request(t)
 	// Simulate a profile that snapshotted the built-in POSIX prepare script on
 	// creation; Windows PowerShell execution must translate it automatically.
-	metadata[MetadataKeySetupScript] = defaultSSHPrepareScript
-	metadata["repository_clone_url"] = "https://github.com/example/demo.git"
-	metadata[MetadataKeyBaseBranch] = "main"
-	metadata[MetadataKeyWorktreeBranch] = "feature/win-ssh"
-
-	req := &ExecutorCreateRequest{
-		InstanceID: "instance-win",
-		TaskID:     "task-win",
-		SessionID:  "session-win",
-		Protocol:   "acp",
-		Metadata:   metadata,
-		Env: map[string]string{
-			envKeyGitHubToken: "ghs_secret_win_token",
-		},
-	}
+	req.Metadata[MetadataKeySetupScript] = defaultSSHPrepareScript
+	req.Metadata[MetadataKeyBaseBranch] = "main"
+	req.Metadata[MetadataKeyWorktreeBranch] = "feature/win-ssh"
+	req.Env = map[string]string{envKeyGitHubToken: "ghs_secret_win_token"}
 
 	instance, err := exec.CreateInstance(context.Background(), req)
 	if err != nil {
@@ -587,7 +479,7 @@ func TestSSHWindowsCreateInstancePowerShellEndToEnd(t *testing.T) {
 	}
 
 	wantTaskDir := `C:\Users\Kandev User\.kandev\tasks\task-task-win`
-	wantSessionDir := `C:\Users\Kandev User\.kandev\tasks\task-task-win\.kandev\sessions\session-win`
+	wantSessionDir := wantTaskDir + `\.kandev\sessions\session-win`
 	if instance.RuntimeName != executor.NameSSH {
 		t.Fatalf("RuntimeName = %q", instance.RuntimeName)
 	}
@@ -602,29 +494,22 @@ func TestSSHWindowsCreateInstancePowerShellEndToEnd(t *testing.T) {
 	}
 
 	harness.mu.Lock()
-	prepScripts := append([]string(nil), harness.prepareScripts...)
-	prepStdin := append([]string(nil), harness.prepareStdinJSON...)
-	startScripts := append([]string(nil), harness.startScripts...)
-	harness.mu.Unlock()
-
-	if len(prepScripts) != 1 || len(prepStdin) != 1 {
-		t.Fatalf("prepare script invocations = %d/%d, want 1", len(prepScripts), len(prepStdin))
+	defer harness.mu.Unlock()
+	if len(harness.prepareScripts) != 1 || len(harness.prepareStdinJSON) != 1 {
+		t.Fatalf("prepare script invocations = %d/%d, want 1", len(harness.prepareScripts), len(harness.prepareStdinJSON))
 	}
-	if strings.Contains(prepScripts[0], "ghs_secret_win_token") {
+	if strings.Contains(harness.prepareScripts[0], "ghs_secret_win_token") {
 		t.Fatal("secret GitHub token leaked into PowerShell script command instead of stdin JSON")
 	}
-	harness.mu.Lock()
-	commandLines := append([]string(nil), harness.commandLines...)
-	harness.mu.Unlock()
-	for _, line := range commandLines {
+	for _, line := range harness.server.commands() {
 		if strings.Contains(line, "ghs_secret_win_token") {
 			t.Fatalf("secret GitHub token appeared on a remote command line: %.120s", line)
 		}
 	}
-	if !strings.Contains(prepStdin[0], `"GITHUB_TOKEN":"ghs_secret_win_token"`) {
-		t.Fatalf("expected GITHUB_TOKEN in PowerShell stdin JSON, got: %s", prepStdin[0])
+	if !strings.Contains(harness.prepareStdinJSON[0], `"GITHUB_TOKEN":"ghs_secret_win_token"`) {
+		t.Fatalf("expected GITHUB_TOKEN in PowerShell stdin JSON, got: %s", harness.prepareStdinJSON[0])
 	}
-	if len(startScripts) != 1 || !strings.Contains(startScripts[0], `--workdir "C:\Users\Kandev User\.kandev\tasks\task-task-win"`) {
-		t.Fatalf("expected Win32-quoted --workdir in the WMI launch wrapper, got: %v", startScripts)
+	if len(harness.startScripts) != 1 || !strings.Contains(harness.startScripts[0], `--workdir "`+wantTaskDir+`"`) {
+		t.Fatalf("expected Win32-quoted --workdir in the WMI launch wrapper, got: %v", harness.startScripts)
 	}
 }

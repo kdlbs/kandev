@@ -223,7 +223,7 @@ func TestSSHWindowsExecDefaultPrepare(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(taskDir, "setup-ran.txt")); err != nil {
 			t.Fatalf("[%s] repository setup did not run: %v", shell, err)
 		}
-		if err := r.verifyWindowsPrimaryCheckout(context.Background(), client, taskDir, req, windows); err != nil {
+		if err := r.verifyPrimaryCheckout(context.Background(), client, taskDir, req, windows); err != nil {
 			t.Fatalf("[%s] verify checkout: %v", shell, err)
 		}
 		if err := r.runPrepareScript(context.Background(), client, taskDir, req, windows, ""); err != nil {
@@ -299,7 +299,7 @@ func TestSSHWindowsExecControllerLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("orphan inventory: %v", err)
 	}
-	inventory := parseSSHWindowsOrphanInventory(inventoryOut, root)
+	inventory := parseSSHOrphanInventory(inventoryOut, root)
 	if inventory.pidfilesByTask["task-exec1"][pid] != "s1" {
 		t.Fatalf("inventory pidfiles = %v, want pid %d claimed by s1", inventory.pidfilesByTask, pid)
 	}
@@ -333,7 +333,7 @@ func TestSSHWindowsExecReplacesRunningHelper(t *testing.T) {
 	}
 	server := newLocalWindowsSSHServer(t)
 	server.enableSFTP()
-	server.sftpHandler = newWindowsDriveSFTPHandlers(`C:\`, false, true)
+	server.sftpHandler = newWindowsDriveSFTPFS(`C:\`).handlers()
 	bin := filepath.Join(root, "bin", "agentctl.exe")
 	copyTestBinary(t, bin)
 	running := exec.Command(bin)

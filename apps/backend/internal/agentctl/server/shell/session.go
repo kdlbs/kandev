@@ -196,7 +196,6 @@ func (s *Session) start(cfg Config) error {
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
 	s.cmd.Dir = cfg.WorkDir
 	s.cmd.Env = buildShellEnv(cfg.WorkDir, cfg.Env)
-	configureShellProcess(s.cmd)
 
 	// Start with PTY
 	var err error
@@ -592,7 +591,6 @@ func (s *Session) respawn() error {
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
 	s.cmd.Dir = s.workDir
 	s.cmd.Env = buildShellEnv(s.workDir, s.config.Env)
-	configureShellProcess(s.cmd)
 
 	// Start with PTY
 	var err error

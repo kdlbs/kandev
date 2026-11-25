@@ -627,7 +627,7 @@ func TestEnsureRemoteTaskDir(t *testing.T) {
 			sshScriptRule{match: remoteHomeCommand, result: sshOut("/home/kandev")},
 			sshScriptRule{match: "mkdir -p", result: sshOK},
 		).handle)
-		taskDir, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "task-42")
+		taskDir, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "task-42", SSHRemotePlatform{})
 		if err != nil {
 			t.Fatalf("ensureRemoteTaskDir: %v", err)
 		}
@@ -642,7 +642,7 @@ func TestEnsureRemoteTaskDir(t *testing.T) {
 
 	t.Run("empty task dir name is rejected before dialing", func(t *testing.T) {
 		server := newFakeSSHServer(t, nil)
-		_, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "")
+		_, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "", SSHRemotePlatform{})
 		if err == nil || !strings.Contains(err.Error(), "task dir name is empty") {
 			t.Fatalf("error = %v", err)
 		}
@@ -658,7 +658,7 @@ func TestEnsureRemoteTaskDir(t *testing.T) {
 			}
 			return sshOut("/home/kandev")
 		})
-		_, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "task-42")
+		_, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "task-42", SSHRemotePlatform{})
 		if err == nil || !strings.Contains(err.Error(), "/home/kandev/.kandev/tasks/task-42") {
 			t.Fatalf("error = %v, want the task dir path in the message", err)
 		}

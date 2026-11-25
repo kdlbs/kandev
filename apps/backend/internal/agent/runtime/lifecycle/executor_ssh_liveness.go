@@ -20,14 +20,11 @@ func (r *SSHExecutor) ConfirmAgentctlAbsent(ctx context.Context, instanceID stri
 		return false, errors.New("SSH agentctl process identity or transport is unavailable")
 	}
 	client, pid, platform := state.client, state.pid, state.platform
-	if platform.GOOS == "" {
-		platform = sshPlatformFromMetadata(state.metadata, state.remoteTaskDir, state.remoteDir)
-	}
 	r.mu.Unlock()
 
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	alive, err := probeRemoteAgentctlLivenessForPlatform(probeCtx, client, pid, platform)
+	alive, err := probeRemoteAgentctlLiveness(probeCtx, client, pid, platform)
 	if err != nil || alive {
 		return false, err
 	}

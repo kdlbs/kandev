@@ -6,15 +6,12 @@ import "strings"
 // explicit selection is materialized strictly before repository setup; a task
 // without one keeps the best-effort generated-branch postlude.
 func withWindowsBranchCheckout(req *ExecutorCreateRequest, script string) string {
-	if req == nil {
-		return script
-	}
 	if _, ok := req.RemoteContributions[""]; ok {
 		return script
 	}
 	branch := getMetadataString(req.Metadata, metadataCheckoutBranch)
 	if branch == "" {
-		return script + "\n" + windowsBranchCheckoutPostlude()
+		return script + "\n" + windowsBranchCheckoutPostlude
 	}
 	// Capture reuse before the prepare template initializes a new repository.
 	prefix := "$__kExistingCheckout = ''\n"

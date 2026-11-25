@@ -305,7 +305,7 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 			return nil, err
 		}
 	} else {
-		taskDir, err = r.prepareRemoteTaskDirForPlatform(baseCtx, client, workdir, req, platform)
+		taskDir, err = r.prepareRemoteTaskDir(baseCtx, client, workdir, req, platform)
 		if err != nil {
 			return nil, err
 		}
@@ -479,9 +479,6 @@ func (r *SSHExecutor) preflightGitHubCredentialBroker(
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
 ) error {
-	if !hasManagedGitCredentialBrokerEnv(req.Env) {
-		return nil
-	}
 	if platform.GOOS == "" {
 		platform = sshPlatformFromMetadata(req.Metadata)
 	}
@@ -558,12 +555,8 @@ func (r *SSHExecutor) prepareRemoteHost(
 }
 
 // prepareRemoteTaskDir makes <workdir>/tasks/<taskDir> before preparation runs.
-func (r *SSHExecutor) prepareRemoteTaskDir(ctx context.Context, client *ssh.Client, workdir string, req *ExecutorCreateRequest) (string, error) {
-	return r.prepareRemoteTaskDirForPlatform(ctx, client, workdir, req, SSHRemotePlatform{})
-}
-
-func (r *SSHExecutor) prepareRemoteTaskDirForPlatform(ctx context.Context, client *ssh.Client, workdir string, req *ExecutorCreateRequest, platform SSHRemotePlatform) (string, error) {
-	taskDir, err := ensureRemoteTaskDirForPlatform(ctx, client, workdir, sshTaskDirName(req), platform)
+func (r *SSHExecutor) prepareRemoteTaskDir(ctx context.Context, client *ssh.Client, workdir string, req *ExecutorCreateRequest, platform SSHRemotePlatform) (string, error) {
+	taskDir, err := ensureRemoteTaskDir(ctx, client, workdir, sshTaskDirName(req), platform)
 	if err != nil {
 		r.report(req.OnProgress, "Preparing task directory", PrepareStepFailed, err.Error())
 		return "", err
@@ -731,7 +724,7 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 				// distinguishing a mismatch/already-burned nonce from
 				// bootstrap mode never having been configured on the remote.
 				logCtx, logCancel := sshRemoteCleanupContext(ctx)
-				logTail := readRemoteAgentctlLogTail(logCtx, client, sessionDir)
+				logTail := readRemoteAgentctlLogTail(logCtx, client, sessionDir, sshAgentctlLogTailLines)
 				logCancel()
 				err = fmt.Errorf("%w (port %d, pid %d, nonce %s); log:\n%s",
 					err, port, pid, nonceFingerprint, logTail)
@@ -854,9 +847,6 @@ func (r *SSHExecutor) buildInstance(
 		MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
 		MetadataKeySSHWorkdirRoot:        workdir,
 		MetadataKeyIsRemote:              true,
-	}
-	if inferred := sshPlatformFromMetadata(req.Metadata, taskDir, sessionDir); inferred.isKnown() {
-		metadata[MetadataKeySSHRemotePlatform] = inferred.String()
 	}
 	if controlPort > 0 {
 		metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(controlPort)
@@ -1264,7 +1254,7 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		// remains their only liveness evidence. Never use it to classify a
 		// receipt-backed PID: another user's process can reuse that number after
 		// a host reboot.
-		alive, err := probeRemoteAgentctlLivenessForPlatform(ctx, client, pid, platform)
+		alive, err := probeRemoteAgentctlLiveness(ctx, client, pid, platform)
 		if err != nil {
 			_ = client.Close()
 			return fmt.Errorf("ssh resume: probe agentctl pid %d: %w", pid, err)
@@ -1688,9 +1678,6 @@ func (r *SSHExecutor) GetRemoteStatus(ctx context.Context, instance *ExecutorIns
 		transportLost = state.transportLost
 		client = state.client
 		platform = state.platform
-		if platform.GOOS == "" {
-			platform = sshPlatformFromMetadata(state.metadata, state.remoteTaskDir, state.remoteDir)
-		}
 	}
 	r.mu.Unlock()
 	now := time.Now()

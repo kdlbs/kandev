@@ -13,22 +13,12 @@ import (
 )
 
 func TestSSHWindowsTrackedStopTerminatesProcessTreeAndSessionDir(t *testing.T) {
-	withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
-	harness := newWindowsSSHLaunchHarness(t, 4242)
-	exec := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
-	t.Cleanup(func() { _ = exec.Close() })
-
-	metadata := sshConnectionMetadata(t, harness.server)
-	metadata[MetadataKeySetupScript] = "Write-Output 'win-prepared'"
-	metadata[MetadataKeyCleanupScript] = "Write-Output 'KANDEV_WIN_CLEANUP_MARKER'"
-
-	instance, err := exec.CreateInstance(context.Background(), &ExecutorCreateRequest{
-		InstanceID: "instance-win",
-		TaskID:     "task-win",
-		SessionID:  "session-win",
-		Protocol:   "acp",
-		Metadata:   metadata,
-	})
+	harness := newWindowsSSHLaunchHarness(t)
+	exec := harness.newExecutor(t)
+	req := harness.request(t)
+	req.Metadata[MetadataKeySetupScript] = "Write-Output 'win-prepared'"
+	req.Metadata[MetadataKeyCleanupScript] = "Write-Output 'KANDEV_WIN_CLEANUP_MARKER'"
+	instance, err := exec.CreateInstance(context.Background(), req)
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
@@ -37,16 +27,8 @@ func TestSSHWindowsTrackedStopTerminatesProcessTreeAndSessionDir(t *testing.T) {
 	if err := exec.StopInstance(context.Background(), instance, false); err != nil {
 		t.Fatalf("StopInstance on Windows session: %v", err)
 	}
-
-	harness.mu.Lock()
-	cleanupCount := len(harness.cleanupScripts)
-	stopCount := len(harness.stopScripts)
-	harness.mu.Unlock()
-	if cleanupCount != 1 {
-		t.Fatalf("Windows cleanup script runs = %d, want 1", cleanupCount)
-	}
-	if stopCount != 1 {
-		t.Fatalf("Windows stop script runs = %d, want 1", stopCount)
+	if _, stops, cleanups := harness.counts(); stops != 1 || cleanups != 1 {
+		t.Fatalf("Windows stop/cleanup script runs = %d/%d, want 1/1", stops, cleanups)
 	}
 	if harness.alive.Load() {
 		t.Fatal("expected Windows agentctl.exe process to be terminated")
@@ -54,21 +36,11 @@ func TestSSHWindowsTrackedStopTerminatesProcessTreeAndSessionDir(t *testing.T) {
 }
 
 func TestSSHWindowsBackendShutdownPreservesAgentctlAndResumeReconnects(t *testing.T) {
-	withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
-	harness := newWindowsSSHLaunchHarness(t, 4242)
-	exec1 := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
-	t.Cleanup(func() { _ = exec1.Close() })
-
-	metadata := sshConnectionMetadata(t, harness.server)
-	metadata[MetadataKeySetupScript] = "Write-Output 'win-prepared'"
-
-	instance1, err := exec1.CreateInstance(context.Background(), &ExecutorCreateRequest{
-		InstanceID: "instance-win",
-		TaskID:     "task-win",
-		SessionID:  "session-win",
-		Protocol:   "acp",
-		Metadata:   metadata,
-	})
+	harness := newWindowsSSHLaunchHarness(t)
+	exec1 := harness.newExecutor(t)
+	req := harness.request(t)
+	req.Metadata[MetadataKeySetupScript] = "Write-Output 'win-prepared'"
+	instance1, err := exec1.CreateInstance(context.Background(), req)
 	if err != nil {
 		t.Fatalf("initial CreateInstance: %v", err)
 	}
@@ -83,33 +55,23 @@ func TestSSHWindowsBackendShutdownPreservesAgentctlAndResumeReconnects(t *testin
 	}
 
 	// Simulate backend restart: a fresh SSHExecutor resumes using persisted metadata.
-	exec2 := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
-	t.Cleanup(func() { _ = exec2.Close() })
-
-	resumeMeta := cloneSSHMetadata(instance1.Metadata)
+	exec2 := harness.newExecutor(t)
 	resumeReq := &ExecutorCreateRequest{
 		InstanceID: "instance-win-resumed",
 		TaskID:     "task-win",
 		SessionID:  "session-win",
 		AuthToken:  "persisted-win-token",
-		Metadata:   resumeMeta,
+		Metadata:   cloneSSHMetadata(instance1.Metadata),
 	}
 	if err := exec2.ResumeRemoteInstance(context.Background(), resumeReq); err != nil {
 		t.Fatalf("ResumeRemoteInstance on Windows SSH host: %v", err)
 	}
-
-	harness.mu.Lock()
-	startsBeforeCreate := len(harness.startScripts)
-	harness.mu.Unlock()
-
+	startsBeforeCreate, _, _ := harness.counts()
 	resumedInstance, err := exec2.CreateInstance(context.Background(), resumeReq)
 	if err != nil {
 		t.Fatalf("CreateInstance after ResumeRemoteInstance: %v", err)
 	}
-	harness.mu.Lock()
-	startsAfterCreate := len(harness.startScripts)
-	harness.mu.Unlock()
-	if startsAfterCreate != startsBeforeCreate {
+	if startsAfterCreate, _, _ := harness.counts(); startsAfterCreate != startsBeforeCreate {
 		t.Fatalf("resumed CreateInstance spawned %d new processes, want 0", startsAfterCreate-startsBeforeCreate)
 	}
 	if got := getMetadataString(resumedInstance.Metadata, MetadataKeySSHRemotePlatform); got != "windows/amd64" {
@@ -134,29 +96,19 @@ func TestSSHWindowsBackendShutdownPreservesAgentctlAndResumeReconnects(t *testin
 }
 
 func TestSSHWindowsResumeClearsMetadataWhenRemoteProcessExited(t *testing.T) {
-	withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
-	harness := newWindowsSSHLaunchHarness(t, 4242)
+	harness := newWindowsSSHLaunchHarness(t)
 	harness.alive.Store(false)
-
-	exec := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
-	t.Cleanup(func() { _ = exec.Close() })
+	exec := harness.newExecutor(t)
 
 	wantTaskDir := `C:\Users\Kandev User\.kandev\tasks\task-task-win`
-	meta := sshConnectionMetadata(t, harness.server)
-	meta[MetadataKeySSHRemoteAgentctlPID] = "4242"
-	meta[MetadataKeySSHRemoteAgentctlPort] = "45123"
-	meta[MetadataKeySSHRemoteControlPort] = "45124"
-	meta[MetadataKeySSHRemoteSessionDir] = wantTaskDir + `\.kandev\sessions\session-win`
-	meta[MetadataKeySSHRemoteTaskDir] = wantTaskDir
-	meta[MetadataKeySSHRemotePlatform] = "windows/amd64"
-
-	req := &ExecutorCreateRequest{
-		InstanceID: "instance-win",
-		TaskID:     "task-win",
-		SessionID:  "session-win",
-		AuthToken:  "persisted-win-token",
-		Metadata:   meta,
-	}
+	req := harness.request(t)
+	req.AuthToken = "persisted-win-token"
+	req.Metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
+	req.Metadata[MetadataKeySSHRemoteAgentctlPort] = "45123"
+	req.Metadata[MetadataKeySSHRemoteControlPort] = "45124"
+	req.Metadata[MetadataKeySSHRemoteSessionDir] = wantTaskDir + `\.kandev\sessions\session-win`
+	req.Metadata[MetadataKeySSHRemoteTaskDir] = wantTaskDir
+	req.Metadata[MetadataKeySSHRemotePlatform] = "windows/amd64"
 	if err := exec.ResumeRemoteInstance(context.Background(), req); err != nil {
 		t.Fatalf("ResumeRemoteInstance with dead Windows process: %v", err)
 	}
@@ -258,149 +210,80 @@ func TestSSHWindowsRecoverInstancesDetailedReattachesAndDiscoversControlPort(t *
 }
 
 func TestSSHWindowsPersistedStopVerifiesIdentityAndGuardsSessionDir(t *testing.T) {
-	wantTaskDir := `C:\Users\Kandev User\.kandev\tasks\task-1`
-	wantSessionDir := wantTaskDir + `\.kandev\sessions\session-1`
+	taskDir := `C:\Users\Kandev User\.kandev\tasks\task-1`
+	for _, tc := range []struct {
+		name                 string
+		identity, pidfile    string
+		wantKill, wantRemove bool
+		wantErr              bool
+	}{
+		{
+			name:     "confirmed agentctl pid is killed and its session dir removed",
+			identity: `CMDLINE:"C:\Users\Kandev User\.kandev\bin\agentctl.exe" --workdir "` + taskDir + `"`,
+			pidfile:  "PID:4242", wantKill: true, wantRemove: true,
+		},
+		{
+			name:     "pid reused by another process is left running and the abandoned dir reclaimed",
+			identity: "ABSENT", pidfile: "PID:4242", wantRemove: true,
+		},
+		{
+			name:     "session dir claimed by a newer pid fails closed",
+			identity: "ABSENT", pidfile: "PID:9999", wantErr: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var killed, removed bool
+			server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
+				script, ok := decodeTestPowerShell(command, stdin)
+				switch {
+				case !ok:
+					return sshFail("expected PowerShell: " + command)
+				case strings.Contains(script, "$targetPid = 4242"):
+					// The kill script gates the kill on the task identity.
+					if !strings.Contains(script, `$workdirNeedle = '--workdir "' + '`+taskDir+`' + '"'`) {
+						return sshFail("kill script lacks the task identity gate")
+					}
+					killed = true
+					removed = strings.Contains(script, "Remove-Item -LiteralPath")
+					return sshOK
+				case strings.Contains(script, "Win32_Process"):
+					if !strings.Contains(script, "Name = 'agentctl.exe'") {
+						return sshFail("identity probe must match only agentctl.exe")
+					}
+					return sshOut(tc.identity + "\r\n")
+				case strings.Contains(script, "DIR_MISSING"):
+					return sshOut(tc.pidfile + "\r\n")
+				case strings.Contains(script, "Remove-Item -LiteralPath"):
+					removed = true
+					return sshOK
+				default:
+					return sshFail("unexpected PowerShell script: " + script)
+				}
+			})
+			metadata := sshConnectionMetadata(t, server)
+			metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
+			metadata[MetadataKeySSHRemoteSessionDir] = taskDir + `\.kandev\sessions\session-1`
+			metadata[MetadataKeySSHRemoteTaskDir] = taskDir
 
-	t.Run("confirmed Windows agentctl pid is killed and session dir removed", func(t *testing.T) {
-		killed := false
-		removed := false
-		server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
-			script, ok := decodeTestPowerShell(command, stdin)
-			if !ok {
-				return sshFail("expected PowerShell: " + command)
+			err := NewSSHExecutor(nil, nil, nil, newTestLogger()).StopInstance(context.Background(), &ExecutorInstance{
+				InstanceID: "persisted-win",
+				StopReason: "stopped via API",
+				Metadata:   metadata,
+			}, true)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("StopInstance error = %v, want error %v", err, tc.wantErr)
 			}
-			switch {
-			case strings.Contains(script, "$targetPid = 4242") && strings.Contains(script, "taskkill.exe /PID $targetPid /T /F"):
-				// The kill is gated on the task identity inside the same script.
-				killed = strings.Contains(script, `$workdirNeedle = '--workdir "' + 'C:\Users\Kandev User\.kandev\tasks\task-1' + '"'`)
-				removed = strings.Contains(script, "Remove-Item -LiteralPath")
-				return sshOK
-			case strings.Contains(script, "Win32_Process"):
-				return sshOut(`CMDLINE:"C:\Users\Kandev User\.kandev\bin\agentctl.exe" --workdir "C:\Users\Kandev User\.kandev\tasks\task-1"` + "\r\n")
-			case strings.Contains(script, "DIR_MISSING"):
-				return sshOut("PID:4242\r\n")
-			default:
-				return sshFail("unexpected PowerShell script: " + script)
-			}
-		})
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
-		metadata := sshConnectionMetadata(t, server)
-		metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
-		metadata[MetadataKeySSHRemoteSessionDir] = wantSessionDir
-		metadata[MetadataKeySSHRemoteTaskDir] = wantTaskDir
-
-		err := exec.StopInstance(context.Background(), &ExecutorInstance{
-			InstanceID: "persisted-win-1",
-			StopReason: "stopped via API",
-			Metadata:   metadata,
-		}, true)
-		if err != nil {
-			t.Fatalf("StopInstance: %v", err)
-		}
-		if !killed || !removed {
-			t.Fatalf("killed=%v removed=%v, want both true", killed, removed)
-		}
-	})
-
-	t.Run("reused PID running unrelated Windows process skips kill and reclaims abandoned dir", func(t *testing.T) {
-		killed := false
-		dirRemoved := false
-		server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
-			script, ok := decodeTestPowerShell(command, stdin)
-			if !ok {
-				return sshFail("expected PowerShell: " + command)
-			}
-			switch {
-			case strings.Contains(script, "Win32_Process"):
-				return sshOut(`CMDLINE:"C:\Windows\System32\notepad.exe"` + "\r\n")
-			case strings.Contains(script, "DIR_MISSING"):
-				return sshOut("PID:4242\r\n")
-			case strings.Contains(script, "taskkill.exe"):
-				killed = true
-				return sshOK
-			case strings.Contains(script, "Remove-Item -LiteralPath"):
-				dirRemoved = true
-				return sshOK
-			default:
-				return sshFail("unexpected PowerShell script: " + script)
-			}
-		})
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
-		metadata := sshConnectionMetadata(t, server)
-		metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
-		metadata[MetadataKeySSHRemoteSessionDir] = wantSessionDir
-		metadata[MetadataKeySSHRemoteTaskDir] = wantTaskDir
-
-		err := exec.StopInstance(context.Background(), &ExecutorInstance{
-			InstanceID: "persisted-win-reused",
-			StopReason: "stopped via API",
-			Metadata:   metadata,
-		}, true)
-		if err != nil {
-			t.Fatalf("StopInstance: %v", err)
-		}
-		if killed {
-			t.Fatal("must NOT kill an unrelated Windows process holding a recycled PID")
-		}
-		if !dirRemoved {
-			t.Fatal("expected abandoned Windows session directory to be reclaimed")
-		}
-	})
-
-	t.Run("session dir claimed by newer Windows PID fails closed without killing or deleting", func(t *testing.T) {
-		acted := false
-		server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
-			script, ok := decodeTestPowerShell(command, stdin)
-			if !ok {
-				return sshFail("expected PowerShell: " + command)
-			}
-			switch {
-			case strings.Contains(script, "Win32_Process"):
-				return sshOut("ABSENT\r\n")
-			case strings.Contains(script, "DIR_MISSING"):
-				return sshOut("PID:9999\r\n")
-			case strings.Contains(script, "taskkill.exe"), strings.Contains(script, "Remove-Item"):
-				acted = true
-				return sshOK
-			default:
-				return sshFail("unexpected PowerShell script: " + script)
+			if killed != tc.wantKill || removed != tc.wantRemove {
+				t.Fatalf("killed=%v removed=%v, want %v/%v", killed, removed, tc.wantKill, tc.wantRemove)
 			}
 		})
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
-		metadata := sshConnectionMetadata(t, server)
-		metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
-		metadata[MetadataKeySSHRemoteSessionDir] = wantSessionDir
-		metadata[MetadataKeySSHRemoteTaskDir] = wantTaskDir
-
-		err := exec.StopInstance(context.Background(), &ExecutorInstance{
-			InstanceID: "persisted-win-conflict",
-			StopReason: "stopped via API",
-			Metadata:   metadata,
-		}, true)
-		if err == nil {
-			t.Fatal("expected StopInstance to fail closed when pidfile names a newer PID")
-		}
-		if acted {
-			t.Fatal("must neither kill nor remove session dir owned by a newer launch")
-		}
-	})
-}
-
-type windowsOrphanSweepTestStore struct {
-	orphanSweepRootTestStore
-	sessions []*models.TaskSession
-}
-
-func (s *windowsOrphanSweepTestStore) ListTaskSessions(context.Context, string) ([]*models.TaskSession, error) {
-	return s.sessions, nil
+	}
 }
 
 func TestSSHWindowsOrphanSweepInventoriesAndStopsOrphanedAgentctl(t *testing.T) {
 	now := time.Now()
-	store := &windowsOrphanSweepTestStore{
-		orphanSweepRootTestStore: orphanSweepRootTestStore{
-			task: &models.Task{ID: "archived-win", ArchivedAt: &now},
-		},
+	store := &orphanSweepRootTestStore{
+		task: &models.Task{ID: "archived-win", ArchivedAt: &now},
 		sessions: []*models.TaskSession{
 			{ID: "sess-orphan", TaskID: "archived-win", State: models.TaskSessionStateCompleted},
 		},

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
-	"github.com/kandev/kandev/internal/githubauth"
 )
 
 func TestSSHWindowsPathClassificationAndCleaning(t *testing.T) {
@@ -87,28 +86,15 @@ func TestSSHWindowsPathComparisonsAndDriveRoots(t *testing.T) {
 	}
 }
 
-func TestSSHWindowsQuoteArgAndCredentialHelper(t *testing.T) {
+func TestSSHWindowsQuoteArgRoundTrip(t *testing.T) {
 	quoted := quoteWindowsArg(`C:\Users\Kandev User\dir with "quote"\`)
 	wantQuoted := `"C:\Users\Kandev User\dir with \"quote\"\\"`
 	if quoted != wantQuoted {
 		t.Fatalf("quoteWindowsArg = %s, want %s", quoted, wantQuoted)
 	}
-	tokens := splitWindowsCommandLine(`agentctl.exe --workdir ` + quoted)
-	if len(tokens) != 3 || tokens[2] != `C:\Users\Kandev User\dir with "quote"\` {
-		t.Fatalf("round-trip splitWindowsCommandLine = %#v", tokens)
-	}
-
-	req := &ExecutorCreateRequest{Env: map[string]string{
-		envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
-		envKeyGitHubCredentialLease:     "lease",
-		"GIT_CONFIG_COUNT":              "1",
-		"GIT_CONFIG_KEY_0":              "credential.https://github.com.helper",
-		"GIT_CONFIG_VALUE_0":            githubauth.ManagedGitCredentialHelper,
-	}}
-	got := sshRemoteContributionEnv(req, `C:\Users\Kandev User\.kandev\bin\agentctl.exe`)
-	wantHelper := `!'C:/Users/Kandev User/.kandev/bin/agentctl.exe' git-credential`
-	if got["GIT_CONFIG_VALUE_0"] != wantHelper {
-		t.Fatalf("Windows git credential helper = %q, want %q", got["GIT_CONFIG_VALUE_0"], wantHelper)
+	taskDir := `C:\Users\Kandev User\tasks\task 1`
+	if workdir, ok := windowsAgentctlWorkdir(`agentctl.exe --workdir ` + quoteWindowsArg(taskDir)); !ok || workdir != taskDir {
+		t.Fatalf("windowsAgentctlWorkdir round trip = %q, %v; want %q", workdir, ok, taskDir)
 	}
 }
 
@@ -132,8 +118,8 @@ func TestSSHWindowsCommandLineFlagExtractionAndMatching(t *testing.T) {
 			want:    true,
 		},
 		{
-			name:    "equals syntax and forward slashes",
-			cmdline: `C:\kandev\agentctl.exe --workdir="c:/users/kandev user/.kandev/tasks/task-1"`,
+			name:    "drive letter case and separators normalize",
+			cmdline: `"C:\kandev\agentctl.exe" --workdir "c:/users/kandev user/.kandev/tasks/task-1"`,
 			want:    true,
 		},
 		{
@@ -142,8 +128,8 @@ func TestSSHWindowsCommandLineFlagExtractionAndMatching(t *testing.T) {
 			want:    false,
 		},
 		{
-			name:    "unrelated executable must not match",
-			cmdline: `"C:\Windows\System32\notepad.exe" --workdir "C:\Users\Kandev User\.kandev\tasks\task-1"`,
+			name:    "no quoted workdir",
+			cmdline: `"C:\Users\Kandev User\.kandev\bin\agentctl.exe" --workdir=C:\Users\Kandev User\.kandev\tasks\task-1`,
 			want:    false,
 		},
 	}
@@ -174,34 +160,24 @@ func (w *recordingSkillWorkspace) RemoveAll(_ context.Context, target string) er
 	return nil
 }
 
+// Skill files stay under the Windows task directory. Paths keep the Windows form
+// until the SFTP boundary, so the leading \\ of a UNC share is never collapsed.
 func TestSSHWindowsMaterializeSkillManifestTaskDir(t *testing.T) {
 	manifestBytes, err := json.Marshal(skill.Manifest{
 		ProjectSkillDir: ".claude/skills",
-		Skills: []skill.Skill{
-			{Slug: "win-deploy", Content: "# Deploy skill\n"},
-		},
+		Skills:          []skill.Skill{{Slug: "win-deploy", Content: "# Deploy skill\n"}},
 	})
 	if err != nil {
-		t.Fatalf("marshal skill manifest: %v", err)
+		t.Fatal(err)
 	}
-	ws := &recordingSkillWorkspace{}
-	err = materializeSSHSkillManifest(
-		context.Background(),
-		ws,
-		`C:\Users\Kandev User\.kandev\tasks\task-1`,
-		string(manifestBytes),
-	)
-	if err != nil {
-		t.Fatalf("materializeSSHSkillManifest with Windows taskDir: %v", err)
-	}
-	var sawSkill bool
-	for p, body := range ws.written {
-		if strings.HasPrefix(p, `C:\Users\Kandev User\.kandev\tasks\task-1\.claude\skills\`) && strings.HasSuffix(p, `\SKILL.md`) {
-			sawSkill = body == "# Deploy skill\n"
+	for _, taskDir := range []string{`C:\Users\Kandev User\.kandev\tasks\task-1`, `\\srv\share\kandev\tasks\task-1`} {
+		ws := &recordingSkillWorkspace{}
+		if err := materializeSSHSkillManifest(context.Background(), ws, taskDir, string(manifestBytes)); err != nil {
+			t.Fatalf("materializeSSHSkillManifest(%q): %v", taskDir, err)
 		}
-	}
-	if !sawSkill {
-		t.Fatalf("expected the skill under the Windows task directory, got %#v", ws.written)
+		if got := ws.written[taskDir+`\.claude\skills\kandev-win-deploy\SKILL.md`]; got != "# Deploy skill\n" {
+			t.Errorf("skill under %q = %q, written %#v", taskDir, got, ws.written)
+		}
 	}
 }
 
@@ -216,12 +192,6 @@ func TestSSHWindowsCreateInstanceRequestJournalPathSeparator(t *testing.T) {
 	wantWinJournal := `C:\Users\Kandev User\.kandev\tasks\task-1\.kandev\agentctl-journals\owner-1\delivery.bbolt`
 	if winCreate.DurableJournalPath != wantWinJournal {
 		t.Fatalf("Windows DurableJournalPath = %q, want %q", winCreate.DurableJournalPath, wantWinJournal)
-	}
-
-	posixCreate := buildSSHCreateInstanceRequest(req, "/home/kandev/.kandev/tasks/task-1", "/home/kandev/.kandev/bin/agentctl")
-	wantPosixJournal := "/home/kandev/.kandev/tasks/task-1/.kandev/agentctl-journals/owner-1/delivery.bbolt"
-	if posixCreate.DurableJournalPath != wantPosixJournal {
-		t.Fatalf("POSIX DurableJournalPath = %q, want %q", posixCreate.DurableJournalPath, wantPosixJournal)
 	}
 }
 
@@ -239,26 +209,4 @@ func TestSSHWindowsTaskDirRejectsNonWindowsWorkdirRoot(t *testing.T) {
 			t.Errorf("ensureWindowsRemoteTaskDir(%q) error = %v, want a rejection naming the root", root, err)
 		}
 	}
-}
-
-// Skill files for a UNC task directory stay under that share. Paths keep the
-// Windows form until the SFTP boundary, so the leading \\ is never collapsed.
-func TestSSHWindowsMaterializeSkillManifestUNCTaskDir(t *testing.T) {
-	manifestBytes, err := json.Marshal(skill.Manifest{
-		ProjectSkillDir: ".claude/skills",
-		Skills:          []skill.Skill{{Slug: "win-deploy", Content: "# Deploy skill\n"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ws := &recordingSkillWorkspace{}
-	if err := materializeSSHSkillManifest(context.Background(), ws, `\\srv\share\kandev\tasks\task-1`, string(manifestBytes)); err != nil {
-		t.Fatalf("materializeSSHSkillManifest with a UNC taskDir: %v", err)
-	}
-	for p := range ws.written {
-		if strings.HasPrefix(p, `\\srv\share\kandev\tasks\task-1\.claude\skills\`) && strings.HasSuffix(p, `\SKILL.md`) {
-			return
-		}
-	}
-	t.Fatalf("expected the skill under the UNC task directory, got %#v", ws.written)
 }

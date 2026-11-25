@@ -40,25 +40,15 @@ func (r *SSHExecutor) materializeSSHRemoteContribution(
 
 	env := sshRemoteContributionEnv(req, agentctlBin)
 	shell := sshShellForRemote(req.Metadata, platform)
-	var envPayload, wrapped string
-	var err error
+	script := sshRemoteContributionScript(taskDir, targetURL, binding)
 	if isPowerShellShell(shell) {
-		cmd, cmdErr := newPowerShellCommand(shell, powerShellEnvelope{
-			Login: true, Env: env, Script: sshWindowsRemoteContributionScript(taskDir, targetURL, binding),
-		})
-		if cmdErr != nil {
-			return fmt.Errorf("ssh: prepare remote contribution environment: %w", cmdErr)
-		}
-		wrapped, envPayload = cmd.line, cmd.stdin
-	} else {
-		envPayload, err = buildSSHEnvInitScript(env)
-		if err != nil {
-			return fmt.Errorf("ssh: prepare remote contribution environment: %w", err)
-		}
-		inner := sshRemoteContributionScript(taskDir, targetURL, binding)
-		wrapped = WrapLoginShell(shell, "set -ae; "+sshStdinEnvImport+"; set +a\n"+inner)
+		script = sshWindowsRemoteContributionScript(taskDir, targetURL, binding)
 	}
-	_, _, runErr := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envPayload))
+	command, envPayload, err := sshScriptCommand(shell, env, script)
+	if err != nil {
+		return fmt.Errorf("ssh: prepare remote contribution environment: %w", err)
+	}
+	_, _, runErr := runSSHCommandStdin(ctx, client, command, strings.NewReader(envPayload))
 	if runErr != nil {
 		// Git may include a credentialed helper URL in stderr. Keep the error
 		// deliberately generic; provider and credential data never leave the

@@ -24,6 +24,9 @@ func sftpReplaceWindowsFile(client *ssh.Client, remotePath string, data []byte) 
 	defer func() { _ = c.Close() }()
 
 	target := toSFTPPath(remotePath)
+	if err := sshMkdirAll(c, path.Dir(target)); err != nil {
+		return fmt.Errorf("sftp: mkdir for %s: %w", target, err)
+	}
 	tmp := fmt.Sprintf("%s.tmp.%d.%d", target, os.Getpid(), mrand.Uint64())
 	if err := writeSFTPFile(c, tmp, data); err != nil {
 		_ = c.Remove(tmp)
@@ -45,6 +48,10 @@ func sftpReplaceWindowsFile(client *ssh.Client, remotePath string, data []byte) 
 		return fmt.Errorf("sftp: rename %s -> %s: %w", tmp, target, err)
 	}
 	removeStaleWindowsAsideFiles(c, target)
+	// Antivirus software can quarantine a new executable as soon as it lands.
+	if info, err := c.Stat(target); err != nil || info.Size() == 0 {
+		return fmt.Errorf("sftp: %s is missing after upload", target)
+	}
 	return nil
 }
 

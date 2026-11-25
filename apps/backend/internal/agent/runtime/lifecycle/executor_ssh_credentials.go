@@ -389,16 +389,8 @@ func (u *sshFileUploader) WriteFile(_ context.Context, remotePath string, data [
 		return fmt.Errorf("sftp: mkdir for %s: %w", sftpPath, err)
 	}
 
-	f, err := c.Create(sftpPath)
-	if err != nil {
-		return fmt.Errorf("sftp: create %s: %w", sftpPath, err)
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("sftp: write %s: %w", sftpPath, err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("sftp: close %s: %w", sftpPath, err)
+	if err := writeSFTPFile(c, sftpPath, data); err != nil {
+		return err
 	}
 	if err := c.Chmod(sftpPath, mode); err != nil && !sftpChmodFailureTolerated(remotePath, err) {
 		return fmt.Errorf("sftp: chmod %s: %w", sftpPath, err)
@@ -409,7 +401,8 @@ func (u *sshFileUploader) WriteFile(_ context.Context, remotePath string, data [
 // sftpChmodFailureTolerated reports whether a file may keep its default mode:
 // Win32-OpenSSH cannot apply POSIX modes, but a Linux or macOS host must.
 func sftpChmodFailureTolerated(remotePath string, err error) bool {
-	return isWindowsRemotePath(remotePath) && isSFTPOpUnsupported(err)
+	var statusErr *sftp.StatusError
+	return isWindowsRemotePath(remotePath) && errors.As(err, &statusErr) && statusErr.FxCode() == sftp.ErrSSHFxOpUnsupported
 }
 
 func (u *sshFileUploader) RemoveAll(ctx context.Context, target string) error {

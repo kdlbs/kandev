@@ -7,64 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-
-	"github.com/pkg/sftp"
 )
-
-// windowsInUseSFTPFS adds Windows image locking to the drive emulation: the
-// file of a running process cannot be removed, but it can be renamed, and the
-// lock follows the renamed file.
-type windowsInUseSFTPFS struct {
-	*windowsDriveSFTPFS
-	mu    sync.Mutex
-	inUse map[string]bool
-	// failTempRename fails the final rename of an uploaded temporary file.
-	failTempRename bool
-}
-
-func (f *windowsInUseSFTPFS) Filecmd(r *sftp.Request) error {
-	local, err := f.localPath(r.Filepath)
-	if err != nil {
-		return err
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	switch r.Method {
-	case "Remove":
-		if f.inUse[local] {
-			return sftp.ErrSSHFxFailure
-		}
-	case "Rmdir":
-		// pkg/sftp retries a failed file removal as a directory removal; a
-		// Windows rmdir never deletes a file.
-		if info, statErr := os.Stat(local); statErr == nil && !info.IsDir() {
-			return sftp.ErrSSHFxFailure
-		}
-	case "Rename":
-		dst, dstErr := f.localPath(r.Target)
-		if dstErr != nil {
-			return dstErr
-		}
-		if f.failTempRename && strings.Contains(filepath.Base(local), ".tmp.") {
-			return sftp.ErrSSHFxFailure
-		}
-		if err := f.windowsDriveSFTPFS.Filecmd(r); err != nil {
-			return err
-		}
-		if f.inUse[local] {
-			delete(f.inUse, local)
-			f.inUse[dst] = true
-		}
-		return nil
-	}
-	return f.windowsDriveSFTPFS.Filecmd(r)
-}
 
 type windowsHelperHost struct {
 	server *fakeSSHServer
-	fs     *windowsInUseSFTPFS
+	fs     *windowsDriveSFTPFS
 	binDir string
 	helper string
 }
@@ -73,14 +21,11 @@ func newWindowsHelperHost(t *testing.T) *windowsHelperHost {
 	t.Helper()
 	driveRoot := t.TempDir()
 	binDir := filepath.Join(driveRoot, "Users", "Kandev User", ".kandev", "bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(binDir), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	host := &windowsHelperHost{
-		fs: &windowsInUseSFTPFS{
-			windowsDriveSFTPFS: &windowsDriveSFTPFS{root: driveRoot, unsupportedChmod: true},
-			inUse:              map[string]bool{},
-		},
+		fs:     newWindowsDriveSFTPFS(driveRoot),
 		binDir: binDir,
 		helper: filepath.Join(t.TempDir(), "agentctl-windows-amd64.exe"),
 	}
@@ -103,7 +48,7 @@ func newWindowsHelperHost(t *testing.T) *windowsHelperHost {
 		}
 	})
 	host.server.enableSFTP()
-	host.server.sftpHandler = &sftp.Handlers{FileGet: host.fs, FilePut: host.fs, FileCmd: host.fs, FileList: host.fs}
+	host.server.sftpHandler = host.fs.handlers()
 	return host
 }
 
@@ -111,6 +56,9 @@ func (h *windowsHelperHost) install(t *testing.T, data []byte, running bool) {
 	t.Helper()
 	bin := filepath.Join(h.binDir, "agentctl.exe")
 	sum := sha256.Sum256(data)
+	if err := os.MkdirAll(h.binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(bin, data, 0o755); err != nil {
 		t.Fatal(err)
 	}

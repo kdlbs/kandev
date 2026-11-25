@@ -13,10 +13,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/winproc"
 )
 
-// configureShellProcess is a no-op: ConPTY creates the shell process itself and
-// ignores exec.Cmd process attributes.
-func configureShellProcess(_ *exec.Cmd) {}
-
 // waitShellCommand reaps a ConPTY shell. ConPTY started the process, so
 // cmd.Wait would fail with "exec: not started"; cmd.Process is a handle that
 // ptyexec.Start resolved for the same PID.

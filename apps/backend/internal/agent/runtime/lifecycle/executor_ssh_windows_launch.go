@@ -24,9 +24,9 @@ func windowsAgentctlLaunchScript(agentctlBin, workspacePath, sessionDir string, 
 	cleanWorkdir := cleanWindowsRemotePath(workspacePath)
 	logPath := joinWindowsRemotePath(cleanSessionDir, "agentctl.log")
 	wrapper := "cmd.exe /d /s /c \"" +
-		quoteWindowsArgAlways(cleanWindowsRemotePath(agentctlBin)) +
-		" --workdir " + quoteWindowsArgAlways(cleanWorkdir) +
-		" > " + quoteWindowsArgAlways(logPath) + " 2>&1\""
+		quoteWindowsArg(cleanWindowsRemotePath(agentctlBin)) +
+		" --workdir " + quoteWindowsArg(cleanWorkdir) +
+		" > " + quoteWindowsArg(logPath) + " 2>&1\""
 	return fmt.Sprintf(`$sessionDir = %[1]s
 $workspacePath = %[2]s
 $logPath = %[3]s
@@ -100,8 +100,7 @@ func startRemoteWindowsAgentctlOnPort(
 	if err != nil {
 		return 0, fmt.Errorf("ssh: Windows agentctl launch returned non-numeric pid %q", out)
 	}
-	return awaitRemoteAgentctlReadyForPlatform(
-		ctx, client, cleanWindowsRemotePath(sessionDir), port, pid, sshAgentctlReadyTimeout, sshAgentctlReadyPoll,
-		SSHRemotePlatform{GOOS: sshRemoteGOOSWindows}, log,
+	return awaitRemoteAgentctlReady(
+		ctx, client, cleanWindowsRemotePath(sessionDir), port, pid, sshAgentctlReadyTimeout, sshAgentctlReadyPoll, log,
 	)
 }

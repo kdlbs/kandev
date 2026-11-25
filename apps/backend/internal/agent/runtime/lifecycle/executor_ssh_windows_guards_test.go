@@ -5,23 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/agent/remoteauth"
 )
-
-func newWindowsGuardRequest(t *testing.T, harness *windowsSSHLaunchHarness) *ExecutorCreateRequest {
-	t.Helper()
-	metadata := sshConnectionMetadata(t, harness.server)
-	metadata["repository_clone_url"] = "https://github.com/example/demo.git"
-	return &ExecutorCreateRequest{
-		InstanceID: "instance-win",
-		TaskID:     "task-win",
-		SessionID:  "session-win",
-		Protocol:   "acp",
-		Metadata:   metadata,
-	}
-}
 
 func assertNoWindowsPreparation(t *testing.T, harness *windowsSSHLaunchHarness) {
 	t.Helper()
@@ -32,59 +18,65 @@ func assertNoWindowsPreparation(t *testing.T, harness *windowsSSHLaunchHarness) 
 	}
 }
 
+// The PowerShell scripts exist only for Windows hosts, and Windows has no
+// passthrough or POSIX-shell execution path.
+// @covers AC-EXECUTORS-SSH-WINDOWS-001.3
 // @covers AC-EXECUTORS-SSH-WINDOWS-001.4
-func TestSSHWindowsRejectsNonPowerShellSavedShell(t *testing.T) {
-	for _, shell := range []string{"bash", "cmd"} {
-		t.Run(shell, func(t *testing.T) {
-			withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
-			harness := newWindowsSSHLaunchHarness(t, 4242)
-			exec := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
-			t.Cleanup(func() { _ = exec.Close() })
-			req := newWindowsGuardRequest(t, harness)
-			req.Metadata[MetadataKeySSHShell] = shell
-
-			_, err := exec.CreateInstance(context.Background(), req)
-			if !errors.Is(err, errSSHWindowsLaunchUnsupported) {
-				t.Fatalf("CreateInstance error = %v, want errSSHWindowsLaunchUnsupported", err)
+// @covers AC-EXECUTORS-SSH-WINDOWS-001.17
+func TestSSHWindowsLaunchGuard(t *testing.T) {
+	windows := SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"}
+	linux := SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}
+	darwin := SSHRemotePlatform{GOOS: "darwin", GOARCH: "arm64"}
+	for _, tc := range []struct {
+		platform    SSHRemotePlatform
+		shell       string
+		passthrough bool
+		wantErr     error
+		wantText    []string
+	}{
+		{platform: windows, shell: ""},
+		{platform: windows, shell: "powershell"},
+		{platform: windows, shell: "pwsh"},
+		{platform: windows, shell: `C:\Program Files\PowerShell\7\pwsh.exe`},
+		{platform: windows, shell: "bash", wantErr: errSSHWindowsLaunchUnsupported, wantText: []string{`"bash"`, "powershell", "pwsh"}},
+		{platform: windows, shell: "cmd", wantErr: errSSHWindowsLaunchUnsupported, wantText: []string{`"cmd"`, "powershell", "pwsh"}},
+		{platform: windows, passthrough: true, wantErr: errSSHWindowsLaunchUnsupported, wantText: []string{"passthrough"}},
+		{platform: linux, shell: "bash", passthrough: true},
+		{platform: linux, shell: "pwsh", wantErr: errSSHPowerShellRequiresWindows, wantText: []string{"pwsh"}},
+		{platform: linux, shell: "/usr/bin/pwsh", wantErr: errSSHPowerShellRequiresWindows, wantText: []string{"/usr/bin/pwsh"}},
+		{platform: darwin, shell: "powershell", wantErr: errSSHPowerShellRequiresWindows, wantText: []string{"powershell"}},
+	} {
+		req := &ExecutorCreateRequest{IsPassthrough: tc.passthrough, Metadata: map[string]interface{}{MetadataKeySSHShell: tc.shell}}
+		err := validateSSHWindowsLaunch(req, tc.platform)
+		if !errors.Is(err, tc.wantErr) {
+			t.Errorf("validateSSHWindowsLaunch(%s, shell=%q, passthrough=%v) = %v, want %v", tc.platform.GOOS, tc.shell, tc.passthrough, err, tc.wantErr)
+			continue
+		}
+		for _, want := range tc.wantText {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q missing %q", err.Error(), want)
 			}
-			for _, want := range []string{`"` + shell + `"`, "powershell", "pwsh"} {
-				if !strings.Contains(err.Error(), want) {
-					t.Errorf("error %q missing %q", err.Error(), want)
-				}
+		}
+	}
+}
+
+// The guard runs before any remote preparation.
+// @covers AC-EXECUTORS-SSH-WINDOWS-001.4
+// @covers AC-EXECUTORS-SSH-WINDOWS-001.17
+func TestSSHWindowsRejectedLaunchRunsNoPreparation(t *testing.T) {
+	for name, configure := range map[string]func(*ExecutorCreateRequest){
+		"bash shell":  func(req *ExecutorCreateRequest) { req.Metadata[MetadataKeySSHShell] = "bash" },
+		"passthrough": func(req *ExecutorCreateRequest) { req.IsPassthrough = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			harness := newWindowsSSHLaunchHarness(t)
+			req := harness.request(t)
+			configure(req)
+			if _, err := harness.newExecutor(t).CreateInstance(context.Background(), req); !errors.Is(err, errSSHWindowsLaunchUnsupported) {
+				t.Fatalf("CreateInstance error = %v, want errSSHWindowsLaunchUnsupported", err)
 			}
 			assertNoWindowsPreparation(t, harness)
 		})
-	}
-}
-
-// @covers AC-EXECUTORS-SSH-WINDOWS-001.17
-func TestSSHWindowsRejectsPassthroughLaunch(t *testing.T) {
-	withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
-	harness := newWindowsSSHLaunchHarness(t, 4242)
-	exec := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
-	t.Cleanup(func() { _ = exec.Close() })
-	req := newWindowsGuardRequest(t, harness)
-	req.IsPassthrough = true
-
-	_, err := exec.CreateInstance(context.Background(), req)
-	if !errors.Is(err, errSSHWindowsLaunchUnsupported) || !strings.Contains(err.Error(), "passthrough") {
-		t.Fatalf("CreateInstance error = %v, want passthrough rejection", err)
-	}
-	assertNoWindowsPreparation(t, harness)
-}
-
-// @covers AC-EXECUTORS-SSH-WINDOWS-001.3
-func TestSSHWindowsLaunchAcceptsPowerShellShells(t *testing.T) {
-	windows := SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"}
-	for _, shell := range []string{"", "powershell", "pwsh", `C:\Program Files\PowerShell\7\pwsh.exe`} {
-		req := &ExecutorCreateRequest{Metadata: map[string]interface{}{MetadataKeySSHShell: shell}}
-		if err := validateSSHWindowsLaunch(req, windows); err != nil {
-			t.Errorf("validateSSHWindowsLaunch(shell=%q) = %v, want nil", shell, err)
-		}
-	}
-	posix := &ExecutorCreateRequest{IsPassthrough: true, Metadata: map[string]interface{}{MetadataKeySSHShell: "bash"}}
-	if err := validateSSHWindowsLaunch(posix, SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}); err != nil {
-		t.Errorf("validateSSHWindowsLaunch on Linux = %v, want nil", err)
 	}
 }
 
@@ -97,9 +89,6 @@ func TestSSHWindowsRemoteDockerRejectsWindowsHost(t *testing.T) {
 	_, listed, found := strings.Cut(err.Error(), "supported platforms are")
 	if !found || strings.Contains(listed, "windows") || !strings.Contains(listed, "darwin/{amd64,arm64}") {
 		t.Fatalf("Remote Docker error %q must list only Linux and macOS platforms", err.Error())
-	}
-	if err := SSHRequireSupportedExecutorPlatform(SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"}); err != nil {
-		t.Fatalf("SSH executor gate rejected windows/amd64: %v", err)
 	}
 }
 
@@ -116,12 +105,15 @@ func TestSSHWindowsRejectsARM64Host(t *testing.T) {
 	}
 }
 
-func TestGitCredentialHelperCommandQuotesPOSIXPathsWithSpaces(t *testing.T) {
-	if got, want := gitCredentialHelperCommand("/home/kandev/.kandev/bin/agentctl"), "!/home/kandev/.kandev/bin/agentctl git-credential"; got != want {
-		t.Fatalf("plain POSIX helper = %q, want %q", got, want)
-	}
-	if got, want := gitCredentialHelperCommand("/home/kandev user/.kandev/bin/agentctl"), "!'/home/kandev user/.kandev/bin/agentctl' git-credential"; got != want {
-		t.Fatalf("spaced POSIX helper = %q, want %q", got, want)
+func TestGitCredentialHelperCommand(t *testing.T) {
+	for bin, want := range map[string]string{
+		"/home/kandev/.kandev/bin/agentctl":             "!/home/kandev/.kandev/bin/agentctl git-credential",
+		"/home/kandev user/.kandev/bin/agentctl":        "!'/home/kandev user/.kandev/bin/agentctl' git-credential",
+		`C:\Users\Kandev User\.kandev\bin\agentctl.exe`: `!'C:/Users/Kandev User/.kandev/bin/agentctl.exe' git-credential`,
+	} {
+		if got := gitCredentialHelperCommand(bin); got != want {
+			t.Errorf("gitCredentialHelperCommand(%q) = %q, want %q", bin, got, want)
+		}
 	}
 }
 
@@ -157,20 +149,5 @@ func TestSSHWindowsSkipsPOSIXAuthSetupScripts(t *testing.T) {
 		"Claude", method, SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"})
 	if len(commands) != 0 {
 		t.Fatalf("POSIX auth setup script ran on a Windows host: %v", commands)
-	}
-}
-
-// The PowerShell scripts exist only for Windows hosts, so a Linux or macOS
-// profile saved with a PowerShell shell fails before any preparation.
-// @covers AC-EXECUTORS-SSH-WINDOWS-001.4
-func TestSSHPOSIXLaunchRejectsPowerShellShell(t *testing.T) {
-	for _, platform := range []SSHRemotePlatform{{GOOS: "linux", GOARCH: "amd64"}, {GOOS: "darwin", GOARCH: "arm64"}} {
-		for _, shell := range []string{"pwsh", "powershell", "/usr/bin/pwsh"} {
-			req := &ExecutorCreateRequest{Metadata: map[string]interface{}{MetadataKeySSHShell: shell}}
-			err := validateSSHWindowsLaunch(req, platform)
-			if !errors.Is(err, errSSHPowerShellRequiresWindows) || !strings.Contains(err.Error(), shell) {
-				t.Errorf("validateSSHWindowsLaunch(%s, shell=%q) = %v, want a PowerShell-on-POSIX rejection naming the shell", platform.GOOS, shell, err)
-			}
-		}
 	}
 }

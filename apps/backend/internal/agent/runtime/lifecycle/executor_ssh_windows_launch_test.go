@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,7 @@ func TestSSHWindowsLaunchUsesWMIWithMergedEnvironment(t *testing.T) {
 		"EnvironmentVariables = $envBlock",
 		powerShellQuote(wantWrapper),
 		"CurrentDirectory = $workspacePath",
+		"if ($result.ReturnValue -ne 0)",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("launch script missing %q", want)
@@ -51,21 +53,55 @@ func TestSSHWindowsLaunchRecordsAgentctlChildPID(t *testing.T) {
 	}
 }
 
-func TestSSHWindowsLaunchFailsOnWMIReturnCode(t *testing.T) {
-	script := windowsAgentctlLaunchScript(testWinAgentctl, testWinTaskDir, testWinSessionDr, 45123)
-	if !strings.Contains(script, "if ($result.ReturnValue -ne 0)") || !strings.Contains(script, "Win32_Process.Create returned") {
-		t.Fatal("launch script must fail on a non-zero Win32_Process.Create return value")
-	}
-	server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
-		if _, ok := decodeTestPowerShell(command, stdin); !ok {
-			return sshFail("expected the PowerShell loader")
-		}
-		return sshFail("Win32_Process.Create returned 9")
-	})
-	_, err := startRemoteWindowsAgentctlOnPort(context.Background(), server.dial(t), "powershell",
-		testWinAgentctl, testWinTaskDir, testWinSessionDr, nil, 45123, newTestLogger())
-	if err == nil || !strings.Contains(err.Error(), "Win32_Process.Create returned 9") {
-		t.Fatalf("launch error = %v, want the WMI return code", err)
+// Windows reserves port ranges (netsh int ipv4 show excludedportrange) that
+// refuse a bind with an access error. agentctl then exits before the launch
+// script finds its PID, so the bind failure arrives on the launch stderr and
+// must still select another port.
+// @covers AC-EXECUTORS-SSH-WINDOWS-001.23
+func TestSSHWindowsLaunchFailureClassification(t *testing.T) {
+	bindFailure := `{"level":"error","msg":"HTTP server failed to bind","error":"listen tcp 127.0.0.1:45123: bind: ` +
+		`An attempt was made to access a socket in a way forbidden by its access permissions."}`
+	for _, tc := range []struct {
+		name          string
+		stderr        string
+		wantPortInUse bool
+		wantText      []string
+	}{
+		{
+			name:          "refused bind selects another port",
+			stderr:        "agentctl.exe did not start under wrapper pid 4242\n" + bindFailure,
+			wantPortInUse: true,
+			wantText:      []string{"port 45123", "forbidden by its access permissions"},
+		},
+		{
+			name:     "missing executable is not retried",
+			stderr:   "agentctl.exe did not start under wrapper pid 4242\nThe system cannot find the file specified.",
+			wantText: []string{"cannot find the file specified"},
+		},
+		{
+			name:     "WMI return code is reported",
+			stderr:   "Win32_Process.Create returned 9",
+			wantText: []string{"Win32_Process.Create returned 9"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
+				if _, ok := decodeTestPowerShell(command, stdin); !ok {
+					return sshFail("expected the PowerShell loader")
+				}
+				return sshFail(tc.stderr)
+			})
+			_, err := startRemoteWindowsAgentctlOnPort(context.Background(), server.dial(t), "powershell",
+				testWinAgentctl, testWinTaskDir, testWinSessionDr, nil, 45123, newTestLogger())
+			if err == nil || errors.Is(err, errSSHAgentctlPortInUse) != tc.wantPortInUse {
+				t.Fatalf("launch error = %v, want port-in-use %v", err, tc.wantPortInUse)
+			}
+			for _, want := range tc.wantText {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("launch error %q missing %q", err.Error(), want)
+				}
+			}
+		})
 	}
 }
 
@@ -95,8 +131,8 @@ func TestQuoteWindowsArgAlwaysQuotes(t *testing.T) {
 		`C:\with space`:         `"C:\with space"`,
 	}
 	for in, want := range cases {
-		if got := quoteWindowsArgAlways(in); got != want {
-			t.Errorf("quoteWindowsArgAlways(%q) = %q, want %q", in, got, want)
+		if got := quoteWindowsArg(in); got != want {
+			t.Errorf("quoteWindowsArg(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

@@ -93,39 +93,42 @@ func (r *SSHExecutor) resolvePrepareScript(req *ExecutorCreateRequest, workspace
 	return r.resolveSSHScript(req, workspacePath, agentctlBin, script)
 }
 
-func sshStaticScriptPlaceholders() map[string]string {
-	return map[string]string{
-		"repository.clone_url":    "''",
-		"kandev.agentctl.port":    "",
-		"kandev.agentctl.install": "",
-		"kandev.agentctl.start":   "",
-	}
-}
-
 func (r *SSHExecutor) resolveSSHScript(req *ExecutorCreateRequest, workspacePath, agentctlBin, script string) (string, error) {
 	if req == nil {
 		return "", fmt.Errorf("ssh: script request is required")
 	}
-	resolver := scriptengine.NewResolver().
-		WithStatic(sshStaticScriptPlaceholders()).
-		WithProvider(scriptengine.WorkspaceProvider(workspacePath)).
-		WithProvider(scriptengine.GitIdentityProvider(req.Metadata)).
-		WithProvider(scriptengine.GitHubAuthProvider(req.Env)).
-		WithProvider(scriptengine.AgentInstallProvider(r.collectAgentInstallScripts(req))).
-		WithProvider(scriptengine.WorktreeProvider(
+	_ = agentctlBin // agentctl placeholders are intentionally disabled for SSH scripts.
+	return resolveSSHScriptPlaceholders(script,
+		scriptengine.WorkspaceProvider(workspacePath),
+		scriptengine.GitIdentityProvider(req.Metadata),
+		scriptengine.GitHubAuthProvider(req.Env),
+		scriptengine.AgentInstallProvider(r.collectAgentInstallScripts(req)),
+		scriptengine.WorktreeProvider(
 			workspacePath,
 			workspacePath,
 			getMetadataString(req.Metadata, MetadataKeyWorktreeID),
 			getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
 			getMetadataString(req.Metadata, MetadataKeyBaseBranch),
-		)).
-		WithProvider(scriptengine.RepositoryProvider(req.Metadata, nil, getGitRemoteURL, nil))
+		),
+		scriptengine.RepositoryProvider(req.Metadata, nil, getGitRemoteURL, nil),
+	)
+}
 
+func resolveSSHScriptPlaceholders(script string, providers ...scriptengine.PlaceholderProvider) (string, error) {
+	resolver := scriptengine.NewResolver().
+		WithStatic(map[string]string{
+			"repository.clone_url":    "''",
+			"kandev.agentctl.port":    "",
+			"kandev.agentctl.install": "",
+			"kandev.agentctl.start":   "",
+		})
+	for _, provider := range providers {
+		resolver = resolver.WithProvider(provider)
+	}
 	resolved := resolver.Resolve(script)
 	if strings.Contains(resolved, "{{") {
 		return "", fmt.Errorf("ssh: unresolved prepare script placeholder")
 	}
-	_ = agentctlBin // agentctl placeholders are intentionally disabled for SSH scripts.
 	return strings.TrimSpace(resolved), nil
 }
 
@@ -175,11 +178,10 @@ func addMethodAgentIDs(ids map[string]bool, metadata map[string]interface{}, key
 
 func (r *SSHExecutor) runPrepareScript(ctx context.Context, client *ssh.Client, taskDir string, req *ExecutorCreateRequest, platform SSHRemotePlatform, agentctlBin string) error {
 	shell := sshShellForRemote(req.Metadata, platform)
-	usePowerShell := isPowerShellShell(shell)
 	var script string
 	var err error
-	if usePowerShell {
-		script, err = r.resolveWindowsPrepareScript(req, taskDir, agentctlBin)
+	if isPowerShellShell(shell) {
+		script, err = r.resolveWindowsPrepareScript(req, taskDir)
 	} else {
 		script, err = r.resolvePrepareScript(req, taskDir, agentctlBin)
 	}
@@ -190,19 +192,9 @@ func (r *SSHExecutor) runPrepareScript(ctx context.Context, client *ssh.Client, 
 		return nil
 	}
 	env := sshRemoteContributionEnv(req, agentctlBin)
-	var envPayload, command string
-	if usePowerShell {
-		cmd, cmdErr := newPowerShellCommand(shell, powerShellEnvelope{Login: true, Env: env, Script: script})
-		if cmdErr != nil {
-			return fmt.Errorf("ssh: prepare script environment: %w", cmdErr)
-		}
-		command, envPayload = cmd.line, cmd.stdin
-	} else {
-		envPayload, err = buildSSHEnvInitScript(env)
-		if err != nil {
-			return fmt.Errorf("ssh: prepare script environment: %w", err)
-		}
-		command = WrapLoginShell(shell, sshScriptWithEnvironment(script))
+	command, envPayload, err := sshScriptCommand(shell, env, script)
+	if err != nil {
+		return fmt.Errorf("ssh: prepare script environment: %w", err)
 	}
 	r.report(req.OnProgress, "Running prepare script", PrepareStepRunning, "")
 	stepCtx, cancel := context.WithTimeout(preparationContext(ctx), constants.SetupScriptTimeout)
@@ -227,6 +219,21 @@ const sshStdinEnvImport = `eval "$(cat)"`
 
 func sshScriptWithEnvironment(script string) string {
 	return "set -ae\n" + sshStdinEnvImport + "\nset +a\nset -e\n" + script
+}
+
+// sshScriptCommand returns the exec command line and stdin that run script
+// with env under shell: a PowerShell envelope on Windows, or a login shell that
+// imports env from stdin on Linux and macOS.
+func sshScriptCommand(shell string, env map[string]string, script string) (string, string, error) {
+	if isPowerShellShell(shell) {
+		cmd, err := newPowerShellCommand(shell, powerShellEnvelope{Login: true, Env: env, Script: script})
+		return cmd.line, cmd.stdin, err
+	}
+	envPayload, err := buildSSHEnvInitScript(env)
+	if err != nil {
+		return "", "", err
+	}
+	return WrapLoginShell(shell, sshScriptWithEnvironment(script)), envPayload, nil
 }
 
 func redactSSHScriptOutput(output string, env map[string]string) string {
@@ -265,21 +272,18 @@ func normalizeSSHRemotePath(path string) string {
 }
 
 func (r *SSHExecutor) verifyPrimaryCheckout(ctx context.Context, client *ssh.Client, taskDir string, req *ExecutorCreateRequest, platform SSHRemotePlatform) error {
-	shell := sshShellForRemote(req.Metadata, platform)
-	if isWindowsRemotePlatform(platform) || isPowerShellShell(shell) || isWindowsRemotePath(taskDir) {
-		return r.verifyWindowsPrimaryCheckout(ctx, client, taskDir, req, platform)
-	}
 	targetURL := getMetadataString(req.Metadata, "repository_clone_url")
 	if targetURL == "" {
 		return nil
 	}
-	canonicalTaskDir, taskDirStderr, taskDirErr := runSSHCommand(ctx, client, WrapLoginShell(shell, "cd "+shellQuote(taskDir)+" && pwd -P"))
+	probe := newSSHCheckoutProbe(ctx, client, sshShellForRemote(req.Metadata, platform), taskDir)
+	canonicalTaskDir, taskDirStderr, taskDirErr := probe.run(probe.canonicalDir)
 	if taskDirErr != nil {
 		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(canonicalTaskDir, taskDirStderr, taskDirErr))
 		return fmt.Errorf("ssh: primary repository checkout is missing")
 	}
-	root, rootStderr, rootErr := runSSHCommand(ctx, client, WrapLoginShell(shell, "git -C "+shellQuote(taskDir)+" rev-parse --show-toplevel"))
-	if rootErr != nil || normalizeSSHRemotePath(root) != normalizeSSHRemotePath(canonicalTaskDir) {
+	root, rootStderr, rootErr := probe.run(probe.gitRoot)
+	if rootErr != nil || !sshRemotePathsEqual(root, canonicalTaskDir, platform) {
 		detail := sshCommandFailureDetail(root, rootStderr, rootErr)
 		if rootErr == nil {
 			detail = fmt.Sprintf("checkout root %q does not match task directory %q", strings.TrimSpace(root), strings.TrimSpace(canonicalTaskDir))
@@ -287,17 +291,49 @@ func (r *SSHExecutor) verifyPrimaryCheckout(ctx context.Context, client *ssh.Cli
 		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, detail)
 		return fmt.Errorf("ssh: primary repository checkout is missing")
 	}
-	origin, originStderr, originErr := runSSHCommand(ctx, client, WrapLoginShell(shell, "git -C "+shellQuote(taskDir)+" config --get remote.origin.url"))
+	origin, originStderr, originErr := probe.run(probe.gitOrigin)
 	if originErr != nil || strings.TrimSpace(origin) != targetURL {
 		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(origin, originStderr, originErr))
 		return fmt.Errorf("ssh: primary repository origin does not match configured repository")
 	}
-	if head, headStderr, headErr := runSSHCommand(ctx, client, WrapLoginShell(shell, "git -C "+shellQuote(taskDir)+" rev-parse --verify HEAD")); headErr != nil {
+	if head, headStderr, headErr := probe.run(probe.gitHead); headErr != nil {
 		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(head, headStderr, headErr))
 		return fmt.Errorf("ssh: primary repository has no checkout")
 	}
 	r.report(req.OnProgress, "Verifying primary checkout", PrepareStepCompleted, strings.TrimSpace(canonicalTaskDir))
 	return nil
+}
+
+// sshCheckoutProbe holds the primary-checkout probe commands for one host
+// family and the runner that executes them.
+type sshCheckoutProbe struct {
+	run                                       func(command string) (string, string, error)
+	canonicalDir, gitRoot, gitOrigin, gitHead string
+}
+
+func newSSHCheckoutProbe(ctx context.Context, client *ssh.Client, shell, taskDir string) sshCheckoutProbe {
+	if isPowerShellShell(shell) {
+		dir := powerShellQuote(cleanWindowsRemotePath(taskDir))
+		return sshCheckoutProbe{
+			run: func(command string) (string, string, error) {
+				return runPowerShell(ctx, client, shell, command, true)
+			},
+			canonicalDir: "[Console]::Out.Write((Get-Item -LiteralPath " + dir + " -Force).FullName)",
+			gitRoot:      "& git -C " + dir + " rev-parse --show-toplevel",
+			gitOrigin:    "& git -C " + dir + " config --get remote.origin.url",
+			gitHead:      "& git -C " + dir + " rev-parse --verify HEAD",
+		}
+	}
+	dir := shellQuote(taskDir)
+	return sshCheckoutProbe{
+		run: func(command string) (string, string, error) {
+			return runSSHCommand(ctx, client, WrapLoginShell(shell, command))
+		},
+		canonicalDir: "cd " + dir + " && pwd -P",
+		gitRoot:      "git -C " + dir + " rev-parse --show-toplevel",
+		gitOrigin:    "git -C " + dir + " config --get remote.origin.url",
+		gitHead:      "git -C " + dir + " rev-parse --verify HEAD",
+	}
 }
 
 func (r *SSHExecutor) runCleanupScript(ctx context.Context, client *ssh.Client, taskDir string, metadata map[string]interface{}, env map[string]string, platform SSHRemotePlatform, instanceID, reason string) error {
@@ -308,10 +344,19 @@ func (r *SSHExecutor) runCleanupScript(ctx context.Context, client *ssh.Client, 
 	if taskDir == "" {
 		return fmt.Errorf("ssh: cleanup task directory is missing")
 	}
-	if platform.GOOS == "" {
-		platform = sshPlatformFromMetadata(metadata, taskDir)
+	shell := sshShellForRemote(metadata, platform)
+	req := &ExecutorCreateRequest{Metadata: metadata, Env: env}
+	var resolved string
+	var err error
+	if isPowerShellShell(shell) {
+		resolved, err = r.resolveWindowsSSHScript(req, taskDir, script)
+	} else {
+		resolved, err = r.resolveSSHScript(req, taskDir, "", script)
 	}
-	command, envPayload, err := r.buildSSHCleanupInvocation(taskDir, metadata, env, platform, script)
+	if err != nil {
+		return err
+	}
+	command, envPayload, err := sshScriptCommand(shell, env, resolved)
 	if err != nil {
 		return err
 	}
@@ -326,35 +371,4 @@ func (r *SSHExecutor) runCleanupScript(ctx context.Context, client *ssh.Client, 
 	}
 	r.logger.Debug("ssh cleanup script completed", zap.String("instance_id", instanceID), zap.String("reason", reason))
 	return nil
-}
-
-func (r *SSHExecutor) buildSSHCleanupInvocation(
-	taskDir string,
-	metadata map[string]interface{},
-	env map[string]string,
-	platform SSHRemotePlatform,
-	script string,
-) (string, string, error) {
-	shell := sshShellForRemote(metadata, platform)
-	req := &ExecutorCreateRequest{Metadata: metadata, Env: env}
-	if isPowerShellShell(shell) {
-		resolved, err := r.resolveWindowsSSHScript(req, taskDir, "", script)
-		if err != nil {
-			return "", "", err
-		}
-		cmd, err := newPowerShellCommand(shell, powerShellEnvelope{Login: true, Env: env, Script: resolved})
-		if err != nil {
-			return "", "", err
-		}
-		return cmd.line, cmd.stdin, nil
-	}
-	resolved, err := r.resolveSSHScript(req, taskDir, "", script)
-	if err != nil {
-		return "", "", err
-	}
-	envPayload, err := buildSSHEnvInitScript(env)
-	if err != nil {
-		return "", "", err
-	}
-	return WrapLoginShell(shell, sshScriptWithEnvironment(resolved)), envPayload, nil
 }

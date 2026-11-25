@@ -40,20 +40,20 @@ func waitExit(t *testing.T, cmd *exec.Cmd, want int) {
 }
 
 // Every managed Git command on Windows starts suspended. Resuming it by process
-// handle avoids a system-wide thread snapshot per command.
+// handle avoids a system-wide thread snapshot per command; the snapshot walk
+// remains the fallback.
 // @covers AC-EXECUTORS-SSH-WINDOWS-001.22
-func TestResumeSuspendedProcessByHandle(t *testing.T) {
-	cmd := startSuspendedExit(t, "7")
-	if err := resumeSuspendedProcessByHandle(cmd.Process.Pid); err != nil {
-		t.Fatalf("resume by handle: %v", err)
+func TestResumeSuspendedProcessRunsItToCompletion(t *testing.T) {
+	for name, resume := range map[string]func(int) error{
+		"by handle":       resumeSuspendedProcessByHandle,
+		"thread snapshot": resumeSuspendedProcessThreads,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cmd := startSuspendedExit(t, "7")
+			if err := resume(cmd.Process.Pid); err != nil {
+				t.Fatalf("resume: %v", err)
+			}
+			waitExit(t, cmd, 7)
+		})
 	}
-	waitExit(t, cmd, 7)
-}
-
-func TestResumeSuspendedProcessResumesItsThreads(t *testing.T) {
-	cmd := startSuspendedExit(t, "5")
-	if err := ResumeSuspendedProcess(cmd.Process.Pid); err != nil {
-		t.Fatalf("resume: %v", err)
-	}
-	waitExit(t, cmd, 5)
 }
