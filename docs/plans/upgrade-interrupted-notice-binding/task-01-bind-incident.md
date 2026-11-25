@@ -32,3 +32,5 @@ The new regression cases failed on both engines before the change. After the cha
 The legacy restart integration test includes multiple retired interrupted submissions in one generation. With no prior recovery snapshot, all authenticated work can retire and the generic block can resolve. The transaction leaves both delivery fields empty and emits no submission-specific marker. A historical terminal snapshot with one current interruption retains an exact binding.
 
 After correcting the legacy-history case, the native resume and historical terminal repository suites passed on SQLite and PostgreSQL 17.11. A separate test verifies that ambiguous history with a saved notice still refuses resolution.
+
+The historical-terminal matcher requires a bound submission ID. A generic companion cannot identify a later interrupted submission on its own. The transaction binds a sole generic block before matching. The historical tests cover both a settled earlier notice and an earlier incident that still lacks terminal settlement.
