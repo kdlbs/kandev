@@ -24,6 +24,9 @@ and replay remain owned by [queue admission](queue-admission.md).
 | .5       | Orchestrator focus refresh and idle-suspension revalidation       |
 | .6       | `messagequeue` admission entry holder record and timeout logging  |
 | .7       | MCP deferred-move handler error mapping                           |
+| .8       | Fresh-start recovery lifecycle and admission release              |
+| .9       | Focus-floor retention                                             |
+| .10      | Workflow parking revalidation                                     |
 
 ## Acquisition and callback lifetime
 
@@ -42,6 +45,38 @@ Use the acquisition context only at lock acquisition. The admitted callback and
 its token retain the caller context and the existing after-lifecycle-unlock
 callbacks. Convert only an internally budgeted acquisition deadline into
 `ErrSessionAdmissionTimeout`; callback errors are returned unchanged.
+
+## Lock order with session lifecycle
+
+Session locks are taken in one order: route operation lock, then session
+lifecycle lock, then queue admission. Resume and recovery hold the lifecycle
+lock while their continuation reaches prompt admission, so code that already
+holds queue admission must never block on the lifecycle lock.
+
+- Focus refresh of a live session and idle-suspension revalidation acquire the
+  lifecycle lock without waiting. When it is busy, a lifecycle operation owns
+  the session, so the session is not settled. Revalidation skips the candidate
+  and the next reaper scan retries. Focus restarts the in-memory idle interval,
+  which revalidation reads under the same admission, and leaves the persisted
+  focus record for a settled execution.
+- Focus on an idle-suspended session decides under admission, then releases it
+  before resuming. The resume takes the route and lifecycle locks first and
+  rechecks suspension provenance under them, so a concurrent resume or stop
+  turns the focus into a no-op.
+- A focus request that cannot take the lifecycle lock still resets the
+  in-memory idle interval. The reaper keeps that floor while its executor row
+  exists, including scans that skip the session because of temporary known
+  work. It rechecks the interval while admitted before it accepts a suspension
+  candidate. Passive resume checks workflow parking again after it reacquires
+  the lifecycle locks, as required by .10.
+
+Fresh-start recovery replays the original submission as a dispatch-only prompt.
+The resume continuation, and with it the lifecycle lock, ends at provider
+acceptance, matching ordinary first launch. Turn results and failures arrive
+through the normal agent event path, not the recovery request. The agent
+runtime watches every dispatch-only prompt for inactivity, as
+[agent stall recovery](../../agents/system-design/agent-stall-recovery.md)
+describes, so the replayed turn keeps its stall notice.
 
 ## Failure and recovery
 
@@ -67,8 +102,8 @@ Each acquisition keeps its own 30-second budget;
 the same live compensation can wait for contention to clear without dropping
 the known-undelivered message.
 
-All queue mutation handlers map this sentinel to the existing retryable
-`UNAVAILABLE` response. Operator mutation wrappers wait 35 seconds and preserve
+All queue mutation handlers, including the MCP `move_task` deferred-move path,
+map this sentinel to the existing retryable `UNAVAILABLE` response. Operator mutation wrappers wait 35 seconds and preserve
 the structured admission error. Queue controls use the existing translated
 queue-unavailable feedback. Identity, entry-not-found, merge limits, and reorder
 drift retain their precedence. Identified queue admission keeps its existing
@@ -90,8 +125,9 @@ admitted callback must not wait for the lifecycle lock without a bound,
 because the admission gate stays held for as long as the callback blocks.
 Opportunistic callbacks use the existing `tryAcquireSessionLifecycleLock`.
 When the lock is busy, the callback returns without side effects: the focus
-refresh records no focus marker, and the reaper leaves the candidate for a
-later scan.
+refresh writes no persisted focus marker, but it restarts the in-memory idle
+interval. The reaper keeps the candidate for a later scan and rechecks its idle
+deadline under admission before suspension.
 
 ## Holder diagnostics
 

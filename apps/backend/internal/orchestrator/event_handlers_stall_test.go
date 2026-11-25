@@ -3,11 +3,14 @@ package orchestrator
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
@@ -280,4 +283,48 @@ func TestStallNoticeContentIgnoresHistoricalTerminalClassification(t *testing.T)
 	if got := stallNoticeContent(payload); got != "Still waiting on Start dev server." {
 		t.Fatalf("stallNoticeContent() = %q, want the advisory tool message", got)
 	}
+}
+
+func TestHandleAgentStalledStopsWaitingWhenManagerContextIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	svc := &Service{
+		repo:           setupTestRepo(t),
+		messageCreator: &mockMessageCreator{},
+		logger:         testLogger(),
+	}
+	const sessionID = "stall-session"
+	guard, releaseGuard := svc.acquireCancelInFlightGuard(sessionID)
+	require.NoError(t, guard.LockContext(context.Background()))
+	var held sync.Once
+	releaseHeldGuard := func() {
+		held.Do(func() {
+			guard.Unlock()
+			releaseGuard()
+		})
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+			TaskID: "stall-task", SessionID: sessionID,
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		releaseHeldGuard()
+		<-done
+	})
+
+	require.Eventually(t, func() bool {
+		guard.stateMu.Lock()
+		defer guard.stateMu.Unlock()
+		return len(guard.waiters) == 1
+	}, time.Second, time.Millisecond, "stall handler should wait on the held session guard")
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stall handler did not stop waiting after the manager context was cancelled")
+	}
+	releaseHeldGuard()
 }

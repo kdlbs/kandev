@@ -60,6 +60,8 @@
   "cursorMcpSelectionTitle": "Agent MCP selection",
   "cursorMcpSelectionDescription": "Choose which enabled native MCP servers this profile will use at its next launch.",
   "refreshMcpDiscovery": "Refresh discovery",
+  "copilotLongContextFlag": "Long context",
+  "copilotLongContextFlagDescription": "Request a larger context window for new sessions on supported models. May use more AI credits.",
   "copilotPluginsTitle": "Plugins",
   "copilotPluginsDescription": "Load whole plugins for this profile. A plugin can run MCP servers, skills, agents, commands, hooks, and other executable components. Selected plugins are added to Copilot's native loading, so Copilot can still load other enabled plugins.",
   "copilotPluginsScopeNote": "Local and worktree executors only. Selections apply when the next process starts. A running process keeps its original plugins.",

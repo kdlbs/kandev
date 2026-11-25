@@ -1107,6 +1107,8 @@ The field is not a shell script. Pipes, redirects, variable expansion, and comma
 
 Claude CLI passthrough uses standard output by default. Add an enabled `--verbose` entry to the profile CLI flags when you need diagnostic output.
 
+For Copilot, enable **Long context** in **CLI Flags** to pass `--context long_context` at launch. This option is off by default. To use long context for a new session, select a profile with the flag enabled and a model that supports it. Copilot controls the effective window and billing. Larger windows can use more AI credits. See [GitHub's supported Copilot models](https://docs.github.com/en/copilot/reference/ai-models/supported-models#models-with-extended-capabilities).
+
 Some older profiles contain compatibility fields such as Auggie's `allow_indexing`; current launch behavior is represented by the active profile settings and flags.
 
 ### Command prefixes

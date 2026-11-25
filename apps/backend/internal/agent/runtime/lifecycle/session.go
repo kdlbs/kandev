@@ -1621,35 +1621,47 @@ func (sm *SessionManager) waitForPromptDone(
 			return nil, ctx.Err()
 
 		case <-stallTicker.C:
-			snapshot, owned := sm.capturePromptStall(execution, promptGeneration)
-			if !owned {
-				continue
-			}
-			lastActivity, agentEventSeen, activityEpoch := snapshot.lastActivity, snapshot.outputObserved, snapshot.activityEpoch
-			elapsed := time.Since(lastActivity)
-			neverStarted := !agentEventSeen
-
-			if elapsed >= stallThreshold && !stallReported {
-				snapshot.diagnostic.StreamStages = captureStreamStages(execution)
-				snapshot.diagnostic.ElapsedMillis = elapsed.Milliseconds()
-				sm.logger.Warn("agent stall detected: no events received",
-					zap.Any("stall", snapshot.diagnostic))
-				if sm.eventPublisher != nil {
-					sm.eventPublisher.PublishAgentStalled(
-						ctx,
-						execution,
-						promptGeneration,
-						lastActivity,
-						elapsed,
-						activityEpoch,
-						neverStarted,
-						snapshot.accepted,
-					)
-				}
-				stallReported = true
+			if !stallReported {
+				_, stallReported = sm.reportPromptStall(ctx, execution, promptGeneration, stallThreshold)
 			}
 		}
 	}
+}
+
+// reportPromptStall publishes the generation's single stall notice once its
+// silence reaches threshold. owned is false once the generation has settled
+// or been superseded.
+func (sm *SessionManager) reportPromptStall(
+	ctx context.Context,
+	execution *AgentExecution,
+	promptGeneration uint64,
+	threshold time.Duration,
+) (owned, reported bool) {
+	snapshot, owned := sm.capturePromptStall(ctx, execution, promptGeneration)
+	if !owned {
+		return false, false
+	}
+	elapsed := time.Since(snapshot.lastActivity)
+	if elapsed < threshold {
+		return true, false
+	}
+	snapshot.diagnostic.StreamStages = captureStreamStages(execution)
+	snapshot.diagnostic.ElapsedMillis = elapsed.Milliseconds()
+	sm.logger.Warn("agent stall detected: no events received",
+		zap.Any("stall", snapshot.diagnostic))
+	if sm.eventPublisher != nil {
+		sm.eventPublisher.PublishAgentStalled(
+			ctx,
+			execution,
+			promptGeneration,
+			snapshot.lastActivity,
+			elapsed,
+			snapshot.activityEpoch,
+			!snapshot.outputObserved,
+			snapshot.accepted,
+		)
+	}
+	return true, true
 }
 
 func isCancelReleaseError(msg string) bool {

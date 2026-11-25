@@ -80,6 +80,7 @@
 # By default, comments/reviews/review threads are limited to items created after
 # the PR head commit. Checks are already scoped by GitHub to the current head.
 # Pass --all to include historical comments and reviews.
+# Set GH_REPO=OWNER/REPO to run outside a repository checkout.
 #
 # Requires: gh (authenticated), jq.
 
@@ -237,6 +238,11 @@ gh_json() {
     gh "$@" 2>"$GH_ERROR_FILE"
 }
 
+repo_view_json() {
+  local fields=$1
+  gh_json repo view ${GH_REPO:+"$GH_REPO"} --json "$fields"
+}
+
 emit_comment_json() {
   local comment_id=$1
   local repo_json
@@ -245,7 +251,7 @@ emit_comment_json() {
   local comment_json
   local comment_type
 
-  repo_json="$(gh_json repo view --json owner,name)"
+  repo_json="$(repo_view_json owner,name)"
   owner="$(jq -r '.owner.login // ""' <<<"$repo_json")"
   repo="$(jq -r '.name // ""' <<<"$repo_json")"
   if [[ -z "$owner" || -z "$repo" ]]; then
@@ -283,7 +289,7 @@ emit_job_log() {
   archive_file="$(mktemp)"
   log_file="$(mktemp)"
 
-  repo_json="$(gh_json repo view --json owner,name)" || {
+  repo_json="$(repo_view_json owner,name)" || {
     rm -f "$archive_file" "$log_file"
     printf 'failed to resolve repository identity\n' >&2
     return 1
@@ -976,7 +982,7 @@ fetch_review_threads_nodes_json() {
 repo_owner=''
 repo_name=''
 default_branch_name=''
-if repo_json="$(gh_json repo view --json owner,name,defaultBranchRef)"; then
+if repo_json="$(repo_view_json owner,name,defaultBranchRef)"; then
   repo_owner="$(jq -r '.owner.login // ""' <<<"$repo_json")"
   repo_name="$(jq -r '.name // ""' <<<"$repo_json")"
   default_branch_name="$(jq -r '.defaultBranchRef.name // ""' <<<"$repo_json")"
@@ -1079,16 +1085,22 @@ if ! approval_required_runs_json="$(fetch_approval_required_runs_json "$repo_own
 fi
 
 since=''
-if [[ "$INCLUDE_ALL" != "1" && -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
-  if since_json="$(fetch_head_commit_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
-    since="$(jq -r '.committed_at // ""' <<<"$since_json")"
-    if [[ -z "$since" ]]; then
-      add_error "since" "head commit timestamp unavailable; including historical comments"
-      since_json='null'
+opening_head_oid=''
+if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
+  if opening_head_json="$(fetch_head_commit_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
+    opening_head_oid="$(jq -r '.head_oid // ""' <<<"$opening_head_json")"
+    if [[ "$INCLUDE_ALL" != "1" ]]; then
+      since="$(jq -r '.committed_at // ""' <<<"$opening_head_json")"
+      if [[ -n "$since" ]]; then
+        since_json="$opening_head_json"
+      else
+        add_error "since" "head commit timestamp unavailable; including historical comments"
+      fi
     fi
-  else
+  elif [[ "$INCLUDE_ALL" != "1" ]]; then
     add_error "since" "gh api graphql head commit failed; including historical comments"
-    since_json='null'
+  else
+    add_error "opening_head" "gh api graphql opening head commit failed"
   fi
 fi
 
@@ -1105,8 +1117,6 @@ if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
 else
   add_error "reviews" "skipped: resolved PR identity unavailable"
 fi
-
-opening_head_oid="$(jq -r '.head_oid // ""' <<<"$since_json")"
 
 if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
   if threads_nodes_json="$(fetch_review_threads_nodes_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
