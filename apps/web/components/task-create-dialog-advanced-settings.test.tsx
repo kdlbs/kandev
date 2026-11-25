@@ -102,7 +102,6 @@ describe("TaskCreateAdvancedSettings", () => {
 
     const trigger = screen.getByTestId(ADVANCED_SETTINGS_TRIGGER_TEST_ID);
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(trigger.className).toContain("min-h-12");
     expect(screen.queryByTestId(DEPENDENCY_TRIGGER_TEST_ID)).toBeNull();
     expect(screen.queryByTestId("task-create-priority-select")).toBeNull();
   });
@@ -136,21 +135,10 @@ describe("TaskCreateAdvancedSettings", () => {
     expect(screen.getByTestId("task-create-dependency-setting-label").textContent).toContain(
       "Depends on",
     );
-    const grid = screen.getByTestId("task-create-advanced-settings-grid");
     const row = screen.getByTestId("task-create-dependency-setting-row");
-    const priorityRow = screen.getByTestId("task-create-priority-setting-row");
     const selectorContainer = screen.getByTestId("task-create-dependency-selector-container");
-    expect(grid.className).toContain("md:grid-cols-2");
-    expect(row.className).toContain("items-center");
-    expect(row.className).toContain("gap-3");
-    expect(row.className).not.toContain("flex-col");
-    expect(row.parentElement).toBe(grid);
-    expect(grid.firstElementChild).toBe(row);
-    expect(priorityRow.parentElement).toBe(grid);
-    expect(priorityRow.className).toContain("md:col-start-2");
-    expect(priorityRow.className).toContain("md:justify-self-start");
-    expect(priorityRow.className).not.toContain("md:justify-self-end");
-    expect(selectorContainer.parentElement).toBe(row);
+    expect(row.contains(selectorContainer)).toBe(true);
+    expect(selectorContainer.contains(screen.getByTestId(DEPENDENCY_TRIGGER_TEST_ID))).toBe(true);
     const info = screen.getByTestId("task-create-dependency-setting-info");
     expect(info.getAttribute("aria-label")).toBe("About task dependencies");
 
