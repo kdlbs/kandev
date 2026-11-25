@@ -84,13 +84,16 @@ func TestListOpenPRsFirstPageErrorFails(t *testing.T) {
 	}
 }
 
-func TestGHClientListOpenPRsCopiesFilterFields(t *testing.T) {
+func TestGHClientListOpenPRsReadsEveryPage(t *testing.T) {
 	calls := newFakeGH(t, ghResponse{
-		Prefix: "pr list",
-		Stdout: `[{"number":3,"title":"t","url":"https://github.com/acme/widget/pull/3","state":"OPEN",
-			"headRefName":"feat","headRefOid":"ccc","baseRefName":"main","author":{"login":"carol"},
-			"isDraft":false,"labels":[{"name":"needs-review"}],
-			"reviewRequests":[{"__typename":"User","login":"kandev-bot"}]}]`,
+		Prefix: "api repos/acme/widget/pulls",
+		Stdout: `[[{"number":3,"title":"t","state":"open","draft":false,
+			"head":{"ref":"feat","sha":"ccc"},"base":{"ref":"main","sha":"b1"},
+			"user":{"login":"carol"},"labels":[{"name":"needs-review"}],
+			"requested_reviewers":[{"login":"kandev-bot"}]}],
+			[{"number":4,"title":"u","state":"open","draft":true,
+			"head":{"ref":"fix","sha":"ddd"},"base":{"ref":"main","sha":"b1"},
+			"user":{"login":"dave"},"labels":[]}]]`,
 	})
 
 	prs, complete, err := NewGHClient().ListOpenPRs(context.Background(), "acme", "widget")
@@ -98,11 +101,10 @@ func TestGHClientListOpenPRsCopiesFilterFields(t *testing.T) {
 		t.Fatalf("ListOpenPRs: %v", err)
 	}
 	assertGHArgv(t, calls(t), 0, []string{
-		"pr", "list", "--repo", "acme/widget", "--state", "open", "--limit", "1000",
-		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,labels,reviewRequests,createdAt,updatedAt",
+		"api", "repos/acme/widget/pulls?state=open&per_page=100", "--paginate", "--slurp",
 	})
-	if !complete || len(prs) != 1 {
-		t.Fatalf("complete=%v prs=%d", complete, len(prs))
+	if !complete || len(prs) != 2 {
+		t.Fatalf("complete=%v prs=%d, want every page", complete, len(prs))
 	}
 	pr := prs[0]
 	if pr.HeadSHA != "ccc" || pr.BaseBranch != "main" || len(pr.Labels) != 1 || pr.Labels[0] != "needs-review" {
@@ -110,5 +112,8 @@ func TestGHClientListOpenPRsCopiesFilterFields(t *testing.T) {
 	}
 	if len(pr.RequestedReviewers) != 1 || pr.RequestedReviewers[0].Login != "kandev-bot" {
 		t.Fatalf("requested reviewers = %+v", pr.RequestedReviewers)
+	}
+	if !prs[1].Draft || prs[1].HeadSHA != "ddd" {
+		t.Fatalf("second PR = %+v", prs[1])
 	}
 }

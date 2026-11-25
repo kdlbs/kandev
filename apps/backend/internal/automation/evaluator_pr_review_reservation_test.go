@@ -80,3 +80,23 @@ func TestReviewRequestedReservationClearsWhenRequestDisappears(t *testing.T) {
 	require.Len(t, runs, 2, "a new request after the reservation was released fires")
 	require.Equal(t, "pr:acme/widget#17/review-requested/2", runs[1].DedupKey)
 }
+
+// A reviewer requested after a reserved request was committed is not covered
+// by that reservation, so it gets its own key and dispatches.
+func TestReviewRequestedReservationCoversOnlyItsReviewers(t *testing.T) {
+	f := newPRFollowUpFixture(t, followUpPR{Number: 17, Head: "aaa"})
+	f.addTrigger(t, reviewRequestedEvents)
+	f.evaluate()
+
+	restore := failProcessedObservationWrites(t, f)
+	f.setPRs(followUpPR{Number: 17, Head: "aaa", Reviewers: []string{"alice-reviewer"}})
+	f.evaluate()
+	restore()
+
+	f.setPRs(followUpPR{Number: 17, Head: "aaa", Reviewers: []string{"alice-reviewer", "bob-reviewer"}})
+	f.evaluate()
+	runs := f.runs(t)
+	require.Len(t, runs, 2, "the later reviewer is not swallowed by the reserved key")
+	require.Equal(t, "pr:acme/widget#17/review-requested/1", runs[0].DedupKey)
+	require.Equal(t, "pr:acme/widget#17/review-requested/2", runs[1].DedupKey)
+}

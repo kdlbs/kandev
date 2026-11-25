@@ -71,6 +71,7 @@ a fill and outline that read in both themes.
 ## Verification
 
 ```bash
+(cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm exec vitest run components/automations)
 (cd apps/web && pnpm run i18n:check && pnpm run lint)
 (cd apps/web && pnpm e2e:run --host --project chromium tests/automations-settings.spec.ts tests/automations-pr-follow-up.spec.ts tests/automations-mcp-selection.spec.ts tests/automations-plugin-tools.spec.ts)

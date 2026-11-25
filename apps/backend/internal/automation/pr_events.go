@@ -215,6 +215,7 @@ func baselineObservation(triggerID, owner, repo string, pr *github.PR, sel prEve
 func cloneObservation(obs *PRObservation) *PRObservation {
 	next := *obs
 	next.Requested = append([]string(nil), obs.Requested...)
+	next.PendingReviewReviewers = append([]string(nil), obs.PendingReviewReviewers...)
 	if obs.PendingSince != nil {
 		since := *obs.PendingSince
 		next.PendingSince = &since
@@ -222,10 +223,15 @@ func cloneObservation(obs *PRObservation) *PRObservation {
 	return &next
 }
 
+// clearReviewReservation releases a reserved review-request generation.
+func (o *PRObservation) clearReviewReservation() {
+	o.PendingReviewGeneration, o.PendingReviewReviewers = 0, nil
+}
+
 func observationsEqual(a, b *PRObservation) bool {
 	if a.HeadSHA != b.HeadSHA || a.PendingHeadSHA != b.PendingHeadSHA || a.TrackedEvents != b.TrackedEvents ||
 		a.ReviewGeneration != b.ReviewGeneration || a.PendingReviewGeneration != b.PendingReviewGeneration ||
-		!slices.Equal(a.Requested, b.Requested) {
+		!slices.Equal(a.Requested, b.Requested) || !slices.Equal(a.PendingReviewReviewers, b.PendingReviewReviewers) {
 		return false
 	}
 	if (a.PendingSince == nil) != (b.PendingSince == nil) {
@@ -256,7 +262,7 @@ func choosePRFollowUp(
 	if !matched {
 		next.HeadSHA, next.Requested = pr.HeadSHA, current
 		next.PendingHeadSHA, next.PendingSince = "", nil
-		next.PendingReviewGeneration = 0
+		next.clearReviewReservation()
 		return nil, next
 	}
 	if firing := chooseNewCommits(pr, cfg, sel, next, now); firing != nil {
@@ -270,7 +276,7 @@ func choosePRFollowUp(
 		}
 	}
 	next.Requested = current
-	next.PendingReviewGeneration = 0
+	next.clearReviewReservation()
 	return nil, next
 }
 
@@ -309,7 +315,7 @@ func processedObservation(obs *PRObservation, pr *github.PR, firing *prFiring, s
 	next.TrackedEvents = sel.trackedFor(obs)
 	next.HeadSHA, next.Requested = pr.HeadSHA, requestedReviewerKeys(pr)
 	next.PendingHeadSHA, next.PendingSince = "", nil
-	next.PendingReviewGeneration = 0
+	next.clearReviewReservation()
 	if firing.event == PREventReviewRequested {
 		next.ReviewGeneration = firing.generation
 	}

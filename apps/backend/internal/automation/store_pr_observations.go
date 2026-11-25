@@ -26,6 +26,7 @@ const prObservationTablesSQL = `
 		requested TEXT NOT NULL DEFAULT '[]',
 		review_generation BIGINT NOT NULL DEFAULT 0,
 		pending_review_generation BIGINT NOT NULL DEFAULT 0,
+		pending_review_reviewers TEXT NOT NULL DEFAULT '[]',
 		pending_head_sha TEXT NOT NULL DEFAULT '',
 		pending_since {{timestamp}},
 		tracked_events TEXT NOT NULL DEFAULT '',
@@ -49,8 +50,11 @@ type PRObservation struct {
 	// a run committed without its observation advancing is never dispatched
 	// again under a new key.
 	PendingReviewGeneration int64
-	PendingHeadSHA          string
-	PendingSince            *time.Time
+	// PendingReviewReviewers are the reviewer keys the reservation covers. A
+	// retry reuses the reserved generation only for these reviewers.
+	PendingReviewReviewers []string
+	PendingHeadSHA         string
+	PendingSince           *time.Time
 	// TrackedEvents lists the follow-up events this observation was recorded
 	// for, so an event added later starts from its own baseline.
 	TrackedEvents string
@@ -65,6 +69,7 @@ type prObservationRow struct {
 	Requested        string       `db:"requested"`
 	ReviewGeneration int64        `db:"review_generation"`
 	PendingReviewGen int64        `db:"pending_review_generation"`
+	PendingReviewers string       `db:"pending_review_reviewers"`
 	PendingHeadSHA   string       `db:"pending_head_sha"`
 	PendingSince     sql.NullTime `db:"pending_since"`
 	TrackedEvents    string       `db:"tracked_events"`
@@ -84,6 +89,9 @@ func (r prObservationRow) toObservation() (*PRObservation, error) {
 	if err := json.Unmarshal([]byte(r.Requested), &obs.Requested); err != nil {
 		return nil, fmt.Errorf("decode requested reviewers: %w", err)
 	}
+	if err := json.Unmarshal([]byte(r.PendingReviewers), &obs.PendingReviewReviewers); err != nil {
+		return nil, fmt.Errorf("decode reserved reviewers: %w", err)
+	}
 	return obs, nil
 }
 
@@ -93,7 +101,8 @@ func (s *Store) ListPRObservations(ctx context.Context, triggerID, owner, repo s
 	var rows []prObservationRow
 	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT trigger_id, repo_owner, repo_name, pr_number, head_sha, requested,
-			review_generation, pending_review_generation, pending_head_sha, pending_since, tracked_events
+			review_generation, pending_review_generation, pending_review_reviewers,
+			pending_head_sha, pending_since, tracked_events
 		FROM automation_pr_observations
 		WHERE trigger_id = ? AND repo_owner = ? AND repo_name = ?`), triggerID, owner, repo)
 	if err != nil {
@@ -116,12 +125,11 @@ func (s *Store) UpsertPRObservation(ctx context.Context, obs *PRObservation) err
 	if obs == nil {
 		return errors.New("pr observation is required")
 	}
-	requested := append([]string(nil), obs.Requested...)
-	sort.Strings(requested)
-	if requested == nil {
-		requested = []string{}
+	encoded, err := encodeReviewerKeys(obs.Requested)
+	if err != nil {
+		return err
 	}
-	encoded, err := json.Marshal(requested)
+	reserved, err := encodeReviewerKeys(obs.PendingReviewReviewers)
 	if err != nil {
 		return err
 	}
@@ -132,20 +140,30 @@ func (s *Store) UpsertPRObservation(ctx context.Context, obs *PRObservation) err
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO automation_pr_observations (
 			trigger_id, repo_owner, repo_name, pr_number, head_sha, requested,
-			review_generation, pending_review_generation, pending_head_sha, pending_since, tracked_events, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			review_generation, pending_review_generation, pending_review_reviewers,
+			pending_head_sha, pending_since, tracked_events, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(trigger_id, repo_owner, repo_name, pr_number) DO UPDATE SET
 			head_sha = excluded.head_sha,
 			requested = excluded.requested,
 			review_generation = excluded.review_generation,
 			pending_review_generation = excluded.pending_review_generation,
+			pending_review_reviewers = excluded.pending_review_reviewers,
 			pending_head_sha = excluded.pending_head_sha,
 			pending_since = excluded.pending_since,
 			tracked_events = excluded.tracked_events,
 			updated_at = excluded.updated_at`),
-		obs.TriggerID, obs.RepoOwner, obs.RepoName, obs.PRNumber, obs.HeadSHA, string(encoded),
-		obs.ReviewGeneration, obs.PendingReviewGeneration, obs.PendingHeadSHA, pendingSince, obs.TrackedEvents, time.Now().UTC())
+		obs.TriggerID, obs.RepoOwner, obs.RepoName, obs.PRNumber, obs.HeadSHA, encoded,
+		obs.ReviewGeneration, obs.PendingReviewGeneration, reserved, obs.PendingHeadSHA, pendingSince, obs.TrackedEvents, time.Now().UTC())
 	return err
+}
+
+// encodeReviewerKeys stores reviewer keys as a sorted JSON list.
+func encodeReviewerKeys(keys []string) (string, error) {
+	sorted := append([]string{}, keys...)
+	sort.Strings(sorted)
+	encoded, err := json.Marshal(sorted)
+	return string(encoded), err
 }
 
 // DeletePRObservation removes one observation.

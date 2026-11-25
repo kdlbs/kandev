@@ -84,8 +84,9 @@ to `github.Client`.
   `GET /repos/{owner}/{repo}/pulls?state=open&per_page=100`. They follow
   `Link: rel="next"` until the last page. `complete` is false if a later page
   fails after earlier pages succeeded.
-- `GHClient` calls `gh pr list --state open --limit 1000` with the needed
-  JSON fields. A result that reaches the limit reports `complete=false`.
+- `GHClient` calls `gh api repos/<owner>/<repo>/pulls?state=open&per_page=100
+  --paginate --slurp` and converts the REST pages like `PATClient`. A failed
+  page fails the call, so a successful result is always complete.
 - `MockClient` returns its seeded open PRs ordered by number. `NoopClient`
   returns `ErrNoClient`, like its other reads.
 
@@ -151,7 +152,8 @@ Each row holds:
 - `requested` (sorted JSON list of lowercased logins and team keys).
 - `review_generation`.
 - `pending_review_generation`, the generation reserved for a review request
-  before its firing is dispatched.
+  before its firing is dispatched, and `pending_review_reviewers`, the
+  reviewer keys that reservation covers.
 - `pending_head_sha` and `pending_since`, which track the quiet period.
 
 The evaluator computes candidates for each listed PR:
@@ -208,7 +210,9 @@ reuses a key that an earlier request holds. The evaluator stores the
 reservation in `pending_review_generation` and dispatches only after that
 write succeeds. A retry of the same transition reuses the reserved key, so a
 run committed before its observation advanced deduplicates instead of firing
-again. Processing any firing, or the transition disappearing, clears the
+again. The key is reused only when every reviewer of the retry is in
+`pending_review_reviewers`; a reviewer requested later gets a new generation
+and dispatches. Processing any firing, or the transition disappearing, clears the
 reservation.
 
 Each row also stores `tracked_events`, the events the trigger selected when
@@ -462,6 +466,7 @@ CREATE TABLE IF NOT EXISTS automation_pr_observations (
   requested         TEXT NOT NULL DEFAULT '[]',
   review_generation BIGINT NOT NULL DEFAULT 0,
   pending_review_generation BIGINT NOT NULL DEFAULT 0,
+  pending_review_reviewers  TEXT NOT NULL DEFAULT '[]',
   pending_head_sha  TEXT NOT NULL DEFAULT '',
   pending_since     TIMESTAMP NULL,
   tracked_events    TEXT NOT NULL DEFAULT '',

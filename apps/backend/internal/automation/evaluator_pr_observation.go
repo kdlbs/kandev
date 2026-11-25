@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"go.uber.org/zap"
 
@@ -151,8 +152,8 @@ func (e *GitHubEvaluator) recordOpenedOutcome(
 }
 
 // reserveReviewGeneration gives a review_requested firing its dedup key and
-// stores it on the observation before dispatch. A retry of the same request
-// reuses the reserved generation, so a run committed before its observation
+// stores it, with the reviewers it covers, on the observation before
+// dispatch. A retry for those reviewers reuses the reserved generation, so a run committed before its observation
 // advanced deduplicates instead of dispatching again. A new request takes the
 // next sequence after every key this automation already used for the PR, so a
 // reopened PR, a recreated trigger, or a second trigger never reuses a held
@@ -162,7 +163,7 @@ func (e *GitHubEvaluator) reserveReviewGeneration(
 	ctx context.Context, t *AutomationTrigger, repo github.RepoFilter, pr *github.PR, next *PRObservation, firing *prFiring,
 ) bool {
 	prefix := reviewRequestDedupPrefix(repo.Owner, repo.Name, pr.Number)
-	if next.PendingReviewGeneration > 0 {
+	if next.PendingReviewGeneration > 0 && reservationCovers(next.PendingReviewReviewers, firing.reviewers) {
 		firing.generation = next.PendingReviewGeneration
 		firing.dedupKey = fmt.Sprintf("%s%d", prefix, firing.generation)
 		return true
@@ -176,11 +177,23 @@ func (e *GitHubEvaluator) reserveReviewGeneration(
 	firing.generation = max(next.ReviewGeneration, used) + 1
 	firing.dedupKey = fmt.Sprintf("%s%d", prefix, firing.generation)
 	next.PendingReviewGeneration = firing.generation
+	next.PendingReviewReviewers = append([]string(nil), firing.reviewers...)
 	if err := e.svc.Store().UpsertPRObservation(ctx, next); err != nil {
 		e.logger.Warn("failed to reserve review-request generation; retrying next poll",
 			zap.String("trigger_id", t.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
-		next.PendingReviewGeneration = 0
+		next.clearReviewReservation()
 		return false
+	}
+	return true
+}
+
+// reservationCovers reports whether every reviewer of a firing was part of
+// the reservation, so reusing its key cannot swallow a later reviewer.
+func reservationCovers(reserved, reviewers []string) bool {
+	for _, reviewer := range reviewers {
+		if !slices.Contains(reserved, reviewer) {
+			return false
+		}
 	}
 	return true
 }

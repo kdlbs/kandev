@@ -464,25 +464,26 @@ func (c *GHClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*
 	return c.parsePRList(out, owner, repo)
 }
 
-// ghOpenPRListLimit bounds `gh pr list`. A result that reaches the limit is
-// reported as incomplete so callers never treat a truncated listing as
-// authoritative.
-const ghOpenPRListLimit = 1000
-
+// ListOpenPRs reads every page of the REST pulls listing, so the result is
+// complete whenever it succeeds. `gh api --paginate` fails the whole call when
+// a page fails, so a partial listing is never returned.
 func (c *GHClient) ListOpenPRs(ctx context.Context, owner, repo string) ([]*PR, bool, error) {
-	out, err := c.run(ctx, "pr", "list",
-		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--state", "open",
-		"--limit", strconv.Itoa(ghOpenPRListLimit),
-		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,labels,reviewRequests,createdAt,updatedAt")
+	out, err := c.run(ctx, "api", fmt.Sprintf("repos/%s/%s/pulls?state=open&per_page=100", owner, repo),
+		"--paginate", "--slurp")
 	if err != nil {
 		return nil, false, fmt.Errorf("list open PRs: %w", err)
 	}
-	prs, err := c.parsePRList(out, owner, repo)
-	if err != nil {
-		return nil, false, err
+	var pages [][]patPR
+	if err := json.Unmarshal([]byte(out), &pages); err != nil {
+		return nil, false, fmt.Errorf("decode open PRs for %s/%s: %w", owner, repo, err)
 	}
-	return prs, len(prs) < ghOpenPRListLimit, nil
+	prs := make([]*PR, 0)
+	for _, page := range pages {
+		for i := range page {
+			prs = append(prs, convertPatPR(&page[i], owner, repo))
+		}
+	}
+	return prs, true, nil
 }
 
 func (c *GHClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, customQuery string) ([]*PR, error) {
