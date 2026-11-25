@@ -18,7 +18,7 @@ type EnsureSessionResponse struct {
 	SessionID             string `json:"session_id,omitempty"`
 	State                 string `json:"state"`
 	AgentProfileID        string `json:"agent_profile_id,omitempty"`
-	Source                string `json:"source"`                   // existing_primary | existing_newest | created_prepare | created_start | skipped_terminal_pr
+	Source                string `json:"source"`                   // existing_primary | existing_newest | created_prepare | created_start | skipped_terminal_pr | awaiting_manual_start
 	NewlyCreated          bool   `json:"newly_created"`            // true when a new session was created by this call
 	WorkspacePath         string `json:"workspace_path,omitempty"` // effective workspace path (for quick-chat sessions without worktrees)
 	ActivationDisposition string `json:"activation_disposition,omitempty"`
@@ -122,6 +122,20 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 	if agentProfileID != "" && autoStart {
 		intent = IntentStart
 		source = "created_start"
+	}
+	passiveForkReviewOpen := o.ActivationSource == LaunchActivationSourceSessionOpen &&
+		(o.AutoStart == nil || !*o.AutoStart)
+	stepDerivedForkReviewStart := intent == IntentStart && o.AutoStart == nil
+	if taskRequiresManualForkPRStart(task) && (passiveForkReviewOpen || stepDerivedForkReviewStart) {
+		return &EnsureSessionResponse{
+			Success:               true,
+			TaskID:                taskID,
+			State:                 string(models.TaskSessionStateCreated),
+			AgentProfileID:        agentProfileID,
+			Source:                "awaiting_manual_start",
+			ActivationDisposition: activationDispositionSuppressed,
+			ActivationReason:      "fork_pr_manual_start",
+		}, nil
 	}
 
 	launchResp, err := s.LaunchSession(ctx, &LaunchSessionRequest{

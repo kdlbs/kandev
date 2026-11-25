@@ -44,6 +44,25 @@ const oversizedLog = Array.from(
     `2026-09-18T06:32:25Z INFO worker=${index} operation completed; duration=125ms status=ok`,
 ).join("\n");
 
+it("hides attachment markers only for the comment groups in the message", () => {
+  const { container } = render(
+    <>
+      {renderUserMessageBody({
+        hasContent: true,
+        showRaw: false,
+        hasAttachments: true,
+        attachments: [{ comment_id: "group-a" }],
+        content:
+          "Review this.\n\n<!-- kandev-comment-files:group-a -->\n\n<!-- kandev-comment-files:example -->\n\nDone.",
+        taskId: "task-1",
+      })}
+    </>,
+  );
+  expect(container.textContent).not.toContain("group-a");
+  expect(container.textContent).toContain("kandev-comment-files:example");
+  expect(container.textContent).toContain("Done.");
+});
+
 describe("renderUserMessageBody", () => {
   it("bounds oversized user text before Markdown rendering", () => {
     const { container } = render(

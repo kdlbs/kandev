@@ -138,6 +138,7 @@ func (a *Adapter) clearVerifiedClaudeShellBindingsLocked() {
 	if !verifiedClaudeTerminalBridge(a.agentID, name, version) {
 		return
 	}
+	a.claudeShellOutput.clear()
 	for toolCallID, payload := range a.activeToolCalls {
 		if payload != nil && payload.Kind() == streams.ToolKindShellExec {
 			delete(a.activeToolCalls, toolCallID)

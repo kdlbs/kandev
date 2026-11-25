@@ -715,6 +715,8 @@ func (m *Manager) Start(ctx context.Context) error {
 			m.remoteStatusLoop(remoteStatusCtx)
 		}()
 		m.logger.Info("remote status loop started")
+		m.wg.Add(1)
+		go m.dispatchedPromptStallLoop(m.stopContext)
 	})
 	// Set up callbacks for passthrough mode (using standalone runtime)
 	if standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone); err == nil {

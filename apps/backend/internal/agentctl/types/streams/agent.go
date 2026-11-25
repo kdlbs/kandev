@@ -135,6 +135,30 @@ const (
 	EventTypeBackgroundWorkOutput = "background_work_output"
 )
 
+const (
+	AgentEventDataCopilotInterruptionNotice = "copilot_interruption_notice"
+	CopilotInterruptionClarification        = "clarification"
+	CopilotInterruptionTool                 = "tool"
+	EventTypeCopilotInterruptionNotice      = "copilot_interruption_notice"
+)
+
+// CopilotInterruptionNoticeType returns the supported classification carried by
+// an assistant event, or an empty string when the marker is absent or invalid.
+func CopilotInterruptionNoticeType(raw any) string {
+	data, ok := raw.(map[string]any)
+	if !ok {
+		return ""
+	}
+	switch data[AgentEventDataCopilotInterruptionNotice] {
+	case CopilotInterruptionClarification:
+		return CopilotInterruptionClarification
+	case CopilotInterruptionTool:
+		return CopilotInterruptionTool
+	default:
+		return ""
+	}
+}
+
 // PromptFailureDisposition identifies a host-validated outcome for a failed
 // prompt. Unknown values are invalid and must retain conservative terminal
 // failure behavior.
@@ -311,6 +335,9 @@ type AgentEvent struct {
 	// ProtocolMessageID identifies the source-protocol message this chunk belongs to.
 	// It is distinct from the Kandev message record ID used by downstream streaming.
 	ProtocolMessageID string `json:"protocol_message_id,omitempty"`
+
+	// ReplaceMessageContent applies this snapshot to the same protocol message.
+	ReplaceMessageContent bool `json:"replace_message_content,omitempty"`
 
 	// RetractedMessageIDs identifies Kandev transcript records owned by an
 	// abandoned response attempt. It is populated only on response-attempt resets.

@@ -180,8 +180,9 @@ func (s *Service) processOnTurnCompleteWithCause(
 	if cause == turnCompletionCauseUserCancellation {
 		ctx = cancellationTransitionAttribution(ctx)
 	}
-	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true)
-	return true
+	transitionCapture := &workflowTransitionErrorCapture{}
+	s.executeStepTransition(withWorkflowTransitionErrorCapture(ctx, transitionCapture), taskID, sessionID, currentStep, targetStepID, true)
+	return transitionCapture.err == nil
 }
 
 func (s *Service) shouldSkipLegacyTurnCompletion(
@@ -490,11 +491,11 @@ func (s *Service) onTurnStartTaskAdmission(ctx context.Context, taskID string) (
 // If false, only the step change is applied (used for on_turn_start where the user is about to send a message).
 func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool) {
 	settleFailedTransitionSession := func(transitionErr error) {
+		recordWorkflowTransitionError(ctx, transitionErr)
 		if triggerOnEnter {
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
 			return
 		}
-		recordWorkflowTransitionError(ctx, transitionErr)
 		s.reportWorkflowTurnStartPreparationError(
 			ctx,
 			taskID,
@@ -525,6 +526,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Atomically admit the target step before exit side effects. A full target
 	// is represented as a durable destination queue entry instead of a failed
 	// transition.
+	oldState := task.State
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
 	// Capture the completion signal before admission and carry its handoff on
@@ -555,6 +557,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	}
 	applied, err := s.updateTransitionTaskWithCapacityAndEffect(transitionCtx, task, fromStepID, targetStep)
 	if err != nil {
+		s.recordCompletionGateRefusal(ctx, taskID, fromStepID, sessionID, err)
 		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
@@ -588,6 +591,10 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Publish task updated event via the task service so the payload carries
 	// the full context (session counts, primary session, repositories).
 	s.publishTaskUpdated(ctx, task)
+	if task.State == v1.TaskStateCompleted && task.State != oldState {
+		s.publishTaskStateChanged(ctx, task, oldState)
+		s.processParentChildrenCompletedForTaskState(ctx, taskID, task.State)
+	}
 	if !queued {
 		s.processParentChildrenCompletedForTerminalStepMove(ctx, taskID, toStepID)
 	}
@@ -739,6 +746,10 @@ func (s *Service) updateTransitionTaskWithCapacityAndEffect(
 			)
 			return applied, err
 		}
+	}
+	if appliedRepo, ok := s.repo.(workflowMoveAdmissionAppliedRepository); ok {
+		_, applied, err := appliedRepo.UpdateTaskWithWorkflowStepAdmissionReportingApplied(ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit)
+		return applied, err
 	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
@@ -5103,6 +5114,8 @@ func (s *Service) handleWorkflowEntryPromptError(
 	s.publishSessionWaitingEvent(ctx, taskID, session.ID, step.ID, session)
 }
 
+const metaKeyWorkflowMoveInstructions = "workflow_move_instructions"
+
 // queueMoveInstructionsForSession delivers one-shot workflow-move instructions
 // to an existing session that will not otherwise receive the overlaid step
 // prompt (no auto-start, no profile switch). It is a no-op for ordinary steps
@@ -5117,7 +5130,7 @@ func (s *Service) queueMoveInstructionsForSession(ctx context.Context, taskID, s
 	}
 	if _, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx, sessionID, taskID, block, "",
-		messagequeue.QueuedByUser, false, nil, nil,
+		messagequeue.QueuedByUser, false, nil, map[string]interface{}{metaKeyWorkflowMoveInstructions: true},
 	); err != nil {
 		s.logger.Warn("failed to queue one-shot workflow move instructions",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
@@ -6968,8 +6981,8 @@ func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, bas
 		attachments = make([]v1.MessageAttachment, 0, len(msg.Attachments))
 		for _, a := range msg.Attachments {
 			attachments = append(attachments, v1.MessageAttachment{
-				Type:         a.Type,
-				AttachmentID: a.AttachmentID,
+				Type:      a.Type,
+				CommentID: a.CommentID, AttachmentID: a.AttachmentID,
 				Data:         a.Data,
 				MimeType:     a.MimeType,
 				Name:         a.Name,
@@ -7060,8 +7073,8 @@ func toQueuedAttachments(attachments []v1.MessageAttachment) []messagequeue.Mess
 	queued := make([]messagequeue.MessageAttachment, 0, len(attachments))
 	for _, attachment := range attachments {
 		queued = append(queued, messagequeue.MessageAttachment{
-			Type:         attachment.Type,
-			AttachmentID: attachment.AttachmentID,
+			Type:      attachment.Type,
+			CommentID: attachment.CommentID, AttachmentID: attachment.AttachmentID,
 			Data:         attachment.Data,
 			MimeType:     attachment.MimeType,
 			Name:         attachment.Name,
@@ -8429,7 +8442,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 			if !steptelemetry.HasTrigger(transitionCtx) {
 				transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
 			}
-			committedTask, oldWorkflowID, applied, wipLimit, err := s.workflowStore.applyTransitionIfAtStepRaw(
+			committedTask, oldWorkflowID, oldState, applied, wipLimit, err := s.workflowStore.applyTransitionIfAtStepRaw(
 				transitionCtx, taskID, fromStepID, toStepID,
 			)
 			if err != nil {
@@ -8443,6 +8456,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 			// The raw CAS commit intentionally has no side effects. The shared
 			// lifecycle helper performs the remaining task-level work below.
 			s.publishTaskUpdated(ctx, committedTask, oldWorkflowID)
+			s.workflowStore.publishCommittedCompletion(ctx, committedTask, oldState)
 			s.workflowStore.pullNextTaskOnVacate(ctx, fromStepID, taskID)
 			return workflowTransitionCommitResult{
 				Applied:        true,
@@ -8651,7 +8665,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 		settleFailedTransitionSession()
 		return false
 	}
-	if sessionLifecycle {
+	if sessionLifecycle && !terminalTarget {
 		s.processOnExit(ctx, taskID, session, fromStep)
 	}
 
@@ -8674,6 +8688,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	commitResult, err := commit(applyCtx)
 	if err != nil {
 		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
+		s.recordCompletionGateRefusal(ctx, taskID, result.FromStepID, session.ID, err)
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
@@ -8686,6 +8701,10 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
+	}
+
+	if sessionLifecycle && terminalTarget {
+		s.processOnExit(ctx, taskID, session, fromStep)
 	}
 
 	// ADR 0015 — record the audit row before the pending signal (if any) is

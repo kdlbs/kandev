@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +27,7 @@ type recordingProfileDiscoveryUtility struct {
 	capabilityResult  *hostutility.ProfileCapabilityResult
 	modelResolution   hostutility.ModelConfigResolution
 	agentCapabilities hostutility.AgentCapabilities
+	refreshCalled     chan struct{}
 }
 
 func (f *recordingProfileDiscoveryUtility) Get(string) (hostutility.AgentCapabilities, bool) {
@@ -35,6 +38,12 @@ func (f *recordingProfileDiscoveryUtility) Get(string) (hostutility.AgentCapabil
 }
 
 func (f *recordingProfileDiscoveryUtility) Refresh(context.Context, string) (hostutility.AgentCapabilities, error) {
+	if f.refreshCalled != nil {
+		select {
+		case f.refreshCalled <- struct{}{}:
+		default:
+		}
+	}
 	return hostutility.AgentCapabilities{Status: hostutility.StatusOK}, nil
 }
 
@@ -222,6 +231,69 @@ func TestCopilotPluginProfileProbeFailureReason(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAntigravitySettingsRejectsCapabilitiesFromPreviousRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX CLI script")
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	binDir := t.TempDir()
+	cliPath := filepath.Join(binDir, "agy")
+	writeAntigravityCLI(t, cliPath, "1.5.15")
+	t.Setenv("PATH", binDir)
+
+	controller, _, ctx, _, _ := newProviderTestController(t)
+	stale := hostutility.AgentCapabilities{
+		RuntimeVariant: "standalone",
+		Status:         hostutility.StatusOK,
+		Models:         []hostutility.Model{{ID: "standalone-only", Name: "Standalone only"}},
+	}
+	utility := &recordingProfileDiscoveryUtility{
+		agentCapabilities: stale,
+		capabilityResult:  &hostutility.ProfileCapabilityResult{Capabilities: stale},
+		refreshCalled:     make(chan struct{}, 2),
+	}
+	controller.hostUtility = utility
+	envVars := []dto.ProfileEnvVarDTO{}
+	cliFlags := []dto.CLIFlagDTO{}
+	commandPrefix := ""
+	response, err := controller.FetchProfileDynamicModels(ctx, agents.AntigravityACPAgentID, dto.ProfileCapabilityRequest{
+		AuthorizationScope: "user-antigravity",
+		LaunchSettings: &dto.ProfileLaunchSettingsRequest{
+			EnvVars: &envVars, CLIFlags: &cliFlags, CommandPrefix: &commandPrefix,
+		},
+	})
+	if err != nil {
+		t.Fatalf("FetchProfileDynamicModels: %v", err)
+	}
+	if response.RuntimeVariant != "cli" || response.Status != string(hostutility.StatusProbing) || len(response.Models) != 0 {
+		t.Fatalf("profile snapshot = variant %q, status %q, models %+v; want cli/probing/empty", response.RuntimeVariant, response.Status, response.Models)
+	}
+
+	modelConfig := controller.buildModelConfigFromHostUtility(ctx, agents.AntigravityACPAgentID)
+	if modelConfig.RuntimeVariant != "cli" || modelConfig.Status != string(hostutility.StatusProbing) || len(modelConfig.AvailableModels) != 0 {
+		t.Fatalf("agent snapshot = variant %q, status %q, models %+v; want cli/probing/empty", modelConfig.RuntimeVariant, modelConfig.Status, modelConfig.AvailableModels)
+	}
+
+	dynamic, err := controller.FetchDynamicModels(ctx, agents.AntigravityACPAgentID, false)
+	if err != nil || dynamic.Status != string(hostutility.StatusProbing) {
+		t.Fatalf("dynamic snapshot = %#v, error = %v; want probing while CLI refresh starts", dynamic, err)
+	}
+	select {
+	case <-utility.refreshCalled:
+	case <-time.After(time.Second):
+		t.Fatal("runtime change did not start a replacement capability probe")
+	}
+	if _, err := controller.FetchDynamicModels(ctx, agents.AntigravityACPAgentID, false); err != nil {
+		t.Fatalf("FetchDynamicModels on repeated poll: %v", err)
+	}
+	select {
+	case <-utility.refreshCalled:
+		t.Fatal("repeated settings poll started another probe for the same runtime")
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 

@@ -210,6 +210,24 @@ export interface RevokePluginCapabilityApprovalInput {
   audit_id: string;
 }
 
+/** One external account linked to a Kandev user through a plugin
+ * installation (backend plugins.IdentityLinkDTO). */
+export interface PluginIdentityLink {
+  id: string;
+  provider: string;
+  subject: string;
+  display_name: string;
+  user_id: string;
+  user_display_name: string;
+  created_at: string;
+}
+
+/** A single-use link code the external surface redeems within ten minutes. */
+export interface PluginIdentityLinkCode {
+  code: string;
+  expires_at: string;
+}
+
 /**
  * Derived install state of a marketplace catalog entry relative to what is
  * installed locally. Mirrors marketplace.InstallState

@@ -24,7 +24,9 @@ func TestFreshStartResumeRequestReplacesNativeConversation(t *testing.T) {
 func TestApplyDeliveryIdentityFreshStartAdvancesCommittedGeneration(t *testing.T) {
 	repo := &interruptedGenerationRepository{
 		mockRepository: newMockRepository(),
-		generation:     &models.HarnessSessionGeneration{Generation: 1, NativeSessionID: "previous-native"},
+		generation: &models.HarnessSessionGeneration{
+			Generation: 1, NativeSessionID: "previous-native", AdapterVersion: "antigravity-cli/1.5.15",
+		},
 	}
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
 	req := &LaunchAgentRequest{ReplaceNativeConversation: true}
@@ -34,6 +36,7 @@ func TestApplyDeliveryIdentityFreshStartAdvancesCommittedGeneration(t *testing.T
 	require.EqualValues(t, 2, req.DeliveryHarnessGeneration)
 	require.Equal(t, "incarnation:g2", req.DeliveryStreamID)
 	require.True(t, req.ReplaceNativeConversation)
+	require.Equal(t, "antigravity-cli/1.5.15", req.RuntimeAdapterVersion)
 }
 
 func TestApplyDeliveryIdentityFreshStartWithoutCommittedGenerationStaysFirst(t *testing.T) {

@@ -687,6 +687,8 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
+	PreferACPV2 bool
+
 	InstanceID    string
 	CausingRunID  string
 	IsPassthrough bool
@@ -1024,6 +1026,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		promptTurnID:                     req.PromptTurnID,
 		AgentID:                          agentID,
 		AuthPolicy:                       req.AuthPolicy,
+		LocalRuntimeEnv:                  cloneStringMap(req.LocalRuntimeEnv),
 		ContainerID:                      ri.ContainerID,
 		ContainerIP:                      ri.ContainerIP,
 		WorkspacePath:                    workspacePath,

@@ -78,6 +78,43 @@ func countCombinedDeliveryRows(t *testing.T, repo *Repository, query string, arg
 	return count
 }
 
+func TestCanonicalMessageSnapshotsReplaceAndClear(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedCombinedDeliveryBatchSession(t, repo)
+	ctx := t.Context()
+	events := []*models.AgentDeliveryEvent{
+		combinedDeliveryBatchEvent(t, 1, "stale answer"),
+		combinedDeliveryBatchEvent(t, 2, "revised"),
+		combinedDeliveryBatchEvent(t, 3, " answer"),
+	}
+	setSnapshot := func(event *models.AgentDeliveryEvent, text string) {
+		t.Helper()
+		payload, err := json.Marshal(streams.AgentEvent{
+			Type: streams.EventTypeMessageChunk, Text: text, ReplaceMessageContent: true,
+			CanonicalMessageBaseID: combinedDeliveryMessageID, CanonicalMessageID: combinedDeliveryMessageID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		event.Payload = payload
+	}
+	setSnapshot(events[1], "revised")
+	project := func(batch []*models.AgentDeliveryEvent, want string) {
+		t.Helper()
+		if _, err := repo.ReceiveAndProjectCanonicalAgentDeliveryEvents(ctx, batch, combinedDeliveryBatchEffects(batch), 0); err != nil {
+			t.Fatal(err)
+		}
+		message, err := repo.GetMessage(ctx, combinedDeliveryMessageID)
+		if err != nil || message.Content != want {
+			t.Fatalf("message = %+v, error = %v, want content %q", message, err, want)
+		}
+	}
+	project(events, "revised answer")
+	clear := combinedDeliveryBatchEvent(t, 4, "")
+	setSnapshot(clear, "")
+	project([]*models.AgentDeliveryEvent{clear}, "")
+}
+
 func TestReceiveAndProjectCanonicalBatchAtomic(t *testing.T) {
 	repos := map[string]func(*testing.T) *Repository{
 		"sqlite":   newRepoForSessionTests,

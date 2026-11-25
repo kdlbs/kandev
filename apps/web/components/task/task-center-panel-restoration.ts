@@ -3,7 +3,7 @@
 import {
   shouldOpenFilePreview,
   previewFileState,
-  canOfferViewerAfterReadFailure,
+  canFindViewerForFileType,
 } from "@/lib/plugins/file-viewer-selection";
 
 import type { StoreApi } from "zustand";
@@ -85,7 +85,7 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
               : undefined,
         });
       } catch {
-        if (canOfferViewerAfterReadFailure(savedTab.path)) {
+        if (canFindViewerForFileType(savedTab.path)) {
           loadedTabs[index] = installFileEditorTab(previewFileState(savedTab.path, savedTab.repo));
         }
       }

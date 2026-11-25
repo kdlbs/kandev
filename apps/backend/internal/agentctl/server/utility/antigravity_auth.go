@@ -43,6 +43,9 @@ func prepareAntigravityUtilityEnv(
 	if cfg == nil || cfg.AuthPolicy == nil || !acpcompat.IsAntigravity(agentID) {
 		return env, nil
 	}
+	if cfg.AuthPolicy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI {
+		return acpcompat.PrepareLocalAntigravityEnv(env, "")
+	}
 	harness := envValue(env, acpcompat.AntigravityHarnessPathEnv)
 	if harness == "" {
 		bundle, err := antigravityruntime.Resolve(ctx, antigravityruntime.ResolveOptions{})
@@ -96,6 +99,9 @@ func applyAntigravityAuth(
 	consent <-chan string,
 ) error {
 	if policy == nil || !acpcompat.IsAntigravity(agentID) {
+		return nil
+	}
+	if policy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI {
 		return nil
 	}
 	if policy.MethodID != acpcompat.AntigravityPersonalAuthMethod {

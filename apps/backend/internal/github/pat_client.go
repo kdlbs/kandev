@@ -843,6 +843,23 @@ func (c *PATClient) DeleteGist(ctx context.Context, gistID string) error {
 	return c.delete(ctx, "/gists/"+gistID)
 }
 
+// ResolveRepoRefSHA returns the latest commit SHA for a repository branch,
+// tag, or commit ref.
+func (c *PATClient) ResolveRepoRefSHA(ctx context.Context, owner, repo, ref string) (string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return "", errors.New("resolve repository ref: empty ref")
+	}
+	endpoint := fmt.Sprintf("/repos/%s/%s/commits?sha=%s&per_page=1", owner, repo, url.QueryEscape(ref))
+	var commits []repoCommitSHA
+	if err := c.get(ctx, endpoint, &commits); err != nil {
+		return "", fmt.Errorf("resolve repository ref: %w", err)
+	}
+	if len(commits) == 0 || commits[0].SHA == "" {
+		return "", errors.New("resolve repository ref: no commit found")
+	}
+	return commits[0].SHA, nil
+}
+
 // ListRepoDirectory lists the entries of a directory in a repository at the
 // given ref via the REST contents API. A 404 (missing directory) surfaces as
 // a *GitHubAPIError via the shared get() helper.

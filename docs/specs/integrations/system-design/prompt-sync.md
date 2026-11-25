@@ -292,9 +292,10 @@ caller.
 
 ## Control flow
 
-One service mutex serializes runs, version saves, configuration writes,
-and removal. **Sync now** and removal authorize the loaded configuration
-under that mutex. Sync uses the authorized snapshot for fetch and apply.
+One service mutex serializes manual runs, automatic apply, version saves,
+configuration writes, and removal. **Sync now** and removal authorize the
+loaded configuration under that mutex. Sync uses the authorized snapshot for
+fetch and apply. [Automatic runs](#automatic-runs) fetch outside it.
 
 1. Load the configuration. For automatic sync, check the schedule and
    suspension status.
@@ -307,15 +308,39 @@ under that mutex. Sync uses the authorized snapshot for fetch and apply.
    against connection replacement.
 5. Record status and return the result.
 
-Automatic GitHub runs use non-blocking background admission. A deferred
-run leaves failure status intact and retries on the next tick.
-
 Manual GitHub runs opt in to `WithNonBlockingGitHubAdmission` in
 `syncLocked` (AC-INTEGRATIONS-PROMPT-SYNC-001.6). An opted-in interactive
 request returns `AdmissionWaitError` when quota blocks it. This applies to
 the listing and each download. The error carries the retry boundary and
 distinguishes a quota block from cancellation. An admitted request uses
 its normal transport deadline. The source check fetches outside the lock.
+
+### Automatic runs
+
+An automatic run fetches outside the service mutex
+(AC-INTEGRATIONS-PROMPT-SYNC-005.5). Admission waits do not hold the mutex.
+
+1. `SyncIfDue` takes the mutex with `TryLock`, refreshes the credential
+   fingerprint, and checks suspension and the schedule. It records an
+   `automaticRun` with the snapshot, the live fingerprint, and a cancelable
+   context in `Service.automatic`, then releases the mutex.
+2. The run checks the credential workspace and binds GitHub. It resolves the
+   branch to one commit SHA, then uses that SHA for the listing and every file.
+   GitLab uses the configured ref. `retryDeferred` waits and repeats only a
+   deferred ref, listing, or file request. Each wait lasts at most
+   `PollInterval` and checks the live fingerprint.
+3. A manual run, configuration save, removal, or `RunExclusive` cancels the
+   automatic run. The run takes the mutex again after its fetch. It applies
+   only when its context is live, the row exists, and no known fingerprint
+   changed. Otherwise, it records nothing and logs
+   `prompt sync automatic result superseded`.
+4. The run records a fetch error or applies the files inside
+   `CommitWorkspaceGitHubHost`. An `ErrGitHubHostMismatch` before the callback
+   is discarded. Automatic failure writes use the cancelable run context.
+   Manual failure writes survive request cancellation.
+
+`Poller.Stop` cancels the run, which records nothing. Only the poller
+starts automatic runs, so one runs at a time.
 
 ### Prompt file parsing
 
@@ -514,13 +539,14 @@ list, the `unchanged` flag, and the stored status match the current output
 
 ## Observability
 
-- Expvar counters `prompt_sync_runs_total` with closed keys `success` and
-  `failure`, and `prompt_sync_poll_skipped_total` with the closed keys
-  `suspended` and `rate_limited` (deferred background run). They carry no
-  repository, workspace, or prompt labels.
+- Expvar counters: `prompt_sync_runs_total` (`success`, `failure`) and
+  `prompt_sync_poll_skipped_total` (`suspended`). The GitHub rate coordinator
+  counts admission deferrals in `github_rate_limit_background_deferrals_total`.
+  These metrics have no repository, workspace, or prompt labels.
 - Structured zap logs: `applied prompt sync` (with counts),
-  `prompt sync attempt failed`, `prompt sync polling suspended`, and
-  `prompt sync polling recovered`.
+  `prompt sync attempt failed`, `prompt sync polling suspended`,
+  `prompt sync polling recovered`, and `prompt sync automatic result
+  superseded`.
 
 ## Related decisions
 

@@ -24,19 +24,20 @@ func (h *TaskHandlers) wsListTaskPlanComments(ctx context.Context, msg *ws.Messa
 
 func (h *TaskHandlers) wsCreateTaskPlanComment(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID       string `json:"task_id"`
-		PlanID       string `json:"plan_id"`
-		ID           string `json:"id"`
-		Body         string `json:"body"`
-		SelectedText string `json:"selected_text"`
-		AnchorFrom   int    `json:"anchor_from"`
-		AnchorTo     int    `json:"anchor_to"`
+		AttachmentIDs []string `json:"attachment_ids"`
+		TaskID        string   `json:"task_id"`
+		PlanID        string   `json:"plan_id"`
+		ID            string   `json:"id"`
+		Body          string   `json:"body"`
+		SelectedText  string   `json:"selected_text"`
+		AnchorFrom    int      `json:"anchor_from"`
+		AnchorTo      int      `json:"anchor_to"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return invalidPlanCommentPayload(msg, err)
 	}
 	snapshot, err := h.planService.CreatePlanComment(ctx, service.CreatePlanCommentRequest{
-		TaskID: req.TaskID, PlanID: req.PlanID, ID: req.ID, Body: req.Body,
+		TaskID: req.TaskID, PlanID: req.PlanID, ID: req.ID, AttachmentIDs: req.AttachmentIDs, Body: req.Body,
 		SelectedText: req.SelectedText, AnchorFrom: req.AnchorFrom, AnchorTo: req.AnchorTo,
 	})
 	if err != nil {
@@ -47,17 +48,18 @@ func (h *TaskHandlers) wsCreateTaskPlanComment(ctx context.Context, msg *ws.Mess
 
 func (h *TaskHandlers) wsUpdateTaskPlanComment(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID          string `json:"task_id"`
-		PlanID          string `json:"plan_id"`
-		ID              string `json:"id"`
-		Body            string `json:"body"`
-		ExpectedVersion int64  `json:"expected_version"`
+		AttachmentIDs   []string `json:"attachment_ids"`
+		TaskID          string   `json:"task_id"`
+		PlanID          string   `json:"plan_id"`
+		ID              string   `json:"id"`
+		Body            string   `json:"body"`
+		ExpectedVersion int64    `json:"expected_version"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return invalidPlanCommentPayload(msg, err)
 	}
 	snapshot, err := h.planService.UpdatePlanComment(ctx, service.UpdatePlanCommentRequest{
-		TaskID: req.TaskID, PlanID: req.PlanID, ID: req.ID,
+		TaskID: req.TaskID, PlanID: req.PlanID, ID: req.ID, AttachmentIDs: req.AttachmentIDs,
 		Body: req.Body, ExpectedVersion: req.ExpectedVersion,
 	})
 	if err != nil {

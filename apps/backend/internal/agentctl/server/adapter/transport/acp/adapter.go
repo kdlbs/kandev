@@ -157,6 +157,7 @@ type Adapter struct {
 	// backgroundWorkEnabled is the effective shared background-work feature
 	// value resolved by the backend for this launch.
 	backgroundWorkEnabled bool
+	claudeShellOutput     *claudeShellOutputFollower
 
 	// Normalizer for converting tool data to NormalizedPayload
 	normalizer *Normalizer
@@ -237,7 +238,8 @@ type Adapter struct {
 	// During load, we capture the last Plan so we can re-emit it after load completes.
 	// AvailableCommandsUpdate is NOT suppressed — it may arrive after the replay as a
 	// "ready" signal, and the last one always wins in the frontend.
-	isLoadingSession bool
+	isLoadingSession    bool
+	copilotInterruption copilotInterruptionState
 	// Session creation buffers startup reports until the provider's returned ID is bound.
 	sessionCreationPending        bool
 	pendingSessionStartupWarnings []AgentEvent
@@ -265,6 +267,7 @@ type Adapter struct {
 	// on turn end / reset (clearCursorTaskMetaLocked), so it never outlives the
 	// turn that produced it.
 	cursorTaskMetaBySession map[string]map[string]cursorTaskMeta
+	cursorShellWatches      map[string]cursorShellWatch
 	// toolCallParents preserves nested tool lineage while a handed-off
 	// predecessor continues streaming beside its human successor.
 	toolCallParents map[string]string
@@ -604,6 +607,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		contextCompactions:                make(map[string]*streams.NormalizedPayload),
 		openCodePluginClaims:              make(map[string]opencodeplugin.Claim),
 		cursorTaskMetaBySession:           make(map[string]map[string]cursorTaskMeta),
+		cursorShellWatches:                make(map[string]cursorShellWatch),
 		toolCallParents:                   make(map[string]string),
 		handoffProtectedToolCalls:         make(map[string]struct{}),
 		activeMonitors:                    make(map[string]map[string]string),
@@ -624,6 +628,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		lifetimeCancel:                    cancel,
 		closedCh:                          make(chan struct{}),
 	}
+	a.claudeShellOutput = newClaudeShellOutputFollower(ctx, a.sendUpdate)
 	a.shellSnapshotTimer = time.NewTimer(shellSnapshotInterval)
 	a.shellSnapshotTimer.Stop()
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
@@ -709,7 +714,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
 		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil, a.copilotNativeSessionEvents),
-		ClientInfo:         clientInfoForAgent(a.agentID),
+		ClientInfo:         clientInfoForAgent(a.agentID, a.cfg.AuthPolicy),
 	})
 	if err != nil {
 		span.RecordError(err)
@@ -927,15 +932,29 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 	defer a.updateEmitMu.Unlock()
 	a.flushShellSnapshotLocked()
 	a.shellSnapshots = shellSnapshotState{}
-	a.sendUpdateNow(event)
+	if a.sendUpdateNow(event) {
+		a.activateClaudeShellOutputForEvent(event)
+	}
 }
 
-func (a *Adapter) sendUpdateNow(event AgentEvent) {
+func (a *Adapter) activateClaudeShellOutputForEvent(event AgentEvent) {
+	if a.claudeShellOutput == nil || event.Type != streams.EventTypeToolUpdate || event.NormalizedPayload == nil {
+		return
+	}
+	background := event.NormalizedPayload.BackgroundWork()
+	if background == nil || background.Kind != streams.BackgroundWorkKindShell || background.WorkID == "" ||
+		background.Ended || background.Capabilities == nil || background.Capabilities.Output != "stream" {
+		return
+	}
+	a.claudeShellOutput.activate(event.SessionID, background.WorkID)
+}
+
+func (a *Adapter) sendUpdateNow(event AgentEvent) bool {
 	event = streams.PrepareToolEvent(event)
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
-		return
+		return false
 	}
 	updatesCh := a.updatesCh
 	lifetimeCtx := a.lifetimeCtx
@@ -954,10 +973,13 @@ func (a *Adapter) sendUpdateNow(event AgentEvent) {
 
 	select {
 	case updatesCh <- event:
+		return true
 	case <-closedCh:
+		return false
 	case <-lifetimeCtx.Done():
 		// Shutdown cancels the wait. The event is intentionally discarded after
 		// the adapter has become terminal; no later transcript can be applied.
+		return false
 	}
 }
 
@@ -986,6 +1008,8 @@ func (a *Adapter) Close() error {
 		return nil
 	}
 	a.closed = true
+	clear(a.cursorShellWatches)
+	a.clearCopilotInterruptionLocked()
 	if a.closedCh != nil {
 		close(a.closedCh)
 	}
@@ -1007,6 +1031,10 @@ func (a *Adapter) Close() error {
 	a.cancelAllAsyncTurnCompletes()
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
+	}
+	if a.claudeShellOutput != nil {
+		a.claudeShellOutput.clear()
+		a.claudeShellOutput.wait()
 	}
 
 	// A successful reset returns before its best-effort session/close request,

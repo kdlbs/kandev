@@ -49,8 +49,12 @@ administrator-scoped.
 
 ### Find a viewer for a file
 
-A file without a supported preview offers **Find viewer plugin**. This opens Browse
-with a file-type filter, such as `stl`. Only the extension is used for discovery;
+Files such as `.txt` open directly in the editor. If an installed viewer also
+supports the file, select **Open with** to use it. For a readable file with an
+unknown extension, select **Open with** to find a viewer.
+
+An unsupported preview offers **Find viewer plugin**. This opens Browse
+with a file-type filter, such as `stl`. Only the extension is used for discovery.
 Kandev does not send the filename, path, or file content to the catalog source.
 Select the filter chip to clear it. Format badges such as `.stl` come from the
 package's declared formats. **File viewers** and **3D** are general categories;

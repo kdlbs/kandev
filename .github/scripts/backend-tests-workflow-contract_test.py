@@ -111,6 +111,16 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("PostgresDSNFromEnv", self.workflow)
         self.assertNotIn("mapfile -t postgres_packages", self.workflow)
         persistence_gate = step_block(self.workflow, "Run fixed PostgreSQL 16 persistence gates")
+        postgres_job = job_block(self.workflow, "postgres-boot", "sidebar-resources")
+        self.assertIn(
+            "    env:\n"
+            "      KANDEV_TEST_POSTGRES_DSN: host=postgres port=5432 user=kandev "
+            "password=kandev dbname=kandev_admin sslmode=disable",
+            postgres_job,
+        )
+        self.assertIn("./internal/utility/store", persistence_gate)
+        self.assertIn('ordinary_packages+=("${package}")', persistence_gate)
+        self.assertIn('go test -v -race -timeout 90m "${ordinary_packages[@]}"', persistence_gate)
         self.assertIn("./internal/coordinator", persistence_gate)
         self.assertIn("./internal/coordinator/ledger", persistence_gate)
         self.assertIn("./internal/persistence/storeconformance ./internal/backendapp", self.workflow)

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"go.uber.org/zap"
 
@@ -17,6 +18,7 @@ type askUserQuestionRequest struct {
 	Questions         []clarification.Question `json:"questions"`
 	Context           string                   `json:"context"`
 	AllowFreeTextOnly bool                     `json:"allow_free_text_only,omitempty"`
+	NativeRequestID   string                   `json:"native_request_id,omitempty"`
 	// RetryKey is the connection-scoped transport identity the MCP server
 	// attaches so an exact retry maps to the same durable bundle.
 	RetryKey string `json:"retry_key"`
@@ -69,6 +71,7 @@ type clarificationRetryRegistration struct {
 	pendingID      string
 	isNew          bool
 	deliveryMissed bool
+	scoped         bool
 	wait           func(context.Context, *clarification.Response) (*clarification.Response, error)
 }
 
@@ -77,6 +80,9 @@ func (h *Handlers) registerClarificationRetry(req askUserQuestionRequest, taskID
 	// the handoff to Resolver linearizable: a concurrent durable answer either
 	// finds this waiter, or records that it already chose detached delivery.
 	retryPendingID := clarification.PendingIDForRequest(req.SessionID, req.RetryKey, req.Questions, req.Context)
+	if req.NativeRequestID != "" {
+		retryPendingID = req.nativeScope().PendingID()
+	}
 	clarificationReq := &clarification.Request{
 		PendingID: retryPendingID,
 		SessionID: req.SessionID,
@@ -84,7 +90,7 @@ func (h *Handlers) registerClarificationRetry(req askUserQuestionRequest, taskID
 		Questions: req.Questions,
 		Context:   req.Context,
 	}
-	var retry clarificationRetryRegistration
+	retry := clarificationRetryRegistration{scoped: req.NativeRequestID != ""}
 	if registrar, ok := h.clarificationSvc.(clarificationRetryRegistrar); ok && retryPendingID != "" {
 		retry.pendingID, retry.isNew, retry.deliveryMissed, retry.wait = registrar.CreateRetryRequestWithWaiter(clarificationReq)
 	} else {
@@ -169,6 +175,20 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	if response != nil || err != nil {
 		return response, err
 	}
+	if req.NativeRequestID != "" {
+		scope := req.nativeScope()
+		if !ownsNativeQuestion(ctx, scope) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "native clarification scope is invalid", nil)
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		defer func() {
+			if errors.Is(context.Cause(ctx), protocol.ErrNativeQuestionCancelled) {
+				_ = h.expireNativeQuestion(context.WithoutCancel(ctx), scope.SessionID, scope.PendingID())
+			}
+		}()
+	}
 	if protocol.HasQuestionImages(req.Questions) {
 		session, lookupErr := h.sessionRepo.GetTaskSession(ctx, req.SessionID)
 		if lookupErr != nil || session == nil || (req.TaskID != "" && req.TaskID != session.TaskID) {
@@ -237,7 +257,10 @@ func (h *Handlers) waitForAskUserQuestion(ctx context.Context, msg *ws.Message, 
 		resp, err = h.clarificationSvc.WaitForResponse(ctx, retry.pendingID)
 	}
 	if err != nil {
-		if h.inputPauser != nil {
+		if retry.scoped && ctx.Err() == nil {
+			_ = h.expireNativeQuestion(ctx, sessionID, retry.pendingID)
+		}
+		if !retry.scoped && h.inputPauser != nil {
 			if _, pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), sessionID); pauseErr != nil {
 				h.logger.Warn("failed to pause session after clarification ended without answer",
 					zap.String("pending_id", retry.pendingID),

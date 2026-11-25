@@ -99,6 +99,10 @@ func TestClientCapabilitiesCLI_RejectsInvalidJSONBeforeStartingChild(t *testing.
 
 func TestACPDBGCLIHelperProcess(t *testing.T) {
 	if os.Getenv("ACPDBG_CLI_PEER") == "1" {
+		if scenario := os.Getenv("ACPDBG_WIRE_CASE"); scenario != "" {
+			serveWirePeer(t, scenario)
+			return
+		}
 		serveCLIACP(t)
 		return
 	}

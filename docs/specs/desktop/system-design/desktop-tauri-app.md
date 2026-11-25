@@ -4,7 +4,7 @@ system: desktop
 requirements:
   - REQ-DESKTOP-DESKTOP-TAURI-APP-001
 created: 2026-06-23
-updated: 2026-10-14
+updated: 2026-11-24
 owners:
   - tbd
 ---
@@ -20,6 +20,7 @@ This design defines the technical contract for `REQ-DESKTOP-DESKTOP-TAURI-APP-00
 | Requirement | Design section |
 | --- | --- |
 | `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Desktop architecture](#desktop-architecture), [macOS window chrome](#macos-window-chrome), [Auxiliary child ownership](#auxiliary-child-ownership), [Settings notification test](#settings-notification-test) |
+| AC `.18`–`.20` | [macOS agent PATH](#macos-agent-path) |
 
 ## Desktop architecture
 
@@ -134,6 +135,16 @@ configuration. A separate test launch follows the [isolated startup design](isol
 It owns cleanup of the launcher/backend process tree on quit, startup failure, and update restart.
 The existing HTTP, WebSocket, and boot-payload product APIs remain the SPA's data plane; the
 desktop bridge is only for native integration.
+
+### macOS agent PATH
+
+On macOS, `common_path_entries` reads `~/.nvm/alias/default`. For `node` or a
+numeric version prefix, select the highest matching installed Node release by
+numeric version order. An exact version selects its own directory. If its `bin`
+contains executable `node`, `npm`, and `npx`, append it after the common PATH
+entries. The existing PATH builder handles duplicates and passes PATH to the
+launcher and its local descendants. If the lookup yields no usable bin, use
+the ordinary desktop PATH. [nvm discovery plan](../../../plans/macos-desktop-nvm-path/plan.md)
 
 ## Contextual close contract
 

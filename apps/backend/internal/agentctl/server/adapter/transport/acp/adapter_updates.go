@@ -196,6 +196,7 @@ func (a *Adapter) handleACPUpdate(
 	startupWarningOwned := !a.closed &&
 		((isLoading && a.loadingSessionID == sessionID) || (!isLoading && a.sessionID == sessionID))
 	a.mu.Unlock()
+	copilotNotice := a.observeCopilotInterruptionUpdate(sessionID, n.Update, promptGeneration)
 	if isStartupWarning && !startupWarningOwned {
 		startupWarning = nil
 		if !isLoading {
@@ -273,10 +274,21 @@ func (a *Adapter) handleACPUpdate(
 	}
 	suppressed := a.dialect.suppresses(n)
 	handled := suppressed
+	var cursorWatchEvent *AgentEvent
+	if !suppressed {
+		cursorWatchEvent = a.observeCursorShellWatch(sessionID, n.Update, promptGeneration)
+		handled = handled || cursorWatchEvent != nil
+	}
 	var event, leadingEvent *AgentEvent
 	var claudeResumeUpdate *AgentEvent
 	if !suppressed {
 		event = a.convertNotificationForGeneration(n, promptGeneration)
+		if copilotNotice != "" && event != nil {
+			if event.Data == nil {
+				event.Data = make(map[string]any)
+			}
+			event.Data[streams.AgentEventDataCopilotInterruptionNotice] = copilotNotice
+		}
 		if a.copilotNativeActive.Load() && n.Update.UsageUpdate != nil &&
 			event != nil && event.Type == streams.EventTypeContextWindow {
 			// The native usage_info stream owns the Copilot gauge. The ordinary
@@ -294,20 +306,7 @@ func (a *Adapter) handleACPUpdate(
 			}
 		}
 		if event != nil && event.Type == streams.EventTypeSessionModels && n.Update.ConfigOptionUpdate != nil {
-			if _, hasModeOption := modeConfigOption(event.ConfigOptions); hasModeOption {
-				a.mu.RLock()
-				availableModes := append([]streams.SessionModeInfo(nil), a.availableModes...)
-				activeSession := a.sessionID == sessionID && !a.closed
-				a.mu.RUnlock()
-				if activeSession {
-					leadingEvent = &AgentEvent{
-						Type:           streams.EventTypeSessionMode,
-						SessionID:      sessionID,
-						CurrentModeID:  currentModeFromConfig(event.ConfigOptions),
-						AvailableModes: availableModes,
-					}
-				}
-			}
+			leadingEvent = a.modeEventForConfigSnapshot(*event)
 		}
 		if event != nil && (a.observeCodexProviderEvidence(promptGeneration, event) ||
 			a.observeCursorRetriableEvidence(promptGeneration, event)) {
@@ -357,6 +356,12 @@ func (a *Adapter) handleACPUpdate(
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, claudeResumeUpdate)
 		a.sendUpdate(*claudeResumeUpdate)
 	}
+	if cursorWatchEvent != nil {
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, cursorWatchEvent)
+		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
+			cursorWatchEvent.Type, rawData, cursorWatchEvent)
+		a.sendUpdate(*cursorWatchEvent)
+	}
 	if leadingEvent != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, leadingEvent)
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
@@ -400,7 +405,8 @@ func (a *Adapter) handleACPUpdate(
 func (a *Adapter) stampSessionSettingsReports(sessionID string, events ...*AgentEvent) {
 	needsStamp := false
 	for _, event := range events {
-		if event != nil && (event.Type == streams.EventTypeSessionMode || event.Type == streams.EventTypeSessionModels) {
+		if event != nil && event.SessionSettingsGeneration == 0 &&
+			(event.Type == streams.EventTypeSessionMode || event.Type == streams.EventTypeSessionModels) {
 			needsStamp = true
 			break
 		}
@@ -412,7 +418,8 @@ func (a *Adapter) stampSessionSettingsReports(sessionID string, events ...*Agent
 	if a.sessionID == sessionID && !a.closed {
 		a.sessionSettingsGeneration++
 		for _, event := range events {
-			if event == nil || (event.Type != streams.EventTypeSessionMode && event.Type != streams.EventTypeSessionModels) {
+			if event == nil || event.SessionSettingsGeneration != 0 ||
+				(event.Type != streams.EventTypeSessionMode && event.Type != streams.EventTypeSessionModels) {
 				continue
 			}
 			event.SessionSettingsPolicy = providerRestoredPolicy(a.sessionSettingsPolicy)
@@ -645,7 +652,7 @@ func (a *Adapter) convertACPSessionNotification(n acp.SessionNotification) (*Age
 
 	case u.ConfigOptionUpdate != nil:
 		configOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
-		if len(configOptions) > 0 {
+		if len(configOptions) > 0 || a.agentID == acpcompat.PiAgentID {
 			// Refresh the cached config options so emitSetModelEvent
 			// (called from SetModel) doesn't reuse the stale snapshot from
 			// session/new. Include the cached available models so the event
@@ -657,21 +664,24 @@ func (a *Adapter) convertACPSessionNotification(n acp.SessionNotification) (*Age
 			}
 			cachedModels := a.availableModels
 			a.availableConfigOptions = configOptions
-			if modes, found := sessionModesFromConfig(configOptions); found {
+			a.clearUnknownThinkingModeLocked(configOptions)
+			if modes, found := a.sessionModesFromConfig(configOptions); found {
 				a.availableModes = modes
 			}
-			a.mu.Unlock()
-			if currentMode := currentModeFromConfig(configOptions); currentMode != "" {
-				a.noteCurrentMode(sessionID, currentMode)
+			a.noteConfigModeSnapshotLocked(sessionID, a.currentModeFromConfig(configOptions), false)
+			a.sessionSettingsGeneration++
+			event := &AgentEvent{
+				Type:                      streams.EventTypeSessionModels,
+				SessionID:                 sessionID,
+				CurrentModelID:            currentModelFromConfig(configOptions),
+				SessionModels:             convertSessionModels(cachedModels),
+				ConfigOptions:             configOptions,
+				SessionSettingsPolicy:     providerRestoredPolicy(a.sessionSettingsPolicy),
+				SessionSettingsGeneration: a.sessionSettingsGeneration,
+				Data:                      map[string]any{"config_options_source": "provider_update"},
 			}
-			return &AgentEvent{
-				Type:           streams.EventTypeSessionModels,
-				SessionID:      sessionID,
-				CurrentModelID: currentModelFromConfig(configOptions),
-				SessionModels:  convertSessionModels(cachedModels),
-				ConfigOptions:  configOptions,
-				Data:           map[string]any{"config_options_source": "provider_update"},
-			}, true
+			a.mu.Unlock()
+			return event, true
 		}
 		return nil, true
 

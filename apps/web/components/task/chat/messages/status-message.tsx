@@ -19,6 +19,7 @@ import {
   MutedConfigurationStatus,
   PickerConfigurationStatus,
 } from "./configuration-feedback-status";
+import { CopilotInterruptionMessage } from "./copilot-interruption-message";
 
 const UNKNOWN_TASK_KEY = "task:unknown";
 
@@ -482,6 +483,7 @@ function renderConfigurationCommandStatus({
 }
 
 function renderBaseSpecialStatusMessage({
+  comment,
   metadata,
   progress,
   statusLine,
@@ -489,6 +491,11 @@ function renderBaseSpecialStatusMessage({
   isError,
   isWarning,
 }: SpecialStatusArguments): ReactElement | null {
+  if (metadata?.copilot_interruption_notice) {
+    return (
+      <CopilotInterruptionMessage comment={comment} kind={metadata.copilot_interruption_notice} />
+    );
+  }
   if (metadata?.kind === "branch_recreated") return <BranchRecreatedWarning metadata={metadata} />;
   if (metadata?.variant === "resume_settings_provider_restored") {
     return <ProviderRestoredResumeStatus message={message} />;
