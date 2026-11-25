@@ -458,10 +458,7 @@ export function TaskCreateAdvancedSettings(props: TaskCreateAdvancedSettingsProp
         <Button
           type="button"
           variant="ghost"
-          className={controlSizingClassName(
-            "standard",
-            "w-full cursor-pointer justify-between px-0 text-sm font-semibold hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent",
-          )}
+          className="min-h-12 h-12 w-full justify-start gap-1 px-1 text-[11px] text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground cursor-pointer md:h-7 md:min-h-7"
           data-testid="task-create-advanced-settings-trigger"
         >
           <span>{t("task:advancedSettings")}</span>

@@ -127,6 +127,12 @@ test.describe("Task-create dependency selector", () => {
       await expect(dependency).toBeVisible();
       await expect(dependency).toContainText("No dependency");
       await expect(dependency).toHaveCSS("border-top-width", "1px");
+      const promptBorder = await dialog.getByTestId("task-description-input").evaluate((input) => {
+        const wrapper = input.closest(".border-input");
+        if (!wrapper) throw new Error("Prompt border is missing");
+        return getComputedStyle(wrapper).borderTopColor;
+      });
+      await expect(dependency).toHaveCSS("border-top-color", promptBorder);
       await dependency.click();
 
       const picker = dialog.getByTestId("task-create-dependencies-popover");

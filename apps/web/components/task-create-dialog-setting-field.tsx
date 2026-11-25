@@ -5,7 +5,7 @@ export const TASK_CREATE_SETTING_ROW =
 export const TASK_CREATE_SETTING_LABEL =
   "flex min-w-0 items-center gap-1 text-xs font-medium text-foreground md:min-h-7";
 export const TASK_CREATE_SETTING_TRIGGER =
-  "w-full min-w-0 rounded-md border border-muted-foreground/65 bg-background/40 font-normal hover:border-muted-foreground hover:bg-muted/40 focus-visible:ring-muted-foreground/70";
+  "w-full min-w-0 rounded-md border border-input bg-background/40 font-normal hover:bg-muted/40 focus-visible:ring-muted-foreground/70";
 
 export function TaskCreateSettingField({
   label,
