@@ -1,8 +1,10 @@
 package runtimeflags
 
 import (
+	"encoding/json"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/config"
@@ -200,31 +202,55 @@ func TestApplyStatesToConfigSetsClaudeMidTurnSteering(t *testing.T) {
 	}
 }
 
-func TestLSPBrowserContinuityFlagContract(t *testing.T) {
+// @covers AC-PLATFORM-LSP-CONTINUITY-GRADUATION-001.5
+func TestLSPBrowserContinuityFlagIsRetired(t *testing.T) {
 	const key = "features.lspBrowserContinuity"
 	const envVar = "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY"
-	definition, ok := DefinitionByKey(key)
-	if !ok {
-		t.Fatalf("runtime flag definition %q is missing", key)
+	if _, active := DefinitionByKey(key); active {
+		t.Fatalf("retired runtime flag %q remains active", key)
 	}
-	if definition.EnvVar != envVar {
-		t.Fatalf("EnvVar = %q, want %q", definition.EnvVar, envVar)
-	}
-	if !definition.RestartRequired {
-		t.Fatal("RestartRequired = false, want true")
-	}
-	defaults, err := profiles.FeatureFlagDefaults()
-	if err != nil {
-		t.Fatalf("FeatureFlagDefaults: %v", err)
-	}
-	if got := defaults["lsp_browser_continuity"]; got != "true" {
-		t.Fatalf("profile default = %q, want true", got)
+	if !slices.Contains(retiredRuntimeFlagIdentities, runtimeFlagIdentity{key: key, envVar: envVar}) {
+		t.Fatalf("retired identity pair %q / %q is missing", key, envVar)
 	}
 
+	t.Setenv(envVar, "false")
+	ctx := t.Context()
+	store := newTestStore(t)
+	if err := store.SetOverride(ctx, key, false); err != nil {
+		t.Fatalf("seed stale override: %v", err)
+	}
 	cfg := &config.Config{}
-	ApplyStatesToConfig(cfg, []RuntimeFlagState{{Key: key, EffectiveValue: false}})
-	if ValuesFromConfig(cfg)[key] {
-		t.Fatal("explicit false override did not disable LSP browser continuity")
+	opts := OptionsFromConfig(cfg)
+	if _, read := opts.EnvValues[envVar]; read {
+		t.Fatalf("retired environment variable %q is still read", envVar)
+	}
+	states, err := NewService(store, opts).ListStates(ctx)
+	if err != nil {
+		t.Fatalf("list runtime flags: %v", err)
+	}
+	for _, state := range states {
+		if state.Key == key {
+			t.Fatalf("retired flag %q appears in runtime states", key)
+		}
+	}
+	ApplyStatesToConfig(cfg, states)
+	featureJSON, err := json.Marshal(cfg.Features)
+	if err != nil {
+		t.Fatalf("encode feature response: %v", err)
+	}
+	var features map[string]bool
+	if err := json.Unmarshal(featureJSON, &features); err != nil {
+		t.Fatalf("decode feature response: %v", err)
+	}
+	if _, active := features["lspBrowserContinuity"]; active {
+		t.Fatalf("retired flag %q appears in the feature response", key)
+	}
+	overrides, err := store.ListOverrides(ctx)
+	if err != nil {
+		t.Fatalf("list saved overrides: %v", err)
+	}
+	if value, saved := overrides[key]; !saved || value {
+		t.Fatalf("saved override = %v, present = %v, want retained false override", value, saved)
 	}
 }
 

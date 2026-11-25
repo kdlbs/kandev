@@ -7,12 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	gorillaws "github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -248,12 +246,11 @@ func TestCloseCodeConstants(t *testing.T) {
 		name string
 		code int
 	}{
-		{"lspCloseBinaryNotFound", lspCloseBinaryNotFound},
 		{"lspCloseSessionNotFound", lspCloseSessionNotFound},
-		{"lspCloseInstallFailed", lspCloseInstallFailed},
 		{"lspCloseUnsupportedExecutor", lspCloseUnsupportedExecutor},
 		{"lspCloseCapacityExceeded", lspCloseCapacityExceeded},
-		{"lspCloseStreamError", lspCloseStreamError},
+		{"lspCloseTransport", lspCloseTransport},
+		{"lspCloseRuntimeStopped", lspCloseRuntimeStopped},
 	}
 	for _, tc := range codes {
 		if tc.code < 4000 || tc.code > 4999 {
@@ -285,40 +282,6 @@ func TestWriteLSPProxyMessageSetsDeadlineBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestForwardLSPCloseUsesGenericStreamErrorCode(t *testing.T) {
-	writer := &recordingLSPMessageWriter{}
-	handler := &LSPHandler{}
-
-	handler.forwardLSPClose(writer, errors.New("transport failed"))
-
-	if writer.messageType != gorillaws.CloseMessage {
-		t.Fatalf("message type = %d, want close message", writer.messageType)
-	}
-	closeCode := int(writer.payload[0])<<8 | int(writer.payload[1])
-	if closeCode != lspCloseStreamError {
-		t.Fatalf("close code = %d, want %d", closeCode, lspCloseStreamError)
-	}
-	if writer.deadlineOnWrite.IsZero() {
-		t.Fatal("close frame written without a write deadline")
-	}
-}
-
-func TestForwardLSPClosePreservesTaskHostApplicationCode(t *testing.T) {
-	const autoInstallUnsupportedCode = 4007
-	writer := &recordingLSPMessageWriter{}
-	handler := &LSPHandler{}
-
-	handler.forwardLSPClose(writer, &gorillaws.CloseError{
-		Code: autoInstallUnsupportedCode,
-		Text: "auto-install unsupported on task host",
-	})
-
-	closeCode := int(writer.payload[0])<<8 | int(writer.payload[1])
-	if closeCode != autoInstallUnsupportedCode {
-		t.Fatalf("close code = %d, want %d", closeCode, autoInstallUnsupportedCode)
-	}
-}
-
 func TestLSPRuntimeSupported(t *testing.T) {
 	tests := []struct {
 		runtime agentruntime.Runtime
@@ -337,102 +300,24 @@ func TestLSPRuntimeSupported(t *testing.T) {
 	}
 }
 
-func TestResolveLSPExecutionRejectsUnsupportedRuntimeBeforeEnsure(t *testing.T) {
-	manager := &recordingLSPLifecycleManager{runtimeName: agentruntime.RuntimeSSH}
-	handler := &LSPHandler{lifecycleMgr: manager, capacity: newLSPCapacityLimiter(1)}
-
-	_, runtimeName, err := handler.resolveLSPExecution(context.Background(), "session-ssh")
-	if !errors.Is(err, errLSPUnsupportedExecutor) {
-		t.Fatalf("resolveLSPExecution() error = %v, want unsupported executor", err)
+func TestResolveContinuityExecutionEnsuresLocalDockerRuntime(t *testing.T) {
+	const sessionID = "session-docker"
+	execution := &lifecycle.AgentExecution{
+		ID: "execution-docker", SessionID: sessionID, RuntimeName: agentruntime.RuntimeDocker,
 	}
-	if runtimeName != agentruntime.RuntimeSSH {
-		t.Fatalf("resolveLSPExecution() runtime = %q, want %q", runtimeName, agentruntime.RuntimeSSH)
-	}
-	if manager.ensureCalls != 0 {
-		t.Fatalf("GetOrEnsureExecution calls = %d, want 0", manager.ensureCalls)
-	}
-}
-
-func TestResolveLSPExecutionEnsuresSupportedRuntime(t *testing.T) {
-	execution := &lifecycle.AgentExecution{RuntimeName: agentruntime.RuntimeDocker}
 	manager := &recordingLSPLifecycleManager{
 		runtimeName: agentruntime.RuntimeDocker,
 		execution:   execution,
 	}
-	handler := &LSPHandler{lifecycleMgr: manager, capacity: newLSPCapacityLimiter(1)}
+	handler := newLSPHandler(manager, nil, testLogger(), 1, nil, nil)
 
-	got, runtimeName, err := handler.resolveLSPExecution(context.Background(), "session-docker")
-	if err != nil {
-		t.Fatalf("resolveLSPExecution() error = %v", err)
-	}
-	if got != execution || runtimeName != agentruntime.RuntimeDocker {
-		t.Fatalf(
-			"resolveLSPExecution() = (%p, %q), want (%p, %q)",
-			got, runtimeName, execution, agentruntime.RuntimeDocker,
-		)
+	got, closeCode, message := handler.resolveContinuityExecution(t.Context(), sessionID)
+	if got != execution || closeCode != 0 {
+		t.Fatalf("resolveContinuityExecution() = (%p, %d, %q), want (%p, 0, empty)", got, closeCode, message, execution)
 	}
 	if manager.ensureCalls != 1 {
 		t.Fatalf("GetOrEnsureExecution calls = %d, want 1", manager.ensureCalls)
 	}
-	handler.capacity.Release()
-}
-
-func TestHandleLSPConnectionChecksCapacityBeforeEnsuringExecution(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	manager := &recordingLSPLifecycleManager{runtimeName: agentruntime.RuntimeStandalone}
-	capacity := newLSPCapacityLimiter(1)
-	if !capacity.TryAcquire() {
-		t.Fatal("failed to fill test capacity")
-	}
-	defer capacity.Release()
-	handler := &LSPHandler{
-		lifecycleMgr: manager,
-		capacity:     capacity,
-		logger:       testLogger(),
-	}
-	router := gin.New()
-	router.GET("/lsp/:sessionId", handler.HandleLSPConnection)
-	server := httptest.NewServer(router)
-	defer server.Close()
-
-	conn, _, err := gorillaws.DefaultDialer.Dial(
-		"ws"+strings.TrimPrefix(server.URL, "http")+"/lsp/cold-session?language=go",
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("Dial() error = %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	_, _, readErr := conn.ReadMessage()
-	var closeErr *gorillaws.CloseError
-	if !errors.As(readErr, &closeErr) || closeErr.Code != lspCloseCapacityExceeded {
-		t.Fatalf("ReadMessage() error = %v, want close code %d", readErr, lspCloseCapacityExceeded)
-	}
-	if manager.ensureCalls != 0 {
-		t.Fatalf("GetOrEnsureExecution calls = %d, want 0", manager.ensureCalls)
-	}
-}
-
-func TestResolveLSPExecutionReleasesCapacityWhenEnsureFails(t *testing.T) {
-	ensureErr := errors.New("task start failed")
-	manager := &recordingLSPLifecycleManager{
-		runtimeName: agentruntime.RuntimeStandalone,
-		ensureErr:   ensureErr,
-	}
-	capacity := newLSPCapacityLimiter(1)
-	handler := &LSPHandler{lifecycleMgr: manager, capacity: capacity}
-
-	_, _, err := handler.resolveLSPExecution(context.Background(), "failed-session")
-	if !errors.Is(err, ensureErr) {
-		t.Fatalf("resolveLSPExecution() error = %v, want %v", err, ensureErr)
-	}
-	if !capacity.TryAcquire() {
-		t.Fatal("capacity slot was not released after ensure failure")
-	}
-	capacity.Release()
 }
 
 func TestShouldAutoInstallRejectsManualOnlyLanguage(t *testing.T) {
@@ -440,13 +325,13 @@ func TestShouldAutoInstallRejectsManualOnlyLanguage(t *testing.T) {
 		LspAutoInstallLanguages: []string{"kotlin", "python", "rust"},
 	}}}
 
-	if handler.shouldAutoInstall(context.Background(), "kotlin") {
+	if _, _, autoInstall := handler.continuityUserSettings(t.Context(), "kotlin"); autoInstall {
 		t.Fatal("Kotlin must remain manual-install-only even if stale settings contain it")
 	}
-	if !handler.shouldAutoInstall(context.Background(), "python") {
+	if _, _, autoInstall := handler.continuityUserSettings(t.Context(), "python"); !autoInstall {
 		t.Fatal("Python should honor its auto-install setting")
 	}
-	if !handler.shouldAutoInstall(context.Background(), "rust") {
+	if _, _, autoInstall := handler.continuityUserSettings(t.Context(), "rust"); !autoInstall {
 		t.Fatal("Rust preference must reach agentctl so the task host decides platform support")
 	}
 }

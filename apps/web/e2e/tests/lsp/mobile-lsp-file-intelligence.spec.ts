@@ -34,9 +34,6 @@ test.describe("Mobile LSP boundaries", () => {
     seedData,
     backend,
   }) => {
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
-    });
     const initial = await apiClient.getUserSettings();
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
@@ -84,7 +81,6 @@ test.describe("Mobile LSP boundaries", () => {
         lsp_auto_start_languages: initialAutoStart,
         lsp_status_location: initialLocation,
       });
-      await releaseFeature();
     }
   });
 
@@ -180,9 +176,6 @@ test.describe("Mobile LSP boundaries", () => {
     backend,
   }) => {
     test.setTimeout(180_000);
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
-    });
     const initial = await apiClient.getUserSettings();
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
@@ -259,7 +252,6 @@ test.describe("Mobile LSP boundaries", () => {
         lsp_auto_start_languages: initialAutoStart,
         lsp_status_location: initialLocation,
       });
-      await releaseFeature();
     }
   });
 

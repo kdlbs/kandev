@@ -1,7 +1,7 @@
 ---
 id: selected-feature-graduation-05
 title: Retire LSP continuity flag
-status: pending
+status: done
 wave: 5
 depends_on:
   - selected-feature-graduation-02
@@ -90,11 +90,26 @@ cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --project=containers tests/d
 
 ## Dependencies and risks
 
-Requires Task 02 to have shipped in a stable release and its default-on
-resource evidence to be recorded. Removing the former browser-owned path also
-removes its emergency rollback. A retained lease can pin a task host until
-its configured release condition, so expiry and capacity proof is required.
+Task 02 shipped in Stable v0.97.0. Nine Stable releases used the default-on
+lease path through v0.103.1. The release and capacity checks below cover the
+resource bounds that previously had an operator off switch.
 
 ## Results
 
-Pending.
+The gateway and browser always use the bounded lease lifecycle for supported
+LSP connections. The old flag identity is retired. The runtime flags API,
+feature API, profile defaults, and frontend flag map omit it. Existing false
+override rows remain stored and have no effect.
+
+- Registry tests used a saved SQLite false override and an explicit false
+  environment value. The desktop E2E test reloaded with the retired
+  environment value and reattached to the same task-host process.
+- Gateway tests passed for detached expiry, capacity, and an unavailable
+  agentctl client. Frontend tests covered Stop during editor initialization and
+  confirmed lease release on editor idle.
+- Playwright passed 18 desktop, 4 phone and tablet, and 3 Local Docker
+  scenarios with retries disabled. Desktop coverage exercised browser close,
+  idle reaping, capacity eviction, and backend restart.
+- Go registry, config, profile, gateway, backend composition, and orchestrator
+  suites passed. The shared frontend run passed 160 tests. Changed Go lint,
+  frontend typecheck and lint, and documentation checks passed.

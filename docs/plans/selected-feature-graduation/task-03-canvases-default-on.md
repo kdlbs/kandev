@@ -1,7 +1,7 @@
 ---
 id: selected-feature-graduation-03
 title: Promote canvases
-status: pending
+status: done
 wave: 3
 depends_on: ["07-authoring-bundle-and-scaffold"]
 plan: plan.md
@@ -88,12 +88,24 @@ cd apps/web && pnpm e2e:run --project=mobile-chrome tests/canvas/mobile-plugin-c
 
 ## Dependencies and risks
 
-The authoring-bundle work order is still in progress. Its completion is an
-external dependency, not part of this work order. Default exposure increases
-the reach of agent-authored
-code, so package isolation and grant review are promotion gates. This task
-retains a working kill switch.
+The [authoring-bundle work order](../plugin-backed-canvases-ux-follow-up/task-07-authoring-bundle-and-scaffold.md#results)
+records a successful Codex ACP publication. The off switch remains available
+while the default-on behavior ships and receives Stable release exposure.
 
 ## Results
 
-Pending.
+The production, development, and E2E profiles now enable canvases. Existing
+environment values and saved overrides keep their precedence. An operator can
+turn off the feature and restart Kandev.
+
+- A fresh production profile served the workspace canvas API. A saved false
+  override hid the API after restart. An explicit environment value won over
+  that saved override.
+- The external Codex ACP run published a valid release with one pathless core
+  read, one optional reference read, and zero invalid paths.
+- The desktop canvas workbench and host-origin suites passed all eight
+  scenarios across the full run and the focused opt-out rerun. The phone suite
+  passed all five scenarios. The desktop workbench and phone creation flows
+  used the shipped default.
+- Go profile, registry, config, canvas, plugin, and backend composition tests
+  passed. Frontend contracts, typecheck, lint, and public docs checks passed.
