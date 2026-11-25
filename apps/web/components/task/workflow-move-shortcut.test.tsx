@@ -1,7 +1,19 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  readMoveInstructions,
+  setMoveInstructions,
+} from "./workflow-move-instructions-test-helpers";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { WorkflowMoveOptionsForm } from "./workflow-move-options";
+
+vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
+  useCustomPrompts: () => ({
+    prompts: [{ id: "review", name: "review-checklist", content: "Check the tests." }],
+    loaded: true,
+    loading: false,
+  }),
+}));
 
 afterEach(cleanup);
 
@@ -12,11 +24,24 @@ function setup(onSubmit = vi.fn().mockResolvedValue(false), isMoving = false) {
     </TooltipProvider>,
   );
   const input = screen.getByTestId("workflow-move-instructions");
-  fireEvent.change(input, { target: { value: "  Check timeout\nKeep the context  " } });
+  setMoveInstructions(input, "  Check timeout\nKeep the context  ");
   return { input, onSubmit };
 }
 
 describe("move keyboard submission", () => {
+  // @covers AC-TASKS-SAVED-PROMPT-DELIVERY-001.16
+  it("keeps the move shortcut available while a saved-prompt match is open", async () => {
+    const { input, onSubmit } = setup();
+    setMoveInstructions(input, "Check @review");
+    await screen.findByRole("option", { name: "review-checklist" });
+
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledExactlyOnceWith({ instructions: "Check @review" }),
+    );
+  });
+
   // @covers AC-TASKS-KEYBOARD-ACTIONS-001.1
   it.each(["metaKey", "ctrlKey"])("submits the full draft with %s+Enter", async (modifier) => {
     const { input, onSubmit } = setup();
@@ -69,10 +94,10 @@ describe("move keyboard submission", () => {
     });
     expect(onSubmit).toHaveBeenCalledTimes(1);
     await act(async () => finish(false));
-    expect((input as HTMLTextAreaElement).value).toBe("  Check timeout\nKeep the context  ");
+    expect(readMoveInstructions(input)).toBe("  Check timeout\nKeep the context  ");
     fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
     expect(onSubmit).toHaveBeenCalledTimes(2);
     await act(async () => finish(true));
-    expect((input as HTMLTextAreaElement).value).toBe("");
+    expect(readMoveInstructions(input)).toBe("");
   });
 });

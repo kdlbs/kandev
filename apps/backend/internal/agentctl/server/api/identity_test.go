@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -59,6 +60,9 @@ func TestHandleIdentityIsReachableWithoutAuthAndReportsIdentityAndCapabilities(t
 	}
 	if len(body.Capabilities) == 0 {
 		t.Error("Capabilities is empty, want the advertised capability set")
+	}
+	if !slices.Contains(body.Capabilities, acpcompat.AntigravityCLIRuntimeCapability) {
+		t.Errorf("Capabilities = %v, want %q for CLI runtime task and utility configuration", body.Capabilities, acpcompat.AntigravityCLIRuntimeCapability)
 	}
 	// AC-EXECUTORS-CONTROL-OWNERSHIP-003.2 (Review round 3, finding 5): an
 	// adopting backend must be able to renew ownership on the cadence this

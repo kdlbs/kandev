@@ -77,7 +77,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		return &PromptResponse{Success: false, Error: "work_dir is required for ACP inference"}, nil
 	}
 	model, modelConfigOptions, _ := acpcompat.MigrateCursorModel(req.AgentID, req.Model, nil)
-	resolvedCmd, cmdErr := resolveSpawnCommandContext(ctx, cfg)
+	resolvedCmd, cmdErr := resolveSpawnCommandContext(ctx, req.AgentID, cfg)
 	if cmdErr != "" {
 		return &PromptResponse{Success: false, Error: cmdErr}, nil
 	}
@@ -239,7 +239,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
 		ClientCapabilities: clientCapabilitiesForInference(agentID, gatewayAuth),
-		ClientInfo:         inferenceClientInfo(agentID, "kandev-inference"),
+		ClientInfo:         inferenceClientInfo(agentID, "kandev-inference", authPolicy),
 	})
 	if err != nil {
 		return "", describeACPFailure(ctx, "initialize", err)
@@ -549,7 +549,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	if workDir == "" {
 		return &ProbeResponse{Success: false, Error: "work_dir is required for ACP probe"}, nil
 	}
-	resolvedCmd, cmdErr := resolveSpawnCommandContext(ctx, cfg)
+	resolvedCmd, cmdErr := resolveSpawnCommandContext(ctx, req.AgentID, cfg)
 	if cmdErr != "" {
 		return &ProbeResponse{Success: false, Error: cmdErr}, nil
 	}
@@ -1241,7 +1241,7 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
 		ClientCapabilities: clientCapabilitiesForInference(agentID, gatewayAuth),
-		ClientInfo:         inferenceClientInfo(agentID, "kandev-probe"),
+		ClientInfo:         inferenceClientInfo(agentID, "kandev-probe", authPolicy),
 	})
 	if err != nil {
 		return nil, describeACPFailure(ctx, "initialize", err)
@@ -1708,13 +1708,20 @@ func resolveProbeCommand(name string) string {
 // from. The operator who typed the command is the operator who could run it
 // directly on the host.
 func resolveSpawnCommand(cfg *InferenceConfigDTO) (string, string) {
-	return resolveSpawnCommandContext(context.Background(), cfg)
+	return resolveSpawnCommandContext(context.Background(), "", cfg)
 }
 
-func resolveSpawnCommandContext(ctx context.Context, cfg *InferenceConfigDTO) (string, string) {
+func resolveSpawnCommandContext(ctx context.Context, agentID string, cfg *InferenceConfigDTO) (string, string) {
 	command := cfg.Command[0]
 	if cfg.OperatorDefined {
 		return command, ""
+	}
+	if acpcompat.IsAntigravity(agentID) && cfg.AuthPolicy != nil &&
+		cfg.AuthPolicy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI {
+		if antigravityruntime.IsSelectedCLICommand(ctx, cfg.Command) {
+			return command, ""
+		}
+		return "", "Antigravity CLI command is not the qualified host runtime"
 	}
 	if filepath.IsAbs(command) {
 		if antigravityruntime.IsValidatedServerPath(ctx, command) {
@@ -1959,8 +1966,8 @@ func clientCapabilitiesForInference(agentID string, gw *acpprovider.GatewayAuth)
 
 // inferenceClientInfo keeps the provider-specific wire identity while leaving
 // every other agent on its existing name.
-func inferenceClientInfo(agentID, fallbackName string) *acp.Implementation {
-	if name, version := acpcompat.ClientInfoForAgent(agentID); name != "" {
+func inferenceClientInfo(agentID, fallbackName string, policy *acpcompat.AuthPolicy) *acp.Implementation {
+	if name, version := acpcompat.ClientInfoForLaunch(agentID, policy); name != "" {
 		return &acp.Implementation{Name: name, Version: version}
 	}
 	return &acp.Implementation{Name: fallbackName, Version: "1.0.0"}

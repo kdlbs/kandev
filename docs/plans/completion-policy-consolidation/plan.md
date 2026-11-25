@@ -182,6 +182,7 @@ their source column. Maps to `AC-TASKS-COMPLETION-005.5` and
 - [x] [Task 03: Remove the service-level approval fallback](task-03-remove-service-fallback.md)
 - [x] [Task 04: Completion effects from committed state](task-04-completion-effects.md)
 - [x] [Task 05: Bulk move preflight and partial results](task-05-bulk-move-admission.md)
+- [x] [Task 06: Completion gate on workflow entry](task-06-completion-gate-on-entry.md)
 
 ## Verification results
 

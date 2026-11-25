@@ -79,6 +79,33 @@ func TestServiceExplicitEnvLocksOverride(t *testing.T) {
 	}
 }
 
+func TestACPPreviewFlagPrecedence(t *testing.T) {
+	const key = "features.acpV2"
+	const env = "KANDEV_FEATURES_ACP_V2"
+	ctx := t.Context()
+	store := &memoryStore{values: map[string]bool{key: true}}
+	cfg := &config.Config{}
+	options := OptionsFromConfig(cfg)
+	options.IsExplicitEnv = func(string) bool { return false }
+	states, err := NewService(store, options).ListStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flag := stateByKey(t, states, key); flag.DefaultValue || !flag.EffectiveValue ||
+		flag.Source != SourceOverride || !flag.RequiresRestartToApply {
+		t.Fatalf("unexpected ACP preview override: %+v", flag)
+	}
+	options.IsExplicitEnv = func(name string) bool { return name == env }
+	options.EnvValues[env] = false
+	states, err = NewService(store, options).ListStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flag := stateByKey(t, states, key); flag.EffectiveValue || flag.Source != SourceEnv || !flag.EnvLocked {
+		t.Fatalf("unexpected ACP preview environment lock: %+v", flag)
+	}
+}
+
 func TestServiceExplicitImpliedEnvLocksDebugMode(t *testing.T) {
 	svc := NewService(&memoryStore{values: map[string]bool{"debug.devMode": false}}, Options{
 		DefaultValues: map[string]bool{"debug.devMode": false},

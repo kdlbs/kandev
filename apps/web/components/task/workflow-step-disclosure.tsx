@@ -28,6 +28,7 @@ import {
 import { StepCircleIndicator } from "./workflow-step-marker";
 import { useTranslation } from "react-i18next";
 import { StepDisclosureMoveControls } from "./workflow-step-disclosure-move-controls";
+import { keepMoveOpenForPromptSuggestions } from "./workflow-move-surface";
 
 /** Move callback shared by every compact-disclosure surface. A revealed,
  * filled options draft rides along as one-shot `entry_options`. */
@@ -295,7 +296,7 @@ function CompactWorkflowDisclosureSurface({
     return (
       <Drawer open={controls.open} onOpenChange={controls.setOpen}>
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-        <DrawerContent className="max-h-[80dvh]">
+        <DrawerContent className="max-h-[80dvh]" onEscapeKeyDown={keepMoveOpenForPromptSuggestions}>
           <DrawerHeader className="shrink-0 text-left">
             <DrawerTitle>{t("task:moveTo")}</DrawerTitle>
             <DrawerDescription>{t("task:stepCount", { count: stepCount })}</DrawerDescription>
@@ -318,7 +319,10 @@ function CompactWorkflowDisclosureSurface({
         className="w-[25rem] max-w-[calc(100vw-1rem)] p-2"
         onOpenAutoFocus={controls.handleOpenAutoFocus}
         onCloseAutoFocus={controls.handleCloseAutoFocus}
-        onEscapeKeyDown={(event) => event.stopPropagation()}
+        onEscapeKeyDown={(event) => {
+          keepMoveOpenForPromptSuggestions(event);
+          if (!event.defaultPrevented) event.stopPropagation();
+        }}
         onMouseEnter={controls.openDisclosure}
         onMouseLeave={controls.scheduleClose}
         onFocusCapture={controls.handleContentFocus}

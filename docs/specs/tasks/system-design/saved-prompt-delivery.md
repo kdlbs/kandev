@@ -30,7 +30,7 @@ surfaces continue to use the shared composer and message handler.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-TASKS-SAVED-PROMPT-DELIVERY-001` | [Components and responsibilities](#components-and-responsibilities), [Control flow](#control-flow), [Security](#security) |
+| `REQ-TASKS-SAVED-PROMPT-DELIVERY-001` | [Components and responsibilities](#components-and-responsibilities), [Control flow](#control-flow), [Security](#security), [One-time move instructions](#one-time-move-instructions) |
 
 ## Components and responsibilities
 
@@ -160,6 +160,57 @@ Preserve task/session identity, completion instructions, mode transforms, entity
 references, handoff ordering, cancellation guards, and title ownership. Passthrough
 sessions continue to omit hidden expansions.
 
+## One-time move instructions
+
+`WorkflowMoveOptionsFields` owns the shared instructions field. Use
+`TaskPromptReferenceEditor` for reference recognition, selection, highlighting,
+and plain-text serialization. Keep the visible field label and provide its
+accessible name to the editor. Retain the existing task-create defaults.
+`workflowMoveOptionsPayload` sends the draft through `entry_options.instructions`.
+It contains visible text and `@name` references.
+
+Reuse the composer suggestion popup on desktop. Anchor it above the editor
+and give the list its own scroll region. The next-step popover and sidebar
+Move submenu keep the same dimensions when suggestions open. The shared
+stepper inherits the same field.
+
+Keep the phone next-step drawer and the task-switcher **Task actions** path.
+Use the existing move drawer as the mobile exemplar. Its body owns vertical
+scrolling and contains the editor, inline results, and Move action in one column.
+Keep the header fixed. Bound the drawer to the dynamic viewport and keep
+the body above the bottom safe area. Contain overscroll in the drawer.
+Use 44 px minimum touch targets for
+suggestions and the Move action. Match the existing 28 px desktop actions,
+focus rings, and prompt-chip tokens. Keep the selected result visible and
+allow long names to truncate with their full accessible name.
+
+The editor owns plain Enter, Tab, and Escape while it handles a suggestion.
+The existing Ctrl/Cmd+Enter move shortcut takes precedence. Keep focus in
+the editor after selection and retain the draft after a failed move. Keep
+selection in the same React tree so focus and outside-click handlers preserve
+the move during selection. Use existing border and selected-row styles.
+Update suggestions immediately while the user types.
+
+For workflow auto-start, keep the move sentinel and pass the complete visible
+prompt to the existing resolver once. The transient step overlay already
+carries the instructions on reused-session paths. In `startTask`, move the
+fresh-launch append ahead of the resolver while keeping its position after
+the composed step body. Apply the same ordering to the direct fallback
+when step lookup fails. Keep the exact returned context through persistence
+and dispatch. The skip-step option continues to suppress the step body and
+its task-description fallback.
+
+For a queued handoff from `queueMoveInstructionsForSession`, reuse the
+existing drain-time preparation and exact-context propagation in
+`event_handlers_agent.go`. Classify these entries through server-owned move
+queue metadata. Preserve existing queue routing and consumption behavior.
+Do not derive provenance from the visible sentinel. Keep Office run
+composition in its existing run-owned path.
+
+No request field, database schema, or prompt-resolution policy changes.
+The server continues to strip supplied definitions before structured
+resolution. Passthrough keeps literal text as in other prompt surfaces.
+
 ## Failure and recovery
 
 A saved-prompt lookup error remains non-fatal. Kandev logs a warning without
@@ -231,3 +282,4 @@ expansion reached the session during diagnosis.
 - [Quick Chat delivery](../../../plans/quick-chat-saved-prompt-delivery/plan.md): completed direct-message repair.
 - [Launch fallback](../../../plans/saved-prompt-launch-fallback/plan.md): completed no-workflow repair.
 - [Workflow entry delivery](../../../plans/workflow-entry-saved-prompts/plan.md): completed composed-launch repair.
+- [One-time move instructions](../../../plans/move-instruction-prompt-selection/plan.md): reference selection and delivery.

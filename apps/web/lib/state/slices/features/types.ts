@@ -27,6 +27,7 @@ export const defaultFeatureFlags = {
   coordinatorPhase3: false,
   coordinatorPhase31: false,
   codexAppServer: false,
+  acpV2: false,
   terminalPrimaryQueueHandoff: false,
   agentBackgroundWork: false,
   opencodePlugin: false,

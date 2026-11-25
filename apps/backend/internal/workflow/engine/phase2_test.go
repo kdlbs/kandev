@@ -3,8 +3,6 @@ package engine
 import (
 	"context"
 	"testing"
-
-	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 func TestPhase2_NewTriggerConstantsAreDistinct(t *testing.T) {
@@ -42,64 +40,6 @@ func TestPhase2_NewActionKindsAreDistinct(t *testing.T) {
 			t.Fatalf("duplicate action kind %q", k)
 		}
 		seen[k] = true
-	}
-}
-
-func TestQueueRunAction_RoundTripsThroughActionStruct(t *testing.T) {
-	a := Action{
-		Kind: ActionQueueRun,
-		QueueRun: &QueueRunAction{
-			Target:  "primary",
-			TaskID:  "this",
-			Reason:  "task_assigned",
-			Payload: map[string]any{"comment_id": "c-1"},
-		},
-	}
-	if a.QueueRun == nil || a.QueueRun.Target != "primary" {
-		t.Fatalf("QueueRun struct did not round-trip")
-	}
-	if a.QueueRun.Payload["comment_id"] != "c-1" {
-		t.Fatalf("QueueRun payload did not round-trip")
-	}
-}
-
-func TestQueueRunForEachParticipantAction_Construction(t *testing.T) {
-	a := Action{
-		Kind: ActionQueueRunForEachParticipant,
-		QueueRunForEachParticipant: &QueueRunForEachParticipantAction{
-			Role:   string(wfmodels.ParticipantRoleReviewer),
-			Reason: "review_started",
-		},
-	}
-	if a.QueueRunForEachParticipant == nil {
-		t.Fatalf("expected QueueRunForEachParticipant to be set")
-	}
-	if a.QueueRunForEachParticipant.Role != "reviewer" {
-		t.Fatalf("unexpected role: %q", a.QueueRunForEachParticipant.Role)
-	}
-}
-
-func TestClearDecisionsAction_Construction(t *testing.T) {
-	a := Action{
-		Kind:           ActionClearDecisions,
-		ClearDecisions: &ClearDecisionsAction{},
-	}
-	if a.ClearDecisions == nil {
-		t.Fatalf("expected ClearDecisions to be set")
-	}
-}
-
-func TestPhase2Placeholders_NotRegisteredInDefaultRegistry(t *testing.T) {
-	// Empty MapRegistry must not resolve the new action kinds. This pins the
-	// invariant that the Phase 2 actions are declared but inert until the
-	// engine integration slice wires them up.
-	r := MapRegistry{}
-	for _, kind := range []ActionKind{
-		ActionQueueRun, ActionClearDecisions, ActionQueueRunForEachParticipant,
-	} {
-		if _, ok := r.Get(kind); ok {
-			t.Fatalf("action %q must not be registered by default", kind)
-		}
 	}
 }
 

@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"go.uber.org/zap"
 )
 
@@ -242,6 +244,7 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 	// ACP: mirror lifecycle.CommandBuilder.BuildCommand by appending CLIFlagTokens
 	// after the agent's BuildCommand.
 	var cmd agents.Command
+	requiresAntigravityWorkerMode := false
 	if ptAgent, ok := agentConfig.(agents.PassthroughAgent); ok && req.CLIPassthrough {
 		cmd = ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 			Model:            req.Model,
@@ -269,8 +272,23 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 			PreferNativeBinary:    len(copilotPlugins) == 0 && previewPrefersNativeBinary(agentConfig),
 			ManagedRuntimeVersion: managedRuntimeVersion,
 		})
+		if localRuntime, ok := agentConfig.(agents.LocalRuntimeAgent); ok {
+			selection, err := localRuntime.ResolveLocalRuntime(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("resolve local runtime for command preview: %w", err)
+			}
+			cmd, err = replacePreviewBaseCommand(cmd, agentConfig.Runtime().Cmd, selection.Command)
+			if err != nil {
+				return nil, err
+			}
+			requiresAntigravityWorkerMode = agentName == agents.AntigravityACPAgentID &&
+				selection.Variant == acpcompat.AntigravityRuntimeCLI
+		}
 		if len(cliFlagTokens) > 0 {
 			cmd = cmd.With().Flag(cliFlagTokens...).Build()
+		}
+		if requiresAntigravityWorkerMode {
+			cmd = agents.NewCommand(antigravityruntime.RequireWorkerMode(cmd.Args())...)
 		}
 		// Prepend the launcher prefix last, mirroring
 		// lifecycle.CommandBuilder.BuildCommand. Prefixes were validated above;
@@ -294,6 +312,20 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		DeferredPluginCount: len(copilotPlugins),
 		CommandIncomplete:   len(copilotPlugins) > 0,
 	}, nil
+}
+
+func replacePreviewBaseCommand(command, base, selected agents.Command) (agents.Command, error) {
+	commandArgs := command.Args()
+	baseArgs := base.Args()
+	if len(commandArgs) < len(baseArgs) {
+		return agents.Command{}, fmt.Errorf("preview command does not contain its base runtime")
+	}
+	for index, arg := range baseArgs {
+		if commandArgs[index] != arg {
+			return agents.Command{}, fmt.Errorf("preview command does not contain its base runtime")
+		}
+	}
+	return agents.NewCommand(append(selected.Args(), commandArgs[len(baseArgs):]...)...), nil
 }
 
 func previewCopilotPlugins(agentName string, selection []string) ([]string, error) {
@@ -337,10 +369,11 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 	if _, ok := c.agentRegistry.Get(agentName); !ok {
 		return nil, ErrAgentNotFound
 	}
+	currentVariant := c.localRuntimeVariant(ctx, agentName)
 	if c.hostUtility == nil {
 		return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
-			AgentName: agentName,
-			Status:    "not_configured",
+			AgentName: agentName, RuntimeVariant: currentVariant,
+			Status: "not_configured",
 		}, refresh), nil
 	}
 
@@ -351,9 +384,9 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 		if err != nil {
 			s := err.Error()
 			return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
-				AgentName: agentName,
-				Status:    string(hostutility.StatusFailed),
-				Error:     &s,
+				AgentName: agentName, RuntimeVariant: currentVariant,
+				Status: string(hostutility.StatusFailed),
+				Error:  &s,
 			}, refresh), nil
 		}
 	} else {
@@ -361,14 +394,33 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 		caps, ok = c.hostUtility.Get(agentName)
 		if !ok {
 			return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
-				AgentName: agentName,
-				Status:    "not_configured",
+				AgentName: agentName, RuntimeVariant: currentVariant,
+				Status: "not_configured",
+			}, refresh), nil
+		}
+	}
+
+	currentVariant = c.localRuntimeVariant(ctx, agentName)
+	if agentName == agents.AntigravityACPAgentID {
+		if currentVariant == "" {
+			return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
+				AgentName: agentName, Status: string(hostutility.StatusNotInstalled),
+			}, refresh), nil
+		}
+		if caps.RuntimeVariant != currentVariant {
+			if !refresh && caps.Status != hostutility.StatusProbing {
+				c.kickAntigravityRuntimeRefresh(currentVariant)
+			}
+			return c.finishDynamicModels(ctx, agentName, &dto.DynamicModelsResponse{
+				AgentName: agentName, RuntimeVariant: currentVariant,
+				Status: string(hostutility.StatusProbing),
 			}, refresh), nil
 		}
 	}
 
 	resp := &dto.DynamicModelsResponse{
 		AgentName:      agentName,
+		RuntimeVariant: caps.RuntimeVariant,
 		Status:         string(caps.Status),
 		CurrentModelID: caps.CurrentModelID,
 		CurrentModeID:  caps.CurrentModeID,
@@ -418,6 +470,29 @@ func (c *Controller) finishDynamicModels(
 	}
 	resp.Models, resp.Discovery = c.hostCLIModelProjection(ctx, agentName, resp.Models, refresh)
 	return resp
+}
+
+func (c *Controller) kickAntigravityRuntimeRefresh(variant string) {
+	if variant == "" || c.hostUtility == nil {
+		return
+	}
+	c.antigravityRuntimeRefreshMu.Lock()
+	if c.antigravityRuntimeRefreshVariant == variant {
+		c.antigravityRuntimeRefreshMu.Unlock()
+		return
+	}
+	c.antigravityRuntimeRefreshVariant = variant
+	c.antigravityRuntimeRefreshMu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := c.hostUtility.Refresh(ctx, agents.AntigravityACPAgentID); err != nil {
+			c.logger.Debug("Antigravity capability refresh after runtime change failed",
+				zap.String("runtime_variant", variant), zap.Error(err))
+		}
+		c.BroadcastAvailableAgents()
+	}()
 }
 
 // ResolveAgentModelConfig returns the complete provider configuration-option
