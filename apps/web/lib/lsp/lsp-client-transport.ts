@@ -291,6 +291,12 @@ export class LspClientTransport {
     }
     clearLspLeaseHint(conn.sessionId, conn.lspLanguage);
     conn.releaseAfterConnect = null;
+    if (reason === "editor_idle" && conn.refCount > 0) {
+      conn.leaseId = null;
+      this.prepareForReconnect(conn);
+      this.open(conn);
+      return;
+    }
     conn.reconnecting = false;
     this.host.cleanupConnection(conn);
     this.host.removeStatus(conn.key);

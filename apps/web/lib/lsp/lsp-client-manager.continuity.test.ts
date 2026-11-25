@@ -470,3 +470,24 @@ describe("LSP browser continuity controls", () => {
     expect(sessionStorage.getItem(`kandev-lsp-lease:${SESSION_ID}:typescript`)).toBeNull();
   });
 });
+
+describe("LSP idle release and reacquisition", () => {
+  it("starts a fresh lease when an editor returns during idle release", async () => {
+    vi.useFakeTimers();
+    createMonacoHarness([]);
+    mocks.registerLspProviders.mockReturnValue([]);
+    const { socket, disconnect } = await connectContinuityReady();
+    disconnect();
+    await vi.advanceTimersByTimeAsync(LSP_IDLE_TIMEOUT);
+    const release = latestControl(socket, "release");
+    lspClientManager.connect(SESSION_ID, "typescript");
+    socket.emitMessage(
+      JSON.stringify({ kandev: "lsp", action: "released", requestId: release.requestId }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    const replacement = FakeWebSocket.instances.at(-1);
+    expect(replacement).not.toBe(socket);
+    expect(replacement?.url).not.toContain("leaseId=");
+    expect(lspClientManager.getStatus(SESSION_ID, "typescript")).toEqual({ state: "reconnecting" });
+  });
+});
