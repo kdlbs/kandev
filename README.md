@@ -142,18 +142,21 @@ Executors support profiles for reusable runtime configuration: prepare scripts, 
 
 ## Quick Start
 
+These commands keep Kandev on your computer. See [Security and trust](docs/public/security.md) for remote access.
+
 ### Homebrew (macOS, Linux)
 
 ```bash
 brew install kdlbs/kandev/kandev
-kandev
+KANDEV_SERVER_HOST=127.0.0.1 kandev
 ```
 
 ### Scoop (Windows)
 
-```bash
+```powershell
 scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
 scoop install kandev
+$env:KANDEV_SERVER_HOST = "127.0.0.1"
 kandev
 ```
 
@@ -161,17 +164,21 @@ Installs the native bundle — no Node.js required.
 
 ### NPX
 
+Run this command on macOS or Linux.
+
 ```bash
-npx kandev@latest
+KANDEV_SERVER_HOST=127.0.0.1 npx kandev@latest
 ```
 
 Requires npm 7+. Installs the CLI plus a platform-matched runtime bundle in one step.
 
 ### NPM (global)
 
+Run these commands on macOS or Linux.
+
 ```bash
 npm install -g kandev@latest
-kandev
+KANDEV_SERVER_HOST=127.0.0.1 kandev
 ```
 
 ### Run your first task
