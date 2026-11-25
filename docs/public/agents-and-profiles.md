@@ -100,6 +100,7 @@ Agents that report background shell commands, subagents, or monitors feed the sh
 Provider support differs, and Kandev shows only what the connected runtime verifies:
 
 - **Claude ACP and native Codex** report job lifecycle and, for native Codex, supported job actions. Explicit controls appear only for an advertised capability.
+- **Codex ACP 2.8.0 and 2.9.0 with ACP v2 preview** report detached terminals and child sessions from live background snapshots when **Agent background work** is also enabled. Kandev retains available terminal output and exit status. This ACP adapter does not expose workload controls.
 - **OpenCode ACP** reports a detached shell launch with its native shell identity. With the optional integration plugin enabled on a supported OpenCode v2 2.2.0 runtime, Kandev can settle that job when the native shell exits. Without the plugin, or on any other runtime, the job stays inspectable and its later activity remains unknown. Neither path provides live output or process controls, and the original launch banner stays in the tool message.
 - **Other ACP agents** keep their existing behavior when they do not report background lifecycle.
 
