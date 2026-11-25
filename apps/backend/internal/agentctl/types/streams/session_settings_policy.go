@@ -12,7 +12,8 @@ const (
 )
 
 const (
-	ConfigOptionsSourceKey = "config_options_source"
+	ConfigOptionsSourceKey   = "config_options_source"
+	ConfigOptionsCompleteKey = "config_options_complete"
 	// ConfigOptionsSourceSessionSetup identifies a snapshot from a session setup response.
 	ConfigOptionsSourceSessionSetup = "session_setup"
 )

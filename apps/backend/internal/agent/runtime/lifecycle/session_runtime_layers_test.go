@@ -111,7 +111,7 @@ func TestApplyRuntimeSessionLayersFiltersUnadvertisedOptions(t *testing.T) {
 		defer cancel()
 		_, failed := sm.applyRuntimeSessionLayers(
 			ctx, execution, "acp-1", "cfg", "", "", "", "",
-			map[string]string{"reasoning": "high", "fast": "on", "effort": "x", "thinking": "y"},
+			map[string]string{"reasoning": "high", "fast": "on", "effort": "x", "thinking": "y"}, nil,
 		)
 
 		if len(failed) != 0 {
@@ -141,7 +141,7 @@ func TestApplyRuntimeSessionLayersFiltersUnadvertisedOptions(t *testing.T) {
 		defer cancel()
 		_, failed := sm.applyRuntimeSessionLayers(
 			ctx, execution, "acp-3", "cfg", "", "", "", "",
-			map[string]string{"reasoning": "high", "effort": "x", "thinking": "y"},
+			map[string]string{"reasoning": "high", "effort": "x", "thinking": "y"}, nil,
 		)
 
 		if len(failed) != 0 {
@@ -170,7 +170,7 @@ func TestApplyRuntimeSessionLayersFiltersUnadvertisedOptions(t *testing.T) {
 		defer cancel()
 		_, failed := sm.applyRuntimeSessionLayers(
 			ctx, execution, "acp-2", "cfg", "", "", "", "",
-			map[string]string{"reasoning": "high", "effort": "x"},
+			map[string]string{"reasoning": "high", "effort": "x"}, nil,
 		)
 
 		if len(failed) != 1 || failed[0] != "reasoning" {

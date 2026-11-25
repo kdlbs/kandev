@@ -379,6 +379,7 @@ type Adapter struct {
 	// event emitted after SetModel succeeds so the frontend doesn't lose
 	// the options list when the model is changed.
 	availableConfigOptions []streams.ConfigOption
+	configOptionsComplete  bool
 
 	// sessionSettingsPolicy is host-selected provenance for unsolicited
 	// settings reports from the currently loaded session. Explicit setter
@@ -864,9 +865,12 @@ func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 		return nil
 	}
 	return &streams.SessionModelState{
-		CurrentModelID: currentModelFromConfig(a.availableConfigOptions),
-		Models:         cloneSessionModels(convertSessionModels(a.availableModels)),
-		ConfigOptions:  cloneConfigOptions(a.availableConfigOptions),
+		SessionID:                 a.sessionID,
+		CurrentModelID:            currentModelFromConfig(a.availableConfigOptions),
+		Models:                    cloneSessionModels(convertSessionModels(a.availableModels)),
+		ConfigOptions:             cloneConfigOptions(a.availableConfigOptions),
+		SessionSettingsGeneration: a.sessionSettingsGeneration,
+		ConfigOptionsComplete:     a.configOptionsComplete,
 	}
 }
 

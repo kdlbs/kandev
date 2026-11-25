@@ -678,6 +678,10 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	// and the original-config snapshot could disagree with reality).
 	profileModel = effectiveModel.model
 	runtimeModel = ""
+	var cursorCatalog *CachedModelState
+	if execution.AgentID == acpcompat.CursorAgentID && (len(profileConfigOptions) > 0 || len(runtimeConfigOptions) > 0) {
+		cursorCatalog = cursorStartupModelCatalog(ctx, execution, result.SessionID, effectiveModel)
+	}
 	thinkingConfigID := ""
 	var thinkingModelState *CachedModelState
 	if agentConfig.ID() == acpcompat.PiAgentID {
@@ -693,7 +697,7 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	}
 	finalConfigID, profileModelApplied, profileConfigOptionsApplied := sm.applyProfileSessionLayers(
 		ctx, execution, result.SessionID, profileModel, profileConfigOptions,
-		effectiveModel.handled, effectiveModel.appliedModel,
+		effectiveModel.handled, effectiveModel.appliedModel, cursorCatalog,
 	)
 
 	// Capture the effective profile state before runtime overrides or workflow
@@ -709,7 +713,7 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 
 	finalConfigID, runtimeFailures := sm.applyRuntimeSessionLayers(
 		ctx, execution, result.SessionID, finalConfigID,
-		profileModelApplied, profileMode, runtimeModel, runtimeMode, runtimeConfigOptions,
+		profileModelApplied, profileMode, runtimeModel, runtimeMode, runtimeConfigOptions, cursorCatalog,
 	)
 	requestedMode := runtimeMode
 	if requestedMode == "" {
@@ -755,13 +759,7 @@ func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 	acpSessionID string,
 	profileModel, runtimeModel string,
 	startModelPolicy StartModelPolicy,
-) (effective struct {
-	model        string
-	appliedModel string
-	handled      bool
-	decision     ModelSelectionDecision
-	err          error
-}) {
+) (effective startupModelSelection) {
 	effective.model = profileModel
 	if runtimeModel != "" {
 		effective.model = runtimeModel
@@ -776,10 +774,15 @@ func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 	// profile layers must not retry an outcome that was already handled.
 	effective.handled = true
 	startModelPolicy.Model = effective.model
+	applier := &startupModelApplier{client: client}
+	if execution.AgentID == acpcompat.CursorAgentID {
+		effective.previousGeneration = cursorCatalogGeneration(client, acpSessionID)
+	}
 	decision, policyErr := applyStartModelPolicy(
-		ctx, sm.logger, client,
+		ctx, sm.logger, applier,
 		execution.GetModelState(), startModelPolicy,
 	)
+	effective.configuration = applier.result
 	if policyErr != nil {
 		sm.logger.Error("start model unavailable, failing session start",
 			zap.String("execution_id", execution.ID),
@@ -947,6 +950,7 @@ func (sm *SessionManager) applyProfileSessionLayers(
 	profileConfigOptions map[string]string,
 	modelPolicyHandled bool,
 	policyAppliedModel string,
+	cursorCatalog *CachedModelState,
 ) (string, string, map[string]string) {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
@@ -982,6 +986,9 @@ func (sm *SessionManager) applyProfileSessionLayers(
 		}
 	}
 	sanitizedOptions := sanitizeProfileConfigOptions(profileConfigOptions, execution.GetModelState())
+	if execution.AgentID == acpcompat.CursorAgentID {
+		sanitizedOptions = verifiedStartupOptions(profileConfigOptions, cursorCatalog)
+	}
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
 		if err := setStartupSessionConfigOption(ctx, execution, client, configID, value); err != nil {
@@ -1008,6 +1015,7 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 	runtimeModel string,
 	runtimeMode string,
 	runtimeConfigOptions map[string]string,
+	cursorCatalog *CachedModelState,
 ) (string, []string) {
 	failed := make([]string, 0)
 	client, releaseClient := execution.AcquireAgentCtlClient()
@@ -1036,10 +1044,10 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 	// agents whose startup wait exits on the model list before any config
 	// options settle.
 	modelState := execution.GetModelState()
-	var sanitizedOptions map[string]string
-	if _, catalogKnown := capturedRuntimeConfigOptionCatalog(modelState); catalogKnown {
-		sanitizedOptions = sanitizeRuntimeConfigOptionsWithCatalog(runtimeConfigOptions, modelState)
+	if execution.AgentID == acpcompat.CursorAgentID {
+		modelState = cursorCatalog
 	}
+	sanitizedOptions := verifiedStartupOptions(runtimeConfigOptions, modelState)
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
 		if err := setStartupSessionConfigOption(ctx, execution, client, configID, value); err != nil {
@@ -1216,7 +1224,7 @@ func (sm *SessionManager) publishSettledConfigOptions(
 	if !ready || baselineCandidate == nil || live == nil {
 		return
 	}
-	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
+	event := agentctl.AgentEvent{
 		Type:                    streams.EventTypeSessionModels,
 		SessionID:               acpSessionID,
 		SessionSettingsPolicy:   providerRestoredSettingsPolicy(execution),
@@ -1225,7 +1233,12 @@ func (sm *SessionManager) publishSettledConfigOptions(
 		ConfigOptions:           live.ConfigOptions,
 		ConfigBaselineCandidate: baselineCandidate.ConfigOptions,
 		Data:                    map[string]any{"config_options_settled": true},
-	})
+	}
+	if live.ConfigOptionsComplete {
+		event.Data[streams.ConfigOptionsCompleteKey] = true
+		event.SessionSettingsGeneration = live.SessionSettingsGeneration
+	}
+	sm.eventPublisher.PublishAgentStreamEvent(execution, event)
 }
 
 // publishModelFallbackEvent broadcasts an explicit "using fallback model"

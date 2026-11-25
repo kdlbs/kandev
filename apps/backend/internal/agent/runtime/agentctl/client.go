@@ -83,7 +83,8 @@ type Client struct {
 	// lastSessionModelState is populated by session/new, session/reset, and
 	// session/load responses and by asynchronous session_models events. Lifecycle
 	// policy evaluation can use it before the event reaches its handler.
-	lastSessionModelState *streams.SessionModelState
+	lastSessionModelState  *streams.SessionModelState
+	lastCompleteModelState *streams.SessionModelState
 
 	// Session capabilities are populated by the ACP initialize response and
 	// used by idle-session MCP reconfiguration to choose resume versus load.
@@ -131,6 +132,20 @@ func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lastSessionModelState = cloneSessionModelState(state)
+	if state == nil {
+		c.lastCompleteModelState = nil
+	} else if state.ConfigOptionsComplete &&
+		(c.lastCompleteModelState == nil || state.SessionSettingsGeneration >= c.lastCompleteModelState.SessionSettingsGeneration) {
+		c.lastCompleteModelState = c.lastSessionModelState
+	}
+}
+
+// GetLastCompleteModelState gives startup the latest provider catalog even
+// when a synthetic convergence event follows the provider update.
+func (c *Client) GetLastCompleteModelState() *streams.SessionModelState {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return cloneSessionModelState(c.lastCompleteModelState)
 }
 
 // GetLastSessionModelState returns the latest session model catalog observed
@@ -185,12 +200,9 @@ func cloneSessionModelState(state *streams.SessionModelState) *streams.SessionMo
 	if state == nil {
 		return nil
 	}
-	cloned := &streams.SessionModelState{
-		CurrentModelID:       state.CurrentModelID,
-		Models:               append([]streams.SessionModelInfo(nil), state.Models...),
-		ConfigOptions:        append([]streams.ConfigOption(nil), state.ConfigOptions...),
-		ConfigOptionsSettled: state.ConfigOptionsSettled,
-	}
+	cloned := *state
+	cloned.Models = append([]streams.SessionModelInfo(nil), state.Models...)
+	cloned.ConfigOptions = append([]streams.ConfigOption(nil), state.ConfigOptions...)
 	for i, model := range cloned.Models {
 		if model.Meta == nil {
 			continue
@@ -203,7 +215,7 @@ func cloneSessionModelState(state *streams.SessionModelState) *streams.SessionMo
 	for i, option := range cloned.ConfigOptions {
 		cloned.ConfigOptions[i].Options = append([]streams.ConfigOptionValue(nil), option.Options...)
 	}
-	return cloned
+	return &cloned
 }
 
 // ClientOption configures optional Client settings.

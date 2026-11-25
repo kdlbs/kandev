@@ -680,6 +680,7 @@ func (a *Adapter) convertACPSessionNotification(n acp.SessionNotification) (*Age
 				SessionSettingsGeneration: a.sessionSettingsGeneration,
 				Data:                      map[string]any{"config_options_source": "provider_update"},
 			}
+			a.stampModelCatalogLocked(event, u.ConfigOptionUpdate.ConfigOptions)
 			a.mu.Unlock()
 			return event, true
 		}

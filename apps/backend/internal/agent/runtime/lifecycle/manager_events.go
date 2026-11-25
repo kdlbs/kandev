@@ -1797,12 +1797,15 @@ func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentct
 			AvailableModes: event.AvailableModes,
 		})
 	case "session_models":
+		complete, _ := event.Data[streams.ConfigOptionsCompleteKey].(bool)
 		baselineCandidate, settled := execution.SetModelStateApplyingSettlement(&CachedModelState{
-			CurrentModelID: event.CurrentModelID,
-			Models:         event.SessionModels,
-			ConfigOptions:  event.ConfigOptions,
-			ConfigSource:   agentEventDataString(event.Data, streams.ConfigOptionsSourceKey),
-			ConfigID:       agentEventDataString(event.Data, "config_options_config_id"),
+			CurrentModelID:            event.CurrentModelID,
+			Models:                    event.SessionModels,
+			ConfigOptions:             event.ConfigOptions,
+			ConfigSource:              agentEventDataString(event.Data, streams.ConfigOptionsSourceKey),
+			ConfigID:                  agentEventDataString(event.Data, "config_options_config_id"),
+			SessionSettingsGeneration: event.SessionSettingsGeneration,
+			ConfigOptionsComplete:     complete,
 		})
 		if settled {
 			event.ConfigBaselineCandidate = baselineCandidate.ConfigOptions

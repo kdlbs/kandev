@@ -15,9 +15,10 @@ provider's advertised controls. The [requirement](../requirements/session-config
 owns the observable behavior. Agent identity and sessionless option discovery
 remain with Agents. This design does not change provider selection or startup policy.
 
-The existing implementation filters backend replay and supports settled catalogs.
-The proposed selector correction also handles usable catalogs without settlement.
-Implementation status belongs to the [delivery plan](../../../plans/model-selector-stale-config-availability/plan.md).
+The selector can use a usable catalog before startup settles. Replay and
+persistence need stronger evidence for model-dependent options. The
+[Cursor fix plan](../../../plans/cursor-model-option-reconciliation/plan.md)
+tracks that work.
 
 ## Requirement mapping
 
@@ -26,7 +27,7 @@ All criterion suffixes below refer to
 
 | Requirement | Criteria | Design sections |
 | --- | --- | --- |
-| `REQ-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001` | .1, .2, .3, .6, .8 | Backend replay and persistence |
+| `REQ-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001` | .1, .2, .3, .6, .8, .9 | Backend replay and persistence |
 | `REQ-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001` | .4, .7 | Selector availability |
 | `REQ-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001` | .5 | Hydration and live updates |
 
@@ -34,6 +35,8 @@ All criterion suffixes below refer to
 
 - `lifecycle/session.go` applies profile and runtime layers at startup and resume.
 - `lifecycle/manager_interaction.go` supplies the catalog-aware runtime filter.
+- The ACP v1 adapter supplies model and catalog evidence from provider responses.
+  The agentctl client carries the evidence to the startup and event paths.
 - `orchestrator/event_handlers_streaming.go` persists accepted model snapshots and
   publishes `session.models_updated`.
 - `backendapp/helpers.go` and `backendapp/boot_state.go` project replay and boot state.
@@ -56,23 +59,71 @@ The store uses `configOptionsSettled`. Missing persisted settlement becomes
 The marker records completed startup configuration, not permission to display
 each already advertised control.
 
-No new field, endpoint, event, database migration, or cleanup write is required.
-The repair does not infer provider confirmation from a populated model list.
+Catalog completeness is internal to agentctl and the backend. It has a separate
+meaning from `config_options_settled`, which controls startup publication.
+The existing selector event carries its current fields. The session metadata
+continues to use the same keys and value shapes.
 
 ## Backend replay and persistence
 
-`applyRuntimeSessionLayers` captures the running catalog after model selection.
-It sends only supported restorable runtime options through `SetConfigOption`.
-An unknown catalog causes runtime replay to send no unverified options.
-An advertised option that fails to apply still enters the existing warning path.
+### Provider catalog evidence
 
-`persistSessionModelsSnapshot` preserves settlement for the same settings owner.
-Attempt and source changes retain the existing ownership checks.
-Live events can omit settlement. Backend startup publication and configuration
-confirmation continue to use their existing settlement barriers.
+Apply this repair to the built-in Cursor ACP v1 binding. A complete catalog
+comes from a typed ACP setup response, a `set_config_option` reply, or a
+`config_option_update` for the same native session. The catalog identifies the
+active model. Its projection accounts for every option ID and has unique,
+nonempty IDs. [ACP session config options](https://agentclientprotocol.com/protocol/v1/session-config-options)
 
-The selector correction does not change these backend rules. Saved unsupported
-keys remain on disk and never become synthetic controls or provider requests.
+Mark completeness at the adapter when the provider payload supplies this
+evidence. A partial projection, such as one that loses an option variant,
+cannot establish absence. Synthetic convergence reports carry display state.
+The complete catalog and its model travel together in the optional internal
+agentctl result and on qualified `session_models` reports. Scope the evidence
+to the native session and settings generation that produced it.
+
+### Startup replay
+
+`InitializeAndPromptWithLayers` resolves the model through the existing start
+policy. Use the complete catalog returned by the correlated model setter, if
+available. Require the catalog model to match the confirmed effective model.
+When startup uses the provider's current model without a switch, use the
+matching catalog from the current setup. If a model setter relies on
+notifications, wait within the existing catalog wait budget for a complete
+report for the selected model from the same native session, newer than the
+pre-switch report. Read that evidence from the agentctl client before the
+ordered lifecycle dispatcher. Leave uncertainty about the model to the
+existing selection policy and defer options that lack current evidence.
+
+Use the verified list for both saved Cursor option layers. Preserve the order
+and values of supported writes and the dedicated model and mode setters.
+Populate the startup failure list with errors from attempted runtime setters.
+After startup, a late catalog can reconcile persisted options for future use.
+
+### Persistence
+
+Apply catalog reconciliation after the existing attempt, source, and settings
+generation checks under the session settings lock. Carry evidence through the
+settled startup publication only when it belongs to the published snapshot.
+Keep the provider-default baseline separate from that snapshot.
+
+For a qualified Cursor snapshot, write the intersection of the saved map and
+the advertised IDs, then add any provider-reported current values to that map.
+An empty or missing current value leaves the previous value for that advertised
+ID. The value `"false"` is a reported value. Use the same path when the saved
+model already equals the reported model, including legacy rows cleaned during
+ordinary resume.
+
+A partial report can update an explicitly reported value for its model. Its
+omissions preserve saved values. A synthetic copy of another catalog cannot
+supply observed option values. Use current metadata for concurrent model-only
+writes so they cannot restore keys removed by reconciliation. Record the
+catalog generation after the runtime write succeeds. Duplicate events then
+converge on the same option map.
+
+The provider-derived map belongs to `runtime_config`. Profiles,
+`runtime_config_overrides`, the original effective settings, and the baseline
+retain their existing owners. Provider-restored recovery continues to store
+observations in `acp_model_state` under its attempt policy.
 
 ## Selector availability
 
@@ -143,23 +194,21 @@ define the affected rows and the rendered checks.
 
 ## Failure, security, and observability
 
-A missing catalog remains distinct from an absent settlement marker.
-The repair never sends an unsupported option to force readiness.
-It does not change permissions, recovery admission, or provider-restored policy.
+An unknown model catalog leaves unverified writes deferred. The existing
+startup warning reports rejected settings after a verified write attempt.
 
 Existing `model-selector:gate` diagnostics expose the required keys, option IDs,
 and availability result. No new log stream or metric is required.
-The incident's original missing-marker transition remains unproven. This design
-does not identify a provider or transport event as that transition's cause.
+The missing-marker transition tracked by the earlier selector plan remains
+unproven. The Cursor replay failure has a separate, reproducible ordering.
 
 ## Related decisions
 
 - [Explicit recovery settings](../../../decisions/2026-09-29-explicit-resume-settings.md)
   retains provider-restored authority and saved selections.
+- [Session setting semantics](../../agents/system-design/session-setting-semantics.md)
+  defines the distinct confirmation rules for Pi's thinking settings.
 - [Original reconciliation plan](../../../plans/session-config-cross-agent-reconcile/plan.md)
   records the prior backend filter and settled-catalog repair.
 - [Resume model-label plan](../../../plans/resumed-session-model-labels/plan.md)
   records the existing startup hydration barrier.
-
-No new ADR is required. This correction implements the existing availability
-criteria without changing provider authority or a public contract.

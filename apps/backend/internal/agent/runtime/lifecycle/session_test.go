@@ -65,6 +65,7 @@ type mockAgentServer struct {
 	upgrader             websocket.Upgrader
 	handler              func(msg ws.Message) *ws.Message
 	afterResponse        func(msg ws.Message)
+	eventsAfterResponse  func(msg ws.Message) []agentctl.AgentEvent
 	wsConnected          chan struct{} // closed when WS stream connects
 	materialized         []materializedUpload
 	failMaterialize      bool
@@ -244,6 +245,13 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 			}
 			if m.afterResponse != nil {
 				m.afterResponse(msg)
+			}
+			if m.eventsAfterResponse != nil {
+				for _, event := range m.eventsAfterResponse(msg) {
+					if err := conn.WriteJSON(event); err != nil {
+						return
+					}
+				}
 			}
 		}
 	})

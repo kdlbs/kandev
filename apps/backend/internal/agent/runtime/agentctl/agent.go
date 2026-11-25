@@ -460,9 +460,8 @@ func (c *Client) SetModel(ctx context.Context, modelID string) error {
 	return err
 }
 
-// SetModelWithResult reads the effective model from the correlated setter
-// response. Older agentctl peers return no such evidence and remain
-// unconfirmed.
+// SetModelWithResult reads the effective model and any catalog evidence from
+// the correlated setter response. Older agentctl peers remain unconfirmed.
 func (c *Client) SetModelWithResult(ctx context.Context, modelID string) (streams.ConfigurationResult, error) {
 	result := streams.ConfigurationResult{Requested: modelID}
 	payload := struct {
@@ -927,10 +926,13 @@ func (c *Client) readUpdatesStream(
 			// state yet, so its asynchronous catalog must remain available to the
 			// bounded startup-policy wait.
 			c.setLastSessionModelState(&streams.SessionModelState{
-				CurrentModelID:       event.CurrentModelID,
-				Models:               event.SessionModels,
-				ConfigOptions:        event.ConfigOptions,
-				ConfigOptionsSettled: eventDataBool(event.Data, "config_options_settled"),
+				SessionID:                 event.SessionID,
+				CurrentModelID:            event.CurrentModelID,
+				Models:                    event.SessionModels,
+				ConfigOptions:             event.ConfigOptions,
+				SessionSettingsGeneration: event.SessionSettingsGeneration,
+				ConfigOptionsComplete:     eventDataBool(event.Data, streams.ConfigOptionsCompleteKey),
+				ConfigOptionsSettled:      eventDataBool(event.Data, "config_options_settled"),
 			})
 		}
 

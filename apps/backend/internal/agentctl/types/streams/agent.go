@@ -765,9 +765,13 @@ type SessionModelInfo struct {
 // created or loaded session. It lets lifecycle callers apply a saved model
 // before the asynchronous session_models stream event is dispatched.
 type SessionModelState struct {
-	CurrentModelID string             `json:"current_model_id,omitempty"`
-	Models         []SessionModelInfo `json:"models,omitempty"`
-	ConfigOptions  []ConfigOption     `json:"config_options,omitempty"`
+	SessionID                 string             `json:"session_id,omitempty"`
+	CurrentModelID            string             `json:"current_model_id,omitempty"`
+	Models                    []SessionModelInfo `json:"models,omitempty"`
+	ConfigOptions             []ConfigOption     `json:"config_options,omitempty"`
+	SessionSettingsGeneration uint64             `json:"session_settings_generation,omitempty"`
+	// ConfigOptionsComplete identifies a provider catalog for CurrentModelID.
+	ConfigOptionsComplete bool `json:"config_options_complete,omitempty"`
 	// ConfigOptionsSettled distinguishes a complete empty provider snapshot
 	// from the transient empty state sent before startup settles.
 	ConfigOptionsSettled bool `json:"config_options_settled,omitempty"`
