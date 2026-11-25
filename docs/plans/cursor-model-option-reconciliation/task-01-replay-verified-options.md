@@ -58,12 +58,12 @@ persistence repair in Task 02.
 
 ## Regression cases
 
-Add `TestCursorModelResultCarriesVerifiedCatalog` alongside existing adapter
+Add `TestModelResultCarriesVerifiedCatalog` alongside existing adapter
 configuration tests. Drive a typed model reply, an acknowledgment without a
 catalog, and a projection that drops an option ID. Confirm that only the
 complete reply carries model-bound evidence.
 
-Add `TestInitializeAndPromptWithLayersCursorModelScopedReplay` beside the
+Add `TestInitializeAndPromptWithLayersModelScopedReplay` beside the
 runtime layer tests. Seed the old catalog and withhold publication of the newer
 event. Return the provider's new catalog in the correlated result. Before the
 fix, the test observes a `fast` call and a startup failure entry. Exercise both
@@ -85,7 +85,7 @@ From the repository root, run the focused backend checks.
 (cd apps/backend && go test -trimpath -tags fts5 -count=1 \
   ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/api \
   ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle \
-  -run 'Test(CursorModelResultCarriesVerifiedCatalog|InitializeAndPromptWithLayersCursorModelScopedReplay|ApplyRuntimeSessionLayersFiltersUnadvertisedOptions|SessionModelsPublishOnlySettledStartupState|InitializeAndPromptWithLayers_ProviderRestoredOmitsSavedStartupSettings|InitializeAndPrompt_AppliesProfileConfigOptions|SetConfigOptionWithResultUsesItsACPResponse|SetConfigOptionWithPolicyCarriesHostPolicy)')
+  -run 'Test(ModelResultCarriesVerifiedCatalog|InitializeAndPromptWithLayersModelScopedReplay|ApplyRuntimeSessionLayersFiltersUnadvertisedOptions|SessionModelsPublishOnlySettledStartupState|InitializeAndPromptWithLayers_ProviderRestoredOmitsSavedStartupSettings|InitializeAndPrompt_AppliesProfileConfigOptions|SetConfigOptionWithResultUsesItsACPResponse|SetConfigOptionWithPolicyCarriesHostPolicy)')
 git diff --check
 ```
 
@@ -97,16 +97,16 @@ git diff --check
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_session.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_updates.go`
-- `apps/backend/internal/agentctl/server/adapter/transport/acp/cursor_model_catalog.go`
-- `apps/backend/internal/agentctl/server/adapter/transport/acp/cursor_model_catalog_test.go`
+- `apps/backend/internal/agentctl/server/adapter/transport/acp/model_catalog.go`
+- `apps/backend/internal/agentctl/server/adapter/transport/acp/model_catalog_test.go`
 - `apps/backend/internal/agent/runtime/agentctl/agent.go`
 - `apps/backend/internal/agent/runtime/agentctl/client.go`
 - `apps/backend/internal/agent/runtime/lifecycle/session.go`
 - `apps/backend/internal/agent/runtime/lifecycle/types.go`
 - `apps/backend/internal/agent/runtime/lifecycle/manager_events.go`
 - `apps/backend/internal/agent/runtime/lifecycle/manager_interaction.go`
-- `apps/backend/internal/agent/runtime/lifecycle/session_cursor_options.go`
-- `apps/backend/internal/agent/runtime/lifecycle/session_cursor_options_test.go`
+- `apps/backend/internal/agent/runtime/lifecycle/session_model_options.go`
+- `apps/backend/internal/agent/runtime/lifecycle/session_model_options_test.go`
 - `apps/backend/internal/agent/runtime/lifecycle/session_runtime_layers_test.go`
 - `apps/backend/internal/agent/runtime/lifecycle/session_test.go`
 

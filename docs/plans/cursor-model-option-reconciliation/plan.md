@@ -8,13 +8,15 @@ system_design:
 legacy_specs: []
 ---
 
-# Fix plan for Cursor model option reconciliation
+# Fix plan for model-dependent session options
 
 ## Overview
 
-Restore saved Cursor options against the active model's confirmed catalog.
-Then reconcile the saved effective options whenever Cursor reports a complete
-catalog. [Issue #5508](https://github.com/kdlbs/kandev/issues/5508) is assigned to
+Restore saved options using the running provider's catalog for the active model.
+Clean up the saved effective options when the provider sends a complete report.
+Tasks 01 and 02 implemented the Cursor path in the draft PR. Tasks 03 and 04 extend
+it to any provider that can verify the settings for its active model.
+[Issue #5508](https://github.com/kdlbs/kandev/issues/5508) is assigned to
 `carlosflorencio`.
 
 ## Confirmed root cause
@@ -38,12 +40,22 @@ Both probes exercised the existing service methods through a temporary Go
 overlay. The report supplies the real Cursor log. The original failed
 attempt's catalog and a fresh authenticated Cursor reproduction remain unavailable.
 
+The draft PR checks the Cursor agent ID in the v1 adapter, startup layers,
+and runtime option persistence. A temporary overlay at `243bdab59e6f` reused
+the Cursor regression fixtures with the agent ID `generic-acp`. The adapter
+discarded the typed reply's catalog evidence. Cold resume sent the stale
+`fast` setting. The work orders turn those fixtures into regressions that
+exercise the same code under more than one agent ID.
+
 ## Scope
 
 ### In scope
 
 - Cursor ACP v1 startup and cold resume through the normal startup layers.
 - Complete model confirmation from Cursor setup, replies, and live updates.
+- Shared replay and persistence for provider-verified active-model options.
+- ACP v1 and v2 typed settings reports. Existing Grok model metadata provides
+  evidence for the reasoning options it describes.
 - Stale effective options in existing rows and new in-session model switches.
 - Startup warnings for rejected settings that the active catalog advertises.
 
@@ -55,13 +67,17 @@ attempt's catalog and a fresh authenticated Cursor reproduction remain unavailab
 
 ## Technical approach
 
-1. Carry the provider's complete catalog through the correlated agentctl model
+1. Carry Cursor's complete catalog through the correlated agentctl model
    result and the existing stream. Reuse the startup catalog wait for later
    reports from the same native session. Use only qualified evidence to
    filter saved Cursor options in both startup layers.
 2. Reconcile the observed `runtime_config` in the accepted model-event handler.
    Fence writes with the existing owner and generation checks. Keep concurrent
    model-only writes from restoring a stale option map.
+3. Let each transport associate the options it can verify with the model,
+   native session, and settings generation.
+4. Use that report in both startup layers and persistence for every provider.
+   Replay supported IDs. Limit removal of absent saved IDs to complete reports.
 
 A cache-only change would still depend on stream timing. A write-only change
 would leave old rows and older peers able to reach replay with stale options.
@@ -76,16 +92,22 @@ defines the evidence and the storage boundary.
 | Cursor acknowledgment, partial projection, or older agentctl | Missing qualified catalog | Defer unverified options. Preserve omitted saved keys. |
 | Other agents and transports | Existing replay and settings contracts | Existing cross-agent filtering, explicit recovery, and Pi coverage guard those paths. |
 
+Task 03 adds provider-neutral evidence to the existing agentctl results and
+events. Task 04 replaces the Cursor gates in the consumers. A partial report
+may verify individual entries for replay. Missing and partial reports
+preserve saved keys they omit. Legacy model acknowledgments with copied option
+lists can update the displayed model while Kandev waits for provider evidence.
+
 ## Tests
 
 Criterion suffixes refer to `AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001`.
 
 | Criteria | Planned test | Observable result |
 | --- | --- | --- |
-| .1, .3, .6 | `TestCursorModelResultCarriesVerifiedCatalog` in ACP adapter tests | Typed replies carry the selected model and option IDs. Partial or synthetic snapshots carry no completeness claim. |
-| .1, .2, .3, .6, .8 | `TestInitializeAndPromptWithLayersCursorModelScopedReplay` in lifecycle tests | With a delayed model event, a saved `reasoning_effort` reaches the provider. `fast` has zero setter calls and no warning. |
+| .1, .3, .6 | `TestModelResultCarriesVerifiedCatalog` in ACP adapter tests | Typed replies carry the selected model and option IDs. Partial or synthetic snapshots carry no completeness claim. |
+| .1, .2, .3, .6, .8 | `TestInitializeAndPromptWithLayersModelScopedReplay` in lifecycle tests | With a delayed model event, a saved `reasoning_effort` reaches the provider. `fast` has zero setter calls and no warning. |
 | .1, .2 | Same lifecycle test, missing catalog and rejection cases | An unknown catalog defers unverified writes. A rejected advertised option reaches the existing startup warning. |
-| .5, .9 | `TestCursorRuntimeConfigReconcilesVerifiedCatalog` in orchestrator tests | Live and settled events publish the reported controls. SQLite records supported values and drops absent keys only with complete evidence. |
+| .5, .9 | `TestRuntimeConfigReconcilesVerifiedCatalog` in orchestrator tests | Live and settled events publish the reported controls. SQLite records supported values and drops absent keys only with complete evidence. |
 | .9 | `TestPersistRuntimeModelMetadataPreservesConcurrentCursorCatalog` in executor tests | A model-only write interleaved with reconciliation preserves the clean map. |
 
 ## End-to-end evidence
@@ -106,6 +128,8 @@ option calls, and transcript for the reported warning.
 
 - [x] [Task 01. Replay verified options](task-01-replay-verified-options.md)
 - [x] [Task 02. Reconcile persisted options](task-02-reconcile-persisted-options.md) (after Task 01)
+- [x] [Task 03. Verify provider option reports](task-03-verify-provider-option-reports.md) (after Task 02)
+- [x] [Task 04. Reconcile options for the active model](task-04-reconcile-active-model-options.md) (after Task 03)
 
 ## Verification results
 
@@ -117,6 +141,9 @@ option calls, and transcript for the reported warning.
 - The first full backend run hit package timeouts in process and backend app
   tests and an analytics read deadline. Each affected test passed on its
   focused rerun.
+- All eight package suites for provider-neutral replay and persistence passed.
+  The lifecycle suite passed after the profile fixture supplied the active
+  model's options. The final focused lifecycle checks and Go lint passed.
 
 ## Risks
 
@@ -126,3 +153,6 @@ option calls, and transcript for the reported warning.
   Exercise the settled publication so that the option map still reconciles.
 - A stale model-only write can restore removed keys. Exercise the actual
   repository interleaving and retry.
+- A legacy provider can acknowledge a model change before reporting its
+  options. Defer settings that lack evidence for the selected model. Verify
+  the existing setup and provider-restored compatibility paths.

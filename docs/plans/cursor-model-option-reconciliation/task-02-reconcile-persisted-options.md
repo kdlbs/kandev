@@ -52,7 +52,7 @@ Cursor reports for its active model. Keep a partial report from losing settings.
 
 ## Regression cases
 
-Add `TestCursorRuntimeConfigReconcilesVerifiedCatalog` next to the streaming
+Add `TestRuntimeConfigReconcilesVerifiedCatalog` next to the streaming
 event tests. Use `setupTestRepo` and `handleSessionModelsEvent` to read back
 the SQLite row and check the published event. The complete-catalog case fails
 before the fix because the stored map contains `fast`.
@@ -78,7 +78,7 @@ From the repository root, run the targeted tests and package checks.
 ```bash
 (cd apps/backend && go test -trimpath -tags fts5 -count=1 \
   ./internal/orchestrator ./internal/orchestrator/executor \
-  -run 'Test(CursorRuntimeConfigReconcilesVerifiedCatalog|PersistRuntimeModelMetadataPreservesConcurrentCursorCatalog|ProviderRestoredSessionReportsPreserveSavedSelections|SessionSettingsSameSourceFencesEmptyAttemptGeneration|PersistSessionRuntimeConfigUpdatesProviderState|PersistRuntimeModelMetadataStoresRuntimeConfigAndClearsContextWindow)')
+  -run 'Test(RuntimeConfigReconcilesVerifiedCatalog|PersistRuntimeModelMetadataPreservesConcurrentCursorCatalog|ProviderRestoredSessionReportsPreserveSavedSelections|SessionSettingsSameSourceFencesEmptyAttemptGeneration|PersistSessionRuntimeConfigUpdatesProviderState|PersistRuntimeModelMetadataStoresRuntimeConfigAndClearsContextWindow)')
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -87,8 +87,8 @@ git diff --check
 ## Files likely touched
 
 - `apps/backend/internal/orchestrator/event_handlers_streaming.go`
-- `apps/backend/internal/orchestrator/event_handlers_cursor_config.go`
-- `apps/backend/internal/orchestrator/event_handlers_cursor_config_test.go`
+- `apps/backend/internal/orchestrator/event_handlers_model_options.go`
+- `apps/backend/internal/orchestrator/event_handlers_model_options_test.go`
 - `apps/backend/internal/orchestrator/executor/executor_interaction.go`
 - `apps/backend/internal/orchestrator/executor/executor_runtime_model_metadata_test.go`
 - `apps/backend/internal/task/repository/session_runtime_config.go`

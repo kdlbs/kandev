@@ -1427,6 +1427,23 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
 	mock := newMockAgentServer(t)
 	defer mock.Close()
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.session.set_model" {
+			return mock.defaultHandler(msg)
+		}
+		response, _ := ws.NewResponse(msg.ID, msg.Action, streams.ConfigurationResult{
+			ConfigID: "model", Requested: "sonnet", Effective: "sonnet", Confirmed: true,
+			ModelState: &streams.SessionModelState{
+				SessionID: "test-session-123", CurrentModelID: "sonnet",
+				SessionSettingsGeneration: 1, ConfigOptionsComplete: true,
+				ConfigOptions: []streams.ConfigOption{
+					{ID: "model", Category: "model", CurrentValue: "sonnet"},
+					{ID: "effort", CurrentValue: "medium"},
+				},
+			},
+		})
+		return response
+	}
 
 	log := newSessionTestLogger()
 	stopCh := newTestStopCh(t)
@@ -1496,7 +1513,7 @@ func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
 
 	for _, event := range eventBus.getStreamEvents() {
 		if event.Data != nil && settledConfigEventData(event.Data.Data) {
-			t.Fatal("startup requests without an authoritative config snapshot must not be marked settled")
+			t.Fatal("startup must wait for a provider report after the final option write")
 		}
 	}
 }

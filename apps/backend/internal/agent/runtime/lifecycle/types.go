@@ -1431,6 +1431,8 @@ type CachedModelState struct {
 	ConfigID                  string
 	SessionSettingsGeneration uint64
 	ConfigOptionsComplete     bool
+	ConfigOptionsDisplayOnly  bool
+	VerifiedConfigOptionIDs   []string
 	// ConfigOptionsSettled is true after startup config application has a
 	// complete provider snapshot, including snapshots with no options.
 	ConfigOptionsSettled bool
@@ -1572,6 +1574,7 @@ func cloneCachedModelState(state *CachedModelState) *CachedModelState {
 	cloned := *state
 	cloned.Models = append([]streams.SessionModelInfo(nil), state.Models...)
 	cloned.ConfigOptions = append([]streams.ConfigOption(nil), state.ConfigOptions...)
+	cloned.VerifiedConfigOptionIDs = append([]string(nil), state.VerifiedConfigOptionIDs...)
 	for i := range cloned.ConfigOptions {
 		cloned.ConfigOptions[i].Options = append(
 			[]streams.ConfigOptionValue(nil),
@@ -1588,6 +1591,8 @@ func cachedModelStateFromStream(state *streams.SessionModelState) *CachedModelSt
 		ConfigOptions:             state.ConfigOptions,
 		SessionSettingsGeneration: state.SessionSettingsGeneration,
 		ConfigOptionsComplete:     state.ConfigOptionsComplete,
+		ConfigOptionsDisplayOnly:  state.ConfigOptionsDisplayOnly,
+		VerifiedConfigOptionIDs:   state.VerifiedConfigOptionIDs,
 		ConfigOptionsSettled:      state.ConfigOptionsSettled,
 	}
 }

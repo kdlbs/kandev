@@ -84,7 +84,7 @@ type Client struct {
 	// session/load responses and by asynchronous session_models events. Lifecycle
 	// policy evaluation can use it before the event reaches its handler.
 	lastSessionModelState  *streams.SessionModelState
-	lastCompleteModelState *streams.SessionModelState
+	lastVerifiedModelState *streams.SessionModelState
 
 	// Session capabilities are populated by the ACP initialize response and
 	// used by idle-session MCP reconfiguration to choose resume versus load.
@@ -131,21 +131,27 @@ type updatesStreamDialCleanup struct {
 func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.lastSessionModelState = cloneSessionModelState(state)
 	if state == nil {
-		c.lastCompleteModelState = nil
-	} else if state.ConfigOptionsComplete &&
-		(c.lastCompleteModelState == nil || state.SessionSettingsGeneration >= c.lastCompleteModelState.SessionSettingsGeneration) {
-		c.lastCompleteModelState = c.lastSessionModelState
+		c.lastSessionModelState = nil
+		c.lastVerifiedModelState = nil
+		return
+	}
+	if latest := c.lastSessionModelState; latest != nil &&
+		state.SessionSettingsGeneration > 0 && state.SessionSettingsGeneration < latest.SessionSettingsGeneration {
+		return
+	}
+	c.lastSessionModelState = cloneSessionModelState(state)
+	if state.HasConfigOptionEvidence() {
+		c.lastVerifiedModelState = c.lastSessionModelState
 	}
 }
 
-// GetLastCompleteModelState gives startup the latest provider catalog even
-// when a synthetic convergence event follows the provider update.
-func (c *Client) GetLastCompleteModelState() *streams.SessionModelState {
+// GetSessionModelEvidence returns the latest state and verified option report
+// together so a newer model can invalidate earlier option evidence.
+func (c *Client) GetSessionModelEvidence() (latest, verified *streams.SessionModelState) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return cloneSessionModelState(c.lastCompleteModelState)
+	return cloneSessionModelState(c.lastSessionModelState), cloneSessionModelState(c.lastVerifiedModelState)
 }
 
 // GetLastSessionModelState returns the latest session model catalog observed
@@ -201,6 +207,7 @@ func cloneSessionModelState(state *streams.SessionModelState) *streams.SessionMo
 		return nil
 	}
 	cloned := *state
+	cloned.VerifiedConfigOptionIDs = append([]string(nil), state.VerifiedConfigOptionIDs...)
 	cloned.Models = append([]streams.SessionModelInfo(nil), state.Models...)
 	cloned.ConfigOptions = append([]streams.ConfigOption(nil), state.ConfigOptions...)
 	for i, model := range cloned.Models {

@@ -212,7 +212,7 @@ func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, m
 	if !result.Success {
 		return NewSessionResponse{}, fmt.Errorf("%s failed: %s", action, result.Error)
 	}
-	c.setLastSessionModelState(result.ModelState)
+	c.setSessionSetupModelState(result.SessionID, result.ModelState)
 	c.setLastAttachmentAttemptID(result.AttachmentAttemptID)
 	return result, nil
 }
@@ -309,7 +309,7 @@ func (c *Client) LoadSessionWithResult(ctx context.Context, sessionID string, mc
 	if !result.Success {
 		return "", fmt.Errorf("load session failed: %s", result.Error)
 	}
-	c.setLastSessionModelState(result.ModelState)
+	c.setSessionSetupModelState(sessionID, result.ModelState)
 	c.setLastAttachmentAttemptID(result.AttachmentAttemptID)
 	return result.AttachmentAttemptID, nil
 }
@@ -357,9 +357,20 @@ func (c *Client) ResumeSessionWithResult(ctx context.Context, sessionID, cwd str
 	if !result.Success {
 		return "", fmt.Errorf("resume session failed: %s", result.Error)
 	}
-	c.setLastSessionModelState(result.ModelState)
+	c.setSessionSetupModelState(sessionID, result.ModelState)
 	c.setLastAttachmentAttemptID(result.AttachmentAttemptID)
 	return result.AttachmentAttemptID, nil
+}
+
+func (c *Client) setSessionSetupModelState(sessionID string, state *streams.SessionModelState) {
+	if state == nil {
+		return
+	}
+	setup := *state
+	if setup.SessionID == "" {
+		setup.SessionID = sessionID
+	}
+	c.setLastSessionModelState(&setup)
 }
 
 // ForkSession asks the current provider session to fork through a completed
@@ -932,7 +943,9 @@ func (c *Client) readUpdatesStream(
 				ConfigOptions:             event.ConfigOptions,
 				SessionSettingsGeneration: event.SessionSettingsGeneration,
 				ConfigOptionsComplete:     eventDataBool(event.Data, streams.ConfigOptionsCompleteKey),
+				VerifiedConfigOptionIDs:   event.VerifiedConfigOptionIDs,
 				ConfigOptionsSettled:      eventDataBool(event.Data, "config_options_settled"),
+				ConfigOptionsDisplayOnly:  eventDataBool(event.Data, streams.ConfigOptionsDisplayOnlyKey),
 			})
 		}
 

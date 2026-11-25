@@ -29,6 +29,7 @@ type acpDialect struct {
 		[]modelInfo,
 		string,
 	) []streams.ConfigOption
+	modelOptionEvidence  func([]streams.ConfigOption, []modelInfo, string) []string
 	modelChangeRequest   func(dialectConfigChange) (*dialectRPC, error)
 	configChangeRequest  func(dialectConfigChange) (*dialectRPC, error)
 	suppressNotification func(acp.SessionNotification) bool
@@ -134,6 +135,13 @@ func (d acpDialect) modelConfigAfterChange(
 		return config
 	}
 	return d.configAfterModelChange(config, models, modelID)
+}
+
+func (d acpDialect) verifiedModelOptions(config []streams.ConfigOption, models []modelInfo, modelID string) []string {
+	if d.modelOptionEvidence == nil {
+		return nil
+	}
+	return d.modelOptionEvidence(config, models, modelID)
 }
 
 func (d acpDialect) modelRequest(change dialectConfigChange) (*dialectRPC, error) {

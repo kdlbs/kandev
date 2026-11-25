@@ -16,8 +16,8 @@ owns the observable behavior. Agent identity and sessionless option discovery
 remain with Agents. This design does not change provider selection or startup policy.
 
 The selector can use a usable catalog before startup settles. Replay and
-persistence need stronger evidence for model-dependent options. The
-[Cursor fix plan](../../../plans/cursor-model-option-reconciliation/plan.md)
+persistence need evidence that the options belong to the active model. The
+[model change and resume fix](../../../plans/cursor-model-option-reconciliation/plan.md)
 tracks that work.
 
 ## Requirement mapping
@@ -35,7 +35,7 @@ All criterion suffixes below refer to
 
 - `lifecycle/session.go` applies profile and runtime layers at startup and resume.
 - `lifecycle/manager_interaction.go` supplies the catalog-aware runtime filter.
-- The ACP v1 adapter supplies model and catalog evidence from provider responses.
+- Transport adapters supply model and catalog evidence from provider reports.
   The agentctl client carries the evidence to the startup and event paths.
 - `orchestrator/event_handlers_streaming.go` persists accepted model snapshots and
   publishes `session.models_updated`.
@@ -68,36 +68,46 @@ continues to use the same keys and value shapes.
 
 ### Provider catalog evidence
 
-Apply this repair to the built-in Cursor ACP v1 binding. A complete catalog
-comes from a typed ACP setup response, a `set_config_option` reply, or a
-`config_option_update` for the same native session. The catalog identifies the
-active model. Its projection accounts for every option ID and has unique,
-nonempty IDs. [ACP session config options](https://agentclientprotocol.com/protocol/v1/session-config-options)
+The adapter confirms that a report belongs to an active model, native session,
+and settings generation. It marks the catalog complete when the protocol
+defines the list as complete and the projection preserves every option ID.
+The projection requires unique, nonempty IDs. The model comes from the report
+or the same provider response's model state. A requested model ID alone gives
+no catalog evidence.
 
-Mark completeness at the adapter when the provider payload supplies this
-evidence. A partial projection, such as one that loses an option variant,
-cannot establish absence. Synthetic convergence reports carry display state.
-The complete catalog and its model travel together in the optional internal
-agentctl result and on qualified `session_models` reports. Scope the evidence
-to the native session and settings generation that produced it.
+ACP v1 and v2 can supply this evidence in typed setup, `set_config_option`
+replies, and `config_option_update` notifications. A model-shaped row must
+agree with the reported model. A projection with unsupported variants can
+verify the entries it preserves. Deletion requires the complete set of IDs.
+[ACP v1 session options](https://agentclientprotocol.com/protocol/v1/session-config-options)
+[ACP v2 session options](https://agentclientprotocol.com/protocol/v2/session-config-options)
+
+Legacy transports can verify individual options from provider evidence. For
+example, Grok's model metadata can establish which reasoning choices belong to
+the confirmed model. Mark only entries supported by that evidence when the
+display list also contains cached options. A synthetic model-switch event can
+update the displayed model. Its copied option IDs supply no evidence.
+
+Carry the verified entries and completeness through the existing agentctl
+configuration result, setup model state, and `session_models` event. Missing
+evidence from older helpers is unknown. The replay and persistence consumers
+use this contract for every agent.
 
 ### Startup replay
 
-`InitializeAndPromptWithLayers` resolves the model through the existing start
-policy. Use the complete catalog returned by the correlated model setter, if
-available. Require the catalog model to match the confirmed effective model.
-When startup uses the provider's current model without a switch, use the
-matching catalog from the current setup. If a model setter relies on
-notifications, wait within the existing catalog wait budget for a complete
-report for the selected model from the same native session, newer than the
-pre-switch report. Read that evidence from the agentctl client before the
-ordered lifecycle dispatcher. Leave uncertainty about the model to the
-existing selection policy and defer options that lack current evidence.
+`InitializeAndPromptWithLayers` resolves the effective model through the start
+policy. Use verified options from the correlated model setter or a newer
+provider report for that model and native session. Read the agentctl client
+before the ordered lifecycle dispatcher. Use the existing bounded wait when
+saved settings need evidence from a delayed report. Reject evidence superseded
+by a report of another active model or session. Use the current setup report
+when startup keeps its model, including options advertised by legacy setup.
 
-Use the verified list for both saved Cursor option layers. Preserve the order
-and values of supported writes and the dedicated model and mode setters.
-Populate the startup failure list with errors from attempted runtime setters.
-After startup, a late catalog can reconcile persisted options for future use.
+Filter both saved option layers by the verified IDs. Defer unverified options
+when evidence is missing. Keep the order and values of supported writes, the
+dedicated model and mode setters, and the provider-restored recovery policy.
+Record errors from attempted runtime setters in the startup failure list.
+After startup, a late catalog can reconcile saved options for future use.
 
 ### Persistence
 
@@ -106,19 +116,18 @@ generation checks under the session settings lock. Carry evidence through the
 settled startup publication only when it belongs to the published snapshot.
 Keep the provider-default baseline separate from that snapshot.
 
-For a qualified Cursor snapshot, write the intersection of the saved map and
-the advertised IDs, then add any provider-reported current values to that map.
+For a complete active-model snapshot, write the intersection of the saved map
+and the advertised IDs, then add provider-reported current values to that map.
 An empty or missing current value leaves the previous value for that advertised
 ID. The value `"false"` is a reported value. Use the same path when the saved
 model already equals the reported model, including legacy rows cleaned during
 ordinary resume.
 
-A partial report can update an explicitly reported value for its model. Its
-omissions preserve saved values. A synthetic copy of another catalog cannot
-supply observed option values. Use current metadata for concurrent model-only
-writes so they cannot restore keys removed by reconciliation. Record the
-catalog generation after the runtime write succeeds. Duplicate events then
-converge on the same option map.
+A partial report can update an explicitly observed value for its model. Its
+omissions preserve saved values. Copied display options supply no values to
+the saved map. Use current metadata for concurrent model-only writes so they
+preserve the reconciled map. Record the catalog generation after the runtime
+write succeeds. Duplicate events then converge on the same option map.
 
 The provider-derived map belongs to `runtime_config`. Profiles,
 `runtime_config_overrides`, the original effective settings, and the baseline

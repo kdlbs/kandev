@@ -14,9 +14,51 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const cursorOptionsTestNativeID = "cursor-native-session"
+const modelOptionsTestNativeID = "native-model-settings"
 
-func TestInitializeAndPromptWithLayersCursorModelScopedReplay(t *testing.T) {
+func TestStartupCatalogRejectsSupersededModel(t *testing.T) {
+	report := &streams.SessionModelState{
+		SessionID: modelOptionsTestNativeID, CurrentModelID: "sonnet",
+		SessionSettingsGeneration: 2, ConfigOptionsComplete: true,
+	}
+	latest := *report
+	latest.SessionSettingsGeneration++
+	latest.ConfigOptionsDisplayOnly = true
+	latest.CurrentModelID = "opus"
+	require.False(t, matchesStartupCatalog(report, &latest, modelOptionsTestNativeID, "sonnet", 1))
+
+	latest.CurrentModelID = "sonnet"
+	require.True(t, matchesStartupCatalog(report, &latest, modelOptionsTestNativeID, "sonnet", 1))
+	latest.ConfigOptionsDisplayOnly = false
+	require.False(t, matchesStartupCatalog(report, &latest, modelOptionsTestNativeID, "sonnet", 1))
+}
+
+func TestStartupCatalogRetainsSameModelSetup(t *testing.T) {
+	setup := &streams.SessionModelState{
+		SessionID: modelOptionsTestNativeID, CurrentModelID: "sonnet", SessionSettingsGeneration: 1,
+		ConfigOptions: []streams.ConfigOption{{ID: "reasoning_effort"}},
+	}
+	latest := *setup
+	latest.SessionSettingsGeneration++
+	latest.ConfigOptionsDisplayOnly = true
+	latest.ConfigOptions = []streams.ConfigOption{{ID: "fast"}}
+	catalog := startupCatalogWithoutSwitch(&latest, nil, setup, modelOptionsTestNativeID, "sonnet")
+	require.NotNil(t, catalog)
+	require.Equal(t, setup.ConfigOptions, catalog.ConfigOptions)
+	latest.CurrentModelID = "opus"
+	require.Nil(t, startupCatalogWithoutSwitch(&latest, nil, setup, modelOptionsTestNativeID, "sonnet"))
+}
+
+func TestInitializeAndPromptWithLayersModelScopedReplay(t *testing.T) {
+	for _, agentID := range []string{acpcompat.CursorAgentID, "generic-acp"} {
+		t.Run(agentID, func(t *testing.T) {
+			testStartupOptionEvidence(t, agentID)
+		})
+	}
+}
+
+func testStartupOptionEvidence(t *testing.T, agentID string) {
+	t.Helper()
 	for _, tc := range []struct {
 		name, evidence, reject string
 		applySupported         bool
@@ -24,16 +66,19 @@ func TestInitializeAndPromptWithLayersCursorModelScopedReplay(t *testing.T) {
 		{name: "correlated catalog before stream event", evidence: "reply", applySupported: true},
 		{name: "notification before lifecycle dispatch", evidence: "update", applySupported: true},
 		{name: "catalog from current setup", evidence: "setup", applySupported: true},
+		{name: "verified subset", evidence: "partial", applySupported: true},
 		{name: "unverified catalog"},
+		{name: "catalog for another session", evidence: "wrong session"},
+		{name: "catalog for another model", evidence: "wrong model"},
 		{name: "advertised value rejection", evidence: "reply", reject: "reasoning_effort", applySupported: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			testCursorStartupReplay(t, tc.evidence, tc.reject, tc.applySupported)
+			testModelStartupReplay(t, agentID, tc.evidence, tc.reject, tc.applySupported)
 		})
 	}
 }
 
-func testCursorStartupReplay(t *testing.T, evidence, reject string, applySupported bool) {
+func testModelStartupReplay(t *testing.T, agentID, evidence, reject string, applySupported bool) {
 	t.Helper()
 	mock := newMockAgentServer(t)
 	t.Cleanup(mock.Close)
@@ -42,7 +87,7 @@ func testCursorStartupReplay(t *testing.T, evidence, reject string, applySupport
 	if evidence == "setup" {
 		setupModel, runtimeModel = "sonnet", ""
 	}
-	configureCursorCatalogResponses(mock, setupModel, evidence)
+	configureModelCatalogResponses(mock, setupModel, evidence)
 
 	log := newSessionTestLogger()
 	events := &MockEventBusWithTracking{}
@@ -59,11 +104,11 @@ func testCursorStartupReplay(t *testing.T, evidence, reject string, applySupport
 		}
 	})
 	execution := &AgentExecution{
-		ID: "cursor-exec", TaskID: "task", SessionID: "session", AgentID: acpcompat.CursorAgentID,
-		ACPSessionID: cursorOptionsTestNativeID, WorkspacePath: t.TempDir(), agentctl: client,
+		ID: "model-settings-exec", TaskID: "task", SessionID: "session", AgentID: agentID,
+		ACPSessionID: modelOptionsTestNativeID, WorkspacePath: t.TempDir(), agentctl: client,
 	}
-	config := &testAgent{id: acpcompat.CursorAgentID, enabled: true, runtimeConfig: &agents.RuntimeConfig{
-		Cmd: agents.NewCommand("cursor-agent"), Protocol: agent.ProtocolACP,
+	config := &testAgent{id: agentID, enabled: true, runtimeConfig: &agents.RuntimeConfig{
+		Cmd: agents.NewCommand(agentID), Protocol: agent.ProtocolACP,
 		SessionConfig: agents.SessionConfig{NativeSessionResume: true},
 	}}
 
@@ -78,7 +123,7 @@ func testCursorStartupReplay(t *testing.T, evidence, reject string, applySupport
 	)
 	require.NoError(t, err)
 	require.True(t, ready)
-	require.Equal(t, cursorOptionsTestNativeID, execution.ACPSessionID)
+	require.Equal(t, modelOptionsTestNativeID, execution.ACPSessionID)
 	require.Contains(t, mock.getActionLog(), "agent.session.load")
 	_, called := seen.Load("fast")
 	require.False(t, called, "stale fast option reached agentctl")
@@ -105,7 +150,7 @@ func testCursorStartupReplay(t *testing.T, evidence, reject string, applySupport
 	}
 }
 
-func configureCursorCatalogResponses(mock *mockAgentServer, setupModel, evidence string) {
+func configureModelCatalogResponses(mock *mockAgentServer, setupModel, evidence string) {
 	base := mock.handler
 	models := []streams.SessionModelInfo{{ModelID: "opus"}, {ModelID: "sonnet"}}
 	options := func(model string) []streams.ConfigOption {
@@ -120,7 +165,7 @@ func configureCursorCatalogResponses(mock *mockAgentServer, setupModel, evidence
 	}
 	state := func(model string, generation uint64) map[string]any {
 		return map[string]any{
-			"session_id": cursorOptionsTestNativeID, "current_model_id": model,
+			"session_id": modelOptionsTestNativeID, "current_model_id": model,
 			"models": models, "config_options": options(model),
 			"config_options_complete": true, "session_settings_generation": generation,
 		}
@@ -134,8 +179,21 @@ func configureCursorCatalogResponses(mock *mockAgentServer, setupModel, evidence
 			return response
 		case "agent.session.set_model":
 			body := map[string]any{"effective": "sonnet", "confirmed": true, "config_id": "model"}
-			if evidence == "reply" {
+			switch evidence {
+			case "reply":
 				body["model_state"] = state("sonnet", 2)
+			case "partial":
+				partial := state("sonnet", 2)
+				partial["config_options_complete"] = false
+				partial["config_options"] = append(options("sonnet"), streams.ConfigOption{ID: "fast", CurrentValue: "false"})
+				partial["verified_config_option_ids"] = []string{"model", "reasoning_effort"}
+				body["model_state"] = partial
+			case "wrong session":
+				other := state("sonnet", 2)
+				other["session_id"] = "different-native-session"
+				body["model_state"] = other
+			case "wrong model":
+				body["model_state"] = state("opus", 2)
 			}
 			response, _ := ws.NewResponse(msg.ID, msg.Action, body)
 			return response
@@ -149,7 +207,7 @@ func configureCursorCatalogResponses(mock *mockAgentServer, setupModel, evidence
 				return nil
 			}
 			return []agentctl.AgentEvent{{
-				Type: streams.EventTypeSessionModels, SessionID: cursorOptionsTestNativeID,
+				Type: streams.EventTypeSessionModels, SessionID: modelOptionsTestNativeID,
 				CurrentModelID: "sonnet", SessionModels: models, ConfigOptions: options("sonnet"),
 				SessionSettingsGeneration: 2,
 				Data:                      map[string]any{"config_options_complete": true, "config_options_source": "provider_update"},

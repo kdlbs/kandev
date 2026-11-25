@@ -13,26 +13,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCursorRuntimeConfigReconcilesVerifiedCatalog(t *testing.T) {
+func TestRuntimeConfigReconcilesVerifiedCatalog(t *testing.T) {
+	for _, agentID := range []string{acpcompat.CursorAgentID, "generic-acp"} {
+		t.Run(agentID, func(t *testing.T) {
+			testRuntimeConfigReconcilesVerifiedCatalog(t, agentID)
+		})
+	}
+}
+
+func testRuntimeConfigReconcilesVerifiedCatalog(t *testing.T, agentID string) {
+	t.Helper()
 	t.Run("live switch", func(t *testing.T) {
-		repo, svc, eventBus := newCursorRuntimeConfigFixture(t, "opus")
-		svc.handleSessionModelsEvent(t.Context(), cursorModelReport(t, 1, false, false))
-		require.Equal(t, "false", cursorRuntimeConfig(t, repo).ConfigOptions["fast"])
-		require.Equal(t, "medium", cursorRuntimeConfig(t, repo).ConfigOptions["reasoning_effort"])
-		svc.handleSessionModelsEvent(t.Context(), cursorModelReport(t, 2, true, false))
+		repo, svc, eventBus := newRuntimeOptionsFixture(t, "opus")
+		svc.handleSessionModelsEvent(t.Context(), modelOptionReport(t, agentID, 1, false, false))
+		require.Equal(t, "false", readRuntimeOptions(t, repo).ConfigOptions["fast"])
+		require.Equal(t, "medium", readRuntimeOptions(t, repo).ConfigOptions["reasoning_effort"])
+		svc.handleSessionModelsEvent(t.Context(), modelOptionReport(t, agentID, 2, true, false))
 		want := map[string]string{
 			"model": "sonnet", "context": "300k", "reasoning_effort": "medium", "supported_toggle": "false",
 		}
-		require.Equal(t, want, cursorRuntimeConfig(t, repo).ConfigOptions)
+		require.Equal(t, want, readRuntimeOptions(t, repo).ConfigOptions)
 
 		// A synthetic convergence report can echo old option IDs under the new model.
-		synthetic := cursorModelReport(t, 3, false, false)
+		synthetic := modelOptionReport(t, agentID, 3, false, false)
 		synthetic.Data.Data = nil
 		synthetic.Data.ConfigOptions = append(synthetic.Data.ConfigOptions,
 			streams.ConfigOption{ID: "fast", CurrentValue: "false"})
 		svc.handleSessionModelsEvent(t.Context(), synthetic)
-		svc.handleSessionModelsEvent(t.Context(), cursorModelReport(t, 2, true, false))
-		require.Equal(t, want, cursorRuntimeConfig(t, repo).ConfigOptions)
+		svc.handleSessionModelsEvent(t.Context(), modelOptionReport(t, agentID, 2, true, false))
+		require.Equal(t, want, readRuntimeOptions(t, repo).ConfigOptions)
 
 		session, err := repo.GetTaskSession(t.Context(), "s1")
 		require.NoError(t, err)
@@ -41,33 +50,56 @@ func TestCursorRuntimeConfigReconcilesVerifiedCatalog(t *testing.T) {
 		require.Equal(t, map[string]string{"fast": "false"}, overrides.ConfigOptions)
 		projected := eventBus.events[1].event.Data.(lifecycle.SessionModelsEventPayload)
 		require.Equal(t, "sonnet", projected.CurrentModelID)
-		require.Equal(t, cursorModelReport(t, 2, true, false).Data.ConfigOptions, projected.ConfigOptions)
+		require.Equal(t, modelOptionReport(t, agentID, 2, true, false).Data.ConfigOptions, projected.ConfigOptions)
 	})
 
 	t.Run("legacy row when startup settles", func(t *testing.T) {
-		repo, svc, _ := newCursorRuntimeConfigFixture(t, "sonnet")
+		repo, svc, _ := newRuntimeOptionsFixture(t, "sonnet")
 		ctx := t.Context()
 		require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateStarting, ""))
 		require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyOrigin, models.SessionOriginTaskInitial))
-		svc.handleSessionModelsEvent(ctx, cursorModelReport(t, 1, true, false))
-		require.Contains(t, cursorRuntimeConfig(t, repo).ConfigOptions, "fast")
-		svc.handleSessionModelsEvent(ctx, cursorModelReport(t, 1, true, true))
-		require.NotContains(t, cursorRuntimeConfig(t, repo).ConfigOptions, "fast")
+		svc.handleSessionModelsEvent(ctx, modelOptionReport(t, agentID, 1, true, false))
+		require.Contains(t, readRuntimeOptions(t, repo).ConfigOptions, "fast")
+		settled := modelOptionReport(t, agentID, 1, true, true)
+		settled.Data.ConfigOptions = nil
+		svc.handleSessionModelsEvent(ctx, settled)
+		require.Empty(t, readRuntimeOptions(t, repo).ConfigOptions)
 	})
 
 	t.Run("new report can retry a runtime write", func(t *testing.T) {
-		repo, svc, _ := newCursorRuntimeConfigFixture(t, "sonnet")
-		failing := &cursorRuntimeFailingRepo{Repository: repo}
+		repo, svc, _ := newRuntimeOptionsFixture(t, "sonnet")
+		failing := &runtimeOptionsFailingRepo{Repository: repo}
 		svc.repo = failing
-		report := cursorModelReport(t, 1, true, false)
+		report := modelOptionReport(t, agentID, 1, true, false)
 		svc.handleSessionModelsEvent(t.Context(), report)
-		require.Contains(t, cursorRuntimeConfig(t, repo).ConfigOptions, "fast")
+		require.Contains(t, readRuntimeOptions(t, repo).ConfigOptions, "fast")
 		svc.handleSessionModelsEvent(t.Context(), report)
-		require.NotContains(t, cursorRuntimeConfig(t, repo).ConfigOptions, "fast")
+		require.NotContains(t, readRuntimeOptions(t, repo).ConfigOptions, "fast")
 	})
 }
 
-func newCursorRuntimeConfigFixture(t *testing.T, model string) (*sqliterepo.Repository, *Service, *recordingEventBus) {
+func TestRuntimeConfigUpdatesOnlyVerifiedPartialOptions(t *testing.T) {
+	repo, svc, _ := newRuntimeOptionsFixture(t, "opus")
+	report := modelOptionReport(t, "generic-acp", 1, false, false, "reasoning_effort")
+	svc.handleSessionModelsEvent(t.Context(), report)
+	options := readRuntimeOptions(t, repo).ConfigOptions
+	require.Equal(t, "medium", options["reasoning_effort"])
+	require.Equal(t, "false", options["fast"])
+	require.NotContains(t, options, "supported_toggle")
+
+	copied := modelOptionReport(t, "generic-acp", 2, false, false)
+	copied.Data.Data = map[string]any{
+		streams.ConfigOptionsDisplayOnlyKey: true,
+		streams.ConfigOptionsConfigIDKey:    "supported_toggle",
+	}
+	copied.Data.ConfigOptions[2].CurrentValue = "high"
+	svc.handleSessionModelsEvent(t.Context(), copied)
+	options = readRuntimeOptions(t, repo).ConfigOptions
+	require.Equal(t, "false", options["supported_toggle"])
+	require.Equal(t, "medium", options["reasoning_effort"])
+}
+
+func newRuntimeOptionsFixture(t *testing.T, model string) (*sqliterepo.Repository, *Service, *recordingEventBus) {
 	t.Helper()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -84,15 +116,16 @@ func newCursorRuntimeConfigFixture(t *testing.T, model string) (*sqliterepo.Repo
 	return repo, &Service{logger: testLogger(), repo: repo, eventBus: bus}, bus
 }
 
-func cursorModelReport(t *testing.T, generation uint64, complete, settled bool) *lifecycle.AgentStreamEventPayload {
+func modelOptionReport(t *testing.T, agentID string, generation uint64, complete, settled bool, verifiedIDs ...string) *lifecycle.AgentStreamEventPayload {
 	t.Helper()
 	eventBus := &recordingEventBus{}
 	publisher := lifecycle.NewEventPublisher(eventBus, testLogger())
-	execution := &lifecycle.AgentExecution{ID: "cursor-exec", TaskID: "t1", SessionID: "s1", AgentID: acpcompat.CursorAgentID}
+	execution := &lifecycle.AgentExecution{ID: "model-settings-exec", TaskID: "t1", SessionID: "s1", AgentID: agentID}
 	publisher.PublishAgentStreamEvent(execution, streams.AgentEvent{
-		Type: streams.EventTypeSessionModels, SessionID: "cursor-native",
+		Type: streams.EventTypeSessionModels, SessionID: "model-settings-native",
 		CurrentModelID: "sonnet", SessionSettingsGeneration: generation, SessionSettingsSourceGeneration: 1,
-		SessionModels: []streams.SessionModelInfo{{ModelID: "opus"}, {ModelID: "sonnet"}},
+		SessionModels:           []streams.SessionModelInfo{{ModelID: "opus"}, {ModelID: "sonnet"}},
+		VerifiedConfigOptionIDs: verifiedIDs,
 		ConfigOptions: []streams.ConfigOption{
 			{ID: "model", Category: "model", CurrentValue: "sonnet"},
 			{ID: "context"},
@@ -110,7 +143,7 @@ func cursorModelReport(t *testing.T, generation uint64, complete, settled bool) 
 	return &payload
 }
 
-func cursorRuntimeConfig(t *testing.T, repo *sqliterepo.Repository) models.SessionRuntimeConfig {
+func readRuntimeOptions(t *testing.T, repo *sqliterepo.Repository) models.SessionRuntimeConfig {
 	t.Helper()
 	session, err := repo.GetTaskSession(t.Context(), "s1")
 	require.NoError(t, err)
@@ -119,12 +152,12 @@ func cursorRuntimeConfig(t *testing.T, repo *sqliterepo.Repository) models.Sessi
 	return cfg
 }
 
-type cursorRuntimeFailingRepo struct {
+type runtimeOptionsFailingRepo struct {
 	*sqliterepo.Repository
 	failed bool
 }
 
-func (r *cursorRuntimeFailingRepo) SetSessionMetadataKeyIfJSONValue(ctx context.Context, sessionID, key string, expected, value any) (bool, error) {
+func (r *runtimeOptionsFailingRepo) SetSessionMetadataKeyIfJSONValue(ctx context.Context, sessionID, key string, expected, value any) (bool, error) {
 	if !r.failed && key == models.SessionMetaKeyRuntimeConfig {
 		r.failed = true
 		return false, errors.New("runtime config write failed")

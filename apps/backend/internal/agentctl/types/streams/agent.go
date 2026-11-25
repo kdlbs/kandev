@@ -593,6 +593,10 @@ type AgentEvent struct {
 	// ConfigOptions lists session configuration options from ACP _meta.
 	ConfigOptions []ConfigOption `json:"config_options,omitempty"`
 
+	// VerifiedConfigOptionIDs identifies options reported for CurrentModelID
+	// when only part of the displayed catalog is verified.
+	VerifiedConfigOptionIDs []string `json:"verified_config_option_ids,omitempty"`
+
 	// ConfigBaselineCandidate carries an authoritative response snapshot for
 	// lifecycle settlement without replacing the event's newer live options.
 	ConfigBaselineCandidate []ConfigOption `json:"config_baseline_candidate,omitempty"`
@@ -770,11 +774,13 @@ type SessionModelState struct {
 	Models                    []SessionModelInfo `json:"models,omitempty"`
 	ConfigOptions             []ConfigOption     `json:"config_options,omitempty"`
 	SessionSettingsGeneration uint64             `json:"session_settings_generation,omitempty"`
-	// ConfigOptionsComplete identifies a provider catalog for CurrentModelID.
-	ConfigOptionsComplete bool `json:"config_options_complete,omitempty"`
+	// ConfigOptionsComplete means the report accounts for every option for CurrentModelID.
+	ConfigOptionsComplete   bool     `json:"config_options_complete,omitempty"`
+	VerifiedConfigOptionIDs []string `json:"verified_config_option_ids,omitempty"`
 	// ConfigOptionsSettled distinguishes a complete empty provider snapshot
 	// from the transient empty state sent before startup settles.
-	ConfigOptionsSettled bool `json:"config_options_settled,omitempty"`
+	ConfigOptionsSettled     bool `json:"config_options_settled,omitempty"`
+	ConfigOptionsDisplayOnly bool `json:"config_options_display_only,omitempty"`
 }
 
 // AuthMethodInfo represents an authentication method from ACP initialize.

@@ -312,7 +312,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.availableModels = nil
 	a.retainAvailableCommandsForSessionLocked(sessionID)
 	a.availableConfigOptions = cloneConfigOptions(initialConfigOptions)
-	a.configOptionsComplete = false
+	a.modelCatalog = modelCatalogEvidence{}
 	a.resetSessionModeLocked()
 	if initialModels != nil {
 		a.availableModels = initialModels.AvailableModels
@@ -812,7 +812,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.availableModels = nil
 	a.retainAvailableCommandsForSessionLocked(sessionID)
 	a.availableConfigOptions = cloneConfigOptions(initialConfigOptions)
-	a.configOptionsComplete = false
+	a.modelCatalog = modelCatalogEvidence{}
 	a.resetSessionModeLocked()
 	if initialModels != nil {
 		a.availableModels = initialModels.AvailableModels
@@ -1223,7 +1223,7 @@ func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState,
 		a.sessionSettingsGeneration++
 		event.SessionSettingsGeneration = a.sessionSettingsGeneration
 	}
-	a.stampModelCatalogLocked(&event, acpConfigOptions)
+	a.stampModelCatalogLocked(&event, acpConfigOptions, models.CurrentModelId)
 	a.mu.Unlock()
 	a.sendUpdate(event)
 }
@@ -1298,7 +1298,7 @@ func (a *Adapter) emitSetModelEvent(
 		// just-applied model in the convergence event.
 		a.availableConfigOptions = outConfig
 	}
-	a.configOptionsComplete = false
+	a.modelCatalog = modelCatalogEvidence{}
 	if tracker := a.usageBySession[sessionID]; tracker != nil {
 		tracker.maxSize = 0
 	}
@@ -1311,7 +1311,9 @@ func (a *Adapter) emitSetModelEvent(
 		SessionModels:             convertSessionModels(cachedModels),
 		ConfigOptions:             outConfig,
 		SessionSettingsGeneration: a.sessionSettingsGeneration,
+		Data:                      map[string]any{streams.ConfigOptionsDisplayOnlyKey: true},
 	}
+	a.recordModelCatalogLocked(&event, a.dialect.verifiedModelOptions(outConfig, cachedModels, modelID), false)
 	a.mu.Unlock()
 
 	a.logger.Info("emitting session_models convergence event after SetModel",
@@ -2040,8 +2042,8 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 		SessionModels:         convertSessionModels(cachedModels),
 		ConfigOptions:         configOptions,
 		Data: map[string]any{
-			"config_options_source":    "provider_response",
-			"config_options_config_id": configID,
+			streams.ConfigOptionsSourceKey:   streams.ConfigOptionsSourceProviderResponse,
+			streams.ConfigOptionsConfigIDKey: configID,
 		},
 	}
 	a.mu.Lock()
@@ -2061,7 +2063,7 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 	a.noteConfigModeSnapshotLocked(sessionID, a.currentModeFromConfig(configOptions), correlatedModeResponse)
 	a.sessionSettingsGeneration++
 	event.SessionSettingsGeneration = a.sessionSettingsGeneration
-	a.stampModelCatalogLocked(&event, options)
+	a.stampModelCatalogLocked(&event, options, "")
 	if isModelConfigID(configID, configOptions) {
 		if tracker := a.usageBySession[sessionID]; tracker != nil {
 			tracker.maxSize = 0
@@ -2077,7 +2079,7 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
 	// than drops on a full updatesCh and must run without a.mu held -- see
 	// emitDialectContextWindow's doc comment for the deadlock this avoids.
-	modelState := completeModelStateFromEvent(event)
+	modelState := verifiedModelStateFromEvent(event)
 	a.sendUpdate(event)
 	return modelState
 }
@@ -2152,7 +2154,7 @@ func (a *Adapter) emitSetConfigOptionEventWithPolicy(
 		return
 	}
 	a.availableConfigOptions = outConfig
-	a.configOptionsComplete = false
+	a.modelCatalog = modelCatalogEvidence{}
 	a.sessionSettingsGeneration++
 	event := AgentEvent{
 		Type:                      streams.EventTypeSessionModels,
@@ -2162,6 +2164,10 @@ func (a *Adapter) emitSetConfigOptionEventWithPolicy(
 		ConfigOptions:             outConfig,
 		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicy),
 		SessionSettingsGeneration: a.sessionSettingsGeneration,
+		Data:                      map[string]any{streams.ConfigOptionsDisplayOnlyKey: true},
+	}
+	if found {
+		event.Data[streams.ConfigOptionsConfigIDKey] = configID
 	}
 	a.mu.Unlock()
 
