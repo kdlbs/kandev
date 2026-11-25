@@ -105,7 +105,7 @@ function acknowledgeAttachment(socket: FakeWebSocket): void {
 }
 
 async function connectContinuityReady() {
-  const disconnect = lspClientManager.connect(SESSION_ID, "typescript", undefined, true);
+  const disconnect = lspClientManager.connect(SESSION_ID, "typescript");
   const socket = FakeWebSocket.instances.at(-1);
   if (!socket) throw new Error("expected an LSP WebSocket");
   socket.open();

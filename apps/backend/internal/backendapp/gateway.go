@@ -124,10 +124,9 @@ func provideGateway(
 	notificationSettings commonconfig.NotificationsConfig,
 	dataDir string,
 	registerCleanup func(func() error),
-	lspContinuityEnabled bool,
 	acquireSessionFence func(string) func(),
 	webhookPrivateNetworksAllowed bool,
-	lspMaxConnections ...int,
+	lspMaxConnections int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
 	if err != nil {
@@ -158,13 +157,10 @@ func provideGateway(
 		if terminalSvc != nil {
 			gateway.SetTerminalService(terminalSvc)
 		}
-		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspMaxConnections...)
-		if lspContinuityEnabled {
-			gateway.LSPHandler.EnableContinuity(acquireSessionFence, eventBus)
-			orchestratorSvc.SetLSPLeaseLifecycle(gateway.LSPHandler)
-			if registerCleanup != nil {
-				registerCleanup(gateway.LSPHandler.Close)
-			}
+		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspMaxConnections, acquireSessionFence, eventBus)
+		orchestratorSvc.SetLSPLeaseLifecycle(gateway.LSPHandler)
+		if registerCleanup != nil {
+			registerCleanup(gateway.LSPHandler.Close)
 		}
 		gateway.SetVscodeProxy(lifecycleMgr)
 		gateway.SetPortProxy(lifecycleMgr)
