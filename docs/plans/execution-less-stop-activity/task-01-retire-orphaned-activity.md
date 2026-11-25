@@ -29,10 +29,9 @@ weakening any successor or liveness fence.
   locked read of distinct non-empty IDs from `background`, `tools`, and
   `executionClaims`.
 - In `settleExecutionLessSessionStop`, after a successful
-  `settleExecutionLessSessionTurn` and while the guards are still held, call
-  `retireExecutionActivityAndPublish` with `context.WithoutCancel(ctx)` for
-  each ID, then settle background work with
-  `backgroundWorkCleanupContext(ctx)`.
+  `settleExecutionLessSessionTurn` and while the guards are still held, create
+  a bounded cleanup context with `backgroundWorkCleanupContext(ctx)`. Use it
+  for each `retireExecutionActivityAndPublish` call and for durable settlement.
 - Pass the session's task ID to the publication. For a missing session row,
   retire with an empty task ID and skip publication.
 - Add a new test file, `session_stop_settle_background_test.go`.
@@ -51,7 +50,8 @@ age-based clearing.
 - With the fake settler, open rows are settled only when the probe reports no
   live process. A live or failing probe leaves them open.
 - If the request context is cancelled after turn closure is confirmed, the
-  durable background row still reaches `ended`.
+  activity publication remains deadline-bounded and the durable background row
+  still reaches `ended`.
 - Refused settlement (an `IDLE` state, contention, or a newly registered
   execution) leaves registrations and rows unchanged. The existing
   execution-less stop suites stay green.
@@ -100,11 +100,15 @@ None.
   because `ActiveSubagentCount` remained 1.
 - RED confirmed for request cancellation: canceling after turn closure left
   the open durable row `running`; the regression now proves it reaches `ended`.
-- `go test -trimpath ./internal/orchestrator -run '^TestStopSession_ExecutionLessSettlementSettlesRowsAfterRequestCancellation$' -count=1` passed.
+- RED confirmed for publication bounds: post-cancellation activity publication
+  had no deadline; the regression now proves the read has a cleanup deadline.
+- The same bounded cleanup context now covers activity publication and durable
+  settlement, so a slow session read cannot hold stop guards past its deadline.
+- `go test -trimpath ./internal/orchestrator -run '^TestStopSession_ExecutionLessSettlementSettlesRowsAfterRequestCancellation$' -count=1` passed. It verifies a deadline on the post-cancellation publication read and an `ended` durable row.
 - `go test -trimpath ./internal/orchestrator -run '^(TestStopSession_ExecutionLessSettlementRetiresDeadExecutionActivity|TestStopSession_ExecutionLessSettlementSettlesOpenBackgroundRows|TestStopSession_ExecutionLessRefusalKeepsActivity|TestExecutionIDsWithActivityIncludesDistinctOwnerSources|TestExecutionLessSettlementRetiresActivityWithoutSessionRow)$' -count=1` passed.
-- `(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^(TestStopSession|TestReapPromptUnreadyExecution|TestOwnedTeardown|TestIdleReclaimSettlesOpenBackgroundWork|TestActiveSubagentCount|TestRetireExecutionActivity|TestExecutionIDsWithActivity|TestExecutionLessSettlement)' -count=1)` passed.
+- After the bounded-context fix, `(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^(TestStopSession|TestReapPromptUnreadyExecution|TestOwnedTeardown|TestIdleReclaimSettlesOpenBackgroundWork|TestActiveSubagentCount|TestRetireExecutionActivity|TestExecutionIDsWithActivity|TestExecutionLessSettlement)' -count=1)` passed.
 - `(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^(TestExecutionIDsWithActivityIncludesDistinctOwnerSources|TestExecutionLessSettlementRetiresActivityWithoutSessionRow)$' -count=1)` passed.
-- `go build -trimpath ./internal/orchestrator` and `make -C apps/backend build-kandev` passed.
-- `bash scripts/lint-go-changed apps/backend/internal/orchestrator/session_stop_settle.go apps/backend/internal/orchestrator/turn_activity.go apps/backend/internal/orchestrator/session_stop_settle_background_test.go` passed with 0 issues.
+- After the bounded-context fix, `go build -trimpath ./internal/orchestrator` and `make -C apps/backend build-kandev` passed.
+- `GOMEMLIMIT=6GiB GOMAXPROCS=4 GOFLAGS=-p=4 bash scripts/lint-go-changed apps/backend/internal/orchestrator/session_stop_settle.go apps/backend/internal/orchestrator/turn_activity.go apps/backend/internal/orchestrator/session_stop_settle_background_test.go` passed with 0 issues.
 - `python3 scripts/list-docs.py validate` and
   `python3 scripts/lint-spec-files.py --all` passed.

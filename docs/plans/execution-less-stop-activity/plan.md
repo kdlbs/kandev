@@ -41,8 +41,9 @@ The fix is one work order: reconcile inside the existing settlement guards.
 
 - `settleExecutionLessSessionStop` (`session_stop_settle.go`). On a successful
   settlement, it retires the in-memory activity of every execution ID that
-  owns state in the session's `turnActivity`, then settles durable background
-  rows with a bounded cleanup context from `backgroundWorkCleanupContext(ctx)`.
+  owns state in the session's `turnActivity`. It uses one bounded cleanup
+  context from `backgroundWorkCleanupContext(ctx)` for activity publication
+  and durable background row settlement.
 - A small `turnActivity` helper that lists the owning execution IDs
   (`turn_activity.go`).
 - Regression tests in a new file,
@@ -65,18 +66,21 @@ execution ID recorded in `turnActivity` belongs to a dead execution. After
 `settleExecutionLessSessionTurn` returns `settled == true`, settlement does
 two things:
 
-1. It calls `s.executionIDsWithActivity(sessionID)`, a new locked read that
+1. It creates a bounded cleanup context with
+   `backgroundWorkCleanupContext(ctx)` and calls
+   `s.executionIDsWithActivity(sessionID)`, a new locked read that
    returns the distinct non-empty IDs from `background`, `tools`, and
    `executionClaims`. For each ID it calls `retireExecutionActivityAndPublish`
-   with `context.WithoutCancel(ctx)`, the task ID, session ID, and execution
-   ID. Retirement already keeps a record that an in-flight prompt or dispatch
-   token uses, so successor fences are preserved.
+   with the cleanup context, task ID, session ID, and execution ID. This
+   context is cancellation-independent and bounded, so publication reads
+   cannot hold the session guards indefinitely. Retirement already keeps a
+   record that an in-flight prompt or dispatch token uses, so successor fences
+   are preserved.
    `settleExecutionLessSessionTurn` returns the loaded task ID; a missing
    session row returns an empty task ID, which retires activity without
    publishing a session event.
-2. It creates a bounded cleanup context with
-   `backgroundWorkCleanupContext(ctx)` and calls
-   `s.settleBackgroundWorkLocked(cleanupCtx, sessionID, "")`. This reuses
+2. It calls `s.settleBackgroundWorkLocked(cleanupCtx, sessionID, "")` using
+   the same bounded context. This reuses
    the liveness probe, execution-identity recheck, and retained-owner guards,
    and only the lifecycle lock is needed, which is already held.
    `probeAgentRunning` calls the agent manager directly and takes no
@@ -93,7 +97,7 @@ new state, timer, or event.
 | AC-TASKS-SESSION-STOP-SETTLEMENT-001.3 | `TestStopSession_ExecutionLessSettlementRetiresDeadExecutionActivity`: a subagent and a shell registered for `dead-exec`. After stop, `ActiveSubagentCount == 0` and the background map is empty. Fails before the fix. |
 | AC-TASKS-SESSION-STOP-SETTLEMENT-001.3 | `TestStopSession_ExecutionLessSettlementSettlesOpenBackgroundRows`: an open durable workload row is settled through the settler when the probe reports no live process. With a live or failing probe, the row stays open. |
 | AC-TASKS-SESSION-STOP-SETTLEMENT-001.3 | `TestStopSession_ExecutionLessRefusalKeepsActivity`: an `IDLE` state, lifecycle-lock contention, or a newly registered execution returns the original outcome, and the registration and count are unchanged. |
-| AC-TASKS-SESSION-STOP-SETTLEMENT-001.3 | `TestStopSession_ExecutionLessSettlementSettlesRowsAfterRequestCancellation`: cancelling the request context after turn closure does not prevent durable settlement. |
+| AC-TASKS-SESSION-STOP-SETTLEMENT-001.3 | `TestStopSession_ExecutionLessSettlementSettlesRowsAfterRequestCancellation`: cancellation after turn closure does not prevent durable settlement, and publication's session read remains deadline-bounded. |
 | AC-TASKS-SESSION-STOP-SETTLEMENT-001.2 | The existing `session_stop_settle_review_test.go` and `session_stop_settle_lock_order_test.go` suites keep passing unchanged. |
 
 ## E2E tests

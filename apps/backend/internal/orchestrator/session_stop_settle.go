@@ -55,11 +55,11 @@ func (s *Service) settleExecutionLessSessionStop(ctx context.Context, sessionID 
 	if err != nil || !settled {
 		return settled, err
 	}
-	for _, executionID := range s.executionIDsWithActivity(sessionID) {
-		s.retireExecutionActivityAndPublish(context.WithoutCancel(ctx), taskID, sessionID, executionID)
-	}
 	cleanupCtx, cancel := backgroundWorkCleanupContext(ctx)
 	defer cancel()
+	for _, executionID := range s.executionIDsWithActivity(sessionID) {
+		s.retireExecutionActivityAndPublish(cleanupCtx, taskID, sessionID, executionID)
+	}
 	s.settleBackgroundWorkLocked(cleanupCtx, sessionID, "")
 	return true, nil
 }

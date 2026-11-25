@@ -63,13 +63,14 @@ registrations, tool ownership, or execution claims in the session's
 `turnActivity`, and calls `retireExecutionActivityAndPublish` for each one.
 That function keeps a record that a prompt or dispatch token still uses, so
 the successor fences stay in force. The derived `active_subagent_count`
-then follows the remaining registrations. Retirement uses
-`context.WithoutCancel(ctx)` so request cancellation does not interrupt it.
+then follows the remaining registrations. Before retirement, the stop creates
+a bounded cleanup context with `backgroundWorkCleanupContext(ctx)` and uses it
+for both publication and durable settlement. It derives the context from
+`context.WithoutCancel(ctx)` so request cancellation does not interrupt
+cleanup, while the deadline bounds database reads made during publication.
 
-Next, it calls
-`settleBackgroundWorkLocked(cleanupCtx, sessionID, "")` under the lifecycle
-lock it already holds, where `cleanupCtx` comes from the bounded
-`backgroundWorkCleanupContext(ctx)`. This lets settlement finish if the stop
+Next, it calls `settleBackgroundWorkLocked(cleanupCtx, sessionID, "")` under
+the lifecycle lock it already holds. This lets settlement finish if the stop
 request is cancelled after turn closure. The settler keeps the existing liveness
 probe, execution-identity recheck, and retained-owner guards from the
 [background work design](../../agents/system-design/background-work.md). A

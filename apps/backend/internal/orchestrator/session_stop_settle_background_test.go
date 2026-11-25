@@ -120,10 +120,26 @@ func TestStopSession_ExecutionLessSettlementSettlesRowsAfterRequestCancellation(
 	svc.registerBackgroundWorkKind(
 		sessionID, "subagent-call", "dead-exec", workID, streams.BackgroundWorkKindSubagent,
 	)
+	baseRepo, ok := svc.repo.(repoStore)
+	require.True(t, ok, "test repository must support full repository operations")
+	postCancellationReadBounded := false
+	svc.repo = &coordinatorStopRepoHooks{
+		repoStore: baseRepo,
+		getSessionFunc: func(readCtx context.Context, id string) (*models.TaskSession, error) {
+			if ctx.Err() != nil {
+				_, hasDeadline := readCtx.Deadline()
+				postCancellationReadBounded = hasDeadline && readCtx.Err() == nil
+			}
+			return baseRepo.GetTaskSession(readCtx, id)
+		},
+	}
+	svc.eventBus = &recordingEventBus{}
 	svc.turnService = &cancelAfterTurnClosure{TurnService: svc.turnService, cancel: cancel}
 
 	require.NoError(t, svc.StopSession(ctx, sessionID, "execution already stopped", false))
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
+	require.True(t, postCancellationReadBounded,
+		"activity publication must use cancellation-independent context with a deadline")
 	workload, err := background.GetBackgroundWorkload(context.Background(), sessionID, workID)
 	require.NoError(t, err)
 	require.NotNil(t, workload)
