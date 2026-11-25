@@ -11,11 +11,11 @@ const CUSTOM_INPUT = "schedule-custom-input";
 const CUSTOM_WEEKDAYS = "0 9 * * 1-5";
 const DAILY_9 = "0 9 * * *";
 
-function renderSelector(config: Record<string, unknown> | null) {
+function renderSelector(config: Record<string, unknown> | null, hasOtherTrigger = false) {
   const onChange = vi.fn();
   render(
     <TooltipProvider>
-      <ScheduleSelector config={config} onChange={onChange} />
+      <ScheduleSelector config={config} onChange={onChange} hasOtherTrigger={hasOtherTrigger} />
     </TooltipProvider>,
   );
   return onChange;
@@ -24,6 +24,12 @@ function renderSelector(config: Record<string, unknown> | null) {
 afterEach(cleanup);
 
 describe("ScheduleSelector preview", () => {
+  // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.7
+  it("does not claim the automation never runs when another trigger can start it", () => {
+    renderSelector(null, true);
+    expect(screen.getByTestId(NEXT_RUN).textContent).toBe("No schedule.");
+  });
+
   it("names the resolved instant in both the chosen zone and UTC", () => {
     // The whole point of the line: a cron alone never says which moment it
     // means, and the two readings differ for any zone that is not UTC.

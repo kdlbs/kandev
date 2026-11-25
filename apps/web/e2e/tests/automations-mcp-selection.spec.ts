@@ -77,6 +77,10 @@ test("saves all native packages and workspace servers, then invokes native tools
   expect(
     (await detail.getByTestId("automation-mcp-choice-configuration").boundingBox())!.height,
   ).toBeCloseTo(28, 0);
+  // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.5
+  await expect(detail.getByTestId("automation-mcp-configuration-grant")).toHaveText(
+    "This package can change authorized workflows, profiles, prompts, executors, and automations. It cannot change MCP access grants.",
+  );
   await detail.evaluate((element) => element.scrollIntoView({ block: "start" }));
   if (prCapture.capturing) await waitForFiniteAnimations(testPage.locator("body"));
   await detail.screenshot({ path: "../../artifacts/mcp-switches/automation-desktop.png" });

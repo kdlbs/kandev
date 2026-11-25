@@ -5,13 +5,11 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
-import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import type { AutomationTrigger, PlaceholderInfo, TriggerTypeInfo } from "@/lib/types/automation";
 import { type CreatedWebhookDetails, type FormState } from "./automation-payload";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import { ConfigSection } from "./config-section";
-import { ManagedConversationDestinationSelector } from "./managed-conversation-destination-selector";
-import { PromptSection } from "./prompt-section";
+import { PlaceholderList, PromptSection } from "./prompt-section";
 import { RequiredFieldLabel } from "./required-field-label";
 import { TriggersSection } from "./triggers-section";
 import { WebhookCreatedDialog } from "./webhook-created-dialog";
@@ -19,28 +17,46 @@ import { RetryPolicySection } from "./retry-policy-section";
 import { ContinuationPolicySection, FollowUpPromptField } from "./automation-continuation-section";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 
-import { SELECTED_CARD_CLASS_NAME, UNSELECTED_CARD_CLASS_NAME } from "./automation-card-styles";
+import { TargetModeSection } from "./automation-target-mode-section";
 
 type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 export function NameField({
   value,
+  enabled,
   isDirty,
+  enabledIsDirty,
   onChange,
+  onEnabledChange,
 }: {
   value: string;
+  enabled: boolean;
   isDirty: boolean;
+  enabledIsDirty: boolean;
   onChange: (value: string) => void;
+  onEnabledChange: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
     <div
       className="space-y-2 rounded-lg border bg-card p-4"
-      data-settings-dirty={isDirty}
+      data-settings-dirty={isDirty || enabledIsDirty}
       data-settings-dirty-level="container"
     >
-      <RequiredFieldLabel htmlFor="automation-name">
-        {t("automations:nameLabel")}
-      </RequiredFieldLabel>
+      <div className="flex items-center justify-between gap-4">
+        <RequiredFieldLabel htmlFor="automation-name">
+          {t("automations:nameLabel")}
+        </RequiredFieldLabel>
+        <Label className="flex min-h-7 cursor-pointer items-center gap-2 text-sm max-md:min-h-11 [@media(pointer:coarse)]:min-h-11">
+          {t("automations:enabledLabel")}
+          <Switch
+            checked={enabled}
+            data-settings-dirty={enabledIsDirty}
+            onCheckedChange={onEnabledChange}
+            className="cursor-pointer"
+            data-testid="automation-enabled-switch"
+          />
+        </Label>
+      </div>
       <Input
         id="automation-name"
         data-testid="automation-name-input"
@@ -124,6 +140,10 @@ export function WhenSection({
 }
 
 const THEN_DIRTY_FIELDS: Array<keyof FormState> = [
+  "continuationPolicy",
+  "prContinuationStepId",
+  "prMergedAction",
+  "prClosedAction",
   "taskTitleTemplate",
   "prompt",
   "followUpPrompt",
@@ -135,6 +155,76 @@ const THEN_DIRTY_FIELDS: Array<keyof FormState> = [
   "managedDestination",
 ];
 
+function TaskTitleField({
+  form,
+  savedForm,
+  defaultTaskTitle,
+  updateField,
+}: {
+  form: FormState;
+  savedForm: FormState;
+  defaultTaskTitle: string;
+  updateField: UpdateField;
+}) {
+  const { t } = useTranslation();
+  const { inputRef, clampChange } = useTaskTitleSelectionRestore(form.taskTitleTemplate);
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">{t("automations:taskTitleLabel")}</Label>
+      <Input
+        ref={inputRef}
+        value={form.taskTitleTemplate}
+        data-settings-dirty={isAutomationFieldDirty(form, savedForm, "taskTitleTemplate")}
+        onChange={(event) => updateField("taskTitleTemplate", clampChange(event))}
+        // defaultTaskTitle is the backend trigger type's own template — a
+        // persisted value, not copy. The fallback is the example hint.
+        placeholder={defaultTaskTitle || t("automations:taskTitlePlaceholder")}
+      />
+      <p className="text-xs text-muted-foreground">{t("automations:taskTitleHelp")}</p>
+    </div>
+  );
+}
+
+function ThenConfigSection({
+  form,
+  savedForm,
+  workspaceId,
+  updateField,
+}: {
+  form: FormState;
+  savedForm: FormState;
+  workspaceId: string;
+  updateField: UpdateField;
+}) {
+  return (
+    <ConfigSection
+      workspaceId={workspaceId}
+      workflowId={form.workflowId}
+      agentProfileId={form.agentProfileId}
+      executorProfileId={form.executorProfileId}
+      taskMode={form.taskMode}
+      repositorySelections={form.repositorySelections}
+      dirtyFields={{
+        workflowId: isAutomationFieldDirty(form, savedForm, "workflowId"),
+        agentProfileId: isAutomationFieldDirty(form, savedForm, "agentProfileId"),
+        executorProfileId: isAutomationFieldDirty(form, savedForm, "executorProfileId"),
+        repositorySelections: isAutomationFieldDirty(form, savedForm, "repositorySelections"),
+      }}
+      onWorkflowChange={(value) => {
+        updateField("workflowId", value);
+        updateField("workflowStepId", "");
+        updateField("prContinuationStepId", "");
+      }}
+      onAgentProfileChange={(value) => updateField("agentProfileId", value)}
+      onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
+      onRepositoriesChange={(value) => {
+        updateField("repositorySelections", value);
+        updateField("repositoryMode", value.length > 0 ? "selected" : "none");
+      }}
+    />
+  );
+}
+
 export function ThenSection({
   form,
   workspaceId,
@@ -142,6 +232,7 @@ export function ThenSection({
   defaultTaskTitle,
   savedForm,
   updateField,
+  hasPRTrigger,
 }: {
   form: FormState;
   workspaceId: string;
@@ -149,9 +240,10 @@ export function ThenSection({
   defaultTaskTitle: string;
   savedForm: FormState;
   updateField: UpdateField;
+  hasPRTrigger: boolean;
 }) {
   const { t } = useTranslation();
-  const { inputRef, clampChange } = useTaskTitleSelectionRestore(form.taskTitleTemplate);
+  const managed = form.taskMode === "managed_conversation";
   const isDirty = THEN_DIRTY_FIELDS.some((field) => isAutomationFieldDirty(form, savedForm, field));
   return (
     <div className="space-y-2">
@@ -159,7 +251,7 @@ export function ThenSection({
         <h3 className="text-base font-medium">{t("automations:thenTitle")}</h3>
         <p className="text-sm text-muted-foreground">
           {t(
-            form.taskMode === "managed_conversation"
+            managed
               ? "automations:thenManagedConversationDescription"
               : "automations:thenDescription",
           )}
@@ -170,21 +262,29 @@ export function ThenSection({
         data-settings-dirty={isDirty}
         data-settings-dirty-level="container"
       >
-        {form.taskMode !== "managed_conversation" ? (
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t("automations:taskTitleLabel")}</Label>
-            <Input
-              ref={inputRef}
-              value={form.taskTitleTemplate}
-              data-settings-dirty={isAutomationFieldDirty(form, savedForm, "taskTitleTemplate")}
-              onChange={(event) => updateField("taskTitleTemplate", clampChange(event))}
-              // defaultTaskTitle is the backend trigger type's own template — a
-              // persisted value, not copy. The fallback is the example hint.
-              placeholder={defaultTaskTitle || t("automations:taskTitlePlaceholder")}
-            />
-            <p className="text-xs text-muted-foreground">{t("automations:taskTitleHelp")}</p>
-          </div>
-        ) : null}
+        <TargetModeSection
+          form={form}
+          savedForm={savedForm}
+          workspaceId={workspaceId}
+          updateField={updateField}
+        />
+        {managed ? null : (
+          <ContinuationPolicySection
+            form={form}
+            savedForm={savedForm}
+            updateField={updateField}
+            hasPRTrigger={hasPRTrigger}
+          />
+        )}
+        <Separator />
+        {managed ? null : (
+          <TaskTitleField
+            form={form}
+            savedForm={savedForm}
+            defaultTaskTitle={defaultTaskTitle}
+            updateField={updateField}
+          />
+        )}
         <PromptSection
           value={form.prompt}
           isDirty={isAutomationFieldDirty(form, savedForm, "prompt")}
@@ -197,243 +297,77 @@ export function ThenSection({
           updateField={updateField}
           placeholders={placeholders}
         />
-        <Separator />
-        {form.taskMode === "managed_conversation" ? null : (
-          <ConfigSection
-            workspaceId={workspaceId}
-            workflowId={form.workflowId}
-            agentProfileId={form.agentProfileId}
-            executorProfileId={form.executorProfileId}
-            taskMode={form.taskMode}
-            repositorySelections={form.repositorySelections}
-            dirtyFields={{
-              workflowId: isAutomationFieldDirty(form, savedForm, "workflowId"),
-              agentProfileId: isAutomationFieldDirty(form, savedForm, "agentProfileId"),
-              executorProfileId: isAutomationFieldDirty(form, savedForm, "executorProfileId"),
-              repositorySelections: isAutomationFieldDirty(form, savedForm, "repositorySelections"),
-            }}
-            onWorkflowChange={(value) => {
-              updateField("workflowId", value);
-              updateField("workflowStepId", "");
-              updateField("prContinuationStepId", "");
-            }}
-            onAgentProfileChange={(value) => updateField("agentProfileId", value)}
-            onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
-            onRepositoriesChange={(value) => {
-              updateField("repositorySelections", value);
-              updateField("repositoryMode", value.length > 0 ? "selected" : "none");
-            }}
-          />
+        <PlaceholderList placeholders={placeholders} />
+        {managed ? null : (
+          <>
+            <Separator />
+            <ThenConfigSection
+              form={form}
+              savedForm={savedForm}
+              workspaceId={workspaceId}
+              updateField={updateField}
+            />
+          </>
         )}
       </div>
     </div>
   );
 }
 
-// eslint-disable-next-line max-lines-per-function -- This section keeps the three task modes and their complete accessible descriptions together.
-function TargetModeSection({
+export function LimitsSection({
   form,
   savedForm,
-  workspaceId,
   updateField,
 }: {
   form: FormState;
   savedForm: FormState;
-  workspaceId: string;
   updateField: UpdateField;
 }) {
   const { t } = useTranslation();
-  const targetIsDirty = isAutomationFieldDirty(form, savedForm, "taskMode");
-  const automationRun = form.taskMode === "automation_run";
-  const normalTask = form.taskMode === "normal_task";
-  const managedConversation = form.taskMode === "managed_conversation";
-  const descriptionId = "automation-task-mode-description";
-  return (
-    <div className="space-y-2">
-      <div>
-        <h3 id="automation-task-mode-heading" className="text-sm font-medium">
-          {t("automations:taskModeTitle")}
-        </h3>
-        <p id={descriptionId} className="text-xs text-muted-foreground">
-          {t("automations:taskModeDescription")}
-        </p>
-      </div>
-      <RadioGroup
-        aria-labelledby="automation-task-mode-heading"
-        aria-describedby={descriptionId}
-        value={form.taskMode}
-        onValueChange={(value) => {
-          const mode = value as FormState["taskMode"];
-          updateField("taskMode", mode);
-          if (mode !== "normal_task") updateField("prContinuationStepId", "");
-        }}
-        data-settings-dirty={targetIsDirty}
-        className="gap-2"
-      >
-        <Label
-          htmlFor="automation-task-mode-hidden"
-          className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
-            automationRun ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
-          }`}
-        >
-          <RadioGroupItem
-            id="automation-task-mode-hidden"
-            value="automation_run"
-            aria-describedby="automation-task-mode-hidden-description"
-            className="mt-0.5"
-          />
-          <span className="min-w-0 space-y-1">
-            <span className="block text-sm font-medium">
-              {t("automations:taskModeAutomationRun")}
-            </span>
-            <span
-              id="automation-task-mode-hidden-description"
-              className="block whitespace-normal break-words text-xs text-muted-foreground"
-            >
-              {t("automations:taskModeAutomationRunDescription")}
-            </span>
-          </span>
-        </Label>
-        <Label
-          htmlFor="automation-task-mode-normal"
-          className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
-            normalTask ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
-          }`}
-        >
-          <RadioGroupItem
-            id="automation-task-mode-normal"
-            value="normal_task"
-            aria-describedby="automation-task-mode-normal-description"
-            className="mt-0.5"
-          />
-          <span className="min-w-0 space-y-1">
-            <span className="block text-sm font-medium">{t("automations:taskModeNormalTask")}</span>
-            <span
-              id="automation-task-mode-normal-description"
-              className="block whitespace-normal break-words text-xs text-muted-foreground"
-            >
-              {t("automations:taskModeNormalTaskDescription")}
-            </span>
-          </span>
-        </Label>
-        <Label
-          htmlFor="automation-task-mode-managed-conversation"
-          className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
-            managedConversation ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
-          }`}
-        >
-          <RadioGroupItem
-            id="automation-task-mode-managed-conversation"
-            value="managed_conversation"
-            aria-describedby="automation-task-mode-managed-conversation-description"
-            className="mt-0.5"
-          />
-          <span className="min-w-0 space-y-1">
-            <span className="block text-sm font-medium">
-              {t("automations:managedConversationMode")}
-            </span>
-            <span
-              id="automation-task-mode-managed-conversation-description"
-              className="block whitespace-normal break-words text-xs text-muted-foreground"
-            >
-              {t("automations:managedConversationModeDescription")}
-            </span>
-          </span>
-        </Label>
-      </RadioGroup>
-      {managedConversation ? (
-        <ManagedConversationDestinationSelector
-          workspaceId={workspaceId}
-          value={form.managedDestination}
-          isDirty={isAutomationFieldDirty(form, savedForm, "managedDestination")}
-          onChange={(destination) => updateField("managedDestination", destination)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-export function SettingsSection({
-  form,
-  savedForm,
-  workspaceId,
-  updateField,
-  hasPRTrigger,
-}: {
-  form: FormState;
-  savedForm: FormState;
-  workspaceId: string;
-  updateField: UpdateField;
-  hasPRTrigger: boolean;
-}) {
-  const { t } = useTranslation();
-  const enabledIsDirty = isAutomationFieldDirty(form, savedForm, "enabled");
   const maxRunsIsDirty = isAutomationFieldDirty(form, savedForm, "maxConcurrentRuns");
-  const continuationIsDirty = isAutomationFieldDirty(form, savedForm, "continuationPolicy");
-  const taskModeIsDirty = isAutomationFieldDirty(form, savedForm, "taskMode");
   const retryPolicyIsDirty = isAutomationFieldDirty(form, savedForm, "retryPolicy");
   const reusesThread = form.continuationPolicy === "reuse_thread";
   return (
-    <div
-      className="space-y-3 rounded-lg border bg-card p-4"
-      data-settings-dirty={
-        enabledIsDirty ||
-        maxRunsIsDirty ||
-        continuationIsDirty ||
-        taskModeIsDirty ||
-        retryPolicyIsDirty
-      }
-      data-settings-dirty-level="container"
-    >
-      <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-        {t("common:settings")}
-      </Label>
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={form.enabled}
-            data-settings-dirty={enabledIsDirty}
-            onCheckedChange={(value) => updateField("enabled", value)}
-            className="cursor-pointer"
-          />
-          <Label className="text-sm">{t("automations:enabledLabel")}</Label>
-        </div>
-        <div className="flex items-center gap-2">
-          <Label className="text-sm">{t("automations:maxConcurrentRuns")}</Label>
+    <div className="space-y-2">
+      <h3 className="text-base font-medium">{t("automations:limitsTitle")}</h3>
+      <div
+        className="space-y-4 rounded-lg border bg-card p-4"
+        data-settings-dirty={maxRunsIsDirty || retryPolicyIsDirty}
+        data-settings-dirty-level="container"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <Label htmlFor="automation-max-concurrent-runs" className="text-sm">
+              {t("automations:maxConcurrentRuns")}
+            </Label>
+            {reusesThread && (
+              <p id="automation-max-concurrent-runs-lock" className="text-xs text-muted-foreground">
+                {t("automations:contextBetweenRunsConcurrencyLock")}
+              </p>
+            )}
+          </div>
           <Input
+            id="automation-max-concurrent-runs"
             type="number"
             min={1}
             value={reusesThread ? 1 : form.maxConcurrentRuns}
             data-settings-dirty={maxRunsIsDirty}
             disabled={reusesThread}
+            aria-describedby={reusesThread ? "automation-max-concurrent-runs-lock" : undefined}
             onChange={(event) =>
               updateField("maxConcurrentRuns", Number.parseInt(event.target.value) || 1)
             }
             className="w-20"
           />
         </div>
+        {form.taskMode === "managed_conversation" ? null : (
+          <RetryPolicySection
+            policy={form.retryPolicy}
+            savedPolicy={savedForm.retryPolicy}
+            updateField={updateField}
+          />
+        )}
       </div>
-      <TargetModeSection
-        form={form}
-        savedForm={savedForm}
-        workspaceId={workspaceId}
-        updateField={updateField}
-      />
-      {form.taskMode === "managed_conversation" ? null : (
-        <ContinuationPolicySection
-          form={form}
-          savedForm={savedForm}
-          updateField={updateField}
-          hasPRTrigger={hasPRTrigger}
-        />
-      )}
-      {form.taskMode === "managed_conversation" ? null : (
-        <RetryPolicySection
-          policy={form.retryPolicy}
-          savedPolicy={savedForm.retryPolicy}
-          updateField={updateField}
-        />
-      )}
     </div>
   );
 }

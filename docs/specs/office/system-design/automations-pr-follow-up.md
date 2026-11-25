@@ -389,17 +389,19 @@ control uses an existing primitive.
   parsed on blur like the authors field. When `opened` is checked, an
   **Also run on pull requests already open** checkbox binds
   `include_existing_prs`.
-- The continuation section renders the third `RadioGroupItem`
+- The **Task for each run** `SegmentedChoice` shows the third option
   (`reuse_per_pr`) when the form has a `github_pr` trigger or the saved policy
-  is `reuse_per_pr`. Selecting it does not change `maxConcurrentRuns`.
-- With `reuse_per_pr`, the following appear under the policy cards:
-  - A second `PromptSection` labeled **Follow-up prompt**, with the trigger
-    placeholders.
-  - Two `Select`s for the end-of-PR actions. The delete warning is shown under
-    a select when that select's value is `delete`.
+  is `reuse_per_pr`. Selecting it does not change `maxConcurrentRuns`. The
+  choice sits in the Then card above the task title and prompts it affects.
+- With `reuse_per_pr`, the following appear:
+  - Under the choice, two `Select`s for the end-of-PR actions, side by side
+    from the `sm` breakpoint. The delete warning is shown under a select when
+    that select's value is `delete`.
   - With the normal-task target only, the **Move to step when continuing**
     `Select`. It lists `listWorkflowSteps(form.workflowId)` plus the
     `Stay in current step` sentinel, which maps to `""`.
+  - Directly under the main instructions, a second `PromptSection` labeled
+    **Follow-up instructions**. Both prompts share one `PlaceholderList`.
 - The policy, workflow, and target-mode change handlers clear values that no
   longer apply. `FormState`, `automation-payload.ts`, and
   `lib/types/automation.ts` carry the new fields.

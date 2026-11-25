@@ -48,7 +48,7 @@ export function AutomationMCPAccess({
   };
   return (
     <section
-      className="space-y-4 rounded-lg border bg-card p-4"
+      className="space-y-4"
       data-testid="automation-mcp-access"
       data-settings-dirty={isDirty}
       data-settings-dirty-level="container"
@@ -83,7 +83,6 @@ export function AutomationMCPAccess({
         disabled={loading || error}
         taskMode={taskMode}
       />
-      <p className="text-xs text-muted-foreground">{t("automations:mcpConfigurationAuthority")}</p>
       <AutomationWorkspaceFields
         options={options}
         value={value}
@@ -91,6 +90,7 @@ export function AutomationMCPAccess({
         touch={touch}
         disabled={loading || error}
       />
+      <p className="text-xs text-muted-foreground">{t("automations:mcpThirdPartyPermissions")}</p>
     </section>
   );
 }

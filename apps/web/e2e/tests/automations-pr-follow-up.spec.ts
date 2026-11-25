@@ -56,7 +56,7 @@ test.describe("automations — GitHub PR follow-up", () => {
     await openEditor(testPage, seedData.workspaceId, automation.id);
 
     await testPage
-      .getByRole("button", { name: /PR: opened/ })
+      .getByRole("button", { name: /PR: Opened/ })
       .first()
       .click();
     const card = testPage.getByTestId("trigger-card-github_pr");
@@ -78,7 +78,7 @@ test.describe("automations — GitHub PR follow-up", () => {
     await saveAndReload(testPage, automations);
 
     await testPage
-      .getByRole("button", { name: /PR: opened, new_commits, review_requested/ })
+      .getByRole("button", { name: /PR: Opened, New commits, Review requested/ })
       .first()
       .click();
     const reopened = testPage.getByTestId("trigger-card-github_pr");
@@ -103,8 +103,24 @@ test.describe("automations — GitHub PR follow-up", () => {
     await openEditor(testPage, seedData.workspaceId, automation.id);
 
     await expect(testPage.getByTestId("automation-follow-up-prompt-editor")).toHaveCount(0);
-    await testPage.getByLabel(/Continue one task per pull request/).click();
-    await expect(testPage.getByTestId("automation-follow-up-prompt-editor")).toBeVisible();
+    await testPage.getByRole("radio", { name: "One task per pull request" }).click();
+    const followUp = testPage.getByTestId("automation-follow-up-prompt-editor");
+    await expect(followUp).toBeVisible();
+    await expect(testPage.getByText("Follow-up instructions", { exact: true })).toBeVisible();
+    // @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006.4, AC-OFFICE-AUTOMATIONS-SETTINGS-002.4
+    // The choice sits above the field it reveals, and the follow-up sits
+    // directly under the first-run instructions.
+    const choiceBox = await testPage
+      .getByRole("group", { name: "Task for each run" })
+      .boundingBox();
+    const instructionsBox = await testPage.getByTestId("automation-prompt-editor").boundingBox();
+    const followUpBox = await followUp.boundingBox();
+    const placeholdersBox = await testPage
+      .getByRole("button", { name: "Show placeholders" })
+      .boundingBox();
+    expect(choiceBox!.y).toBeLessThan(instructionsBox!.y);
+    expect(instructionsBox!.y).toBeLessThan(followUpBox!.y);
+    expect(followUpBox!.y).toBeLessThan(placeholdersBox!.y);
 
     const step = testPage.getByTestId("pr-continuation-step");
     await expect(step).toHaveText("Stay in current step");
@@ -121,7 +137,7 @@ test.describe("automations — GitHub PR follow-up", () => {
 
     await saveAndReload(testPage, automations);
 
-    await expect(testPage.getByLabel(/Continue one task per pull request/)).toBeChecked();
+    await expect(testPage.getByRole("radio", { name: "One task per pull request" })).toBeChecked();
     await expect(testPage.getByTestId("pr-continuation-step")).toHaveText(reviewStep.name);
     await expect(testPage.getByTestId("pr-merged-action")).toHaveText("Archive task");
     await expect(testPage.getByTestId("pr-closed-action")).toHaveText("Delete task");

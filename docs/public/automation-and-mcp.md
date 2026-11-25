@@ -98,21 +98,24 @@ Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace
 
 ![Settings > Workspaces > Default > Automations showing enabled scheduled and webhook automations, export, new automation, and run actions.](../screenshots/automation-list.png)
 
-1. Enter a required name and optional description.
-2. Select an agent profile and executor profile. Passthrough profiles are not offered. Worktree and Local-compatible profiles can run without a repository in a task-owned scratch workspace.
-3. Choose the run destination:
-   - **Run in automation history only** keeps each generated task out of Kanban and the sidebar. Workflow selection is optional.
-   - **Create a normal task** creates ordinary workflow work that appears in Kanban and the sidebar. A workflow is required; an empty starting step uses that workflow's configured starting step.
-   - **Send to a managed conversation** delivers each firing to a retained plugin conversation. Select the plugin installation and conversation instance in this workspace. This destination does not create a task, and task-only repository, workflow, context-between-runs, and retry settings are hidden. Selecting it resets the unsaved retry draft to disabled; switching back to another destination does not restore discarded settings. For an existing automation with a previously saved enabled retry policy, the saved value remains unchanged until you explicitly save the reset. Generic retry admission can still use that saved policy before the reset is saved.
-4. Add one or more repository and base-branch pairs, or leave the list empty. The selector is the same searchable paired-chip control used by New Task. A discovered repository is registered in the workspace when the automation is saved. An empty list uses a task-scoped scratch workspace and does not create a Git worktree. Kandev never selects the workspace's first repository for you.
-5. Enter a prompt and optional task-title template.
-6. Choose **Context between runs**:
-   - **Start a new task for every run** creates a separate task, conversation, and task environment for each firing. In the hidden destination, those tasks do not appear in Kanban or the sidebar; in the normal-task destination, they do.
-   - **Continue the previous session** reuses one task, primary session, conversation, and worktree across firings. The destination and exact repository/base-branch pairs remain part of continuation compatibility.
-   - **Continue one task per pull request** appears when the automation has a GitHub PR condition. Each pull request keeps its own task, so different pull requests can run in parallel. See [Following up on a pull request](#following-up-on-a-pull-request).
-7. Keep the default maximum concurrency of 1 unless parallel work is safe. Reused sessions always use one active run.
-8. Choose a schedule and optional GitHub condition, or switch to webhook mode.
-9. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
+The editor reads top to bottom, and each choice sits above the fields it changes.
+
+1. Enter a required name. The **Enabled** switch sits beside it.
+2. Under **When**, choose a schedule and optional GitHub condition, or switch to webhook mode.
+3. Under **Then**, choose the **Run destination**. One line describes the selected option. With a mouse or keyboard, hover or focus another option to read what it does.
+   - **Automation history** keeps each generated task out of Kanban and the sidebar. Workflow selection is optional.
+   - **Normal task** creates ordinary workflow work that appears in Kanban and the sidebar. A workflow is required; an empty starting step uses that workflow's configured starting step.
+   - **Managed conversation** delivers each firing to a retained plugin conversation. Select the plugin installation and conversation instance in this workspace. This destination does not create a task, and task-only repository, workflow, task-for-each-run, agent-tool, and retry settings are hidden. Selecting it resets the unsaved retry draft to disabled; switching back to another destination does not restore discarded settings. For an existing automation with a previously saved enabled retry policy, the saved value remains unchanged until you explicitly save the reset. Generic retry admission can still use that saved policy before the reset is saved.
+4. Choose the **Task for each run**:
+   - **New task each run** creates a separate task, conversation, and task environment for each firing. Runs can overlap.
+   - **One shared task** reuses one task, primary session, conversation, and worktree across every firing, whatever triggered it. With a GitHub PR condition, different pull requests share that task. The destination and exact repository/base-branch pairs remain part of continuation compatibility.
+   - **One task per pull request** appears when the automation has a GitHub PR condition. Each pull request keeps its own task, so different pull requests never share one and can run in parallel. See [Following up on a pull request](#following-up-on-a-pull-request).
+5. Enter an optional task-title template and the instructions. **Show placeholders** lists the trigger's placeholders; typing `{{` in a prompt also offers them.
+6. Select an agent profile and executor profile. Passthrough profiles are not offered. Worktree and Local-compatible profiles can run without a repository in a task-owned scratch workspace.
+7. Add one or more repository and base-branch pairs, or leave the list empty. The selector is the same searchable paired-chip control used by New Task. A discovered repository is registered in the workspace when the automation is saved. An empty list uses a task-scoped scratch workspace and does not create a Git worktree. Kandev never selects the workspace's first repository for you.
+8. Under **Agent tools**, choose [MCP access](#choose-mcp-access) and, for automation-history runs, [plugin tools](#opt-in-plugin-tools).
+9. Under **Limits and retries**, keep the default maximum concurrency of 1 unless parallel work is safe. **One shared task** always uses one active run. Choose [automatic retries](#automatic-retries).
+10. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
 
 ![Automation editor showing repository access, run destination, context between runs, concurrency, and Save changes.](../screenshots/automation-editor.png)
 
@@ -122,7 +125,7 @@ The form can save an empty agent or executor selection, but launch still needs a
 
 Every firing produces a distinct `AutomationRun` with exact task, session, and turn identity. A hidden destination uses `origin = automation_run`; that origin, not `is_ephemeral`, keeps its persistent task out of Kanban and task lists. A normal-task destination uses a separate visible automation origin, enters the selected workflow at its configured start step, and follows the ordinary task lifecycle. The workflow selector shows the same ordered step preview as New Task; automations do not have a separate step selector. The trigger is the start signal, so the agent starts immediately rather than waiting for a workflow step's `auto_start_agent` action.
 
-With **Start a new task for every run**, each firing gets its own task, primary session, worktree or scratch workspace, and conversation. With **Continue the previous session**, the first firing creates one task and later firings send a new turn to its primary session. Kandev does not reset or rebase a reused checkout. If the saved task, session, runtime, or task environment is missing or incompatible, the firing creates a replacement thread and records that action on the run. A reused task keeps its creation title; each run keeps its own rendered `display_title` snapshot.
+With **New task each run**, each firing gets its own task, primary session, worktree or scratch workspace, and conversation. With **One shared task**, the first firing creates one task and later firings send a new turn to its primary session. Kandev does not reset or rebase a reused checkout. If the saved task, session, runtime, or task environment is missing or incompatible, the firing creates a replacement thread and records that action on the run. A reused task keeps its creation title; each run keeps its own rendered `display_title` snapshot.
 
 A finished run parks in `WAITING_FOR_INPUT` rather than `COMPLETED`, so you can reply to it and the agent continues in the same session and worktree. A run is a thread, not a receipt. Worktrees are retained for the ten most recent finished task IDs of each automation and reclaimed beyond that, so an older run stays readable but can no longer be answered.
 
@@ -199,7 +202,7 @@ confirmed completion or Stop before another execution can start.
 
 ### Automatic retries
 
-Task automations can disable retries, retry a finite number of times, or keep retrying without a count limit. Fixed delay keeps the same interval; exponential delay increases the interval between attempts. Attempts and timeline views retain the original firing and its related history.
+Task automations can choose **Don't retry**, **Fixed number of times**, or **Until it succeeds**. Attempt, delay, backoff, and history settings appear once retries are on. Fixed delay keeps the same interval; exponential delay increases the interval between attempts. **Every attempt** lists each retry as its own run; **Retry timeline** groups them into one entry. Both retain the original firing and its related history.
 
 A retry keeps one task, session, turn and submission identity through queued starts and backend recovery. If provider acceptance cannot be established, the run remains pending with an error and is not automatically sent again. It continues to occupy capacity until its exact turn completes or the observed execution is confirmed stopped. Stop, disable and delete can therefore report pending ownership instead of silently releasing a possibly live run. Retrying a failed Stop targets that same execution. Older retries without sufficient acceptance evidence also remain pending.
 
@@ -253,11 +256,11 @@ Kandev fires at most one of these per PR per poll, in the order above. Every fil
 
 #### Following up on a pull request
 
-With **Continue one task per pull request** (`reuse_per_pr`), the first firing for a PR creates its task, and later firings for the same PR send a new turn to that task's session. A firing without a PR, such as **Run now** or a schedule, starts a new task. If the PR's task is deleted, archived, incompatible, or its session ended, Kandev creates a replacement task and records that on the run.
+With **One task per pull request** (`reuse_per_pr`), the first firing for a PR creates its task, and later firings for the same PR send a new turn to that task's session. A firing without a PR, such as **Run now** or a schedule, starts a new task. If the PR's task is deleted, archived, incompatible, or its session ended, Kandev creates a replacement task and records that on the run.
 
-- **Follow-up prompt** (`follow_up_prompt`) replaces the main prompt when a firing continues the PR's task. Leave it empty to reuse the main prompt.
+- **Follow-up instructions** (`follow_up_prompt`) appear directly under the instructions and replace them when a firing continues the PR's task. Leave them empty to send the main instructions.
 - **Move to step when continuing** (`pr_continuation_step_id`, normal tasks only) moves the task to a workflow step, such as a review column, before the follow-up. The step's own auto-start prompt does not run; its other entry actions, such as resetting the agent context, still apply.
-- **When the pull request is merged** and **When the pull request is closed without merging** (`pr_merged_action`, `pr_closed_action`) keep, archive, or delete the PR's task. Kandev applies them directly, without an agent run, within about a minute of the PR ending. Deleting removes the task's conversation and files.
+- **When merged** and **When closed without merging** (`pr_merged_action`, `pr_closed_action`) keep, archive, or delete the PR's task. Kandev applies them directly, without an agent run, within about a minute of the PR ending. Deleting removes the task's conversation and files.
 
 When the PR's task is busy, because a run is open or someone is using its session, Kandev holds new firings and checks again each minute. The next check after the task is free fires once, for the PR's latest state. Maximum concurrent runs still applies to the whole automation.
 
@@ -369,13 +372,13 @@ Private automation sessions receive required, workspace-scoped Core tools for co
 ### Choose MCP access
 
 1. Open **Settings > Workspaces > your workspace > Automations** and select an automation.
-2. Under **MCP access**, use the **On** or **Off** switch in each package row. Select a package name to read its details. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
+2. Under **Agent tools > MCP access**, use the **On** or **Off** switch in each package row. Select a package name to read its details, including what Configuration can change. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
 3. Select additional **Workspace MCP servers** from that workspace's saved catalog. Repository and agent-profile inheritance remains additive.
 4. Use **Save changes**. Use **Reset** to remove unsaved edits.
 
 **Configuration grants mutation access** to authorized workflows, profiles, prompts, executors, and automations. The private run keeps its automation identity and workspace restrictions. Native Configuration tools cannot change package grants, automation MCP selections, plugin approvals, or profile MCP server access. Selected third-party servers use their own tools and credentials. The native dispatcher does not sandbox those servers.
 
-Private-run choices apply at the **next agent process start**. Saving does not restart a run. A new turn in a reused process keeps its accepted selection. A fresh process, including a retry or replacement, reads current choices. Use the MCP plug icon to inspect MCP information when the viewer is available. The run conversation has no separate MCP access summary.
+Private-run choices apply from the **next agent start**. Saving does not restart a run. A continued task keeps its accepted selection until its agent restarts. A fresh process, including a retry or replacement, reads current choices. Use the MCP plug icon to inspect MCP information when the viewer is available. The run conversation has no separate MCP access summary.
 
 Built-in package switches use explicit **On** or **Off** selections directly in the package list. Select a package name to inspect its details. Automations do not offer a package inheritance action. Core remains required.
 
@@ -387,7 +390,7 @@ An unavailable definition remains visible for removal. Selecting a server does n
 
 ### Opt-in plugin tools
 
-A private automation can also use exact plugin tools that its owner selected in the editor. The `Plugin tools (optional)` section lists active, configured plugins whose manifests declare `automation` tools. Only those plugins appear; third-party plugins remain unsupported until their authors add and accept the surface. Select individual tools and use the editor's existing **Save** action; that save is the approval. Saving an unrelated field leaves the stored selection unchanged.
+A private automation can also use exact plugin tools that its owner selected in the editor. The `Plugin tools (optional)` section under **Agent tools** lists active, configured plugins whose manifests declare `automation` tools. Only those plugins appear; third-party plugins remain unsupported until their authors add and accept the surface. Select individual tools and use the editor's existing **Save** action; that save is the approval. Saving an unrelated field leaves the stored selection unchanged.
 
 Access is bounded to the automation, workspace, plugin installation, and plugin policy version shown at save time. Reinstalling a plugin or saving its configuration, including a secret-only change, requires review and reselection. Previously selected tools stay visible for reference but grant nothing until the owner selects current tools again. Clearing a plugin's selection removes its access.
 

@@ -265,10 +265,12 @@ operable on every viewport.
 #### Acceptance criteria
 
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006.1:** When the edited automation has
-  a `github_pr` trigger or already uses `reuse_per_pr`, the Context between
-  runs section shall show a third option, **Continue one task per pull
-  request**. Its localized description shall state that each pull request
-  keeps its own task and that pull requests can run in parallel.
+  a `github_pr` trigger or already uses `reuse_per_pr`, the **Task for each
+  run** choice shall show a third option, **One task per pull request**. Its
+  description shall state that runs for one pull request continue its task and
+  that different pull requests never share a task. With a `github_pr` trigger,
+  the **One shared task** description shall state that different pull
+  requests share one task.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006.2:** When the per-PR option is
   selected and the target is a normal task, the section shall show a localized
   **Move to step when continuing** selector. It lists the selected workflow's
@@ -277,12 +279,11 @@ operable on every viewport.
   or policy changes so that a per-PR option no longer applies, the editor
   shall clear that option before saving.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006.4:** When the per-PR option is
-  selected, the editor shall show a localized **Follow-up prompt** field with
-  the same placeholder help as the main prompt. It shall also show **When the
-  pull request is merged** and **When the pull request is closed without
-  merging** selectors with **Keep task**, **Archive task**, and **Delete
-  task** choices. The delete choice shall carry a localized warning that the
-  conversation and files are removed.
+  selected, the editor shall show a **Follow-up instructions** field directly
+  under the main instructions. It shall also show **When merged** and **When
+  closed without merging** selectors with **Keep task**, **Archive task**, and
+  **Delete task** choices. The delete choice shall carry a localized warning
+  that the conversation and files are removed.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006.5:** On desktop and phone layouts,
   every per-PR control shall remain visible and operable, and each choice
   shall provide a touch target of at least 44 pixels.

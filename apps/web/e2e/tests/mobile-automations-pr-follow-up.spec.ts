@@ -39,7 +39,7 @@ test.describe("GitHub PR follow-up automation on mobile", () => {
     await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
 
     await testPage
-      .getByRole("button", { name: /PR: opened/ })
+      .getByRole("button", { name: /PR: Opened/ })
       .first()
       .tap();
     const card = testPage.getByTestId("trigger-card-github_pr");
@@ -58,11 +58,14 @@ test.describe("GitHub PR follow-up automation on mobile", () => {
     await quiet.fill("5");
     await quiet.blur();
 
-    const perPR = testPage
-      .locator("label")
-      .filter({ hasText: "Continue one task per pull request" });
+    const perPR = testPage.getByRole("radio", { name: "One task per pull request" });
     await expectInsideViewport(testPage, perPR);
+    expect((await perPR.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     await perPR.tap();
+    await expect(perPR).toBeChecked();
+    const followUpLabel = testPage.getByText("Follow-up instructions", { exact: true });
+    await followUpLabel.scrollIntoViewIfNeeded();
+    await expect(followUpLabel).toBeInViewport();
     const step = testPage.getByTestId("pr-continuation-step");
     const merged = testPage.getByTestId("pr-merged-action");
     await expectInsideViewport(testPage, step);
@@ -83,7 +86,7 @@ test.describe("GitHub PR follow-up automation on mobile", () => {
 
     await expect(testPage.getByTestId("pr-merged-action")).toHaveText("Archive task");
     await testPage
-      .getByRole("button", { name: /PR: opened, new_commits, review_requested/ })
+      .getByRole("button", { name: /PR: Opened, New commits, Review requested/ })
       .first()
       .tap();
     await expect(

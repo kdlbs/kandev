@@ -2,13 +2,12 @@
 
 import { useTranslation } from "react-i18next";
 import { Label } from "@kandev/ui/label";
-import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useWorkflowSteps } from "@/hooks/use-workflow-steps";
 import type { ContinuationPolicy, PlaceholderInfo, PREndAction } from "@/lib/types/automation";
 import type { FormState } from "./automation-payload";
 import { PromptSection } from "./prompt-section";
-import { SELECTED_CARD_CLASS_NAME, UNSELECTED_CARD_CLASS_NAME } from "./automation-card-styles";
+import { SegmentedChoice, type SegmentedOption } from "./segmented-choice";
 
 type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 
@@ -34,41 +33,6 @@ function clearPRContinuation(updateField: UpdateField) {
   updateField("prClosedAction", "keep");
 }
 
-type PolicyCardProps = {
-  value: ContinuationPolicy;
-  selected: boolean;
-  title: string;
-  description: string;
-};
-
-function PolicyCard({ value, selected, title, description }: PolicyCardProps) {
-  const id = `automation-continuation-${value.replace(/_/g, "-")}`;
-  return (
-    <Label
-      htmlFor={id}
-      className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
-        selected ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
-      }`}
-    >
-      <RadioGroupItem
-        id={id}
-        value={value}
-        aria-describedby={`${id}-description`}
-        className="mt-0.5"
-      />
-      <span className="min-w-0 space-y-1">
-        <span className="block text-sm font-medium">{title}</span>
-        <span
-          id={`${id}-description`}
-          className="block whitespace-normal break-words text-xs text-muted-foreground"
-        >
-          {description}
-        </span>
-      </span>
-    </Label>
-  );
-}
-
 export function ContinuationPolicySection({
   form,
   savedForm,
@@ -76,67 +40,50 @@ export function ContinuationPolicySection({
   hasPRTrigger,
 }: SectionProps & { hasPRTrigger: boolean }) {
   const { t } = useTranslation();
-  const continuationIsDirty = form.continuationPolicy !== savedForm.continuationPolicy;
   const policy = form.continuationPolicy;
   const offerPerPR =
     hasPRTrigger || policy === "reuse_per_pr" || savedForm.continuationPolicy === "reuse_per_pr";
-  const newTaskDescriptionKey =
-    form.taskMode === "normal_task"
-      ? "automations:contextBetweenRunsNewTaskNormalDescription"
-      : "automations:contextBetweenRunsNewTaskDescription";
-  const continuationDescriptionId = "automation-continuation-description";
+  const options: SegmentedOption<ContinuationPolicy>[] = [
+    {
+      value: "new_task",
+      label: t("automations:contextBetweenRunsNewTask"),
+      description: t("automations:contextBetweenRunsNewTaskDescription"),
+    },
+    {
+      value: "reuse_thread",
+      label: t("automations:contextBetweenRunsReuseThread"),
+      description: t(
+        hasPRTrigger
+          ? "automations:contextBetweenRunsReuseThreadPRDescription"
+          : "automations:contextBetweenRunsReuseThreadDescription",
+      ),
+    },
+  ];
+  if (offerPerPR) {
+    options.push({
+      value: "reuse_per_pr",
+      label: t("automations:contextBetweenRunsReusePerPR"),
+      description: t("automations:contextBetweenRunsReusePerPRDescription"),
+    });
+  }
 
-  const handlePolicyChange = (value: string) => {
-    const next = value as ContinuationPolicy;
+  const handlePolicyChange = (next: ContinuationPolicy) => {
     updateField("continuationPolicy", next);
     if (next === "reuse_thread") updateField("maxConcurrentRuns", 1);
     if (next !== "reuse_per_pr") clearPRContinuation(updateField);
   };
 
   return (
-    <div className="space-y-2 border-t pt-3">
-      <div>
-        <h3 id="automation-continuation-heading" className="text-sm font-medium">
-          {t("automations:contextBetweenRunsTitle")}
-        </h3>
-        <p id={continuationDescriptionId} className="text-xs text-muted-foreground">
-          {t("automations:contextBetweenRunsDescription")}
-        </p>
-      </div>
-      <RadioGroup
-        aria-labelledby="automation-continuation-heading"
-        aria-describedby={continuationDescriptionId}
+    <div className="space-y-3">
+      <SegmentedChoice
+        id="automation-continuation"
+        label={t("automations:contextBetweenRunsTitle")}
         value={policy}
+        options={options}
         onValueChange={handlePolicyChange}
-        data-settings-dirty={continuationIsDirty}
-        className="gap-2"
-      >
-        <PolicyCard
-          value="new_task"
-          selected={policy === "new_task"}
-          title={t("automations:contextBetweenRunsNewTask")}
-          description={t(newTaskDescriptionKey)}
-        />
-        <PolicyCard
-          value="reuse_thread"
-          selected={policy === "reuse_thread"}
-          title={t("automations:contextBetweenRunsReuseThread")}
-          description={t("automations:contextBetweenRunsReuseThreadDescription")}
-        />
-        {offerPerPR && (
-          <PolicyCard
-            value="reuse_per_pr"
-            selected={policy === "reuse_per_pr"}
-            title={t("automations:contextBetweenRunsReusePerPR")}
-            description={t("automations:contextBetweenRunsReusePerPRDescription")}
-          />
-        )}
-      </RadioGroup>
-      {policy === "reuse_thread" && (
-        <p className="text-xs text-muted-foreground">
-          {t("automations:contextBetweenRunsConcurrencyLock")}
-        </p>
-      )}
+        isDirty={policy !== savedForm.continuationPolicy}
+        testId="automation-continuation"
+      />
       {policy === "reuse_per_pr" && (
         <PRContinuationOptions form={form} savedForm={savedForm} updateField={updateField} />
       )}
@@ -146,26 +93,28 @@ export function ContinuationPolicySection({
 
 function PRContinuationOptions({ form, savedForm, updateField }: SectionProps) {
   return (
-    <div className="space-y-3 pt-1">
+    <div className="space-y-3">
       {form.taskMode === "normal_task" && (
         <ContinuationStepSelect form={form} savedForm={savedForm} updateField={updateField} />
       )}
-      <PREndActionSelect
-        field="prMergedAction"
-        labelKey="automations:prMergedActionLabel"
-        testId="pr-merged-action"
-        form={form}
-        savedForm={savedForm}
-        updateField={updateField}
-      />
-      <PREndActionSelect
-        field="prClosedAction"
-        labelKey="automations:prClosedActionLabel"
-        testId="pr-closed-action"
-        form={form}
-        savedForm={savedForm}
-        updateField={updateField}
-      />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <PREndActionSelect
+          field="prMergedAction"
+          labelKey="automations:prMergedActionLabel"
+          testId="pr-merged-action"
+          form={form}
+          savedForm={savedForm}
+          updateField={updateField}
+        />
+        <PREndActionSelect
+          field="prClosedAction"
+          labelKey="automations:prClosedActionLabel"
+          testId="pr-closed-action"
+          form={form}
+          savedForm={savedForm}
+          updateField={updateField}
+        />
+      </div>
     </div>
   );
 }

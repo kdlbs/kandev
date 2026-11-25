@@ -289,7 +289,7 @@ export function AutomationPluginTools({
 
   return (
     <div
-      className="space-y-3 rounded-lg border bg-card p-4"
+      className="space-y-3"
       data-testid="automation-plugin-tools"
       data-settings-dirty={isDirty}
       data-settings-dirty-level="container"

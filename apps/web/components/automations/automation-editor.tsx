@@ -27,28 +27,22 @@ import {
   type FormState,
   DEFAULT_RETRY_POLICY,
   normalizeRetryPolicyForTaskMode,
-  canonicalPluginTools,
-  canonicalMCPSelection,
   automationDraftRevision,
 } from "./automation-payload";
-import {
-  normalizeRepositorySelections,
-  resolveExecutorType,
-} from "./automation-repository-selection";
+import { resolveExecutorType } from "./automation-repository-selection";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import { useSaveHandler, type SaveHandlerOpts } from "./automation-editor-save";
 import { AutomationDeleteConfirmDialog } from "./automation-delete-confirm-dialog";
 import { useAutomationMCPReconciliation } from "@/hooks/domains/settings/use-automation-mcp-reconciliation";
-import { AutomationMCPAccess } from "./automation-mcp-access";
-import { AutomationPluginTools } from "./automation-plugin-tools";
+import { AgentToolsSection } from "./automation-agent-tools-section";
 import { useAutomationPluginTools } from "@/hooks/domains/settings/use-automation-plugin-tools";
 import {
   CreatedWebhookDialogHost,
   EditorFooter,
   isAutomationFieldDirty,
+  LimitsSection,
   NameField,
-  SettingsSection,
   ThenSection,
   WhenSection,
 } from "./automation-editor-sections";
@@ -469,8 +463,11 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     <div className="max-w-3xl space-y-6" data-testid="automation-editor">
       <NameField
         value={form.name}
+        enabled={form.enabled}
         isDirty={isAutomationFieldDirty(form, dirtyBaseline, "name")}
+        enabledIsDirty={isAutomationFieldDirty(form, dirtyBaseline, "enabled")}
         onChange={(v) => updateField("name", v)}
+        onEnabledChange={(v) => updateField("enabled", v)}
       />
       <Separator />
       <WhenSection
@@ -489,52 +486,19 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         defaultTaskTitle={defaultTaskTitle}
         savedForm={dirtyBaseline}
         updateField={updateField}
+        hasPRTrigger={triggerActions.allTriggers.some((trigger) => trigger.type === "github_pr")}
       />
-      {form.taskMode !== "managed_conversation" ? (
-        <AutomationMCPAccess
-          saveFailed={mcpReconciliation.saveFailed}
-          onReloadSaved={mcpReconciliation.reload}
-          workspaceId={workspaceId}
-          profileId={form.agentProfileId}
-          repositoryIds={
-            form.repositoryMode === "selected"
-              ? normalizeRepositorySelections(form.repositorySelections, { supportsMultiRepo })
-                  .filter((item) => item.kind === "registered")
-                  .map((item) => item.id)
-              : []
-          }
-          taskMode={form.taskMode}
-          selection={form.mcpSelection}
-          onChange={(value) => updateField("mcpSelection", value)}
-          isDirty={
-            JSON.stringify(canonicalMCPSelection(form.mcpSelection)) !==
-            JSON.stringify(canonicalMCPSelection(dirtyBaseline.mcpSelection))
-          }
-        />
-      ) : null}
-      {form.taskMode === "automation_run" ? (
-        <AutomationPluginTools
-          groups={pluginToolOptions.groups}
-          loading={pluginToolOptions.loading}
-          error={pluginToolOptions.error}
-          savedSelection={dirtyBaseline.pluginTools}
-          selection={form.pluginTools}
-          onChange={(value) => updateField("pluginTools", value)}
-          onRetry={pluginToolOptions.reload}
-          isDirty={
-            JSON.stringify(canonicalPluginTools(form.pluginTools)) !==
-            JSON.stringify(canonicalPluginTools(dirtyBaseline.pluginTools))
-          }
-        />
-      ) : null}
-      <Separator />
-      <SettingsSection
+      <AgentToolsSection
         form={form}
         savedForm={dirtyBaseline}
         workspaceId={workspaceId}
+        supportsMultiRepo={supportsMultiRepo}
         updateField={updateField}
-        hasPRTrigger={triggerActions.allTriggers.some((trigger) => trigger.type === "github_pr")}
+        mcp={mcpReconciliation}
+        pluginTools={pluginToolOptions}
       />
+      <Separator />
+      <LimitsSection form={form} savedForm={dirtyBaseline} updateField={updateField} />
       <Separator />
       <RunsSection
         automationId={currentId}

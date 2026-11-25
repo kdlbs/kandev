@@ -106,6 +106,7 @@ export function TriggersSection({
     <div className="space-y-4">
       {conditionTrigger?.type !== "plugin_event" && (
         <ScheduleArea
+          hasOtherTrigger={Boolean(conditionTrigger)}
           scheduleTrigger={scheduleTrigger}
           savedScheduleTrigger={savedScheduleTrigger}
           onScheduleChange={handleScheduleChange}
@@ -131,10 +132,12 @@ export function TriggersSection({
 }
 
 function ScheduleArea({
+  hasOtherTrigger,
   scheduleTrigger,
   savedScheduleTrigger,
   onScheduleChange,
 }: {
+  hasOtherTrigger: boolean;
   scheduleTrigger: AutomationTrigger | undefined;
   savedScheduleTrigger: AutomationTrigger | undefined;
   onScheduleChange: (config: Record<string, unknown>) => void;
@@ -150,6 +153,7 @@ function ScheduleArea({
           JSON.stringify(savedScheduleTrigger?.config ?? null)
         }
         onChange={onScheduleChange}
+        hasOtherTrigger={hasOtherTrigger}
       />
     </div>
   );

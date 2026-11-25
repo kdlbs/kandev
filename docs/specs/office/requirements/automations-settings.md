@@ -53,6 +53,45 @@ Users want to schedule an agent to run a prompt on a cron (or on a GitHub PR eve
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.29:** **Turn on schedule** shall change only the enabled state of the scheduled trigger shown in Run detail. After success, Run detail shall show the next-firing status from saved state.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.30:** If the trigger update fails, Run detail shall show an error and allow the user to retry.
 
+### REQ-OFFICE-AUTOMATIONS-SETTINGS-002: Organize the automation editor
+
+**Intent:** Each choice sits above the fields it shows, hides, or changes, so
+selecting an option never reveals a field elsewhere on the page. The editor
+shows each choice first and its detail on demand.
+
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.1:** The editor shall present, in order:
+  the name with the **Enabled** switch; **When**; **Then**; **Agent tools**;
+  **Limits and retries**; recent runs; and deletion.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.2:** **Then** shall present, in order:
+  **Run destination**; **Task for each run** with its per-PR options; the task
+  title; the instructions; the follow-up instructions; one placeholder list;
+  and the workflow, agent, executor, and repository configuration.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.3:** **Run destination**, **Task for
+  each run**, and **Automatic retries** shall each be one labelled single
+  choice with short option labels side by side on desktop and stacked on
+  phones. One line shall describe the selected option. With a fine pointer,
+  each other option shall describe itself in a tooltip on hover or keyboard
+  focus. Each option
+  shall provide a touch target of at least 44 pixels on phones and coarse
+  pointers. Pressing the selected option shall keep it selected.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.4:** The trigger's placeholders shall be
+  listed once for all prompts, behind a collapsed **Show placeholders**
+  disclosure. Prompt editors shall keep offering placeholders as the user
+  types.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.5:** **Agent tools** shall group MCP
+  access and plugin tools in one section. It shall be absent for managed
+  conversations. The Configuration package's authority note shall appear in
+  that package's details.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.6:** **Limits and retries** shall hold
+  **Max concurrent runs** and **Automatic retries**. When **One shared task**
+  is selected, Max concurrent runs shall be locked to 1 with a visible reason.
+  Attempt, delay, backoff, and history settings shall appear only while
+  retries are on.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.7:** When another trigger can start the
+  automation, an empty schedule shall read **No schedule.** without claiming
+  that the automation never runs. A GitHub PR trigger summary shall name its
+  events by their localized labels.
+
 ## List contract exclusions
 
 These criteria govern settings list reads and their visible state. They do not
@@ -63,4 +102,4 @@ their existing contracts.
 
 ## System design
 
-The technical source is split into [part 1](../system-design/automations-settings-01.md), [part 2](../system-design/automations-settings-02.md), and [schedule replacement](../system-design/automations-settings-03.md).
+The technical source is split into [part 1](../system-design/automations-settings-01.md), [part 2](../system-design/automations-settings-02.md), and [schedule replacement](../system-design/automations-settings-03.md), and [editor layout](../system-design/automations-settings-04.md).

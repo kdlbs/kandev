@@ -10,32 +10,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
 import type { RepoFilter } from "@/lib/types/github";
+import { PR_EVENTS } from "./pr-events";
 
 type GitHubPRConfigProps = {
   config: Record<string, unknown>;
   workspaceId: string;
   onUpdate: (config: Record<string, unknown>) => void;
 };
-
-// `value` is the GitHub PR event name persisted in the trigger config and
-// matched by the backend — protocol. Label and tooltip are copy.
-const PR_EVENTS = [
-  {
-    value: "opened",
-    labelKey: "automations:prEventOpened",
-    tooltipKey: "automations:prEventOpenedTooltip",
-  },
-  {
-    value: "new_commits",
-    labelKey: "automations:prEventNewCommits",
-    tooltipKey: "automations:prEventNewCommitsTooltip",
-  },
-  {
-    value: "review_requested",
-    labelKey: "automations:prEventReviewRequested",
-    tooltipKey: "automations:prEventReviewRequestedTooltip",
-  },
-] as const;
 
 const MAX_QUIET_PERIOD_MINUTES = 1440;
 

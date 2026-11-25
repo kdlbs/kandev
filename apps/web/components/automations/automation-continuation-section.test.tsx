@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FormState } from "./automation-payload";
 import { ContinuationPolicySection } from "./automation-continuation-section";
@@ -17,7 +18,8 @@ vi.mock("@/hooks/use-workflow-steps", () => ({
 
 afterEach(cleanup);
 
-const PER_PR_LABEL = /Continue one task per pull request/;
+const PER_PR = { name: "One task per pull request" };
+const SHARED = { name: "One shared task" };
 const STEP_SELECTOR = "pr-continuation-step";
 
 function form(overrides: Partial<FormState> = {}): FormState {
@@ -55,12 +57,14 @@ function form(overrides: Partial<FormState> = {}): FormState {
 function renderSection(current: FormState, hasPRTrigger = true) {
   const updateField = vi.fn();
   render(
-    <ContinuationPolicySection
-      form={current}
-      savedForm={current}
-      updateField={updateField}
-      hasPRTrigger={hasPRTrigger}
-    />,
+    <TooltipProvider>
+      <ContinuationPolicySection
+        form={current}
+        savedForm={current}
+        updateField={updateField}
+        hasPRTrigger={hasPRTrigger}
+      />
+    </TooltipProvider>,
   );
   return updateField;
 }
@@ -69,15 +73,15 @@ function renderSection(current: FormState, hasPRTrigger = true) {
 describe("per-PR continuation option", () => {
   it("is offered only with a github_pr trigger or a saved per-PR policy", () => {
     renderSection(form(), false);
-    expect(screen.queryByLabelText(PER_PR_LABEL)).toBeNull();
+    expect(screen.queryByRole("radio", PER_PR)).toBeNull();
     cleanup();
 
     renderSection(form({ continuationPolicy: "reuse_per_pr" }), false);
-    expect(screen.getByLabelText(PER_PR_LABEL)).toBeTruthy();
+    expect(screen.getByRole("radio", PER_PR)).toBeTruthy();
     cleanup();
 
     const updateField = renderSection(form(), true);
-    fireEvent.click(screen.getByLabelText(PER_PR_LABEL));
+    fireEvent.click(screen.getByRole("radio", PER_PR));
     expect(updateField).toHaveBeenCalledWith("continuationPolicy", "reuse_per_pr");
     expect(updateField).not.toHaveBeenCalledWith("maxConcurrentRuns", expect.anything());
   });
@@ -92,7 +96,7 @@ describe("per-PR continuation option", () => {
         prClosedAction: "delete",
       }),
     );
-    fireEvent.click(screen.getByLabelText(/Start a new task for every run/));
+    fireEvent.click(screen.getByRole("radio", { name: "New task each run" }));
     expect(updateField).toHaveBeenCalledWith("continuationPolicy", "new_task");
     expect(updateField).toHaveBeenCalledWith("followUpPrompt", "");
     expect(updateField).toHaveBeenCalledWith("prContinuationStepId", "");
@@ -138,5 +142,34 @@ describe("end-of-PR actions", () => {
 
     renderSection(form({ continuationPolicy: "reuse_per_pr", prClosedAction: "delete" }));
     expect(screen.getByText(/Deleting removes the task's conversation and files/)).toBeTruthy();
+  });
+});
+
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006.1
+describe("task for each run wording", () => {
+  it("names the choice by the task each run uses", () => {
+    renderSection(form());
+    expect(screen.getByRole("group", { name: "Task for each run" })).toBeTruthy();
+    expect(
+      screen.getByText("Each run starts with its own conversation and files. Runs can overlap."),
+    ).toBeTruthy();
+  });
+
+  it("says that one shared task spans pull requests only when a PR trigger exists", () => {
+    renderSection(form({ continuationPolicy: "reuse_thread" }), true);
+    expect(screen.getByRole("radio", SHARED).getAttribute("aria-checked")).toBe("true");
+    expect(
+      screen.getByText(/different pull requests share one conversation and files/),
+    ).toBeTruthy();
+    cleanup();
+
+    renderSection(form({ continuationPolicy: "reuse_thread" }), false);
+    expect(screen.queryByText(/different pull requests/)).toBeNull();
+    expect(screen.getByText(/Every run continues the same task/)).toBeTruthy();
+  });
+
+  it("states that different pull requests never share a per-PR task", () => {
+    renderSection(form({ continuationPolicy: "reuse_per_pr" }));
+    expect(screen.getByText(/Different pull requests never share a task/)).toBeTruthy();
   });
 });

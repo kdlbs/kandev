@@ -217,6 +217,7 @@ Firing behavior has no live GitHub in E2E. Integration tests prove it with
 - [x] [Task 05: Archive or delete PR tasks when the PR ends](task-05-end-of-pr-actions.md)
 - [x] [Task 06: Fire `opened` only for new pull requests](task-06-opened-new-prs-only.md)
 - [x] [Task 07: Show recorded runs without a reload](task-07-run-recorded-events.md)
+- [x] [Task 08: Organize the automation editor](task-08-editor-layout.md)
 
 ## Verification results
 
