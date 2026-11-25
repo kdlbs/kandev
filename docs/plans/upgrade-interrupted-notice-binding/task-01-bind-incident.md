@@ -29,4 +29,6 @@ Use the v0.103.1 interrupted-session lifecycle scenario to check the PR candidat
 
 The new regression cases failed on both engines before the change. After the change, the full native-resume repository suite passed on SQLite and disposable PostgreSQL 17.11 (264 seconds under MemoryMax=8G). It exercised pending notice verification, ambiguous incidents, rollback and existing native recovery cases. Full release rehearsal evidence remains pending under the main-only workflow rule.
 
-Review checks passed on SQLite and PostgreSQL 17.11 for a sole generic block after an earlier terminal incident and for retry after a previously ambiguous block acquires an exact submission binding. The ambiguous attempt leaves the notice marker absent. The exact binding permits verification after retry.
+The legacy restart integration test includes multiple retired interrupted submissions in one generation. With no prior recovery snapshot, all authenticated work can retire and the generic block can resolve. The transaction leaves both delivery fields empty and emits no submission-specific marker. A historical terminal snapshot with one current interruption retains an exact binding.
+
+After correcting the legacy-history case, the native resume and historical terminal repository suites passed on SQLite and PostgreSQL 17.11. A separate test verifies that ambiguous history with a saved notice still refuses resolution.

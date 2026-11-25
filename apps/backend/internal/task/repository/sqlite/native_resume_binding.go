@@ -54,7 +54,7 @@ func (r *Repository) ResolveSessionRecoveryBlockWithNativeEvidence(ctx context.C
 	if err != nil {
 		return false, err
 	}
-	if len(blocks) == 0 || !bindGenericNativeIncident(blocks, proof) {
+	if len(blocks) == 0 {
 		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionIncidentBlock)
 		return false, nil
 	}
@@ -268,10 +268,18 @@ func (r *Repository) nativeResumeIncidentBlocksTx(ctx context.Context, tx *sqlx.
 		found = found || block.ID == id
 		blocks = append(blocks, block)
 	}
-	if !found {
+	if !found || rows.Err() != nil {
 		return nil, rows.Err()
 	}
-	return blocks, rows.Err()
+	if !bindGenericNativeIncident(blocks, proof) {
+		// Fully authenticated legacy history can retire without a notice.
+		// A saved recovery snapshot still requires an exact incident binding.
+		record, _, valid, err := r.readAuthenticatedNativeNoticeTx(ctx, tx, proof)
+		if err != nil || !valid || record != nil {
+			return nil, err
+		}
+	}
+	return blocks, nil
 }
 
 func nativeResumeIncidentBlockMatches(block models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence) bool {

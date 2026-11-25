@@ -29,7 +29,7 @@ func TestPostgresNativeResumeAuthenticatedMissingBinding(t *testing.T) {
 }
 
 func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testing.T) *Repository) {
-	for _, scenario := range []string{"generic incident", "ambiguous generic incident", "absent notice", "partial notice", "resolved earlier notice", "matching fences", "independent fence", "foreign native", "hash changed", "active work", "unmatched unknown", "foreign stream", "foreign submission stream", "missing submission stream", "reconstructed unknown", "known outcome", "prepared attempt", "independent attempt", "legacy error", "independent error", "rollback"} {
+	for _, scenario := range []string{"generic incident", "ambiguous generic incident", "ambiguous saved notice", "absent notice", "partial notice", "resolved earlier notice", "matching fences", "independent fence", "foreign native", "hash changed", "active work", "unmatched unknown", "foreign stream", "foreign submission stream", "missing submission stream", "reconstructed unknown", "known outcome", "prepared attempt", "independent attempt", "legacy error", "independent error", "rollback"} {
 		t.Run(scenario, func(t *testing.T) {
 			repo := open(t)
 			ctx := context.Background()
@@ -68,7 +68,7 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 				require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, &companion))
 			}
 
-			if scenario == "partial notice" {
+			if scenario == "partial notice" || scenario == "ambiguous saved notice" {
 				partial := fixture.recovery
 				partial.StreamID = ""
 				metadata[models.SessionMetaKeyAgentDeliveryRecovery] = partial
@@ -96,10 +96,10 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 				proof.Submissions = append(proof.Submissions, models.NativeResumeSubmissionEvidence{ID: current.ID, HarnessGeneration: 1, PayloadHash: current.PayloadHash, StreamID: proof.StreamID})
 			}
 			switch scenario {
-			case "generic incident", "ambiguous generic incident":
+			case "generic incident", "ambiguous generic incident", "ambiguous saved notice":
 				_, err = repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE session_recovery_blocks SET reason = 'unresolved_durable_work', delivery_submission_id = '' WHERE id = ?`), fixture.block.ID)
 				require.NoError(t, err)
-				if scenario == "ambiguous generic incident" {
+				if scenario != "generic incident" {
 					other := *submission
 					other.ID = "another-interruption"
 					_, err = repo.PrepareAgentDeliverySubmission(ctx, &other)
@@ -159,7 +159,7 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 			} else {
 				require.NoError(t, err)
 			}
-			want := scenario == "generic incident" || scenario == "legacy error" || scenario == "independent error" || scenario == "prepared attempt" || scenario == "reconstructed unknown" || scenario == "absent notice" || scenario == "partial notice" || scenario == "resolved earlier notice" || scenario == "matching fences"
+			want := scenario == "ambiguous generic incident" || scenario == "generic incident" || scenario == "legacy error" || scenario == "independent error" || scenario == "prepared attempt" || scenario == "reconstructed unknown" || scenario == "absent notice" || scenario == "partial notice" || scenario == "resolved earlier notice" || scenario == "matching fences"
 			require.Equal(t, want, changed)
 			if scenario == "prepared attempt" || scenario == "independent attempt" {
 				attempt, err := repo.GetRestoreAttempt(ctx, "pending-native-attempt")
@@ -170,7 +170,12 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 			require.NoError(t, err)
 			if want {
 				require.Equal(t, models.RecoveryBlockResolved, block.State)
-				require.Equal(t, proof.StreamID, block.DeliveryStreamID)
+				if scenario == "ambiguous generic incident" {
+					require.Empty(t, block.DeliverySubmissionID)
+					require.Empty(t, block.DeliveryStreamID)
+				} else {
+					require.Equal(t, proof.StreamID, block.DeliveryStreamID)
+				}
 				if scenario == "matching fences" {
 					companion, err := repo.GetSessionRecoveryBlock(ctx, "companion")
 					require.NoError(t, err)
@@ -186,14 +191,6 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 				current, err := repo.GetTaskSession(ctx, proof.SessionID)
 				require.NoError(t, err)
 				require.NotContains(t, current.Metadata, models.SessionMetaKeyRecoveryNoticePending)
-				block.DeliverySubmissionID = submission.ID
-				require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, block))
-				changed, err = resolver.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof, time.Now().UTC())
-				require.NoError(t, err)
-				require.True(t, changed)
-				verified, err := repo.VerifyCommittedRecoveryNoticeSource(ctx, fixture.recovery)
-				require.NoError(t, err)
-				require.True(t, verified)
 			}
 			if scenario == "legacy error" || scenario == "independent error" {
 				current, err := repo.GetTaskSession(ctx, proof.SessionID)
