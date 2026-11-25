@@ -12,6 +12,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 pub const AUTOMATIC_CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const LINUX_INSTALL_UNSUPPORTED: &str = "Automatic update installation is available only when Kandev is running from an AppImage. For .deb or .rpm installations, download the latest package from Release notes and update it with your package manager.";
+const NO_UPDATE_READY: &str = "No desktop update is ready to install.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -92,21 +93,24 @@ enum Operation {
     Install,
 }
 
-#[derive(Debug)]
-struct Machine {
+struct Machine<U> {
     snapshot: UpdateSnapshot,
+    pending: Option<U>,
     operation: Option<Operation>,
     last_automatic_check: Option<Duration>,
 }
 
-pub struct UpdaterState {
-    machine: Mutex<Machine>,
+#[cfg(feature = "desktop-runtime")]
+pub type UpdaterState = UpdateState<Update>;
+#[cfg(not(feature = "desktop-runtime"))]
+pub type UpdaterState = UpdateState<()>;
+
+pub struct UpdateState<U> {
+    machine: Mutex<Machine<U>>,
     install_enabled: bool,
-    #[cfg(feature = "desktop-runtime")]
-    pending: Mutex<Option<Update>>,
 }
 
-impl UpdaterState {
+impl<U> UpdateState<U> {
     pub fn new(current_version: impl Into<String>) -> Self {
         Self::new_with_install_enabled(current_version, true)
     }
@@ -153,12 +157,11 @@ impl UpdaterState {
                     install_unsupported_reason: install_support.unsupported_reason,
                     error: None,
                 },
+                pending: None,
                 operation: None,
                 last_automatic_check: None,
             }),
             install_enabled,
-            #[cfg(feature = "desktop-runtime")]
-            pending: Mutex::new(None),
         }
     }
 
@@ -176,7 +179,7 @@ impl UpdaterState {
 
     pub fn begin_check(&self) -> Result<(), String> {
         let mut machine = self.machine.lock().expect("updater state mutex poisoned");
-        ensure_idle(&machine)?;
+        ensure_idle(machine.operation)?;
         machine.operation = Some(Operation::Check);
         machine.snapshot.phase = UpdatePhase::Checking;
         machine.snapshot.error = None;
@@ -185,16 +188,24 @@ impl UpdaterState {
         Ok(())
     }
 
-    pub fn begin_install(&self) -> Result<(), String> {
+    pub fn begin_install(&self) -> Result<U, String>
+    where
+        U: Clone,
+    {
+        let mut guard = self.machine.lock().expect("updater state mutex poisoned");
+        let machine = &mut *guard;
+        let update = machine
+            .pending
+            .as_ref()
+            .ok_or_else(|| NO_UPDATE_READY.to_string())?;
         if !self.install_enabled {
             return Err(
                 "Update installation is disabled for temporary test instances.".to_string(),
             );
         }
-        let mut machine = self.machine.lock().expect("updater state mutex poisoned");
-        ensure_idle(&machine)?;
+        ensure_idle(machine.operation)?;
         if machine.snapshot.phase != UpdatePhase::Available {
-            return Err("No desktop update is ready to install.".to_string());
+            return Err(NO_UPDATE_READY.to_string());
         }
         if !machine.snapshot.install_supported {
             return Err(machine
@@ -208,7 +219,7 @@ impl UpdaterState {
         machine.snapshot.error = None;
         machine.snapshot.downloaded_bytes = Some(0);
         machine.snapshot.total_bytes = None;
-        Ok(())
+        Ok(update.clone())
     }
 
     pub fn snapshot(&self) -> UpdateSnapshot {
@@ -219,8 +230,10 @@ impl UpdaterState {
             .clone()
     }
 
-    pub fn complete_check(&self, update: Option<AvailableUpdate>, checked_at_epoch_ms: u64) {
+    pub fn complete_check(&self, update: Option<(AvailableUpdate, U)>, checked_at_epoch_ms: u64) {
+        let (update, pending) = update.unzip();
         let mut machine = self.machine.lock().expect("updater state mutex poisoned");
+        machine.pending = pending;
         machine.operation = None;
         machine.snapshot.checked_at_epoch_ms = Some(checked_at_epoch_ms);
         machine.snapshot.downloaded_bytes = None;
@@ -329,22 +342,8 @@ fn is_validated_appimage(environment: &InstallEnvironment<'_>) -> bool {
         && current_exe.starts_with(appdir)
 }
 
-#[cfg(feature = "desktop-runtime")]
-impl UpdaterState {
-    fn set_pending(&self, update: Option<Update>) {
-        *self.pending.lock().expect("pending update mutex poisoned") = update;
-    }
-
-    fn pending(&self) -> Option<Update> {
-        self.pending
-            .lock()
-            .expect("pending update mutex poisoned")
-            .clone()
-    }
-}
-
-fn ensure_idle(machine: &Machine) -> Result<(), String> {
-    if machine.operation.is_some() {
+fn ensure_idle(operation: Option<Operation>) -> Result<(), String> {
+    if operation.is_some() {
         Err("Another update operation is already in progress.".to_string())
     } else {
         Ok(())
@@ -398,10 +397,7 @@ pub async fn install_update(
     webview: WebviewWindow,
 ) -> Result<UpdateSnapshot, String> {
     backend.require_owned_origin(&webview)?;
-    let update = state
-        .pending()
-        .ok_or_else(|| "No desktop update is ready to install.".to_string())?;
-    state.begin_install()?;
+    let update = state.begin_install()?;
     let download_result = update
         .download_and_install(
             |chunk_bytes, total_bytes| {
@@ -449,13 +445,15 @@ async fn run_check(app: &AppHandle, state: &UpdaterState) -> Result<UpdateSnapsh
     };
     match updater.check().await {
         Ok(update) => {
-            let metadata = update.as_ref().map(|update| AvailableUpdate {
-                version: update.version.clone(),
-                release_notes: update.body.clone(),
-                release_url: Some(release_url(&update.version)),
+            let release = update.map(|update| {
+                let metadata = AvailableUpdate {
+                    version: update.version.clone(),
+                    release_notes: update.body.clone(),
+                    release_url: Some(release_url(&update.version)),
+                };
+                (metadata, update)
             });
-            state.set_pending(update);
-            state.complete_check(metadata, now_epoch_ms());
+            state.complete_check(release, now_epoch_ms());
             Ok(state.snapshot())
         }
         Err(err) => fail_check(state, err),
@@ -495,7 +493,10 @@ fn now_epoch_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    type TestUpdaterState = UpdateState<()>;
 
     fn install_environment<'a>(
         appimage: Option<&'a Path>,
@@ -512,13 +513,28 @@ mod tests {
         }
     }
 
-    fn supported_updater_state() -> UpdaterState {
-        UpdaterState::with_install_support("1.0.0", InstallSupport::supported())
+    fn supported_updater_state() -> TestUpdaterState {
+        TestUpdaterState::with_install_support("1.0.0", InstallSupport::supported())
+    }
+
+    fn publish_available_update(state: &TestUpdaterState) {
+        state.begin_check().unwrap();
+        state.complete_check(
+            Some((
+                AvailableUpdate {
+                    version: "1.1.0".to_string(),
+                    release_notes: None,
+                    release_url: None,
+                },
+                (),
+            )),
+            42,
+        );
     }
 
     #[test]
     fn automatic_checks_run_immediately_then_no_more_than_once_per_day() {
-        let state = UpdaterState::new("1.0.0");
+        let state = TestUpdaterState::new("1.0.0");
 
         assert!(state.should_run_automatic_check(Duration::ZERO));
         assert!(
@@ -529,7 +545,8 @@ mod tests {
 
     #[test]
     fn temporary_test_instance_cannot_install_updates() {
-        let state = UpdaterState::new_with_install_enabled("1.0.0", false);
+        let state = TestUpdaterState::new_with_install_enabled("1.0.0", false);
+        publish_available_update(&state);
 
         assert_eq!(
             state.begin_install(),
@@ -595,9 +612,10 @@ mod tests {
 
     #[test]
     fn only_one_update_operation_can_be_in_flight() {
-        let state = UpdaterState::new("1.0.0");
+        let state = TestUpdaterState::new("1.0.0");
 
-        state.begin_check().expect("first check should start");
+        publish_available_update(&state);
+        state.begin_check().expect("refresh should start");
 
         assert_eq!(
             state.begin_check(),
@@ -610,8 +628,88 @@ mod tests {
     }
 
     #[test]
+    fn install_reserves_the_release_it_clones() {
+        struct FakeUpdate {
+            version: &'static str,
+            before_clone: Option<Box<dyn Fn()>>,
+        }
+
+        impl Clone for FakeUpdate {
+            fn clone(&self) -> Self {
+                if let Some(before_clone) = &self.before_clone {
+                    before_clone();
+                }
+                Self {
+                    version: self.version,
+                    before_clone: None,
+                }
+            }
+        }
+
+        fn publish(
+            state: &UpdateState<FakeUpdate>,
+            version: &'static str,
+            before_clone: Option<Box<dyn Fn()>>,
+        ) {
+            state.complete_check(
+                Some((
+                    AvailableUpdate {
+                        version: version.to_string(),
+                        release_notes: None,
+                        release_url: None,
+                    },
+                    FakeUpdate {
+                        version,
+                        before_clone,
+                    },
+                )),
+                42,
+            );
+        }
+
+        let state = Rc::new(UpdateState::with_install_support(
+            "1.0.0",
+            InstallSupport::supported(),
+        ));
+        let weak_state = Rc::downgrade(&state);
+        state.begin_check().unwrap();
+        publish(
+            &state,
+            "1.1.0",
+            Some(Box::new(move || {
+                let state = weak_state.upgrade().unwrap();
+                // Publish the second release during the clone if the check can start.
+                let can_start_check = state.machine.try_lock().is_ok();
+                if can_start_check {
+                    state.begin_check().unwrap();
+                    publish(&state, "1.2.0", None);
+                }
+            })),
+        );
+
+        let update = state.begin_install().unwrap();
+        let snapshot = state.snapshot();
+        assert_eq!(snapshot.latest_version.as_deref(), Some(update.version));
+        assert_eq!(update.version, "1.1.0");
+        assert_eq!(snapshot.phase, UpdatePhase::Downloading);
+        assert!(state.begin_check().is_err());
+
+        state.fail_operation("Download failed");
+        state.begin_check().unwrap();
+        assert!(state.begin_install().is_err());
+        publish(&state, "1.2.0", None);
+
+        let update = state.begin_install().unwrap();
+        assert_eq!(
+            state.snapshot().latest_version.as_deref(),
+            Some(update.version)
+        );
+        assert_eq!(update.version, "1.2.0");
+    }
+
+    #[test]
     fn install_requires_a_confirmed_available_update() {
-        let state = UpdaterState::new("1.0.0");
+        let state = TestUpdaterState::new("1.0.0");
 
         assert_eq!(
             state.begin_install(),
@@ -623,16 +721,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn install_is_blocked_outside_a_validated_appimage_runtime() {
-        let state = UpdaterState::new("1.0.0");
-        state.begin_check().unwrap();
-        state.complete_check(
-            Some(AvailableUpdate {
-                version: "1.1.0".to_string(),
-                release_notes: None,
-                release_url: None,
-            }),
-            42,
-        );
+        let state = TestUpdaterState::new("1.0.0");
+        publish_available_update(&state);
 
         assert_eq!(
             state.begin_install(),
@@ -661,11 +751,14 @@ mod tests {
         let state = supported_updater_state();
         state.begin_check().unwrap();
         state.complete_check(
-            Some(AvailableUpdate {
-                version: "1.1.0".to_string(),
-                release_notes: Some("Changes".to_string()),
-                release_url: Some("https://example.test/v1.1.0".to_string()),
-            }),
+            Some((
+                AvailableUpdate {
+                    version: "1.1.0".to_string(),
+                    release_notes: Some("Changes".to_string()),
+                    release_url: Some("https://example.test/v1.1.0".to_string()),
+                },
+                (),
+            )),
             42,
         );
 
@@ -697,15 +790,7 @@ mod tests {
     #[test]
     fn download_progress_and_failure_preserve_a_retryable_update() {
         let state = supported_updater_state();
-        state.begin_check().unwrap();
-        state.complete_check(
-            Some(AvailableUpdate {
-                version: "1.1.0".to_string(),
-                release_notes: None,
-                release_url: None,
-            }),
-            42,
-        );
+        publish_available_update(&state);
         state.begin_install().unwrap();
         state.update_download_progress(25, Some(100));
 
