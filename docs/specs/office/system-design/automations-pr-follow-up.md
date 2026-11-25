@@ -168,9 +168,9 @@ The evaluator computes candidates for each listed PR:
   not empty.
 - **`opened` candidate:** the event is selected, the PR matches the filters,
   no run holds `pr:o/r#n`, and the PR is eligible. Without
-  `include_existing_prs`, the evaluator reads the rows even when `opened` is
-  the only selected event, so a PR already observed under another event is
-  not treated as new. With
+  `include_existing_prs`, a PR already observed under another event is not
+  treated as new. The evaluator reads the rows for every selection, even when
+  `opened` is the only selected event. With
   `include_existing_prs`, every PR is eligible. Otherwise a PR is eligible
   when its row, if any, tracks `opened`, and its `created_at` is zero or not
   before the trigger's `created_at`. A row that does not track `opened` means
@@ -212,7 +212,10 @@ again. Processing any firing, or the transition disappearing, clears the
 reservation.
 
 Each row also stores `tracked_events`, the events the trigger selected when
-the row was written, including `opened`. When an event is added to the trigger, the
+the row was written, including `opened`. A row that tracks no event stores
+`none`, because an empty value marks a legacy row that tracks every event.
+When no follow-up event remains selected, the evaluator still records the
+removal, so selecting the event again rebaselines it. When an event is added to the trigger, the
 next poll rebaselines that event's state (head or requested set) instead of
 firing for changes made before it was selected.
 
@@ -442,6 +445,7 @@ control uses an existing primitive.
 | End-of-PR read, archive, or delete failure | Keep the mapping and retry on the next complete poll. |
 | Mapping upsert fails after task creation | Delete the new task and fail the run. |
 | Restart | Observations, pending quiet periods, and mappings persist. |
+| Restart after a continuation's launch was reserved | Retry recovery resends the snapshot's resolved follow-up prompt for a per-PR continuation, as the original firing chose. |
 
 ## Persistence
 

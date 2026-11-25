@@ -48,6 +48,10 @@ func (s prEventSelection) any() bool { return s.opened || s.newCommits || s.revi
 // observes reports whether the trigger needs stored PR observations.
 func (s prEventSelection) observes() bool { return s.newCommits || s.reviewRequested }
 
+// noTrackedEvents marks an observation that tracks no event, as distinct from
+// a legacy row whose empty list tracks every event.
+const noTrackedEvents = "none"
+
 // tracked lists the selected events in a stable order.
 func (s prEventSelection) tracked() string {
 	var events []string
@@ -70,7 +74,12 @@ func (s prEventSelection) trackedFor(obs *PRObservation) string {
 	if s.opened && !obs.tracks(PREventOpened) {
 		s.opened = false
 	}
-	return s.tracked()
+	if tracked := s.tracked(); tracked != "" {
+		return tracked
+	}
+	// An empty list means a row written before events were tracked, which
+	// tracks every event; an observation that tracks nothing says so.
+	return noTrackedEvents
 }
 
 // tracks reports whether an observation was recorded for event. Rows written

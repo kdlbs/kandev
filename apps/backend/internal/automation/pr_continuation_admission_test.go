@@ -120,7 +120,7 @@ func TestParsePRSubject(t *testing.T) {
 	require.Equal(t, "acme", owner)
 	require.Equal(t, "widget", repo)
 	require.Equal(t, 17, number)
-	for _, bad := range []string{"", "acme/widget", "acme#1", "/widget#1", "acme/widget#x", "acme/widget#0"} {
+	for _, bad := range []string{"", "acme/widget", "acme#1", "/widget#1", "acme/widget#x", "acme/widget#0", "acme/widget#12abc"} {
 		_, _, _, ok := ParsePRSubject(bad)
 		require.False(t, ok, bad)
 	}

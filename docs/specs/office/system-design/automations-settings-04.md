@@ -3,6 +3,7 @@ status: current
 system: office
 requirements:
   - REQ-OFFICE-AUTOMATIONS-SETTINGS-002
+  - REQ-OFFICE-AUTOMATION-CONTINUITY-001
 created: 2026-11-25
 owners:
   - kandev

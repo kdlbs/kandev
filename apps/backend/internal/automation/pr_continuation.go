@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -324,7 +325,8 @@ func ParsePRSubject(subject string) (owner, repo string, number int, ok bool) {
 	if !found || owner == "" || repo == "" {
 		return "", "", 0, false
 	}
-	if _, err := fmt.Sscanf(numberPart, "%d", &number); err != nil || number <= 0 {
+	number, err := strconv.Atoi(numberPart)
+	if err != nil || number <= 0 {
 		return "", "", 0, false
 	}
 	return owner, repo, number, true

@@ -354,3 +354,20 @@ func TestAutomationPRTaskBusyClassifiesSessions(t *testing.T) {
 		})
 	}
 }
+
+// A per-PR follow-up recovered after a restart sends the snapshot's resolved
+// follow-up instructions, not the initial ones.
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-008.2
+func TestRecoveredContinuationPromptUsesFollowUp(t *testing.T) {
+	snapshot := automation.RetryLaunchConfigSnapshot{
+		ContinuationPolicy:     automation.ContinuationPolicyReusePerPR,
+		FollowUpPrompt:         "Review {{pr.head_sha}}",
+		ResolvedPrompt:         "initial instructions",
+		ResolvedFollowUpPrompt: "Review bbb",
+	}
+	require.Equal(t, "Review bbb", recoveredContinuationPrompt(snapshot))
+
+	snapshot.ContinuationPolicy = automation.ContinuationPolicyReuseThread
+	require.Equal(t, "initial instructions", recoveredContinuationPrompt(snapshot),
+		"a shared-task continuation keeps the main prompt")
+}

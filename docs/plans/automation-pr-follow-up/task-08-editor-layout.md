@@ -8,6 +8,8 @@ plan: "plan.md"
 requirements:
   - REQ-OFFICE-AUTOMATIONS-SETTINGS-002
   - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006
+  - REQ-OFFICE-AUTOMATION-CONTINUITY-001
+  - REQ-OFFICE-AUTOMATION-RETRIES-001
 acceptance_criteria:
   - AC-OFFICE-AUTOMATIONS-SETTINGS-002.1
   - AC-OFFICE-AUTOMATIONS-SETTINGS-002.2
@@ -22,6 +24,8 @@ acceptance_criteria:
   - AC-OFFICE-AUTOMATION-RETRIES-001.8
 system_design:
   - ../../specs/office/system-design/automations-settings-04.md
+  - ../../specs/office/system-design/automations-pr-follow-up.md
+  - ../../specs/office/system-design/automation-retries.md
 ---
 
 # Task 08: Organize the automation editor

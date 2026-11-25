@@ -21,16 +21,14 @@ func (e *GitHubEvaluator) evaluatePRRepo(
 			zap.String(automationRepoKey, repo.Owner+"/"+repo.Name), zap.Error(err))
 		return
 	}
-	var observations map[int]*PRObservation
-	// Opened eligibility also reads observations: a PR this trigger already
-	// observed under another event is not new to it.
-	if sel.observes() || (sel.opened && !cfg.IncludeExistingPRs) {
-		observations, err = e.svc.Store().ListPRObservations(ctx, t.ID, repo.Owner, repo.Name)
-		if err != nil {
-			e.logger.Warn("failed to load PR observations",
-				zap.String("trigger_id", t.ID), zap.Error(err))
-			return
-		}
+	// Every selection reads observations: opened eligibility skips a PR this
+	// trigger already observed, and an opened-only trigger still records which
+	// follow-up events were removed.
+	observations, err := e.svc.Store().ListPRObservations(ctx, t.ID, repo.Owner, repo.Name)
+	if err != nil {
+		e.logger.Warn("failed to load PR observations",
+			zap.String("trigger_id", t.ID), zap.Error(err))
+		return
 	}
 	seen := make(map[int]bool, len(prs))
 	for _, pr := range prs {
@@ -65,6 +63,7 @@ func (e *GitHubEvaluator) evaluatePR(
 		return
 	}
 	if !sel.observes() {
+		e.recordTrackedEvents(ctx, sel, obs)
 		return
 	}
 	if obs == nil {
@@ -85,6 +84,20 @@ func (e *GitHubEvaluator) evaluatePR(
 	if firingAdvancesObservation(result, err) {
 		next = processedObservation(obs, pr, firing, sel)
 	}
+	if !observationsEqual(obs, next) {
+		e.storeObservation(ctx, next)
+	}
+}
+
+// recordTrackedEvents stores which events an existing observation still
+// tracks when no follow-up event is selected, so a follow-up event selected
+// again later starts from the pull request's state at that time.
+func (e *GitHubEvaluator) recordTrackedEvents(ctx context.Context, sel prEventSelection, obs *PRObservation) {
+	if obs == nil {
+		return
+	}
+	next := cloneObservation(obs)
+	next.TrackedEvents = sel.trackedFor(obs)
 	if !observationsEqual(obs, next) {
 		e.storeObservation(ctx, next)
 	}

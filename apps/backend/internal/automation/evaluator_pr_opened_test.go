@@ -116,3 +116,35 @@ func TestOpenedDoesNotResubmitAHeldKey(t *testing.T) {
 	require.Zero(t, logs.FilterMessage("failed to record duplicate-skipped run").Len(),
 		"steady-state polling must not resubmit the held opened key")
 }
+
+// Dropping every follow-up event records the removal, so selecting one again
+// starts from the pull request's current state instead of firing for changes
+// made while it was off.
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.10
+func TestFollowUpEventReaddedAfterOpenedOnlyStartsFromCurrentHead(t *testing.T) {
+	f := newPRFollowUpFixture(t, followUpPR{Number: 5, Head: "e1"})
+	trigger := f.addTrigger(t, newCommitsEvents)
+	f.evaluate()
+	update := func(events string) {
+		enabled := true
+		config := json.RawMessage(`{` + eventSelectionRepo + events + `}`)
+		require.NoError(t, f.svc.UpdateTrigger(context.Background(), trigger.ID, &UpdateTriggerRequest{
+			Enabled: &enabled, Config: &config,
+		}))
+	}
+
+	update(openedEvents)
+	f.evaluate()
+	require.False(t, f.observation(t, trigger, 5).tracks(PREventNewCommits), "the removal is recorded")
+	require.False(t, f.observation(t, trigger, 5).tracks(PREventOpened), "opened stays untracked for an older PR")
+
+	f.setPRs(followUpPR{Number: 5, Head: "e2"})
+	f.evaluate()
+	update(newCommitsEvents)
+	f.evaluate()
+	require.Empty(t, f.runs(t), "commits pushed while new_commits was off do not fire")
+
+	f.setPRs(followUpPR{Number: 5, Head: "e3"})
+	f.evaluate()
+	require.Len(t, f.runs(t), 1, "later commits fire again")
+}

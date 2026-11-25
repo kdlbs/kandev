@@ -12,9 +12,14 @@ requirements:
   - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-008
   - REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-009
   - REQ-OFFICE-AUTOMATION-RUNS-001
+  - REQ-OFFICE-AUTOMATIONS-SETTINGS-002
+  - REQ-OFFICE-AUTOMATION-CONTINUITY-001
+  - REQ-OFFICE-AUTOMATION-RETRIES-001
 system_design:
   - ../../specs/office/system-design/automations-pr-follow-up.md
   - ../../specs/office/system-design/automation-run-recorded-events.md
+  - ../../specs/office/system-design/automations-settings-04.md
+  - ../../specs/office/system-design/automation-retries.md
 legacy_specs: []
 ---
 
