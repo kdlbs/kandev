@@ -2,10 +2,29 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"go.uber.org/zap"
 )
+
+func (s *Service) recordCompletionGateRefusal(ctx context.Context, taskID, fromStepID, sessionID string, err error) {
+	if !errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) {
+		return
+	}
+	s.markStepCompletionBlocked(ctx, taskID, fromStepID, sessionID, models.StepCompletionReasonTransitionRefused)
+
+	// A refused move has no committed transition to settle its delivery.
+	// Record the no-op against the original turn and source policy.
+	effect := workflowEffectFromContext(ctx)
+	if !isBoundAgentDeliveryWorkflowEffect(effect) || effect.WorkflowPolicyUpdatedAt == nil ||
+		effect.TaskID != taskID || effect.SessionID != sessionID || effect.WorkflowStepID != fromStepID {
+		return
+	}
+	source := &models.Task{ID: taskID, WorkflowID: effect.WorkflowID, WorkflowStepID: fromStepID}
+	s.recordDeliveryWorkflowNoOp(ctx, source, effect, models.DeliveryWorkflowOutcomeNoAutomaticTransition)
+}
 
 // stepCompletionReceiptOutcomeWriter persists a bounded receipt outcome for one
 // exact accepted signal. The SQLite repository implements it.

@@ -58,9 +58,28 @@ Hermes launches with `hermes acp`. Install the required `hermes` executable from
 
 Goose launches with `goose acp`. Its **Settings > Agents** card runs only the official `download_cli.sh` installer. Homebrew (`block-goose-cli`) and pip (`pip install goose-ai`) are manual alternatives. Configure your model provider with `goose configure`. Goose currently supports task and workspace sessions.
 
-For local and worktree executors, Kandev selects a compatible `agy` CLI when it is available. The CLI must support ACP through `agy acp` (version 1.5.0 or later). Google owns CLI installation and updates; use the [Antigravity CLI setup guide](https://antigravity.google/docs/cli). The CLI uses its own Google sign-in. In **Settings > Agents**, choose **Sign in** to run `agy acp --login` on the Kandev host. This sign-in is separate from the standalone server's credentials.
+For local and worktree executors, Kandev selects a compatible `agy` CLI when it is available. The CLI must support ACP through `agy acp` at version 1.5.0 or later. Its `agy acp --help` output must advertise `--process-per-session`. Kandev adds this flag to each local CLI launch so HTTP MCP support does not depend on profile edits. Google owns CLI installation and updates; use the [Antigravity CLI setup guide](https://antigravity.google/docs/cli). The CLI uses its own Google sign-in. In **Settings > Agents**, choose **Sign in** to run `agy acp --login` on the Kandev host. This sign-in is separate from the standalone server's credentials.
 
 When a compatible CLI is unavailable, Kandev uses the standalone ACP server. The **Settings > Agents > Browse** install action provisions the pinned `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows). Both files must be executable and stay in the same directory. The standalone server has its own Google sign-in and credential store. Its consent flow opens a browser on the Kandev host. Remote and container executors use their own standalone runtime and sign-in.
+
+## ACP v2 preview
+
+Enable **ACP v2 preview** in **Settings > System > Feature Toggles**, then
+restart Kandev. You can also set `KANDEV_FEATURES_ACP_V2=true` in the process
+environment. The preview starts off in all shipped profiles.
+
+The preview covers structured task chat on local and worktree executors.
+Use a managed Claude ACP 0.109.0 or 0.109.1 bridge, or a managed Codex ACP
+2.8.0 or 2.9.0 bridge. Sign in locally or configure the provider's API key.
+
+To return to ACP v1, disable **ACP v2 preview** in Feature Toggles and restart
+Kandev. If the environment locks the toggle, set `KANDEV_FEATURES_ACP_V2` to
+`false` and restart Kandev. If you remove the variable, restart Kandev to unlock
+the toggle. Disable any saved opt-in and restart again.
+
+If an ACP v2 process survives the restart, you can read its history, answer
+pending requests, and stop it. Reconnect the session to send new prompts over v1.
+Kandev reports a restore error if the agent cannot reopen the saved conversation.
 
 ## Codex app-server (experimental)
 
@@ -1289,6 +1308,8 @@ Each flag entry has a raw value, description, enabled state, and an agent-specif
 The field is not a shell script. Pipes, redirects, variable expansion, and command substitution do not run as shell syntax. Empty or malformed quoting is rejected. Keep separate profiles for materially different permission or workspace flags, and recheck customized flags after upgrading the CLI.
 
 Claude CLI passthrough uses standard output by default. Add an enabled `--verbose` entry to the profile CLI flags when you need diagnostic output.
+
+For Copilot, enable **Long context** in **CLI Flags** to pass `--context long_context` at launch. This option is off by default. To use long context for a new session, select a profile with the flag enabled and a model that supports it. Copilot controls the effective window and billing. Larger windows can use more AI credits. See [GitHub's supported Copilot models](https://docs.github.com/en/copilot/reference/ai-models/supported-models#models-with-extended-capabilities).
 
 Some older profiles contain compatibility fields such as Auggie's `allow_indexing`; current launch behavior is represented by the active profile settings and flags.
 

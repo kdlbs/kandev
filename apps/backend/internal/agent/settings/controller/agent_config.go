@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"go.uber.org/zap"
 )
 
@@ -242,6 +244,7 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 	// ACP: mirror lifecycle.CommandBuilder.BuildCommand by appending CLIFlagTokens
 	// after the agent's BuildCommand.
 	var cmd agents.Command
+	requiresAntigravityWorkerMode := false
 	if ptAgent, ok := agentConfig.(agents.PassthroughAgent); ok && req.CLIPassthrough {
 		cmd = ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 			Model:            req.Model,
@@ -278,9 +281,14 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 			if err != nil {
 				return nil, err
 			}
+			requiresAntigravityWorkerMode = agentName == agents.AntigravityACPAgentID &&
+				selection.Variant == acpcompat.AntigravityRuntimeCLI
 		}
 		if len(cliFlagTokens) > 0 {
 			cmd = cmd.With().Flag(cliFlagTokens...).Build()
+		}
+		if requiresAntigravityWorkerMode {
+			cmd = agents.NewCommand(antigravityruntime.RequireWorkerMode(cmd.Args())...)
 		}
 		// Prepend the launcher prefix last, mirroring
 		// lifecycle.CommandBuilder.BuildCommand. Prefixes were validated above;

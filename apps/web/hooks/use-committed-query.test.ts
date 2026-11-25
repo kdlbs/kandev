@@ -31,7 +31,7 @@ describe("useCommittedQuery", () => {
     expect(result.current.committed).toBe("now");
   });
 
-  it("commit after setImmediate is a no-op for committed", () => {
+  it("keeps the new query when committing after setImmediate", () => {
     const { result } = renderHook(() => useCommittedQuery(""));
     act(() => result.current.setImmediate("abc"));
     act(() => result.current.commit());

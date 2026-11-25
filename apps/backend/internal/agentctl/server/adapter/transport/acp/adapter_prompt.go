@@ -182,11 +182,15 @@ func (a *Adapter) sendPrompt(
 	wasLoading := a.isLoadingSession
 	a.isLoadingSession = false
 	a.loadingSessionID = ""
+	trackCopilotInterruption := a.activateCopilotInterruptionPromptIfLoadedLocked(sessionID, promptGeneration)
 	a.mu.Unlock()
 
 	if wasLoading {
 		a.logger.Info("cleared session load suppression flag before sending new prompt",
 			zap.String("session_id", sessionID))
+	}
+	if trackCopilotInterruption {
+		defer a.finishCopilotInterruptionPrompt(sessionID, promptGeneration)
 	}
 
 	a.logger.Info("sending prompt",
@@ -315,6 +319,9 @@ func (a *Adapter) sendPrompt(
 	//     so the downstream buffer flush yields empty and the turn persists as
 	//     had_output=false even when the agent did produce text.
 	notificationsDrained := a.syncNotifQueue()
+	if notificationsDrained && stopReason == string(acp.StopReasonCancelled) {
+		a.settleCursorShellWatchesForCancelledPrompt(sessionID, promptGeneration)
+	}
 	a.settleClaudeSubagents(sessionID, promptGeneration, stopReason, a.promptTurnWasHandedOff(turn))
 
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the

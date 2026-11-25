@@ -431,7 +431,7 @@ func (s *workflowStore) applyTransitionWithResult(
 		return 0, workflowTransitionCommitResult{}, err
 	}
 
-	oldWorkflowID := task.WorkflowID
+	oldWorkflowID, oldState := task.WorkflowID, task.State
 	if targetStep != nil {
 		task.WorkflowID = targetStep.WorkflowID
 	}
@@ -472,6 +472,7 @@ func (s *workflowStore) applyTransitionWithResult(
 	// that field to remove the task from its previous workflow's snapshot
 	// instead of leaving a stale duplicate until reload.
 	s.publishTaskUpdated(ctx, task, oldWorkflowID)
+	s.publishCommittedCompletion(ctx, task, oldState)
 
 	if deferredMove == nil && task.QueuedForStepID == "" {
 		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
@@ -593,7 +594,7 @@ func (s *workflowStore) applyTransitionIfAtStep(
 	if !steptelemetry.HasTrigger(transitionCtx) {
 		transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
 	}
-	task, oldWorkflowID, applied, _, err := s.applyTransitionIfAtStepRaw(transitionCtx, taskID, expectedStepID, toStepID)
+	task, oldWorkflowID, oldState, applied, _, err := s.applyTransitionIfAtStepRaw(transitionCtx, taskID, expectedStepID, toStepID)
 	if err != nil {
 		return false, err
 	}
@@ -602,6 +603,7 @@ func (s *workflowStore) applyTransitionIfAtStep(
 	}
 
 	s.publishTaskUpdated(ctx, task, oldWorkflowID)
+	s.publishCommittedCompletion(ctx, task, oldState)
 
 	if task.QueuedForStepID == "" {
 		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
@@ -628,24 +630,24 @@ func (s *workflowStore) applyTransitionIfAtStep(
 // remaining transition lifecycle after the CAS succeeds.
 func (s *workflowStore) applyTransitionIfAtStepRaw(
 	ctx context.Context, taskID, expectedStepID, toStepID string,
-) (*models.Task, string, bool, int, error) {
+) (*models.Task, string, v1.TaskState, bool, int, error) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
-		return nil, "", false, 0, fmt.Errorf("load task for CAS transition: %w", err)
+		return nil, "", "", false, 0, fmt.Errorf("load task for CAS transition: %w", err)
 	}
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
 	if err != nil {
-		return nil, "", false, 0, fmt.Errorf("load target step for CAS transition: %w", err)
+		return nil, "", "", false, 0, fmt.Errorf("load target step for CAS transition: %w", err)
 	}
 	if targetStep == nil {
-		return nil, "", false, 0, fmt.Errorf("target step %s not found for CAS transition", toStepID)
+		return nil, "", "", false, 0, fmt.Errorf("target step %s not found for CAS transition", toStepID)
 	}
 	casRepo, ok := s.repo.(workflowMoveAdmissionCASRepository)
 	if !ok {
-		return nil, "", false, 0, fmt.Errorf("workflow step CAS admission repository unavailable for step %s", toStepID)
+		return nil, "", "", false, 0, fmt.Errorf("workflow step CAS admission repository unavailable for step %s", toStepID)
 	}
 
-	oldWorkflowID := task.WorkflowID
+	oldWorkflowID, oldState := task.WorkflowID, task.State
 	task.WorkflowID = targetStep.WorkflowID
 	task.WorkflowStepID = toStepID
 	task.WIPAdmitted = true
@@ -675,12 +677,18 @@ func (s *workflowStore) applyTransitionIfAtStepRaw(
 		)
 	}
 	if err != nil {
-		return nil, "", false, 0, fmt.Errorf("update task workflow step (CAS): %w", err)
+		return nil, "", "", false, 0, fmt.Errorf("update task workflow step (CAS): %w", err)
 	}
 	if !applied {
-		return nil, oldWorkflowID, false, targetStep.WIPLimit, nil
+		return nil, oldWorkflowID, oldState, false, targetStep.WIPLimit, nil
 	}
-	return task, oldWorkflowID, true, targetStep.WIPLimit, nil
+	return task, oldWorkflowID, oldState, true, targetStep.WIPLimit, nil
+}
+
+func (s *workflowStore) publishCommittedCompletion(ctx context.Context, task *models.Task, oldState v1.TaskState) {
+	if task.State == v1.TaskStateCompleted && task.State != oldState && s.publishStateChanged != nil {
+		s.publishStateChanged(ctx, task, oldState)
+	}
 }
 
 func markDeferredMoveApplied(task *models.Task, moveID string) error {

@@ -166,7 +166,7 @@ func (a *AntigravityACP) ResolveLoginCommand(
 	if err != nil || selection.Variant != acpcompat.AntigravityRuntimeCLI {
 		return nil, ErrLoginRuntimeChanged
 	}
-	command := append(selection.Command.Args(), "--login")
+	command := []string{selection.Command.Args()[0], "acp", "--login"}
 	return &LoginCommand{
 		Cmd:      command,
 		Variants: map[string][]string{antigravityCLILoginVariant: command},

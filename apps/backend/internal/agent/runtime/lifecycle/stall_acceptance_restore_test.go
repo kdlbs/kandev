@@ -56,7 +56,7 @@ func TestPromptAcceptanceRestoreRequiresAuthenticatedActiveTurn(t *testing.T) {
 				t.Fatal(err)
 			}
 			sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
-			snapshot, owned := sm.capturePromptStall(execution, 7)
+			snapshot, owned := sm.capturePromptStall(context.Background(), execution, 7)
 			if got := owned && snapshot.accepted; got != want {
 				t.Fatalf("restored acceptance = %t, want %t (restore error: %v)", got, want, err)
 			}

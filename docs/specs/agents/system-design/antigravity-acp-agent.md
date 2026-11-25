@@ -115,8 +115,10 @@ defines the priority and ownership.
 1. For native restore, select the variant on the saved conversation.
 2. For new host-local work, find `agy` on the host PATH or in Google's standard install location.
 3. Run a bounded `agy --version` from the host, outside any task workspace.
-   A stable CLI at 1.5.0 or later selects `[absolute-agy, "acp"]`. The ACP handshake establishes readiness.
-4. If `agy` is absent or older, select the complete standalone bundle.
+   For version 1.5.0 or later, check bounded `agy acp --help` output for the exact worker flag.
+   A qualified CLI selects `[absolute-agy, "acp", "--process-per-session"]`.
+   The ACP handshake establishes readiness. [Google ACP flags](https://antigravity.google/docs/ide/extensions/acp#flags)
+4. If no CLI qualifies for new local work, select the complete standalone bundle.
    Keep managed-bundle validation authoritative ahead of the manual PATH and harness checks.
 5. Report version, startup, authentication, and probe failures for the chosen runtime.
    Propagate caller cancellation. Missing remote runtimes follow executor-local admission.
@@ -126,6 +128,16 @@ Settings offers setup when qualification determines that only an older CLI is pr
 Reuse the selected variant throughout one launch or probe. Bind cached capabilities to its
 provenance and invalidate them on runtime change or explicit refresh. Discard work from stale probes.
 Host utility and profile previews use host resolution. Non-local task launch resolves only its executor command.
+
+### CLI worker mode and MCP
+
+The resolver sets worker mode for each host-local CLI process, independent of the model and profile.
+Compose the effective task, resume, utility, and preview arguments before the wrapper applies.
+If a profile flag disables worker mode, put the required enabling flag after profile options and before any argument delimiter.
+Enabled duplicates are compatible. Keep profile settings and saved runtime associations intact.
+
+Use the HTTP capability advertised by the resulting ACP process. The common adapter delivers Core and selected packages.
+The [MCP startup repair](../../../plans/antigravity-cli-mcp-default/plan.md) records the regression and launch checks.
 
 ## Installation
 
@@ -176,7 +188,7 @@ A small helper is preferable to a remote OAuth bridge or a new credential reader
 
 Keep native credential backend selection. The CLI uses its vendor-owned default store under the host user home.
 Apply the shared-home validation and conflicting credential-mode filtering to CLI ACP.
-Use plain `agy acp` for probes and tasks. The standalone harness path and `--uid=` belong to standalone.
+Use the selected worker command for CLI probes and tasks. The standalone harness path and `--uid=` belong to standalone.
 The native macOS keychain and Linux/Windows file backend remain vendor-owned.
 Shared profile flags and sandbox prefixes still apply. An unsupported wrapped environment must fail explicitly rather than bypass the subscription policy.
 

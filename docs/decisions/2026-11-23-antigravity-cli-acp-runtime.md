@@ -12,9 +12,9 @@ Kandev's managed standalone server and the Antigravity CLI use separate Google s
 
 ## Decision
 
-Keep one built-in Antigravity profile identity. Select the installed ACP-capable CLI for new host-local sessions and for their model discovery. Treat discovery, command, and authentication as one runtime choice.
+Keep one built-in Antigravity profile identity. Select the qualified CLI for new host-local sessions and model discovery. Treat discovery, command, and authentication as one runtime choice. Kandev supplies the vendor worker option for editor-supplied HTTP MCP. [Google ACP flags](https://antigravity.google/docs/ide/extensions/acp#flags)
 
-Use the pinned standalone bundle when the CLI is absent or predates ACP. Bind a saved conversation to the runtime that created it. Treat older Antigravity conversation records as standalone.
+If no CLI qualifies, use the complete standalone bundle for new sessions. Bind a saved conversation to the runtime that created it. Treat older Antigravity conversation records as standalone.
 
 Google's executable owns its sign-in and private state. Kandev's install job owns the pinned standalone bundle. The device owner manages the external CLI through Google's installer and updater. [Runtime update authority](2026-10-01-agent-runtime-update-authority.md) · [Durable sessions](2026-09-10-durable-harness-session-boundaries.md)
 
