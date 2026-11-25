@@ -38,7 +38,10 @@ advisory notice and preserves controlled cancellation.
 - `SessionManager.markPromptDispatched` and the execution store record the
   current accepted generation after `triggerPrompt` succeeds.
 - `recordActivity` in `manager_events.go` classifies content and metadata.
-- The prompt waiter watchdog publishes at most one stall per generation.
+- The prompt waiter watchdog publishes at most one stall per generation. A
+  dispatch-only prompt has no waiter. The lifecycle `Manager` owns one loop,
+  started with the manager and joined by `Stop`, that applies the same check
+  to every execution with a pending dispatched prompt, once per generation.
 - `handleAgentStalled` in the orchestrator validates current ownership and
   writes the existing neutral notice with the `agent.cancel` action.
 - Existing cancellation services own protocol cancellation, bounded escalation,

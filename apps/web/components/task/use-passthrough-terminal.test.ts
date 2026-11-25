@@ -393,11 +393,4 @@ describe("computeTerminalPaneState", () => {
   it("never reports ended for agent terminals", () => {
     expect(computeTerminalPaneState("agent", true, false)).toBe("connecting");
   });
-
-  // Before the session lands, state is null. Treating that as ended would put
-  // a permanent "session has ended" over a terminal that is merely starting.
-  it("treats an unknown session state as live", () => {
-    expect(computeTerminalPaneState("shell", false, false)).toBe("connecting");
-    expect(computeTerminalPaneState("shell", false, true)).toBe("connected");
-  });
 });

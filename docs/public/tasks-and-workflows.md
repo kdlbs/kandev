@@ -694,6 +694,12 @@ Selecting a job opens its own tab in the central area on desktop, or a
 full-height detail view on a phone. **View all work** opens the Background Work
 overview. Closing a tab or view does not stop the job.
 
+Cursor shell watches also appear as Monitor entries. An explicit ACP failure
+appears as Failed. A cancelled prompt interrupts only its watches that are still
+running, and a replaced native session leaves unresolved watches as Unknown.
+These states describe the watch, not the shell process. Cursor does not provide
+shell output, controls, or an exit status in this view.
+
 The overview has two tabs. **Active** lists running and waiting jobs. **History**
 lists completed, failed, interrupted, ended, and unknown jobs. Each tab shows its
 count before you search, and search filters the selected tab. Long commands

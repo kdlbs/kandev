@@ -870,12 +870,19 @@ func TestNormalizeRuntimeStopError(t *testing.T) {
 // upsert helper lives there.
 
 func TestContinuationNativeOnlyRestoreLaunchContract(t *testing.T) {
-	req := &orchestratorexecutor.LaunchAgentRequest{RequiredNativeConversationID: "provider-session"}
-	got := reflect.ValueOf(buildLifecycleLaunchRequest(req, "/workspace", "profile-1")).Elem().FieldByName("RequiredNativeConversationID")
+	req := &orchestratorexecutor.LaunchAgentRequest{
+		RequiredNativeConversationID: "provider-session",
+		RuntimeAdapterVersion:        "antigravity-cli/1.5.15",
+	}
+	launch := buildLifecycleLaunchRequest(req, "/workspace", "profile-1")
+	got := reflect.ValueOf(launch).Elem().FieldByName("RequiredNativeConversationID")
 	if !got.IsValid() {
 		t.Fatal("missing native identity field")
 	}
 	if got.String() != "provider-session" {
 		t.Fatal("native identity was not forwarded")
+	}
+	if launch.RuntimeAdapterVersion != req.RuntimeAdapterVersion {
+		t.Fatalf("runtime adapter version = %q, want %q", launch.RuntimeAdapterVersion, req.RuntimeAdapterVersion)
 	}
 }

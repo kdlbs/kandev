@@ -21,7 +21,7 @@ picker is not part of this design.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-UI-QUICK-CHAT-ELEVATION-001` | [Surface composition](#surface-composition), [Responsive behavior](#responsive-behavior), [Verification](#verification) |
+| `REQ-UI-QUICK-CHAT-ELEVATION-001` | [Surface composition](#surface-composition), [WebKit panel rendering](#webkit-panel-rendering), [Responsive behavior](#responsive-behavior), [Verification](#verification) |
 
 ## Components and responsibilities
 
@@ -49,6 +49,27 @@ The class is applied only through this `DialogContent` instance. The shared
 `DialogOverlay` default and unrelated dialogs remain unchanged. The overlay
 continues to cover the page and block interaction below the dialog through the
 existing Radix modal behavior.
+
+## WebKit panel rendering
+
+The shared `DialogContent` has one Quick Chat class for the rendering override.
+The existing document marker from
+[`markRenderingEngine`](../../../../apps/web/lib/browser/rendering-engine.ts)
+selects the WebKit rules in [the app stylesheet](../../../../apps/web/app/globals.css).
+
+WebKit centers the fixed panel with zero insets and automatic margins. The
+panel has no CSS translation. It uses the existing opacity-only dialog
+keyframes for entry and exit. The same rules apply to chat and terminal tabs
+because both render inside this panel.
+
+From `sm` upward, the dialog uses `85dvh` and the width from
+[`useQuickChatWidth`](../../../../apps/web/hooks/use-quick-chat-width.ts),
+capped at the viewport width minus `2rem`. The width behavior includes both
+resize handles and the saved preference. Below `sm`, the dialog fills the
+viewport and keeps the safe-area padding. The existing overlay stays behind
+the panel in both modes.
+
+Other browser engines use the standard dialog motion and responsive placement.
 
 ## Control flow
 
@@ -106,6 +127,11 @@ change accessible names and close controls.
   both surfaces.
 - The existing mobile Quick Chat E2E scenarios remain the evidence for the
   phone entry point, full-screen close control, and document overflow.
+- The shared-modal rendering regression checks opacity-only motion, placement
+  without transforms, and the same panel size for chat and terminal content.
+  It exercises the WebKit style path and the ordinary Chromium path.
+- A native Orion check compares chat and terminal text before and after the
+  fix at the same macOS viewport size and zoom.
 - The focused component test suite remains unchanged because the behavior is
   owned by the real Radix rendering path and is verified through Playwright.
 

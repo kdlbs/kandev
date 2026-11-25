@@ -1,4 +1,5 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { realpathSync } from "node:fs";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
@@ -62,7 +63,7 @@ export type HtmlDiffFixture = {
 
 /**
  * Seeds an uncommitted HTML file with relative CSS and script assets in a
- * fresh task workspace. The diff row and the current workspace file then have
+ * fresh task worktree. The diff row and the current workspace file then have
  * the same known contents until a test deliberately diverges them.
  */
 export async function createHtmlDiffTask({
@@ -92,6 +93,7 @@ export async function createHtmlDiffTask({
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
+      executor_profile_id: seedData.worktreeExecutorProfileId,
     },
   );
   if (!task.session_id) throw new Error("HTML diff preview task has no session");
@@ -101,6 +103,9 @@ export async function createHtmlDiffTask({
   await session.waitForChatIdle({ timeout: 45_000 });
 
   const workspacePath = await waitForWorkspacePath(apiClient, task.id, task.session_id);
+  expect(realpathSync(workspacePath), "HTML preview fixture must use its own worktree").not.toBe(
+    realpathSync(seedData.repositoryPath),
+  );
   const git = new GitHelper(workspacePath, makeGitEnv(backend.tmpDir));
   git.createFile(`${HTML_PREVIEW_ROOT}/assets/preview.css`, PREVIEW_CSS);
   git.createFile(`${HTML_PREVIEW_ROOT}/assets/preview.js`, PREVIEW_SCRIPT);

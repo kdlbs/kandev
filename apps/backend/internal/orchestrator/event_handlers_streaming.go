@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -136,6 +138,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		if eventType != streams.EventTypeUsageObservation {
 			return
 		}
+	}
+	if eventType == streams.EventTypeCopilotInterruptionNotice {
+		s.handleCopilotInterruptionStatus(ctx, payload)
+		return
 	}
 	if eventType == streams.EventTypeMCPStartupWarning {
 		s.handleCodexMCPStartupWarning(ctx, payload, eventExecutionID)
@@ -620,7 +626,9 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	if sessionID != "" && payload.Data.ACPSessionID != "" {
-		s.storeResumeTokenFromAgentEvent(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
+		s.storeResumeTokenFromStreamEvent(
+			ctx, taskID, sessionID, payload.ExecutionID, payload.AgentType, payload.Data.ACPSessionID, "", payload.AttemptID,
+		)
 	}
 	if sessionID == "" || s.messageCreator == nil {
 		return
@@ -879,14 +887,14 @@ func (s *Service) handleStreamingEventKind(
 	appendFn func(context.Context, string, string) error,
 	createFn func(context.Context, string, string, string, string, string) error,
 ) {
-	if payload.Data.Text == "" || payload.SessionID == "" {
+	if payload.SessionID == "" {
 		return
 	}
 	if payload.Data.CanonicalProjection {
 		s.publishCanonicalMessageEvent(ctx, payload)
 		return
 	}
-	if s.messageCreator == nil {
+	if payload.Data.Text == "" || s.messageCreator == nil {
 		return
 	}
 	messageID := payload.Data.MessageID
@@ -961,6 +969,52 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 	s.handleStreamingEventKind(ctx, payload, "message",
 		s.messageCreator.AppendAgentMessage,
 		s.messageCreator.CreateAgentMessageStreaming)
+}
+
+func (s *Service) handleCopilotInterruptionStatus(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if payload == nil || payload.Data == nil || s.messageCreator == nil || payload.TaskID == "" ||
+		payload.SessionID == "" || payload.ExecutionID == "" || payload.Data.Text == "" {
+		return
+	}
+	noticeType := streams.CopilotInterruptionNoticeType(payload.Data.Data)
+	if noticeType == "" {
+		return
+	}
+	turnID := payload.Data.TurnID
+	if turnID == "" {
+		payload.Data.Type = "message_streaming"
+		payload.Data.MessageType = string(v1.MessageTypeMessage)
+		if payload.Data.MessageID == "" {
+			payload.Data.MessageID = copilotInterruptionMessageID(
+				payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration,
+			)
+		}
+		s.handleMessageStreamingEvent(ctx, payload)
+		return
+	}
+	messageID := copilotInterruptionMessageID(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration)
+	metadata := map[string]interface{}{
+		"variant": streams.EventTypeCopilotInterruptionNotice,
+		streams.AgentEventDataCopilotInterruptionNotice: noticeType,
+	}
+	if err := s.messageCreator.CreateSessionMessageIdempotent(
+		ctx, messageID, payload.TaskID, payload.Data.Text, payload.SessionID,
+		string(v1.MessageTypeStatus), turnID, metadata, false,
+	); err != nil {
+		s.logger.Error("failed to persist Copilot interruption status",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+	}
+}
+
+func copilotInterruptionMessageID(sessionID, executionID string, promptGeneration uint64) string {
+	identity := fmt.Sprintf("%s\x00%s\x00%d", sessionID, executionID, promptGeneration)
+	digest := sha256.Sum256([]byte(identity))
+	return "copilot-interruption-" + hex.EncodeToString(digest[:16])
 }
 
 // handleThinkingStreamingEvent handles streaming thinking events for real-time reasoning updates.
@@ -3770,7 +3824,10 @@ func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *li
 			lastMsgUUID = uuid
 		}
 	}
-	s.storeResumeTokenFromAgentEvent(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
+	s.storeResumeTokenFromStreamEvent(
+		ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.AgentType,
+		payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID,
+	)
 }
 
 func (s *Service) resolveCompleteEventTurnID(

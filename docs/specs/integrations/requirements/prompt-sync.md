@@ -254,6 +254,16 @@ temporary failures and to stop repeating permanent ones.
   a credential change shall resume polling.
 - **AC-INTEGRATIONS-PROMPT-SYNC-005.4:** Stored and returned error messages
   shall be sanitized. They shall contain no token or credential material.
+- **AC-INTEGRATIONS-PROMPT-SYNC-005.5:** When provider admission defers a
+  request within a due automatic sync, that sync shall complete after
+  admission opens, even while other background work keeps the provider
+  paced. Deferral alone shall not record a failure, repeat completed reads,
+  or apply partial results. **Sync now**, configuration saves, version
+  saves, and removal shall not wait for a deferred automatic sync. A
+  configuration save, removal, or manual sync during the wait shall end the
+  wait and discard the automatic result without recording it. A credential
+  replacement or disconnection that the provider reports through its
+  connection fingerprint shall do the same within one poll interval.
 
 ### REQ-INTEGRATIONS-PROMPT-SYNC-006: Unresolved references in Workflow Sync
 

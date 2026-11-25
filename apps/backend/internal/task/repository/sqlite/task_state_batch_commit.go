@@ -85,9 +85,7 @@ func (r *Repository) commitTaskStateBatchMemberTx(
 	if oldState == newState {
 		return pendingTaskStateBatchChange{}, false, nil
 	}
-	if err := r.guardTaskCompletionTransitionTx(
-		ctx, tx, taskID, oldState, newState, workflowID, stepID, workflowID, stepID,
-	); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, taskID, oldState, newState, workflowID, stepID); err != nil {
 		return pendingTaskStateBatchChange{}, false, err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(

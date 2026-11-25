@@ -464,7 +464,7 @@ func TestClaudeMonitorCompletionFromPreviousSessionGenerationIsIgnored(t *testin
 	a.activeToolCalls[toolCallID] = payload
 
 	a.mu.Lock()
-	a.advanceNativeGenerationLocked()
+	a.advanceNativeGenerationLocked(sessionID)
 	a.mu.Unlock()
 	a.resetClaudeMonitorReadersForSessionTransition(sessionID, sessionID)
 	a.registerClaudeMonitorCompletionForGeneration(sessionID, 1, claudeMonitorCompletion{
@@ -497,7 +497,7 @@ func TestClaudeMonitorReaderRebindsOnSameSessionResume(t *testing.T) {
 	parsedGeneration := readerState.generation.Load()
 
 	a.mu.Lock()
-	a.advanceNativeGenerationLocked()
+	a.advanceNativeGenerationLocked(sessionID)
 	a.rebindClaudeMonitorReaderGenerationLocked(sessionID, a.nativeGeneration)
 	a.mu.Unlock()
 	require.Equal(t, uint64(1), parsedGeneration)

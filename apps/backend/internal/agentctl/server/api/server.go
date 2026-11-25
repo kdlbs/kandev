@@ -563,6 +563,7 @@ type AgentConfigureRequest struct {
 	ContinueArgs    optionalArgs                `json:"continue_args"`
 	Env             map[string]string           `json:"env,omitempty"`
 	ReplaceEnv      bool                        `json:"replace_env,omitempty"`
+	PreferACPV2     bool                        `json:"prefer_acp_v2,omitempty"`
 	// ProjectMCPDelivery carries execution-bound project-file delivery
 	// evidence. It is trusted only on an authenticated control request and is
 	// validated against this instance before accepted configuration changes.
@@ -618,6 +619,10 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for project MCP delivery"})
 		return
 	}
+	if req.PreferACPV2 && !c.GetBool(authenticatedControlContextKey) {
+		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for ACP v2 preview"})
+		return
+	}
 	if req.InstallContext != nil && (!c.GetBool(authenticatedControlContextKey) || !req.InstallContext.Valid()) {
 		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated installer provenance is required for reusable repairs"})
 		return
@@ -631,7 +636,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	configureErr := s.procMgr.ConfigureRuntime(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ReplaceEnv, req.ProjectMCPDelivery, req.InstallContext, req.OpenCodeRuntime, req.LaunchWrapper)
+	configureErr := s.procMgr.ConfigureRuntime(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ReplaceEnv, req.PreferACPV2, req.ProjectMCPDelivery, req.InstallContext, req.OpenCodeRuntime, req.LaunchWrapper)
 	if configureErr == nil {
 		configureErr = s.procMgr.ConfigureExecutionUsage(req.UsagePolicy)
 	}

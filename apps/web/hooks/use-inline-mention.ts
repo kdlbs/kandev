@@ -215,6 +215,7 @@ export function detectMentionTrigger(
 }
 
 export interface UseInlineMentionParams {
+  anchorToCaret?: boolean;
   inputRef: React.RefObject<RichTextInputHandle | null>;
   value: string;
   onChange: (value: string) => void;
@@ -410,10 +411,11 @@ function useCloseEmptyMention({
 }
 
 type MentionValueChangeOptions = {
+  anchorToCaret: boolean;
   inputRef: UseInlineMentionParams["inputRef"];
   onChange: (value: string) => void;
   scheduleMentionChange: (callback: () => void) => void;
-  setPosition: (position: Position) => void;
+  setPosition: (position: Position | null) => void;
   setTriggerStart: (start: number) => void;
   setQuery: (query: string) => void;
   setSelectedIndex: (index: number) => void;
@@ -421,6 +423,7 @@ type MentionValueChangeOptions = {
 };
 
 function useMentionValueChange({
+  anchorToCaret,
   inputRef,
   onChange,
   scheduleMentionChange,
@@ -440,9 +443,9 @@ function useMentionValueChange({
       scheduleMentionChange(() => {
         const trigger = detectMentionTrigger(newValue, mentionCursorPosition);
         if (trigger) {
-          const caretRect = input.getCaretRect();
-          if (caretRect) {
-            setPosition({ x: caretRect.x, y: caretRect.y });
+          const caretRect = anchorToCaret ? input.getCaretRect() : null;
+          if (!anchorToCaret || caretRect) {
+            setPosition(caretRect ? { x: caretRect.x, y: caretRect.y } : null);
             setTriggerStart(trigger.triggerStart);
             setQuery(trigger.query);
             setSelectedIndex(0);
@@ -455,6 +458,7 @@ function useMentionValueChange({
     },
     [
       inputRef,
+      anchorToCaret,
       onChange,
       scheduleMentionChange,
       setPosition,
@@ -467,6 +471,7 @@ function useMentionValueChange({
 }
 
 export function useInlineMention({
+  anchorToCaret = true,
   inputRef,
   value,
   onChange,
@@ -509,6 +514,7 @@ export function useInlineMention({
   });
 
   const handleChange = useMentionValueChange({
+    anchorToCaret,
     inputRef,
     onChange: (newValue) => {
       suppressOpenRef.current = false;

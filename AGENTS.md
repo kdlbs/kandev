@@ -63,7 +63,14 @@ Production comments state the invariant, not the argument for it: no `AC-NN` ref
 
 ### Testing
 
-Every code change must include tests for new or changed logic. Backend: `*_test.go` files alongside the source. Frontend: `*.test.ts` files for utility functions, hooks, API clients, and store slices. Exceptions: config files, generated code, React component markup. Use `/tdd` for test-driven development.
+Cover new or changed behavior with tests. Reuse or extend existing cases first.
+Add a case only for a distinct behavior or failure mode that existing tests miss.
+Apply the [TDD test-value gate](.agents/skills/tdd/SKILL.md#test-value-gate)
+before writing tests.
+
+Backend tests use `*_test.go` alongside the source. Frontend tests use `*.test.ts`
+for utility functions, hooks, API clients, and store slices. Config files,
+generated code, and React component markup are exempt.
 
 ### Internationalization
 

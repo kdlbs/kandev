@@ -1,6 +1,7 @@
 "use client";
 
 import { useWorkflowMoveSubmit, workflowMoveShortcutLabel } from "./use-workflow-move-submit";
+import { keepMoveOpenForPromptSuggestions } from "./workflow-move-surface";
 
 import {
   useCallback,
@@ -346,7 +347,7 @@ function StepHoverContent({
       side="bottom"
       align="center"
       data-testid="workflow-step-popover"
-      className="p-1.5 flex flex-col gap-1.5 items-center w-auto min-w-28 max-w-[calc(100vw-1rem)] data-[state=closed]:hidden"
+      className="max-h-(--radix-popover-content-available-height) max-w-[calc(100vw-1rem)] min-w-28 w-auto flex flex-col gap-1.5 items-center overflow-y-auto overscroll-contain p-1.5 data-[state=closed]:hidden"
       onMouseEnter={hover.onContentEnter}
       onMouseMove={hover.onContentEnter}
       onPointerEnter={hover.onContentEnter}
@@ -358,7 +359,10 @@ function StepHoverContent({
       onOpenAutoFocus={(event) => event.preventDefault()}
       // Restoring focus after pointer exit would trigger another hover open.
       onCloseAutoFocus={(event) => event.preventDefault()}
-      onEscapeKeyDown={onReturnFocus}
+      onEscapeKeyDown={(event) => {
+        keepMoveOpenForPromptSuggestions(event);
+        if (!event.defaultPrevented) onReturnFocus();
+      }}
     >
       {canMove && (
         <StepMoveControls
@@ -439,10 +443,8 @@ function StepMoveControls({
       {showOptions ? (
         <div
           className="w-64 max-w-[calc(100vw-2rem)]"
-          onKeyDown={(event) => {
-            submission.onKeyDown(event);
-            event.stopPropagation();
-          }}
+          onKeyDownCapture={submission.onKeyDown}
+          onKeyDown={(event) => event.stopPropagation()}
         >
           <WorkflowMoveOptionsFields
             draft={draft}

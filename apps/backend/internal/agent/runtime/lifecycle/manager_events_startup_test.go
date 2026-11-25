@@ -35,12 +35,12 @@ func TestSessionModelsPublishOnlySettledStartupState(t *testing.T) {
 			Type:           streams.EventTypeSessionModels,
 			CurrentModelID: model,
 			Data: map[string]any{
-				"config_options_source":    source,
-				"config_options_config_id": "model",
+				streams.ConfigOptionsSourceKey: source,
+				"config_options_config_id":     "model",
 			},
 		})
 	}
-	publishModel("mock-fast", "")
+	publishModel("mock-fast", streams.ConfigOptionsSourceSessionSetup)
 	if got := execution.GetModelState(); got == nil || got.CurrentModelID != "mock-fast" {
 		t.Fatalf("startup model was not available to configuration setup: %+v", got)
 	}
@@ -49,13 +49,18 @@ func TestSessionModelsPublishOnlySettledStartupState(t *testing.T) {
 	}
 
 	execution.SettleConfigOptions("model", execution.GetModelState())
+	execution.setSessionInitialized(true)
+	publishModel("mock-fast", streams.ConfigOptionsSourceSessionSetup)
+	if got := eventBus.getStreamEvents(); len(got) != 0 {
+		t.Fatalf("startup default published while the config response was pending: %+v", got)
+	}
+
 	publishModel("mock-smart", "provider_response")
 	got := eventBus.getStreamEvents()
 	if len(got) != 1 || got[0].Data.CurrentModelID != "mock-smart" {
 		t.Fatalf("settled startup model was not published: %+v", got)
 	}
 
-	execution.setSessionInitialized(true)
 	publishModel("mock-fast", "provider_update")
 	got = eventBus.getStreamEvents()
 	if len(got) != 2 || got[1].Data.CurrentModelID != "mock-fast" {

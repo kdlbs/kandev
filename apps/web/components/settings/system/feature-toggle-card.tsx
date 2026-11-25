@@ -23,7 +23,7 @@ type FeatureToggleCardProps = {
 };
 
 export function FeatureToggleCard({
-  flag,
+  flag: definition,
   isDirty = false,
   saving,
   onChange,
@@ -31,15 +31,13 @@ export function FeatureToggleCard({
   action,
 }: FeatureToggleCardProps) {
   const { t } = useTranslation();
+  const flag = localizeFlag(definition, t);
   const unavailable = flag.availability?.available === false;
   const disabled = saving || flag.env_locked || !flag.mutable || unavailable;
   return (
     <SettingsCard isDirty={isDirty} data-testid={`feature-toggle-${flag.key}`}>
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-2">
-          {/* `label`, `description` and `risk_description` are authored in
-              runtimeflags/registry.go and rendered by the backend, so they stay
-              English here — localizing them needs a key/value split in Go. */}
           <CardTitle className="flex flex-wrap items-center gap-2 text-base">
             {flag.label}
             <FlagBadges flag={flag} />
@@ -80,6 +78,16 @@ export function FeatureToggleCard({
       </CardContent>
     </SettingsCard>
   );
+}
+
+function localizeFlag(flag: RuntimeFlagState, t: TFunction): RuntimeFlagState {
+  if (flag.key !== "features.acpV2") return flag;
+  return {
+    ...flag,
+    label: t("system:featureToggleAcpV2Label"),
+    description: t("system:featureToggleAcpV2Description"),
+    risk_description: t("system:featureToggleAcpV2Rollback"),
+  };
 }
 
 function FlagBadges({ flag }: { flag: RuntimeFlagState }) {

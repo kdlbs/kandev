@@ -57,10 +57,12 @@ type AgentInfoResponse struct {
 
 // InitializeResponse is the response to an initialize call
 type InitializeResponse struct {
-	Success         bool                 `json:"success"`
-	AgentInfo       *AgentInfoResponse   `json:"agent_info,omitempty"`
-	DurableDelivery *DurableDeliveryInfo `json:"durable_delivery,omitempty"`
-	Error           string               `json:"error,omitempty"`
+	ACPProtocolVersion uint16               `json:"acp_protocol_version,omitempty"`
+	ProcessGeneration  uint64               `json:"process_generation,omitempty"`
+	Success            bool                 `json:"success"`
+	AgentInfo          *AgentInfoResponse   `json:"agent_info,omitempty"`
+	DurableDelivery    *DurableDeliveryInfo `json:"durable_delivery,omitempty"`
+	Error              string               `json:"error,omitempty"`
 }
 
 // DurableDeliveryInfo is separate from ACP capabilities. It describes the
@@ -904,12 +906,12 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
-	adapter, generationCurrent := s.procMgr.GetAdapterForGeneration(req.ProcessGeneration)
+	agentAdapter, generationCurrent := s.procMgr.GetAdapterForGeneration(req.ProcessGeneration)
 	if !generationCurrent {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent process generation changed before initialization", nil)
 		return resp
 	}
-	if adapter == nil {
+	if agentAdapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
@@ -922,30 +924,28 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 		return resp
 	}
 
-	if err := adapter.Initialize(ctx); err != nil {
+	agentAdapter, generation, err := s.procMgr.InitializeAdapter(ctx, agentAdapter, req.ProcessGeneration)
+	if err != nil {
 		s.logger.Error("initialize failed", zap.Error(err))
 		var details map[string]any
-		if evidence := s.procMgr.ManagedStartupEvidence(ctx, req.ProcessGeneration); evidence != nil {
+		if evidence := s.procMgr.ManagedStartupEvidence(ctx, generation); evidence != nil {
 			details = map[string]any{"startup_evidence": evidence}
 		}
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), details)
 		return resp
 	}
 
-	s.procMgr.ManagedRuntimeInitialized(ctx, req.ProcessGeneration)
+	s.procMgr.ManagedRuntimeInitialized(ctx, generation)
 
 	// Get agent info after successful initialization
 	var agentInfoResp *AgentInfoResponse
-	if info := adapter.GetAgentInfo(); info != nil {
+	if info := agentAdapter.GetAgentInfo(); info != nil {
 		agentInfoResp = &AgentInfoResponse{
 			Name:    info.Name,
 			Version: info.Version,
 		}
 	}
-	if capabilities, ok := adapter.(interface {
-		SupportsSessionResume() bool
-		SupportsSessionLoad() bool
-	}); ok {
+	if capabilities, ok := agentAdapter.(adapter.SessionCapabilityProvider); ok {
 		if agentInfoResp == nil {
 			agentInfoResp = &AgentInfoResponse{}
 		}
@@ -954,8 +954,10 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 	}
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, InitializeResponse{
-		Success:   true,
-		AgentInfo: agentInfoResp,
+		Success:            true,
+		AgentInfo:          agentInfoResp,
+		ACPProtocolVersion: adapter.ACPProtocolVersion(agentAdapter),
+		ProcessGeneration:  generation,
 		DurableDelivery: &DurableDeliveryInfo{
 			Version:    deliveryCapability.Version,
 			Durable:    deliveryCapability.Durable,
@@ -1445,6 +1447,10 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 			err = prompt(context.Background())
 		}
 		if err != nil {
+			var reported *streams.ReportedPromptFailure
+			if errors.As(err, &reported) {
+				return
+			}
 			if acptransport.IsPromptAbandonedAfterCancel(err) {
 				s.logger.Info("async prompt abandoned after cancel; suppressing stale error event",
 					zap.Error(err))
