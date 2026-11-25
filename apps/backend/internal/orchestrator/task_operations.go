@@ -789,6 +789,7 @@ type startCreatedSessionOptions struct {
 	beforeInitialPromptDispatch    func() error
 	beforeProviderAdmission        func(executionID string) error
 	onExecutionAdmitted            func(executionID string)
+	acceptInitialPrompt            func(executionID string) bool
 	onInitialPromptAccepted        func(executionID string)
 	onInitialPromptFailed          func()
 	onInitialPromptAdmissionFailed func(error)
@@ -1149,7 +1150,7 @@ func (s *Service) startCreatedSession(
 		OnStartAttemptClaimed: options.onQuickChatStartAttemptClaimed,
 	}
 	if err := s.configureInitialPromptDispatch(
-		ctx, sessionID, initialTurnID, initialTurnCreated, effectivePrompt, attachments, options, &launchOptions,
+		ctx, taskID, session, initialTurnID, initialTurnCreated, effectivePrompt, attachments, options, &launchOptions,
 	); err != nil {
 		return nil, err
 	}
@@ -1199,7 +1200,9 @@ func (s *Service) startCreatedSession(
 
 func (s *Service) configureInitialPromptDispatch(
 	ctx context.Context,
-	sessionID, turnID string,
+	taskID string,
+	session *models.TaskSession,
+	turnID string,
 	turnCreated bool,
 	prompt string,
 	attachments []v1.MessageAttachment,
@@ -1212,12 +1215,49 @@ func (s *Service) configureInitialPromptDispatch(
 	if options.beforeInitialPromptDispatch != nil {
 		if err := options.beforeInitialPromptDispatch(); err != nil {
 			if turnCreated {
-				s.completeTurnIfCurrent(ctx, sessionID, turnID)
+				s.completeTurnIfCurrent(ctx, session.ID, turnID)
 			}
 			return err
 		}
 	}
-	launchOptions.OnInitialPromptAccepted = options.onInitialPromptAccepted
+	snapshot := s.captureInterruptedTaskWarning(ctx, taskID, session, "", turnID, turnID)
+	var admittedExecutionMu sync.Mutex
+	var admittedExecutionID string
+	if snapshot.captured {
+		originalExecutionAdmitted := launchOptions.OnExecutionAdmitted
+		launchOptions.OnExecutionAdmitted = func(executionID string) {
+			admittedExecutionMu.Lock()
+			admittedExecutionID = executionID
+			admittedExecutionMu.Unlock()
+			if originalExecutionAdmitted != nil {
+				originalExecutionAdmitted(executionID)
+			}
+		}
+	}
+	originalPromptAccepted := options.onInitialPromptAccepted
+	launchOptions.OnInitialPromptAccepted = originalPromptAccepted
+	if snapshot.captured || options.acceptInitialPrompt != nil {
+		launchOptions.OnInitialPromptAccepted = func(executionID string) {
+			if options.acceptInitialPrompt != nil && !options.acceptInitialPrompt(executionID) {
+				return
+			}
+			if originalPromptAccepted != nil {
+				originalPromptAccepted(executionID)
+			}
+			if !snapshot.captured {
+				return
+			}
+			admittedExecutionMu.Lock()
+			expectedExecutionID := admittedExecutionID
+			admittedExecutionMu.Unlock()
+			if expectedExecutionID == "" || expectedExecutionID != executionID {
+				return
+			}
+			s.resolveInterruptedTaskWarningAfterPromptAcceptance(
+				ctx, snapshot, executionID, turnID, turnID,
+			)
+		}
+	}
 	launchOptions.OnInitialPromptFailed = options.onInitialPromptFailed
 	if options.beforeProviderAdmission != nil {
 		launchOptions.BeforeInitialPromptDispatch = func(_ context.Context, executionID, _ string, _ []v1.MessageAttachment) error {
@@ -5975,8 +6015,15 @@ func (s *Service) deleteSessionAndPublishRemoval(ctx context.Context, taskID, se
 	if err != nil {
 		return err
 	}
+	previousTask, _ := s.repo.GetTask(ctx, taskID)
 	if err := s.deleteSessionAndCleanAttachments(ctx, session); err != nil {
 		return err
+	}
+	if previousTask != nil {
+		updatedTask, taskErr := s.repo.GetTask(ctx, taskID)
+		if taskErr == nil && updatedTask != nil && models.StringFromAny(previousTask.Metadata[models.MetaKeyInterruptedAt]) != models.StringFromAny(updatedTask.Metadata[models.MetaKeyInterruptedAt]) {
+			s.publishTaskUpdated(ctx, updatedTask)
+		}
 	}
 	if s.eventBus != nil {
 		if err := s.eventBus.Publish(ctx, events.SessionRemoved, bus.NewEvent(
@@ -7068,7 +7115,7 @@ type promptDispatchOutcome struct {
 	accepted       bool
 	publicationErr error
 	turnID         string
-	onAccepted     func(turnID string)
+	onAccepted     func(executionID, turnID string)
 }
 
 func (o *promptDispatchOutcome) recordAccepted(publicationErr error) {
@@ -8024,33 +8071,53 @@ func (s *Service) preparePromptDispatchCallback(
 	)
 	dispatchOutcome = &promptDispatchOutcome{}
 	dispatchOutcome.turnID = rollback.turnID
-	dispatchOutcome.onAccepted = options.onAccepted
+	if options.onAccepted != nil {
+		dispatchOutcome.onAccepted = func(_, turnID string) { options.onAccepted(turnID) }
+	}
 	acceptedExecutionID := session.AgentExecutionID
 	if resumeAttempt != nil && resumeAttempt.execution() != "" {
 		acceptedExecutionID = resumeAttempt.execution()
 	}
+	acceptedAttemptID := rollback.turnID
+	if resumeAttempt != nil {
+		acceptedAttemptID = resumeAttempt.identity()
+	}
+	interruptionSnapshot := s.captureInterruptedTaskWarning(
+		promptCtx, taskID, session, acceptedExecutionID, acceptedAttemptID, rollback.turnID,
+	)
+	if interruptionSnapshot.captured {
+		originalOnAccepted := dispatchOutcome.onAccepted
+		dispatchOutcome.onAccepted = func(executionID, turnID string) {
+			if originalOnAccepted != nil {
+				originalOnAccepted(executionID, turnID)
+			}
+			s.resolveInterruptedTaskWarningAfterPromptAcceptance(
+				promptCtx, interruptionSnapshot, executionID, acceptedAttemptID, turnID,
+			)
+		}
+	}
 	if options.retireInitialSubmissionReplay {
 		originalOnAccepted := dispatchOutcome.onAccepted
-		dispatchOutcome.onAccepted = func(turnID string) {
+		dispatchOutcome.onAccepted = func(executionID, turnID string) {
 			retireCtx, cancel := context.WithTimeout(context.WithoutCancel(promptCtx), 5*time.Second)
 			defer cancel()
 			if err := s.blockInitialSubmissionReplayForOtherPrompt(
-				retireCtx, sessionID, acceptedExecutionID, turnID,
+				retireCtx, sessionID, executionID, turnID,
 			); err != nil {
 				s.logger.Warn("failed to retire original task submission after later prompt acceptance",
 					zap.String("session_id", sessionID), zap.Error(err))
 			}
 			if originalOnAccepted != nil {
-				originalOnAccepted(turnID)
+				originalOnAccepted(executionID, turnID)
 			}
 		}
 	}
 	if options.promptAccepted != nil {
 		originalOnAccepted := dispatchOutcome.onAccepted
-		dispatchOutcome.onAccepted = func(turnID string) {
+		dispatchOutcome.onAccepted = func(executionID, turnID string) {
 			options.promptAccepted.Store(true)
 			if originalOnAccepted != nil {
-				originalOnAccepted(turnID)
+				originalOnAccepted(executionID, turnID)
 			}
 		}
 	}
@@ -8531,7 +8598,7 @@ func (s *Service) promptDispatchCallbackForIdentity(
 				acceptedTurnID = reservedTurn.ID
 			}
 			if acceptedTurnID != "" {
-				outcome.onAccepted(acceptedTurnID)
+				outcome.onAccepted(executionID, acceptedTurnID)
 			}
 		}
 		outcome.recordAccepted(publicationErr)
@@ -8628,7 +8695,7 @@ func (s *Service) trySwitchModelForPromptWithAdmission(
 	resumeAttempt *resumeAttempt,
 	releaseModelSwitchAttemptGuard func(),
 ) (*PromptResult, bool, error) {
-	releaseHold, onDispatched, onFailure, holdErr := s.modelSwitchResumeCallbacks(session, model, resumeAttempt)
+	releaseHold, onDispatched, onFailure, holdErr := s.modelSwitchResumeCallbacks(ctx, session, model, resumeAttempt)
 	if holdErr != nil {
 		releaseModelSwitchAdmission(releaseAdmission)
 		return nil, true, holdErr
@@ -8719,26 +8786,47 @@ func (s *Service) finishModelSwitchPrompt(
 }
 
 func (s *Service) modelSwitchResumeCallbacks(
+	ctx context.Context,
 	session *models.TaskSession,
 	model string,
 	resumeAttempt *resumeAttempt,
 ) (release func(), onDispatched func(executionID string), onFailure func(), err error) {
 	release = func() {}
-	if resumeAttempt == nil || !modelSwitchRequired(session, model) {
+	if !modelSwitchRequired(session, model) {
 		return release, nil, nil, nil
 	}
 	registry := s.resumeAttemptStore()
-	if !registry.holdForInitialPrompt(resumeAttempt) {
-		s.cleanupCancelledResumeAttempt(resumeAttempt)
-		return nil, nil, nil, ErrResumeAttemptCancelled
+	if resumeAttempt != nil {
+		if !registry.holdForInitialPrompt(resumeAttempt) {
+			s.cleanupCancelledResumeAttempt(resumeAttempt)
+			return nil, nil, nil, ErrResumeAttemptCancelled
+		}
+		release = func() { registry.releaseInitialPromptHold(resumeAttempt) }
 	}
-	release = func() { registry.releaseInitialPromptHold(resumeAttempt) }
+	taskID, attemptID := session.TaskID, ""
+	if resumeAttempt != nil {
+		taskID, attemptID = resumeAttempt.taskID, resumeAttempt.identity()
+	}
+	snapshot := s.captureInterruptedTaskWarning(ctx, taskID, session, "", attemptID, "")
 	onDispatched = func(executionID string) {
+		if resumeAttempt == nil {
+			currentExecutionID, lookupErr := s.agentManager.GetExecutionIDForSession(
+				context.WithoutCancel(ctx), session.ID,
+			)
+			if lookupErr != nil || currentExecutionID != executionID {
+				return
+			}
+			s.resolveInterruptedTaskWarningAfterPromptAcceptance(ctx, snapshot, executionID, "", "")
+			return
+		}
 		if s.acceptResumeAttemptAtPromptAcceptance(executionID, resumeAttempt) {
+			s.resolveInterruptedTaskWarningAfterPromptAcceptance(ctx, snapshot, executionID, attemptID, "")
 			registry.finishAfterInitialPromptAcceptance(resumeAttempt)
 		}
 	}
-	onFailure = func() { registry.abortInitialPromptHold(resumeAttempt) }
+	if resumeAttempt != nil {
+		onFailure = func() { registry.abortInitialPromptHold(resumeAttempt) }
+	}
 	return release, onDispatched, onFailure, nil
 }
 

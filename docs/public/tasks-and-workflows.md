@@ -807,9 +807,10 @@ Choosing **Start agent** (or a workflow step transition) always starts the
 agent as usual, and a failed or interrupted session still shows its recovery
 actions. Other clients and direct API calls do not enforce this web preference.
 
-An interrupted task keeps a warning indicator until the agent confirms
-recovery. Opening the task or starting a recovery attempt does not clear the
-indicator; a failed attempt keeps it visible with the existing retry actions.
+An interrupted task keeps its warning until the affected session accepts a new
+prompt. Restoring the conversation does not clear the warning. A prompt that is
+rejected, remains queued, or has an unknown delivery result also keeps it. If
+another session on the task is still interrupted, the task keeps the warning.
 
 ## Use agent commands in the composer
 
