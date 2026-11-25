@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Automation } from "@/lib/types/automation";
+import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { LIVE_REFRESH_INTERVAL_MS } from "@/components/runs/use-live-refresh";
 
 const WORKSPACE_ID = "workspace-1";
@@ -59,6 +59,14 @@ function mkAutomation(overrides: Partial<Automation> = {}): Automation {
     id: AUTOMATION_ID,
     workspace_id: WORKSPACE_ID,
     name: "Nightly drift",
+    description: "",
+    workflow_id: "",
+    workflow_step_id: "",
+    agent_profile_id: "",
+    executor_profile_id: "",
+    repository_ids: [],
+    prompt: "",
+    task_title_template: "",
     enabled: true,
     max_concurrent_runs: 1,
     last_triggered_at: null,
@@ -66,7 +74,23 @@ function mkAutomation(overrides: Partial<Automation> = {}): Automation {
     updated_at: "2026-07-01T00:00:00Z",
     triggers: [],
     ...overrides,
-  } as unknown as Automation;
+  };
+}
+
+function mkRun(overrides: Partial<AutomationRun> = {}): AutomationRun {
+  return {
+    id: "run-failed",
+    automation_id: AUTOMATION_ID,
+    trigger_id: "",
+    trigger_type: "manual",
+    task_id: "",
+    status: "failed",
+    dedup_key: "",
+    trigger_data: {},
+    error_message: "",
+    created_at: new Date().toISOString(),
+    ...overrides,
+  };
 }
 
 function renderSection(collapsed = false) {
@@ -284,7 +308,7 @@ describe("AutomationsSection live running state", () => {
       });
       await waitFor(() => expect(mocks.listAutomationSummaries).toHaveBeenCalledTimes(3));
       expect(screen.queryByTestId(`sidebar-automation-running-${AUTOMATION_ID}`)).toBeNull();
-      expect(screen.getByText("Idle.")).toBeTruthy();
+      expect(screen.getByText("Succeeded.")).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }
@@ -532,4 +556,83 @@ describe("slow external definitions", () => {
       await act(async () => releases.forEach((resolve) => resolve([])));
     }
   });
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.9 AC-OFFICE-AUTOMATION-RUNS-001.19 AC-OFFICE-AUTOMATION-RUNS-001.21
+describe("newest outcome refresh", () => {
+  it("live failure becomes red with outcome before age and a newer success clears it without remount", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const createdAt = new Date(Date.now() - 4 * 60_000).toISOString();
+    const lastRun = mkRun({ created_at: createdAt });
+    mocks.listAutomationSummaries.mockResolvedValue([
+      {
+        automation_id: AUTOMATION_ID,
+        open_runs: 1,
+        last_run: { ...lastRun, status: "task_created" },
+      },
+    ]);
+    try {
+      renderOpenSection();
+      await screen.findByTestId(`sidebar-automation-running-${AUTOMATION_ID}`);
+      const row = screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`);
+      mocks.listAutomationSummaries.mockResolvedValue([
+        { automation_id: AUTOMATION_ID, open_runs: 0, last_run: lastRun },
+      ]);
+      await act(async () => vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS));
+      expect(row.querySelector(".bg-red-500")).not.toBeNull();
+      expect(screen.getByTestId(`sidebar-automation-last-run-${AUTOMATION_ID}`).textContent).toBe(
+        "Failed, 4m ago",
+      );
+      expect(row.textContent).not.toContain("Idle");
+      mocks.listAutomationSummaries.mockResolvedValue([
+        {
+          automation_id: AUTOMATION_ID,
+          open_runs: 0,
+          last_run: {
+            ...lastRun,
+            id: "new-success",
+            status: "succeeded",
+            created_at: new Date(Date.now() - 2 * 60_000).toISOString(),
+          },
+        },
+      ]);
+      await act(async () => vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS));
+      expect(screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`)).toBe(row);
+      expect(row.querySelector(".bg-emerald-500")).not.toBeNull();
+      expect(row.textContent).not.toContain("Failed");
+      expect(row.textContent).toContain("Succeeded");
+      expect(screen.getByTestId(`sidebar-automation-last-run-${AUTOMATION_ID}`).textContent).toBe(
+        "2m ago",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // @covers AC-OFFICE-AUTOMATION-RUNS-001.20
+  it.each([
+    { enabled: false, openRuns: 0, status: "failed", activity: "Paused", outcome: "Failed" },
+    { enabled: true, openRuns: 1, status: "skipped", activity: "Running", outcome: "Skipped" },
+  ] as const)(
+    "keeps $activity separate from newest $outcome",
+    async ({ enabled, openRuns, status, activity, outcome }) => {
+      mocks.listAutomations.mockResolvedValue([mkAutomation({ enabled })]);
+      mocks.listAutomationSummaries.mockResolvedValue([
+        {
+          automation_id: AUTOMATION_ID,
+          open_runs: openRuns,
+          last_run: mkRun({ id: "newest", status }),
+        },
+      ]);
+      renderOpenSection();
+      await waitFor(() =>
+        expect(
+          screen.getByTestId(`sidebar-automation-last-run-${AUTOMATION_ID}`).textContent,
+        ).toContain(outcome),
+      );
+      const row = screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`);
+      expect(row.textContent).toContain(activity);
+      expect(row.querySelector(".bg-red-500")).toBeNull();
+    },
+  );
 });

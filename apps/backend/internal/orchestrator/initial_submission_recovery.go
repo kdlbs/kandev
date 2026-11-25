@@ -152,11 +152,26 @@ func (s *Service) persistLegacyInitialSubmission(
 }
 
 func eligibleInitialSubmissionRecovery(session *models.TaskSession) bool {
-	if session == nil || session.State != models.TaskSessionStateFailed {
+	if session == nil {
 		return false
 	}
 	lastError, found := models.LoadLastAgentError(session.Metadata)
-	return found && !lastError.IsDismissed() && lastError.Phase == models.LaunchErrorPhaseBootstrap
+	if !found || lastError.IsDismissed() || lastError.Phase != models.LaunchErrorPhaseBootstrap {
+		return false
+	}
+	if session.State == models.TaskSessionStateFailed {
+		return true
+	}
+	if session.State != models.TaskSessionStateWaitingForInput || sessionHasProviderSessionToken(session) {
+		return false
+	}
+	for _, cause := range lastError.Causes {
+		if cause.Operation == models.AgentErrorCauseOperationStart &&
+			cause.Code == models.AgentErrorCauseCodeAuthenticationRequired {
+			return true
+		}
+	}
+	return false
 }
 
 func loadInitialPromptPreview(metadata map[string]interface{}) (*models.InitialPromptPreview, bool, error) {
@@ -257,6 +272,7 @@ func (s *Service) validateInitialSubmissionAttachment(
 		return v1.MessageAttachment{}, ErrInitialSubmissionUnavailable
 	}
 	return v1.MessageAttachment{
+		CommentID:    saved.CommentID,
 		AttachmentID: attachment.ID,
 		Type:         attachment.Kind,
 		Name:         attachment.Name,
@@ -581,9 +597,11 @@ func (s *Service) replayInitialPromptSubmission(
 		options.promptReferencesPrepared = true
 		options.ceilingEntryBinding = prepared.binding
 	}
+	// Dispatch-only: the resume continuation, and the session lifecycle lock it
+	// holds, ends at provider acceptance. Turn results arrive as agent events.
 	_, err := s.promptTask(
 		ctx, taskID, sessionID, prompt, "", planMode,
-		submission.Attachments, false, launchOriginManual, options,
+		submission.Attachments, true, launchOriginManual, options,
 	)
 	return err
 }

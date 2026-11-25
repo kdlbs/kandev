@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 func emptyTurnCompletePayload(
@@ -145,9 +146,10 @@ func testCompleteFrameOutputIsNotEmpty(t *testing.T, plan bool) {
 
 func TestEmptyTurnCompletionPreconditions(t *testing.T) {
 	for name, testCase := range map[string]struct {
-		data    map[string]interface{}
-		prepare func(unclassifiedWorkflowFenceFixture)
-		stale   bool
+		data                map[string]interface{}
+		prepare             func(unclassifiedWorkflowFenceFixture)
+		stale               bool
+		configurationResult bool
 	}{
 		"cancelled stop reason": {data: map[string]interface{}{"stop_reason": "cancelled"}},
 		"error completion":      {data: map[string]interface{}{"stop_reason": "end_turn", "is_error": true}},
@@ -176,6 +178,7 @@ func TestEmptyTurnCompletionPreconditions(t *testing.T) {
 		"dynamic routing unavailable": {data: endTurnData(), prepare: func(f unclassifiedWorkflowFenceFixture) {
 			f.resolver.SetEnabled(false)
 		}},
+		"recognized configuration command": {data: endTurnData(), configurationResult: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			fixture := newUnclassifiedWorkflowFenceFixture(t, false, false)
@@ -188,7 +191,13 @@ func TestEmptyTurnCompletionPreconditions(t *testing.T) {
 			if testCase.stale {
 				generation = 2
 			}
-			fixture.svc.handleAgentStreamEvent(fixture.ctx, emptyTurnCompletePayload(fixture, "execution-one", generation, testCase.data))
+			payload := emptyTurnCompletePayload(fixture, "execution-one", generation, testCase.data)
+			if testCase.configurationResult {
+				payload.Data.ConfigurationCommandResult = &streams.ConfigurationCommandResult{
+					Status: "unconfirmed", ConfigID: "model", Requested: "Mock Smart",
+				}
+			}
+			fixture.svc.handleAgentStreamEvent(fixture.ctx, payload)
 			fixture.resolver.SetEnabled(true)
 
 			status, candidate, routeGeneration, streak := loadEmptyTurnPolicy(t, fixture)

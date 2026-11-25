@@ -1076,6 +1076,13 @@ describe("ordered core session validation", () => {
               metadata: { runtime_config_snapshot: { model: "mock-fast" } },
               had_output: false,
             },
+            configuration_result: {
+              status: "applied",
+              config_id: "model",
+              requested: "Mock Smart",
+              effective: "Mock Smart",
+              confirmed: true,
+            },
           },
         ],
       },
@@ -1095,9 +1102,191 @@ describe("ordered core session validation", () => {
           route_generation: 3,
           metadata: { runtime_config_snapshot: { model: "mock-fast" } },
           had_output: false,
+          configuration_result: {
+            status: "applied",
+            config_id: "model",
+            requested: "Mock Smart",
+            effective: "Mock Smart",
+            confirmed: true,
+          },
         }),
       }),
     );
+    subscription.unsubscribe();
+  });
+
+  it("preserves a live command receipt buffered during Core subscription setup", async () => {
+    const { client, socket } = connectClient({ conversationProtocol: "v2" });
+    const completed = vi.fn();
+    client.on("session.turn.completed", completed);
+    const subscription = client.subscribeSessionWithReady("sess-1");
+    const conversationRequest = socket.sent.find(
+      (message) => message.action === "session.conversation.subscribe",
+    );
+    if (!conversationRequest) throw new Error("No source conversation subscribe request was sent");
+    const scopeID = (conversationRequest.payload as { scope_id: string }).scope_id;
+
+    socket.receive({
+      type: "notification",
+      action: "session.conversation.changed",
+      payload: {
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        base_revision: "0",
+        revision: "1",
+        operations: [
+          {
+            kind: "upsert",
+            entity: "turn",
+            id: "buffered-turn",
+            turn: {
+              task_id: "task-1",
+              started_at: "2026-09-16T11:59:00Z",
+              completed_at: "2026-09-16T12:00:01Z",
+              had_output: false,
+            },
+            configuration_result: {
+              status: "applied",
+              config_id: "model",
+              requested: "Mock Smart",
+              effective: "Mock Smart",
+              confirmed: true,
+            },
+          },
+        ],
+      },
+    });
+    expect(completed).not.toHaveBeenCalled();
+
+    const legacyRequest = socket.sent.find((message) => message.action === "session.subscribe");
+    if (!legacyRequest) throw new Error("No legacy session subscribe request was sent");
+    socket.receive({ id: legacyRequest.id, type: "response", payload: { success: true } });
+    socket.receive({
+      id: conversationRequest.id,
+      type: "response",
+      payload: {
+        success: true,
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        revision: "0",
+      },
+    });
+    await subscription.ready;
+
+    expect(completed).toHaveBeenCalledTimes(1);
+    expect(completed.mock.calls[0]?.[0]).toMatchObject({
+      payload: { id: "buffered-turn" },
+    });
+    expect(completed.mock.calls[0]?.[0].payload.configuration_result).toMatchObject({
+      status: "applied",
+      config_id: "model",
+      requested: "Mock Smart",
+      effective: "Mock Smart",
+      confirmed: true,
+    });
+    subscription.unsubscribe();
+  });
+
+  it("preserves a command receipt buffered after the Core recovery checkpoint", async () => {
+    const { client, socket } = connectClient({ conversationProtocol: "v2" });
+    const completed = vi.fn();
+    const recover = vi.fn<() => Promise<boolean>>();
+    client.on("session.turn.completed", completed);
+    const subscription = client.subscribeSessionWithReady("sess-1");
+    const conversationRequest = socket.sent.find(
+      (message) => message.action === "session.conversation.subscribe",
+    );
+    const legacyRequest = socket.sent.find((message) => message.action === "session.subscribe");
+    if (!conversationRequest || !legacyRequest) {
+      throw new Error("Core session subscription requests were not sent");
+    }
+    const scopeID = (conversationRequest.payload as { scope_id: string }).scope_id;
+    socket.receive({ id: legacyRequest.id, type: "response", payload: { success: true } });
+    socket.receive({
+      id: conversationRequest.id,
+      type: "response",
+      payload: {
+        success: true,
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        revision: "0",
+      },
+    });
+    await subscription.ready;
+
+    let resolveRecovery!: (repaired: boolean) => void;
+    const recovery = new Promise<boolean>((resolve) => {
+      resolveRecovery = resolve;
+    });
+    recover.mockReturnValue(recovery);
+    client.registerCoreSessionRecovery("sess-1", recover);
+    socket.receive({
+      type: "notification",
+      action: "session.conversation.changed",
+      payload: {
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        base_revision: "1",
+        revision: "2",
+        operations: [],
+      },
+    });
+    await vi.waitFor(() => expect(recover).toHaveBeenCalledTimes(1));
+    socket.receive({
+      type: "notification",
+      action: "session.conversation.changed",
+      payload: {
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        base_revision: "2",
+        revision: "3",
+        operations: [
+          {
+            kind: "upsert",
+            entity: "turn",
+            id: "recovered-turn",
+            turn: {
+              task_id: "task-1",
+              started_at: "2026-09-16T11:59:00Z",
+              completed_at: "2026-09-16T12:00:01Z",
+              had_output: false,
+            },
+            configuration_result: {
+              status: "applied",
+              config_id: "model",
+              requested: "Mock Smart",
+              effective: "Mock Smart",
+              confirmed: true,
+            },
+          },
+        ],
+      },
+    });
+    resolveRecovery(true);
+
+    await vi.waitFor(() => expect(completed).toHaveBeenCalledTimes(1));
+    expect(completed.mock.calls[0]?.[0]).toMatchObject({
+      payload: {
+        id: "recovered-turn",
+        configuration_result: {
+          status: "applied",
+          config_id: "model",
+          requested: "Mock Smart",
+          effective: "Mock Smart",
+          confirmed: true,
+        },
+      },
+    });
     subscription.unsubscribe();
   });
 

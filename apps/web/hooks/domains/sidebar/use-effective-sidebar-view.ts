@@ -1,8 +1,8 @@
 import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
 import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { cloneSidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
 import { DEFAULT_VIEW } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { sidebarViewWithDraft } from "@/lib/state/slices/ui/sidebar-view-disclosure";
 
 /**
  * Active sidebar view merged with any in-flight draft. Used by both desktop
@@ -14,15 +14,6 @@ export function useEffectiveSidebarView(workspaceId?: string | null) {
   return useMemo(() => {
     const active = sidebarSlice.views.find((v) => v.id === sidebarSlice.activeViewId);
     if (!active) return sidebarSlice.views[0] ?? DEFAULT_VIEW;
-    const d = sidebarSlice.draft;
-    if (!d || d.baseViewId !== active.id) return active;
-    return {
-      ...active,
-      filters: d.filters,
-      sort: d.sort,
-      group: d.group,
-      groupIndent: d.groupIndent,
-      taskRow: cloneSidebarTaskRowPresentation(d.taskRow ?? active.taskRow),
-    };
+    return sidebarViewWithDraft(active, sidebarSlice.draft);
   }, [sidebarSlice.views, sidebarSlice.activeViewId, sidebarSlice.draft]);
 }

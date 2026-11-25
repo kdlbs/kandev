@@ -74,8 +74,8 @@ func (f *completionFixture) assertOrder(finalID string, completes bool) {
 	require.Len(f.t, steps, 3)
 	last := steps[len(steps)-1]
 	require.Equal(f.t, finalID, last.ID)
-	require.Equal(f.t, completes, workflowmodels.IsTerminalStep(last, nil))
-	require.False(f.t, workflowmodels.IsTerminalStep(steps[1], last))
+	require.Equal(f.t, completes, workflowmodels.CompletesTaskOnEnter(last, nil))
+	require.False(f.t, workflowmodels.CompletesTaskOnEnter(steps[1], last))
 }
 
 func (f *completionFixture) task(id string, state v1.TaskState, step string) *taskmodels.Task {

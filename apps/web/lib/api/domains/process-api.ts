@@ -28,6 +28,9 @@ export async function publishHtmlPreview(
   );
 }
 
+/** Cache buster; the `kandev_` prefix keeps it out of preview page routes. */
+const HTML_PREVIEW_VERSION_PARAM = "kandev_preview_version"; // i18n-exempt: URL parameter name
+
 export function buildHtmlPreviewProxyUrl(
   sessionId: string,
   response: HtmlPreviewPublishResponse,
@@ -42,7 +45,7 @@ export function buildHtmlPreviewProxyUrl(
   const url = new URL(
     `${baseUrl}/port-proxy/${encodeURIComponent(sessionId)}/${response.port}${path}`,
   );
-  url.searchParams.set("v", String(response.version));
+  url.searchParams.set(HTML_PREVIEW_VERSION_PARAM, String(response.version));
   return url.toString();
 }
 

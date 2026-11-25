@@ -1,7 +1,9 @@
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { useCallback, type ReactNode } from "react";
 import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { DiffComment } from "@/lib/diff/types";
 import type { TaskReviewFinding } from "@/lib/types/review";
+import { useOptionalAppStore } from "@/components/state-provider";
 import { CommentForm } from "./comment-form";
 import { CommentDisplay } from "./comment-display";
 import { HunkActionBar } from "./hunk-action-bar";
@@ -23,10 +25,16 @@ type UseAnnotationRendererOpts = {
   handleRevertBlock: (changeBlockId: string) => Promise<void>;
   onButtonEnter: () => void;
   onButtonLeave: () => void;
-  handleCommentSubmit: (content: string) => void;
-  handleCommentSubmitAndRun?: (content: string) => void;
+  handleCommentSubmit: (content: string, attachments?: MessageAttachment[]) => void;
+  handleCommentSubmitAndRun?: (content: string, attachments?: MessageAttachment[]) => void;
   submitDisabled: boolean;
-  handleCommentUpdate: (commentId: string, content: string) => void;
+  sessionId?: string;
+  draftKey?: string;
+  handleCommentUpdate: (
+    commentId: string,
+    content: string,
+    attachments?: MessageAttachment[],
+  ) => void;
   handleCommentDelete: (commentId: string) => void;
   handleCommentRun?: (comment: DiffComment) => void;
   setShowCommentForm: (show: boolean) => void;
@@ -36,6 +44,30 @@ type UseAnnotationRendererOpts = {
 
 export type { AnnotationMetadata };
 
+function EditAnnotationForm({
+  taskId,
+  comment,
+  onUpdate,
+  onCancel,
+}: {
+  taskId: string | null;
+  comment: DiffComment;
+  onUpdate: UseAnnotationRendererOpts["handleCommentUpdate"];
+  onCancel: () => void;
+}) {
+  return (
+    <div className="my-1 px-2">
+      <CommentForm
+        initialContent={comment.text}
+        attachmentOptions={taskId ? { taskId, initial: comment.attachments } : undefined}
+        onSubmit={(text, attachments) => onUpdate(comment.id, text, attachments)}
+        onCancel={onCancel}
+        isEditing
+      />
+    </div>
+  );
+}
+
 export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
   const {
     handleRevertBlock,
@@ -44,6 +76,8 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
     handleCommentSubmit,
     handleCommentSubmitAndRun,
     submitDisabled,
+    sessionId,
+    draftKey,
     handleCommentUpdate,
     handleCommentDelete,
     handleCommentRun,
@@ -52,6 +86,8 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
     setEditingComment,
   } = opts;
 
+  const taskId = useOptionalAppStore((state) => state.tasks.activeTaskId, null);
+  const attachmentTask = sessionId ? taskId : null;
   return useCallback(
     (annotation: DiffLineAnnotation<AnnotationMetadata>): ReactNode => {
       const { type, comment, isEditing, changeBlockId, finding, findingStaleReason } =
@@ -61,9 +97,7 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
         return <InlineReviewFinding finding={finding} staleReason={findingStaleReason} />;
       }
 
-      if (type === "walkthrough-step") {
-        return <WalkthroughStepCard key="walkthrough-step" />;
-      }
+      if (type === "walkthrough-step") return <WalkthroughStepCard key="walkthrough-step" />;
 
       if (type === "hunk-actions" && changeBlockId) {
         return (
@@ -81,6 +115,8 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
         return (
           <div className="my-1 px-2">
             <CommentForm
+              key={`${attachmentTask}:${draftKey}`}
+              attachmentOptions={attachmentTask ? { taskId: attachmentTask } : undefined}
               onSubmit={handleCommentSubmit}
               onSubmitAndRun={handleCommentSubmitAndRun}
               submitDisabled={submitDisabled}
@@ -95,14 +131,13 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
 
       if (isEditing && comment) {
         return (
-          <div className="my-1 px-2">
-            <CommentForm
-              initialContent={comment.text}
-              onSubmit={(content) => handleCommentUpdate(comment.id, content)}
-              onCancel={() => setEditingComment(null)}
-              isEditing
-            />
-          </div>
+          <EditAnnotationForm
+            key={`${attachmentTask}:${comment.id}`}
+            taskId={attachmentTask}
+            comment={comment}
+            onUpdate={handleCommentUpdate}
+            onCancel={() => setEditingComment(null)}
+          />
         );
       }
 
@@ -123,6 +158,8 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
       return null;
     },
     [
+      attachmentTask,
+      draftKey,
       setEditingComment,
       handleCommentDelete,
       handleCommentRun,

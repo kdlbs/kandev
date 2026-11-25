@@ -2,6 +2,7 @@
 // missing/empty/failure states (docs/specs/coordinator/requirements/needs-you.md,
 // #routes-and-sidebar, #failure-and-recovery).
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { linkToCoordinator, linkToCoordinatorNeedsYou } from "../../../lib/coordinator/links";
 
 test.describe("Coordinator missing/empty/failure states", () => {
@@ -97,13 +98,29 @@ test.describe("Coordinator missing/empty/failure states", () => {
       task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
-    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    watchWs(testPage);
+    const [goalResponse] = await Promise.all([
+      waitForHttp(testPage, "GET", new RegExp(`/coordinators/${coordinator.id}/goal$`)),
+      testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id)),
+    ]);
+    expect(goalResponse.ok()).toBe(true);
 
     const empty = testPage.getByTestId("empty-needs-you-state");
     await expect(empty).toBeVisible();
     await expect(empty).toContainText("Nothing needs you. That is the working state.");
     await expect(empty).toContainText("0 cards are running.");
     await expect(empty.getByRole("link", { name: "See what is running" })).toBeVisible();
+
+    const goal = testPage.getByTestId("goal-note");
+    await expect(goal).toBeVisible();
+    const strip = await testPage.getByTestId("coordinator-count-strip").boundingBox();
+    expect(strip).not.toBeNull();
+    for (const section of [goal, empty]) {
+      const box = await section.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeCloseTo(strip!.x, 0);
+      expect(box!.width).toBeCloseTo(strip!.width, 0);
+    }
   });
 
   test("a failed stalls read shows the per-input banner and recovers on Try again (AC .007.3, .007.5)", async ({

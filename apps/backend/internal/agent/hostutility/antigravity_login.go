@@ -42,6 +42,7 @@ type antigravityLoginAttempt struct {
 	cancel    context.CancelFunc
 	done      chan struct{}
 	inst      *instance
+	selection agents.LocalRuntimeSelection
 }
 
 func (a *antigravityLoginAttempt) snapshot() AntigravityLoginSnapshot {
@@ -123,8 +124,9 @@ func (m *Manager) StartAntigravityLogin(ctx context.Context) (AntigravityLoginSn
 	if _, err := ag.IsInstalled(ctx); err != nil {
 		return AntigravityLoginSnapshot{}, err
 	}
-	if _, ok := ag.(agents.LocalRuntimeAgent); !ok {
-		return AntigravityLoginSnapshot{}, errors.New("antigravity local runtime is unavailable")
+	selection, err := resolveAntigravityStandaloneRuntime(ctx, ag)
+	if err != nil {
+		return AntigravityLoginSnapshot{}, err
 	}
 	m.loginMu.Lock()
 	m.mu.RLock()
@@ -148,11 +150,30 @@ func (m *Manager) StartAntigravityLogin(ctx context.Context) (AntigravityLoginSn
 		expiresAt: time.Now().Add(antigravityLoginTimeout),
 		cancel:    cancel,
 		done:      make(chan struct{}),
+		selection: selection,
 	}
 	m.loginAttempt = attempt
 	m.loginMu.Unlock()
 	go m.runAntigravityLogin(attemptCtx, attempt)
 	return attempt.snapshot(), nil
+}
+
+func resolveAntigravityStandaloneRuntime(
+	ctx context.Context,
+	ag agents.Agent,
+) (agents.LocalRuntimeSelection, error) {
+	resolver, ok := ag.(agents.SavedLocalRuntimeAgent)
+	if !ok {
+		return agents.LocalRuntimeSelection{}, errors.New("antigravity standalone runtime is unavailable")
+	}
+	selection, err := resolver.ResolveSavedLocalRuntime(ctx, "antigravity-standalone")
+	if err != nil {
+		return agents.LocalRuntimeSelection{}, err
+	}
+	if selection.Variant != acpcompat.AntigravityRuntimeStandalone || selection.Command.IsEmpty() {
+		return agents.LocalRuntimeSelection{}, errors.New("antigravity standalone runtime is unavailable")
+	}
+	return selection, nil
 }
 
 // GetAntigravityLogin returns the latest or named attempt snapshot.
@@ -222,7 +243,7 @@ func (m *Manager) runAntigravityLogin(ctx context.Context, attempt *antigravityL
 		return
 	}
 	attempt.update("checking", "", "", "")
-	caps, err := m.Refresh(ctx, agents.AntigravityACPAgentID)
+	caps, err := m.probeWithLocalRuntime(ctx, agents.AntigravityACPAgentID, attempt.selection)
 	if err != nil || caps.Status != StatusOK {
 		if ctx.Err() != nil {
 			finishLoginCancellation(attempt, ctx)
@@ -231,6 +252,8 @@ func (m *Manager) runAntigravityLogin(ctx context.Context, attempt *antigravityL
 		attempt.finish("succeeded", "catalog_unavailable", "Signed in, but model discovery failed. Retry model discovery.")
 		return
 	}
+	// Keep the published capability snapshot tied to the runtime new sessions use.
+	_, _ = m.Refresh(ctx, agents.AntigravityACPAgentID)
 	attempt.finish("succeeded", "", "")
 }
 
@@ -253,11 +276,13 @@ func (m *Manager) createAntigravityLoginInstance(
 	}
 	workDir := fmt.Sprintf("%s/antigravity-login-%s", parentTmpDir, attempt.id)
 	req := &agentctlCreateInstanceRequest{
-		Protocol:   "acp",
-		AgentType:  agents.AntigravityACPAgentID,
-		Env:        agents.RuntimeEnvFor(ia),
-		StripEnv:   agents.StripEnvFor(ia),
-		AuthPolicy: acpcompat.AntigravityAuthPolicy(true),
+		Protocol:  "acp",
+		AgentType: agents.AntigravityACPAgentID,
+		Env:       agents.RuntimeEnvFor(ia),
+		StripEnv:  agents.StripEnvFor(ia),
+		AuthPolicy: acpcompat.AntigravityAuthPolicyForRuntime(
+			attempt.selection.Variant, attempt.selection.Version, true,
+		),
 	}
 	req.AuthPolicy.AttemptID = attempt.id
 	inst, err := m.createInstanceWithRequest(ctx, agents.AntigravityACPAgentID, workDir, req)
@@ -273,9 +298,14 @@ func (m *Manager) configureAntigravityLoginInstance(
 	ia agents.InferenceAgent,
 	attempt *antigravityLoginAttempt,
 ) error {
-	command, localEnv, err := m.resolveInferenceCommand(ctx, agents.AntigravityACPAgentID, ia, agents.Command{})
-	if err != nil {
-		return err
+	command := attempt.selection.Command
+	localEnv := attempt.selection.Env
+	if command.IsEmpty() {
+		var err error
+		command, localEnv, err = m.resolveInferenceCommand(ctx, agents.AntigravityACPAgentID, ia, agents.Command{})
+		if err != nil {
+			return err
+		}
 	}
 	args := command.Args()
 	if len(args) == 0 {

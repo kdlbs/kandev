@@ -34,6 +34,7 @@ func freshStartSessionCreated(generation uint64, replaces bool) watcher.ACPSessi
 		ACPSessionID:                       "replacement-native",
 		DeliveryIncarnationID:              freshStartIncarnation,
 		DeliveryHarnessGeneration:          generation,
+		AdapterVersion:                     "antigravity-cli/1.5.15",
 		DeliveryReplacesNativeConversation: replaces,
 	}
 }
@@ -50,6 +51,9 @@ func TestFreshStartSessionCreatedCommitsReplacementGeneration(t *testing.T) {
 	if current.Generation != 2 || current.PredecessorGeneration != 1 ||
 		current.NativeSessionID != "replacement-native" || current.CreationReason != "native_replaced" {
 		t.Fatalf("current generation = %+v, want committed replacement 2 after 1", current)
+	}
+	if current.AdapterVersion != data.AdapterVersion {
+		t.Fatalf("adapter version = %q, want %q", current.AdapterVersion, data.AdapterVersion)
 	}
 }
 

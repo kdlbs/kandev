@@ -15,7 +15,8 @@ Write E2E tests using TDD (Red-Green-Refactor). Always run the tests you create 
 
 ## Related skills
 
-- **`/tdd`** — Follow the Red-Green-Refactor cycle when writing tests.
+- **`/tdd`** — Apply the [test-value gate](../tdd/SKILL.md#test-value-gate) before
+  adding a scenario. Follow the Red-Green-Refactor cycle.
 - **`/pr-fixup`** — Use after the PR opens only for CI or reviewer findings.
 - **`/playwright-cli`** — Interactive browser automation. Use to validate features against the dev server before writing tests, and to debug failing tests with `--debug=cli`.
 
@@ -138,7 +139,10 @@ Without this, tests can exercise stale code: after backend changes run `make -C 
 2. Import fixtures from `../../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow). Pull `backend` from the fixture too when you need the backend URL — it's worker-scoped, dynamic, and `process.env.KANDEV_API_BASE_URL` is **not** set in the Playwright runner. Use `backend.baseUrl`.
 3. Use page objects for common interactions; create new ones for new pages. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data
 4. Workspace-scoped mock events must carry the real `workspace_id`. `mockGitHubAssociateTaskPR` defaults an omitted ID to the active workspace; pass it explicitly for foreign-workspace cases, and keep production handlers fail-closed for missing or mismatched IDs. Direct-store bridges that inject Git status or inspect Changes must resolve `environmentIdBySessionId[sessionId]` and use environment-keyed state; sessions can share one environment.
-5. For new status, hydration, or persistence assertions, inventory existing action/mutation scenarios and add coverage beside them, never replace them; preserve response/error, idempotency/duplicate-suppression, and desktop/mobile pointer/target checks, then run affected specs together.
+5. Find existing scenarios for the action before adding status, hydration, or
+   persistence assertions. Extend a suitable scenario when it can exercise the
+   regression. Preserve coverage for distinct response, error, idempotency, and
+   desktop or mobile interaction failures. Run the affected specs together.
 
 ### Input-modality behavior
 

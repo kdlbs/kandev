@@ -23,10 +23,11 @@ type UserInputQuestion struct {
 // UserInputRequest identifies one provider question request. Provider thread,
 // turn, and item IDs remain distinct from Kandev session and task IDs.
 type UserInputRequest struct {
-	ThreadID  string
-	TurnID    string
-	ItemID    string
-	Questions []UserInputQuestion
+	ThreadID           string
+	TurnID             string
+	ItemID             string
+	Questions          []UserInputQuestion
+	ScopedCancellation bool // ItemID identifies a single cancellable request.
 }
 
 // UserInputAttachment is one file delivered with a protocol-native answer.

@@ -20,7 +20,7 @@ import (
 func TestRetiredCleanupRequiresOriginalProcessTermination(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	process := exec.CommandContext(ctx, "/bin/sleep", "60")
+	process := exec.CommandContext(ctx, "sleep", "60")
 	process.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	require.NoError(t, process.Start())
 	t.Cleanup(func() { _ = process.Process.Kill(); _ = process.Wait() })

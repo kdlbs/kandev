@@ -399,7 +399,10 @@ func TestApplyWorkflowAndPlanMode_PreservesEmptyAcceptedPromptSnapshot(t *testin
 
 			got, _, gotTrustedContext := svc.applyWorkflowAndPlanModeWithPromptContextOptions(
 				ctx, preparedPrompt, "task-accepted-empty", "session-accepted-empty", test.workflowStepID,
-				false, false, false, false, trustedContext, true, false,
+				false, false, false, workflowPromptOptions{
+					trustedPromptContext:     trustedContext,
+					promptReferencesPrepared: true,
+				},
 			)
 
 			require.Empty(t, gotTrustedContext)

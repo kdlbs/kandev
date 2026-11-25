@@ -64,11 +64,11 @@ func (m *Manager) waitForNativeResumeProjection(ctx context.Context, owner nativ
 	waiting := false
 	for {
 		if ctx.Err() != nil {
-			return nil, errors.Join(errNativeResumeProjectionLag, ctx.Err())
+			return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalProjectionPending, errors.Join(errNativeResumeProjectionLag, ctx.Err()))
 		}
 		proof, err := m.nativeResumeOwnedProof(ctx, owner)
 		if ctx.Err() != nil {
-			return nil, errors.Join(errNativeResumeProjectionLag, ctx.Err())
+			return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalProjectionPending, errors.Join(errNativeResumeProjectionLag, ctx.Err()))
 		}
 		lag := errors.Is(err, errNativeResumeProjectionLag)
 		if !lag && !errors.Is(err, errNativeResumeStreamProgress) {
@@ -84,7 +84,7 @@ func (m *Manager) waitForNativeResumeProjection(ctx context.Context, owner nativ
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return nil, errors.Join(errNativeResumeProjectionLag, ctx.Err())
+			return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalProjectionPending, errors.Join(errNativeResumeProjectionLag, ctx.Err()))
 		case <-timer.C:
 		}
 	}

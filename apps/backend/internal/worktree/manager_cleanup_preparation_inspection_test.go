@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,4 +176,23 @@ func assertPreparationInspectionError(t *testing.T, err error, stage, reason str
 		require.True(t, errors.As(err, &exitError), "original Git exit must survive wrapping: %v", err)
 	}
 	require.NotContains(t, err.Error(), "private-git-output")
+}
+
+func TestCleanupPreparationEmptyCommitObject(t *testing.T) {
+	t.Setenv("GIT_NO_LAZY_FETCH", "1")
+	mgr, store := newReferenceCleanupTestManager(t)
+	seedReferenceCleanupSession(t, store, "task-inspection", "session-inspection", models.TaskSessionStateCompleted)
+	wt := newPreparationInspectionWorktree(t, mgr, "empty-object")
+	head := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+	object := filepath.Join(wt.RepositoryPath, ".git", "objects", head[:2], head[2:])
+	require.NoError(t, os.MkdirAll(filepath.Dir(object), 0700))
+	if _, err := os.Stat(object); err == nil {
+		require.NoError(t, os.Chmod(object, 0600))
+	}
+	require.NoError(t, os.WriteFile(object, nil, 0600))
+	_, err := mgr.CaptureCleanupHeadOIDs(t.Context(), []*Worktree{wt})
+	var inspection *CleanupInspectionError
+	require.ErrorAs(t, err, &inspection)
+	require.Equal(t, CleanupInspectionStageCommit, inspection.Stage)
+	require.FileExists(t, filepath.Join(wt.Path, "preserve.txt"))
 }

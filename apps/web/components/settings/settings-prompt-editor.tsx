@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import {
   computeEditorHeight,
@@ -74,10 +75,17 @@ export function SettingsPromptEditor({
   return (
     <div
       className="settings-prompt-editor space-y-1.5"
+      data-read-only={readOnly || undefined}
       data-settings-dirty={isDirty}
       data-settings-dirty-level={dirtyLevel}
     >
-      <div className="rounded-md border border-border overflow-hidden" data-testid={testId}>
+      <div
+        className={cn(
+          "rounded-md border border-border overflow-hidden",
+          readOnly && "border-dashed",
+        )}
+        data-testid={testId}
+      >
         <ScriptEditor
           value={value}
           onChange={onChange}

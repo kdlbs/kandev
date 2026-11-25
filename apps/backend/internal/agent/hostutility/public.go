@@ -97,7 +97,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			Protocol: cfg.Protocol,
 			Command:  command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, LaunchWrapper: launchwrapper.Profile(prefix),
-			ProviderGatewayAuth: gatewayAuth, AuthPolicy: hostUtilityAuthPolicy(ia), OperatorDefined: cfg.OperatorDefined,
+			ProviderGatewayAuth: gatewayAuth, AuthPolicy: hostUtilityAuthPolicy(ia, command), OperatorDefined: cfg.OperatorDefined,
 		},
 	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
@@ -266,12 +266,16 @@ func (m *Manager) Refresh(ctx context.Context, agentType string) (AgentCapabilit
 		if errors.Is(err, errAgentNotInstalled) {
 			status = StatusNotInstalled
 		}
-		m.cache.set(AgentCapabilities{
+		caps := AgentCapabilities{
 			AgentType:     agentType,
 			Status:        status,
 			Error:         err.Error(),
 			LastCheckedAt: time.Now(),
-		})
+		}
+		if ia, ok := m.registry.GetInferenceAgent(agentType); ok {
+			m.stampConfiguredRuntime(ctx, &caps, ia)
+		}
+		m.cache.set(caps)
 		return AgentCapabilities{}, err
 	}
 	caps := m.probe(ctx, inst, ia, true)
@@ -296,6 +300,22 @@ func (m *Manager) RefreshWithCommand(
 		m.PublishCapabilities(agentType, caps)
 	}
 	return caps, nil
+}
+
+func (m *Manager) probeWithLocalRuntime(
+	ctx context.Context,
+	agentType string,
+	selection agents.LocalRuntimeSelection,
+) (AgentCapabilities, error) {
+	if selection.Command.IsEmpty() {
+		return AgentCapabilities{}, errors.New("local runtime command is empty")
+	}
+	m.invalidateModelConfigCache(agentType)
+	inst, ia, err := m.getInstance(ctx, agentType)
+	if err != nil {
+		return AgentCapabilities{}, err
+	}
+	return m.probeWithOverrides(ctx, inst, ia, true, selection.Command, "", selection.Env, nil), nil
 }
 
 // ProbeWithCommand runs a trusted command override without changing the live
@@ -454,7 +474,7 @@ func (m *Manager) ExecutePromptWithMCP(
 			WorkDir:         inst.workDir,
 			Env:             mergeInferenceEnv(agents.RuntimeEnvFor(ia), localEnv),
 			StripEnv:        agents.StripEnvFor(ia),
-			AuthPolicy:      hostUtilityAuthPolicy(ia),
+			AuthPolicy:      hostUtilityAuthPolicy(ia, command),
 			OperatorDefined: cfg.OperatorDefined,
 		},
 		MCPServers: mcpServers,

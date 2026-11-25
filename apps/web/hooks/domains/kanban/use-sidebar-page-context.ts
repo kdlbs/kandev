@@ -11,6 +11,9 @@ import { normalizeLocale } from "@/lib/i18n";
 import type { SidebarTaskQuery } from "@/lib/types/http";
 import { sidebarSortToWire } from "@/lib/sidebar/sidebar-sort-chain";
 
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import { isSidebarPluginGrouping } from "@/lib/sidebar/sidebar-plugin-grouping";
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
 const PAGE_SIZE = 100;
 function buildSidebarQuery(
   view: ReturnType<typeof useEffectiveSidebarView>,
@@ -23,6 +26,7 @@ function buildSidebarQuery(
     sort: sidebarSortToWire(view.sort),
     group: view.group,
     collapsed_group_keys: view.collapsedGroups,
+    ...(isSidebarPluginGrouping(view.group) ? { disclosure_view_id: view.id } : {}),
     collapsed_task_ids: collapsedTaskIDs,
     page,
     page_size: PAGE_SIZE,
@@ -31,15 +35,21 @@ function buildSidebarQuery(
 }
 
 function useSidebarViewKey(
-  workspaceId: string | null,
-  workspaceGeneration: number,
-  contextScope: string,
+  context: {
+    workspaceId: string | null;
+    workspaceGeneration: number;
+    contextScope: string;
+    groupingIdentity: string;
+    disclosureOwner: "saved" | "draft";
+  },
   queryView: SidebarTaskQuery,
   prefs: Pick<
     ReturnType<typeof useSidebarTaskPrefs>,
     "pinnedTaskIds" | "orderedTaskIds" | "subtaskOrderByParentId"
   >,
 ) {
+  const { workspaceId, workspaceGeneration, contextScope, groupingIdentity, disclosureOwner } =
+    context;
   const { pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId } = prefs;
   return useMemo(
     () =>
@@ -48,6 +58,8 @@ function useSidebarViewKey(
         workspaceGeneration,
         contextScope,
         ...queryView,
+        groupingIdentity,
+        disclosureOwner,
         pinnedTaskIds,
         orderedTaskIds,
         subtaskOrderByParentId,
@@ -60,6 +72,8 @@ function useSidebarViewKey(
       workspaceId,
       workspaceGeneration,
       contextScope,
+      groupingIdentity,
+      disclosureOwner,
     ],
   );
 }
@@ -75,10 +89,19 @@ export function sidebarContentKey(viewKey: string): string {
 
 export function useSidebarPageContext(workspaceId: string | null) {
   const view = useEffectiveSidebarView(workspaceId);
+  const registry = usePluginRegistry();
+  const groupingIdentity = registry.sidebarGroupingIdentity(view.group, workspaceId);
   const { i18n } = useTranslation();
   const contextScope = useAppStore(sidebarTaskPageScope);
   const collapsedTaskIDs = useAppStore((state) => state.collapsedSubtaskParents);
   const workspaceGeneration = useAppStore((state) => state.workspaceContextGeneration);
+  const disclosureOwner = useAppStore((state) => {
+    const sidebar = selectSidebarViews(state, workspaceId);
+    const saved = sidebar.views.find((candidate) => candidate.id === sidebar.activeViewId);
+    return saved && sidebar.draft?.baseViewId === saved.id && sidebar.draft.group !== saved.group
+      ? "draft"
+      : "saved";
+  });
   const queryRevision = useAppStore(
     (state) => state.sidebarArchivedTasks?.revisionByWorkspaceId?.[workspaceId ?? ""] ?? 0,
   );
@@ -97,9 +120,7 @@ export function useSidebarPageContext(workspaceId: string | null) {
     [view, locale, collapsedTaskIDs],
   );
   const viewKey = useSidebarViewKey(
-    workspaceId,
-    workspaceGeneration,
-    contextScope,
+    { workspaceId, workspaceGeneration, contextScope, groupingIdentity, disclosureOwner },
     queryView,
     prefs,
   );

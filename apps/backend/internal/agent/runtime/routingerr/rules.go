@@ -164,6 +164,18 @@ var providerRules = map[string][]rule{
 		mustRule("opencode.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),
 	},
+	providerDevinACP: {
+		// Devin's free plan rejects a prompt with this exact notice. It is a
+		// temporary per-plan rate limit that names its reset clock, not an
+		// exhausted quota or a generic runtime failure, so the transient class
+		// lets the scheduler retry the same profile once the clock passes.
+		mustRuleOutsideMarkdownFences(
+			ruleDevinFreeModelRateLimit,
+			`(?im)^[ \t]*(?:(?:AI_APICallError|Error|Internal[ \t]+error|API[ \t]+Error):[ \t]*)?`+
+				`reached[ \t]+free[ \t]+model[ \t]+rate[ \t]+limit\b`,
+			CodeRateLimited, ConfHigh,
+		),
+	},
 	"copilot-acp": {
 		mustRule("copilot.stderr.subscription.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?(?:(?:the\s+)?user\s+is\s+not\s+entitled\b|subscription\s+required\b|copilot\s+is\s+disabled\b)`, CodeSubscriptionRequired, ConfHigh),
 		mustRule("copilot.stderr.auth.v1", `(?i)please.*sign in|gh auth login`, CodeAuthRequired, ConfHigh),
@@ -277,10 +289,11 @@ func providerRuleMatchedLine(providerID, ruleID, rawText string) (string, bool) 
 
 // ruleUsesScopedTextReset reports whether text-derived reset hints for rule
 // must come only from its matched diagnostic line. The session, weekly, and
-// Codex usage-limit rules retain their whole-diagnostic compatibility.
+// Codex usage-limit rules retain their whole-diagnostic compatibility. The
+// Devin free-model rule is scoped like the five-hour and usage-limit rules.
 func ruleUsesScopedTextReset(rule string) bool {
 	switch rule {
-	case ruleClaudeFiveHourLimit, ruleClaudeUsageLimit, ruleCodexOutOfCredits:
+	case ruleClaudeFiveHourLimit, ruleClaudeUsageLimit, ruleCodexOutOfCredits, ruleDevinFreeModelRateLimit:
 		return true
 	default:
 		return false

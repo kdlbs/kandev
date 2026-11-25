@@ -14,11 +14,91 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+// @covers AC-TASKS-SESSION-TURN-SETTLEMENT-002.7
+// @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.3
+// @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.5
+func TestCodexMCPStartupWarningDoesNotOpenTurnOrStrandQueue(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-codex-startup", "session-codex-startup", models.TaskSessionStateWaitingForInput)
+	seedExecutorRunning(t, repo, "session-codex-startup", "task-codex-startup", "execution-codex-startup")
+
+	agentManager := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
+	messageCreator := newServiceBackedMessageCreator(repo)
+	svc.messageCreator = messageCreator
+	svc.turnService = messageCreator.svc
+
+	completedTurn, err := messageCreator.svc.StartTurn(ctx, "session-codex-startup")
+	require.NoError(t, err)
+	require.NoError(t, messageCreator.svc.CompleteTurn(ctx, completedTurn.ID))
+
+	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "task-codex-startup", "session-codex-startup")
+	require.NoError(t, err)
+	require.NoError(t, svc.messageQueue.SetAutoRunForSession(ctx, identity, true))
+	_, err = svc.messageQueue.QueueMessageWithMetadataForSession(
+		ctx, identity, "deliver after startup warning", "", messagequeue.QueuedByUser, false, nil, nil,
+	)
+	require.NoError(t, err)
+
+	payload := &lifecycle.AgentStreamEventPayload{
+		TaskID:      "task-codex-startup",
+		SessionID:   "session-codex-startup",
+		ExecutionID: "execution-codex-startup",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       "mcp_startup_warning",
+			Text:       "[codex-acp forwarded startup error] MCP server `server` failed to start: connection refused",
+			ToolCallID: "mcp_startup.server.550e8400-e29b-41d4-a716-446655440000",
+		},
+	}
+	svc.handleAgentStreamEvent(ctx, payload)
+	svc.handleAgentStreamEvent(ctx, payload)
+
+	require.Zero(t, openTurnCount(t, repo, "session-codex-startup"),
+		"a startup warning must persist as a lifecycle-only message without opening a work turn")
+	messages, err := repo.ListMessages(ctx, "session-codex-startup")
+	require.NoError(t, err)
+	var warnings []*models.Message
+	for _, message := range messages {
+		if message.Metadata["kind"] == "mcp_startup_warning" {
+			warnings = append(warnings, message)
+		}
+	}
+	require.Len(t, warnings, 1, "replay must retain one warning message")
+	require.Equal(t, models.MessageTypeStatus, warnings[0].Type)
+	require.Equal(t, "warning", warnings[0].Metadata["variant"])
+	warningTurn, err := repo.GetTurn(ctx, warnings[0].TurnID)
+	require.NoError(t, err)
+	require.NotNil(t, warningTurn.CompletedAt)
+	require.Equal(t, true, warningTurn.Metadata[models.TurnMetaKeyLifecycleOnly])
+
+	completed := make(chan struct{}, 1)
+	svc.onQueuedMessageExecutionComplete = func() { completed <- struct{}{} }
+	svc.CheckQueueAdmissionReadiness(ctx, identity)
+	select {
+	case <-agentManager.promptDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the normal queue admission path to dispatch")
+	}
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for queued dispatch completion")
+	}
+	agentManager.mu.Lock()
+	captured := append([]string(nil), agentManager.capturedPrompts...)
+	agentManager.mu.Unlock()
+	require.Equal(t, []string{"deliver after startup warning"}, captured)
+	require.Zero(t, svc.messageQueue.GetStatus(ctx, "session-codex-startup").Count)
+}
 
 func TestResumeTodosPersistOutOfTurnWithoutOpenTurn(t *testing.T) {
 	ctx := context.Background()

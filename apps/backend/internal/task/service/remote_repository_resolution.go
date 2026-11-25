@@ -128,12 +128,5 @@ func remoteSelectionOriginIdentity(raw, provider string) (origin, path string) {
 	if provider == providerGitHub && origin == "https://www.github.com" {
 		origin = githubProviderHost
 	}
-	if provider == providerAzureDevOps && origin == "https://ssh.dev.azure.com" {
-		parts := strings.Split(path, "/")
-		if len(parts) != 4 || parts[0] != "v3" {
-			return "", ""
-		}
-		return "https://dev.azure.com", parts[1] + "/" + parts[2] + "/_git/" + parts[3]
-	}
 	return origin, path
 }

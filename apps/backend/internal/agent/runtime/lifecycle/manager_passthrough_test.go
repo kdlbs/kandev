@@ -114,6 +114,7 @@ func newPassthroughMCPTestManager(t *testing.T, agentName string) (*Manager, *Ag
 		},
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	profile := &AgentProfileInfo{
 		ProfileID:      "profile-1",
 		AgentName:      agentName,

@@ -129,6 +129,10 @@ type DynamicProfileRepository interface {
 	GetDynamicAgentProfile(ctx context.Context, profileID string) (*models.DynamicAgentProfile, []models.DynamicAgentRoute, error)
 	UpdateDynamicAgentProfile(ctx context.Context, profile *models.DynamicAgentProfile, expectedVersion int64, routes []models.DynamicAgentRoute) error
 	ListDynamicProfileReferencesByExecutionProfile(ctx context.Context, profileID string) ([]models.DynamicProfileReference, error)
+	// DeleteDynamicAgentRoutesForDeletedProfiles removes routes that point at
+	// executionProfileID from soft-deleted dynamic parents, so a deleted
+	// candidate does not stay referenced by configuration that can never run.
+	DeleteDynamicAgentRoutesForDeletedProfiles(ctx context.Context, executionProfileID string) (int64, error)
 }
 
 // AtomicDynamicProfileRepository updates the base profile row and its

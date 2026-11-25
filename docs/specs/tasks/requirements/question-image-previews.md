@@ -18,11 +18,14 @@ The task system owns this capability because clarification messages own the
 question identity, persistence, answer, and blocking lifecycle. The agent tool
 and web interface expose that contract.
 
-Source: [issue #4748](https://github.com/kdlbs/kandev/issues/4748).
+Sources: [issue #4748](https://github.com/kdlbs/kandev/issues/4748) and
+[repository scope correction #5329](https://github.com/kdlbs/kandev/issues/5329).
 The paired [system design](../system-design/question-image-previews.md) defines
 transport and security. The [plan](../../../plans/question-image-previews/plan.md)
 defines delivery. The user approved implementation. Local changes implement this contract; it does
 not yet describe a released version.
+The [repository scope fix plan](../../../plans/question-image-repository-scope/plan.md)
+tracks the correction from issue #5329 separately.
 
 ## Terms
 
@@ -82,6 +85,13 @@ not yet describe a released version.
 - **AC-TASKS-QUESTION-IMAGES-002.5:** Local and remote executors shall read files
   through their authenticated runtime connection. Unavailable or older runtimes
   shall produce a retryable or unsupported preview state without a broader read fallback.
+- **AC-TASKS-QUESTION-IMAGES-002.6:** When the session workspace itself is a
+  repository, its exact folder name in `repo` shall also identify that workspace
+  if no child entry has that name. Such references shall resolve like references
+  with `repo` omitted. An existing child entry shall retain precedence, including
+  inaccessible entries and broken or escaping symlinks. A missing image within
+  that child shall not select a workspace-root image. Other unknown scopes and
+  non-repository workspace roots shall retain their existing preview errors.
 
 ### REQ-TASKS-QUESTION-IMAGES-003: Accessible desktop and phone inspection
 
@@ -140,6 +150,11 @@ not yet describe a released version.
   external answer clients, and rich-output file blocks shall retain their existing
   behavior. Existing clients can ignore additive image metadata. Agent-facing
   documentation shall explain supported formats, limits, references, and answer mapping.
+- **AC-TASKS-QUESTION-IMAGES-004.5:** Tool guidance and public documentation shall
+  define image paths relative to the source session workspace. They shall instruct
+  agents to omit `repo` when that workspace is the repository itself. They shall
+  reserve explicit child scopes for actual workspace-relative repository paths
+  and explain the compatibility alias from AC-TASKS-QUESTION-IMAGES-002.6.
 
 ### REQ-TASKS-QUESTION-IMAGES-005: Images associated with choices
 

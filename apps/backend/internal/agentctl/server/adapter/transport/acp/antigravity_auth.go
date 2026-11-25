@@ -15,8 +15,8 @@ import (
 
 const antigravityConsentRedaction = "Antigravity Google sign-in URL redacted"
 
-func clientInfoForAgent(agentID string) *acp.Implementation {
-	if name, version := acpcompat.ClientInfoForAgent(agentID); name != "" {
+func clientInfoForAgent(agentID string, policy *acpcompat.AuthPolicy) *acp.Implementation {
+	if name, version := acpcompat.ClientInfoForLaunch(agentID, policy); name != "" {
 		return &acp.Implementation{Name: name, Version: version}
 	}
 	return &acp.Implementation{Name: "kandev-agentctl", Version: "1.0.0"}
@@ -25,6 +25,9 @@ func clientInfoForAgent(agentID string) *acp.Implementation {
 func (a *Adapter) applyAntigravityPersonalAuth(ctx context.Context, initResp acp.InitializeResponse) error {
 	policy := a.cfg.AuthPolicy
 	if policy == nil || !acpcompat.IsAntigravity(a.agentID) {
+		return nil
+	}
+	if policy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI {
 		return nil
 	}
 	if policy.MethodID != acpcompat.AntigravityPersonalAuthMethod {

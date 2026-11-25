@@ -23,10 +23,16 @@ func TestAntigravityDebuggerPolicy(t *testing.T) {
 	if otherInfo["name"] != "acpdbg" {
 		t.Fatalf("other agent clientInfo = %#v", otherInfo)
 	}
+	cli := initializeParamsForRuntime("antigravity-acp", nil, nil, "cli")
+	cliInfo := cli["clientInfo"].(map[string]any)
+	if cliInfo["name"] != "acpdbg" {
+		t.Fatalf("CLI clientInfo = %#v, want debugger default identity", cli["clientInfo"])
+	}
 }
 
 func TestAntigravityDebuggerManagedRuntime(t *testing.T) {
 	home := t.TempDir()
+	t.Setenv("HOME", home)
 	t.Setenv("KANDEV_HOME_DIR", home)
 	artifact, err := antigravityruntime.ArtifactFor(runtime.GOOS, runtime.GOARCH)
 	if err != nil {

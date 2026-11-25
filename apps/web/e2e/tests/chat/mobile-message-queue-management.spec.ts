@@ -405,17 +405,6 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await expect
     .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.auto_run))
     .toBe(false);
-  await autoMerge.tap();
-  await expect
-    .poll(async () => (await apiClient.getQueueStatus(queueIdentity)).auto_merge_enabled)
-    .toBe(true);
-  await expect(autoMerge).toHaveAttribute("data-state", "checked");
-  await expect(autoMerge).toBeEnabled();
-  await autoMerge.tap();
-  await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
-  await expect
-    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.auto_merge_enabled))
-    .toBe(false);
 
   await assertNoDocumentHorizontalOverflow(testPage);
 

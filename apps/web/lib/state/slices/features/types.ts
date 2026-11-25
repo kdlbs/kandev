@@ -27,6 +27,7 @@ export const defaultFeatureFlags = {
   codexAppServer: false,
   terminalPrimaryQueueHandoff: false,
   replacedSessionReclaim: false,
+  acpV2: false,
   agentBackgroundWork: false,
   opencodePlugin: false,
 } as const;

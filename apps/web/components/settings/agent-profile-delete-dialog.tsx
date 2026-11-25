@@ -20,6 +20,7 @@ import { useAppStore } from "@/components/state-provider";
 import type {
   ActiveSessionInfo,
   AutomationReference,
+  DynamicProfileReference,
   RoutingTierReference,
   WatcherReference,
   UtilityAgentReference,
@@ -115,36 +116,72 @@ export function AgentProfileDeleteConfirmation({
 
 export function AgentProfileDisableConflictDialog({
   agents,
+  dynamicProfiles = [],
   onCancel,
   onConfirm,
 }: {
   agents: UtilityAgentReference[];
+  dynamicProfiles?: DynamicProfileReference[];
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const { t } = useTranslation();
+  const hasConflict = agents.length > 0 || dynamicProfiles.length > 0;
+  const actionClassName = settingsActionClassName(
+    "w-full cursor-pointer sm:w-auto max-md:min-h-12 " +
+      "[@media(pointer:coarse)]:min-h-12 [@media(any-pointer:coarse)]:min-h-12",
+  );
   return (
     <AlertDialog
-      open={agents.length > 0}
+      open={hasConflict}
       onOpenChange={(open) => {
         if (!open) onCancel();
       }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent
+        data-testid="agent-profile-disable-conflict-dialog"
+        data-layout="contained"
+        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{t("agents:disableProfile")}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t("agents:disableProfileUtilityWarning")}
-          </AlertDialogDescription>
         </AlertDialogHeader>
-        <ul className="list-disc list-inside max-h-40 overflow-y-auto">
-          {agents.map((agent) => (
-            <li key={agent.id}>{agent.name || agent.id}</li>
-          ))}
-        </ul>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t(CANCEL_LABEL_KEY)}</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} className="cursor-pointer">
+        <AlertDialogDescription
+          asChild
+          data-testid="disable-profile-conflict-body"
+          className="min-h-0 min-w-0 space-y-2 overflow-x-hidden overflow-y-auto overscroll-contain text-left"
+        >
+          <div>
+            <p>
+              {[
+                agents.length > 0 ? t("agents:disableProfileUtilityWarning") : "",
+                dynamicProfiles.length > 0 ? t("agents:disableProfileDynamicWarning") : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            </p>
+            {agents.length > 0 ? (
+              <ul className="list-disc list-inside" data-testid="disable-conflict-utility-agents">
+                {agents.map((agent) => (
+                  <li key={agent.id}>{agent.name || agent.id}</li>
+                ))}
+              </ul>
+            ) : null}
+            {dynamicProfiles.length > 0 ? (
+              <div className="space-y-1" data-testid="disable-conflict-dynamic-profiles">
+                <p className="font-medium text-sm">{t("agents:conflictDynamicProfilesTitle")}</p>
+                <ul className="list-disc list-inside">
+                  {dynamicProfiles.map((profile) => (
+                    <li key={profile.id}>{profile.name || profile.id}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        </AlertDialogDescription>
+        <AlertDialogFooter data-testid="disable-profile-conflict-footer">
+          <AlertDialogCancel className={actionClassName}>{t(CANCEL_LABEL_KEY)}</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm} className={actionClassName}>
             {t("agents:disableProfileAnyway")}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -162,6 +199,7 @@ export type AgentProfileDeleteConflict = {
   routingTiers: RoutingTierReference[];
   automations: AutomationReference[];
   utilityAgents?: UtilityAgentReference[];
+  dynamicProfiles?: DynamicProfileReference[];
 };
 
 type AgentProfileDeleteConflictDialogProps = {
@@ -183,6 +221,7 @@ export function AgentProfileDeleteConflictDialog({
   const routingTiers = conflict?.routingTiers ?? [];
   const automations = conflict?.automations ?? [];
   const utilityAgents = conflict?.utilityAgents ?? [];
+  const dynamicProfiles = conflict?.dynamicProfiles ?? [];
   const hasHardBlockers = routingTiers.length > 0;
   const watchersByKind = groupWatchersByKind(watchers);
   const workspaces = useAppStore((s) => s.workspaces.items);
@@ -230,6 +269,7 @@ export function AgentProfileDeleteConflictDialog({
               automations={automations}
               workspaceLabels={workspaceLabels}
             />
+            <DynamicProfileConflictSection dynamicProfiles={dynamicProfiles} />
             <UtilityAgentConflictSection utilityAgents={utilityAgents} />
             {hasHardBlockers ? (
               <p>{t("agents:changeTierMappingsFirst")}</p>
@@ -255,6 +295,30 @@ export function AgentProfileDeleteConflictDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+// Dynamic profiles route through this profile as one of their candidates.
+// Deleting it leaves those routes pointing at a profile that no longer
+// exists, so the user must see them before choosing "Delete Anyway".
+function DynamicProfileConflictSection({
+  dynamicProfiles,
+}: {
+  dynamicProfiles: DynamicProfileReference[];
+}) {
+  const { t } = useTranslation();
+  if (dynamicProfiles.length === 0) return null;
+  return (
+    <div className="space-y-1" data-testid="profile-conflict-dynamic-profiles">
+      <p className="font-medium text-sm">{t("agents:conflictDynamicProfilesTitle")}</p>
+      <ul className="list-disc list-inside space-y-0.5">
+        {dynamicProfiles.map((profile) => (
+          <li key={profile.id} className="text-sm">
+            {profile.name || profile.id}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

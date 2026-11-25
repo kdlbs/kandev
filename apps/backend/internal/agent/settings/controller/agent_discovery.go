@@ -303,8 +303,10 @@ func buildLoginCommandDTO(ag agents.Agent) *dto.LoginCommandDTO {
 func (c *Controller) buildModelConfigFromHostUtility(ctx context.Context, agentID string) dto.ModelConfigDTO {
 	// Always initialize slices so JSON marshals as [] not null — the
 	// frontend uses .some()/.find() on these without null checks.
+	currentVariant := c.localRuntimeVariant(ctx, agentID)
 	cfg := dto.ModelConfigDTO{
 		SupportsDynamicModels: c.agentSupportsDynamicModelConfig(agentID),
+		RuntimeVariant:        currentVariant,
 		AvailableModels:       []dto.ModelEntryDTO{},
 		AvailableModes:        []dto.ModeEntryDTO{},
 	}
@@ -318,6 +320,17 @@ func (c *Controller) buildModelConfigFromHostUtility(ctx context.Context, agentI
 		cfg.Status = "not_configured"
 		cfg.AvailableModels, cfg.Discovery = c.hostCLIModelProjection(ctx, agentID, cfg.AvailableModels, false)
 		return cfg
+	}
+	if agentID == agents.AntigravityACPAgentID {
+		if currentVariant == "" {
+			cfg.Status = string(hostutility.StatusNotInstalled)
+			return cfg
+		}
+		if caps.RuntimeVariant != currentVariant {
+			cfg.Status = string(hostutility.StatusProbing)
+			return cfg
+		}
+		cfg.RuntimeVariant = caps.RuntimeVariant
 	}
 	cfg.SupportsDynamicModels = true
 	cfg.Status = string(caps.Status)
@@ -351,6 +364,25 @@ func (c *Controller) buildModelConfigFromHostUtility(ctx context.Context, agentI
 	}
 	cfg.AvailableModels, cfg.Discovery = c.hostCLIModelProjection(ctx, agentID, cfg.AvailableModels, false)
 	return cfg
+}
+
+func (c *Controller) localRuntimeVariant(ctx context.Context, agentID string) string {
+	if c.agentRegistry == nil {
+		return ""
+	}
+	ag, ok := c.agentRegistry.Get(agentID)
+	if !ok {
+		return ""
+	}
+	resolver, ok := ag.(agents.LocalRuntimeAgent)
+	if !ok {
+		return ""
+	}
+	selection, err := resolver.ResolveLocalRuntime(ctx)
+	if err != nil {
+		return ""
+	}
+	return selection.Variant
 }
 
 func (c *Controller) agentSupportsDynamicModelConfig(agentID string) bool {
