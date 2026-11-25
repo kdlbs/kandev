@@ -395,8 +395,16 @@ func newACPSessionCreatedPayload(execution *AgentExecution, sessionID, attemptID
 		DeliveryStreamID:                   execution.DeliveryStreamID,
 		DeliveryIncarnationID:              execution.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:          execution.DeliveryHarnessGeneration,
+		AdapterVersion:                     adapterVersionForExecution(execution),
 		DeliveryReplacesNativeConversation: execution.ReplacesNativeConversation,
 	}
+}
+
+func adapterVersionForExecution(execution *AgentExecution) string {
+	if execution == nil || execution.AuthPolicy == nil {
+		return ""
+	}
+	return execution.AuthPolicy.AdapterVersion
 }
 
 // PublishAgentStreamEvent publishes an agent stream event to the event bus for WebSocket streaming.

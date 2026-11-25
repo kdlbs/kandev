@@ -122,8 +122,25 @@ func (a *Adapter) RetireOpenCodePluginClaim(admission opencodeplugin.Admission) 
 }
 
 // advanceNativeGenerationLocked starts a new native conversation identity and
-// removes every claim from the superseded one. Callers hold a.mu.
-func (a *Adapter) advanceNativeGenerationLocked() {
+// removes every claim from the superseded one. Running Cursor watches become
+// unknown because their native session can no longer report a terminal state.
+// Callers hold a.mu and publish the returned events after installing the binding.
+func (a *Adapter) advanceNativeGenerationLocked(replacementSessionID string) []AgentEvent {
+	retiredWatches := make([]AgentEvent, 0, len(a.cursorShellWatches))
+	for callID, watch := range a.cursorShellWatches {
+		if watch.sessionID != a.sessionID || watch.nativeGeneration != a.nativeGeneration ||
+			watch.state != streams.RunStateRunning {
+			continue
+		}
+		watch.state = streams.RunStateUnknown
+		a.cursorShellWatches[callID] = watch
+		if event := cursorShellWatchEvent(callID, watch); event != nil {
+			event.SessionID = replacementSessionID
+			retiredWatches = append(retiredWatches, *event)
+		}
+	}
 	a.nativeGeneration++
 	clear(a.openCodePluginClaims)
+	clear(a.cursorShellWatches)
+	return retiredWatches
 }

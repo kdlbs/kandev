@@ -281,6 +281,9 @@ func (a *MockAgent) LoginCommand() *LoginCommand {
 func (a *MockAgent) BillingType() usage.BillingType { return defaultBillingType() }
 
 func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {
+	if a.ID() == CopilotACPAgentID {
+		return copilotPermSettings
+	}
 	return emptyPermSettings
 }
 

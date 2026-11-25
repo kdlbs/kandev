@@ -86,9 +86,10 @@ rendered phone surface with the assigned preview's structure and annotations.
    - Use semantic controls, visible labels or accessible names, focus return, and existing design-system components.
    - Avoid hiding required functionality on mobile unless there is a clear alternate path.
 
-4. Add E2E coverage.
-   - Add or update Playwright tests for the feature's happy path on desktop if missing.
-   - Add mobile Playwright coverage for the same user value, using existing mobile projects/devices when configured.
+4. Verify desktop and mobile behavior with Playwright.
+   - Find the existing desktop and phone cases for the feature's main flow.
+     Reuse or extend them. Apply the [TDD test-value gate](../tdd/SKILL.md#test-value-gate)
+     before adding a case.
    - In this repo, name mobile test files `mobile-*.spec.ts` so the `mobile-chrome` Playwright project picks them up automatically.
    - Cover the actual mobile composition: drawer or full-height surface, visible overflow action, focused navigation, direct route, or bottom control.
    - For overlay and dense-navigation changes, assert viewport containment, internal scrolling, and the absence of document horizontal overflow where those properties are part of the regression.

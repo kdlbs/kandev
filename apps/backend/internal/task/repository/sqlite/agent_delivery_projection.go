@@ -255,7 +255,7 @@ type canonicalDeliveryBatchEntry struct {
 
 func compatibleCanonicalDeliveryEvents(previous, next streams.AgentEvent) bool {
 	return previous.Type == next.Type && previous.CanonicalMessageID != "" &&
-		previous.CanonicalMessageID == next.CanonicalMessageID
+		previous.CanonicalMessageID == next.CanonicalMessageID && !next.ReplaceMessageContent
 }
 
 func canonicalDeliverySegmentMessageID(event streams.AgentEvent, boundary int64) string {
@@ -326,7 +326,7 @@ func canonicalDeliveryBatchContent(group []canonicalDeliveryBatchEntry) (int, st
 	var content strings.Builder
 	for index, item := range group {
 		chunk := canonicalDeliveryEventContent(item.agentEvent)
-		if chunk == "" {
+		if chunk == "" && !item.agentEvent.ReplaceMessageContent {
 			continue
 		}
 		if firstContent == -1 {
@@ -344,7 +344,7 @@ func setCanonicalDeliveryProjectionResults(
 	appended bool,
 ) {
 	for index, item := range group {
-		if canonicalDeliveryEventContent(item.agentEvent) == "" {
+		if canonicalDeliveryEventContent(item.agentEvent) == "" && !item.agentEvent.ReplaceMessageContent {
 			continue
 		}
 		results[item.index].Appended = appended || index > firstContent
@@ -469,11 +469,14 @@ func (r *Repository) persistCanonicalAgentMessageTx(
 	}
 	content := agentEvent.Text
 	messageType := "message"
+	noticeType := streams.CopilotInterruptionNoticeType(agentEvent.Data)
 	if agentEvent.Type == streams.EventTypeReasoning {
 		content = agentEvent.ReasoningText
 		messageType = string(models.MessageTypeThinking)
+	} else if noticeType != "" && agentEvent.TurnID != "" {
+		messageType = string(models.MessageTypeStatus)
 	}
-	if content == "" {
+	if content == "" && !agentEvent.ReplaceMessageContent {
 		return false, nil
 	}
 
@@ -502,7 +505,7 @@ func (r *Repository) persistCanonicalAgentMessageTx(
 	switch {
 	case err == nil:
 		return r.updateCanonicalAgentMessageTx(
-			ctx, tx, messageID, messageType, existingContent, existingMetadata, content, now,
+			ctx, tx, messageID, messageType, existingContent, existingMetadata, content, now, agentEvent.ReplaceMessageContent,
 		)
 	case err != sql.ErrNoRows:
 		return false, fmt.Errorf("load canonical agent message: %w", err)
@@ -511,6 +514,10 @@ func (r *Repository) persistCanonicalAgentMessageTx(
 		"durable_delivery":   true,
 		"delivery_stream_id": event.StreamID,
 		"delivery_sequence":  event.Sequence,
+	}
+	if noticeType != "" && agentEvent.TurnID != "" {
+		messageMetadata[streams.AgentEventDataCopilotInterruptionNotice] = noticeType
+		messageMetadata["variant"] = streams.EventTypeCopilotInterruptionNotice
 	}
 	if messageType == string(models.MessageTypeThinking) {
 		messageMetadata["thinking"] = content
@@ -537,9 +544,10 @@ func (r *Repository) updateCanonicalAgentMessageTx(
 	tx *sqlx.Tx,
 	messageID, messageType, existingContent, existingMetadata, content string,
 	now time.Time,
+	replace bool,
 ) (bool, error) {
 	if messageType == string(models.MessageTypeThinking) {
-		metadata, err := mergeThinkingMetadata(existingMetadata, content)
+		metadata, err := mergeThinkingMetadata(existingMetadata, content, replace)
 		if err != nil {
 			return false, err
 		}
@@ -551,24 +559,30 @@ func (r *Repository) updateCanonicalAgentMessageTx(
 		}
 		return true, nil
 	}
+	if !replace {
+		content = existingContent + content
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_messages
 		SET content = ?, updated_at = ?
-		WHERE id = ?`), existingContent+content, now, messageID); err != nil {
-		return false, fmt.Errorf("append canonical agent message: %w", err)
+		WHERE id = ?`), content, now, messageID); err != nil {
+		return false, fmt.Errorf("update canonical agent message: %w", err)
 	}
 	return true, nil
 }
 
-func mergeThinkingMetadata(raw, content string) (string, error) {
+func mergeThinkingMetadata(raw, content string, replace bool) (string, error) {
 	metadata := make(map[string]interface{})
 	if raw != "" {
 		if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
 			return "", fmt.Errorf("decode canonical agent thinking metadata: %w", err)
 		}
 	}
-	existing, _ := metadata["thinking"].(string)
-	metadata["thinking"] = existing + content
+	if !replace {
+		existing, _ := metadata["thinking"].(string)
+		content = existing + content
+	}
+	metadata["thinking"] = content
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
 		return "", fmt.Errorf("encode canonical agent thinking metadata: %w", err)

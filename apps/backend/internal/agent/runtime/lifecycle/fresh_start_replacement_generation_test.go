@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -109,9 +110,16 @@ func TestToAgentExecutionRecordsNativeConversationReplacement(t *testing.T) {
 }
 
 func TestACPSessionCreatedPayloadCarriesNativeConversationReplacement(t *testing.T) {
-	execution := &AgentExecution{ID: "execution", SessionID: "session", DeliveryHarnessGeneration: 2, ReplacesNativeConversation: true}
+	execution := &AgentExecution{
+		ID: "execution", SessionID: "session", DeliveryHarnessGeneration: 2,
+		ReplacesNativeConversation: true,
+		AuthPolicy:                 &acpcompat.AuthPolicy{AdapterVersion: "antigravity-cli/1.5.15"},
+	}
 	payload := newACPSessionCreatedPayload(execution, "replacement-native", "attempt")
 	if !payload.DeliveryReplacesNativeConversation || payload.DeliveryHarnessGeneration != 2 {
 		t.Fatalf("payload = %+v, want replacement generation 2", payload)
+	}
+	if payload.AdapterVersion != "antigravity-cli/1.5.15" {
+		t.Fatalf("adapter version = %q, want CLI runtime identity", payload.AdapterVersion)
 	}
 }

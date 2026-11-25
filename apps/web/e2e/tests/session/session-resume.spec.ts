@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { linkToTask } from "@/lib/links";
 
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -733,7 +734,7 @@ test.describe("Session resume (multi-session)", () => {
       )
       .toBe(true);
 
-    await testPage.goto(`/t/${task.id}`);
+    await testPage.goto(linkToTask(task.id, { sessionId: firstSessionId }));
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.sessionTabBySessionId(firstSessionId)).toContainText("Mock Smart", {
@@ -748,7 +749,8 @@ test.describe("Session resume (multi-session)", () => {
 
     await recordSessionTabHistory(testPage);
     await backend.restart();
-    await testPage.reload();
+    // Open on the sibling so the first tab initially uses its saved model summary.
+    await testPage.goto(linkToTask(task.id, { sessionId: secondSessionId }));
     await session.waitForLoad();
 
     await expect(session.sessionTabBySessionId(firstSessionId)).toContainText("Mock Smart", {

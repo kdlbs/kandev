@@ -23,19 +23,14 @@ requirements:
 
 ## Purpose and boundaries
 
-Agents owns Antigravity identity, runtime selection, readiness, local authentication, compatibility, and setup UI.
-The vendor server owns Google tokens, refresh, account entitlement, the loopback listener, and conversation storage.
-Tasks, costs, Office, and platform retain their existing lifecycle, accounting, routing, and process ownership.
-This design supplies normalized observations to those systems. It creates no parallel routing or accounting service.
+Agents owns the built-in profile's runtime selection, readiness, authentication, and setup.
+Google owns credentials, refresh, entitlement, consent callbacks, and conversation storage.
+Tasks, Costs, Office, and Platform consume existing normalized observations.
+Each native process shares the host user's store for its runtime.
 
-The supported new path is one personal Google account on the local Kandev machine.
-Task sessions use separate server processes and one shared native store.
-No per-task home, account registry, hosted callback, or Google quota client is introduced.
-Existing remote-auth declarations remain compatible metadata. They do not establish remote subscription support.
-
-The [requirements](../requirements/antigravity-acp-agent.md) explicitly retire conflicting September draft restrictions.
-The [plan](../../../plans/antigravity-local-subscription/plan.md) contains implementation and qualification gates.
-Implementation is present for Tasks 01-06. Both documents remain draft until live qualification evidence is recorded.
+See the [requirements](../requirements/antigravity-acp-agent.md) and the
+[standalone](../../../plans/antigravity-local-subscription/plan.md) and
+[CLI](../../../plans/antigravity-cli-acp/plan.md) delivery plans.
 
 ## Requirement mapping
 
@@ -81,6 +76,10 @@ Its SHA-256 was `923923a0d7dc8073f66cc6f78647a3107e3a7ee2b7e1a24df8b3927b5188013
 This is research evidence, not permission to download a mutable registry target at execution time.
 Private `acp-debug/` captures contain consent state and diagnostic data. They must not become committed fixtures.
 
+Google added the supported CLI command in 1.5.0. See the [CLI ACP documentation](https://antigravity.google/docs/cli/acp).
+On November 23, CLI 1.5.15 returned 27 model and effort variants and completed a prompt on Linux amd64.
+The live standalone model probe reported auth_required. A separate standalone launch exited with SIGILL.
+
 ## Components and responsibilities
 
 | Boundary | Existing location | Planned responsibility |
@@ -88,7 +87,7 @@ Private `acp-debug/` captures contain consent state and diagnostic data. They mu
 | Agent declaration | `internal/agent/agents/antigravity_acp.go` | Preserve identity, base arguments, skills, resume, and remote metadata. Declare the subscription default. |
 | Native bundle helper | `internal/agent/antigravityruntime/` | Trusted artifact records, bounded installation, filesystem validation, and local resolution. No generic native package manager. |
 | Install orchestration | `internal/agent/settings/controller/agent_install.go`, `install_job.go` | Reuse job status, output, cancellation, maintenance interlock, and operator authorization. Accept a typed Go action for this local bundle. |
-| Launch selection | `internal/agent/runtime/lifecycle/command.go`, `internal/agent/hostutility/manager.go` | Resolve the same absolute bundle executable on local paths. Preserve remote command behavior. |
+| Launch selection | `internal/agent/runtime/lifecycle/manager_launch.go`, `internal/agent/hostutility/manager.go` | Consume the same selected runtime for local task, model, and inference paths. |
 | Wire compatibility | `internal/agentctl/acpcompat/`, `server/adapter/transport/acp/dialect.go` | Pure Antigravity client-info, auth-method, URL, question, and error translation helpers. |
 | ACP/process ownership | `internal/agentctl/server/adapter/transport/acp/`, `internal/agentctl/server/process/` | Execute RPCs, observe stderr safely, maintain auth state, and manage process generations. |
 | Sessionless setup | `internal/agent/hostutility/`, `agent/capabilities/handlers/` | Own one bounded local sign-in attempt using existing authenticated agentctl instances and client methods. |
@@ -102,34 +101,43 @@ Stateful process and database operations stay outside dialect functions.
 ## Existing identity
 
 Keep `antigravity-acp`, display order 22, logos, non-virtual ACP, and existing profiles.
-Base constructors remain pure. The local resolver replaces only the executable and supplies the selected helper path before shared profile wrapping.
+Base constructors remain pure. The local resolver supplies the entire base command before profile flags and wrappers apply.
 MCP configuration stays in ACP session creation. No project-local MCP file or assumed transport override is added.
 Native load/resume decisions remain capability-driven.
 
 ## Local runtime resolution
 
-Use one provider-specific resolver from discovery, local task launch, recovery, probes, inference, and sign-in.
-Inputs include platform, locality, effective environment, and the existing Kandev user cache location.
-The result includes server path, helper path, provenance, exact managed version when known, and a bounded failure reason.
-Do not infer installation from the presence of `agy`.
+Resolve the local variant in `internal/agent/antigravityruntime`, with absolute argv,
+provenance, version, and a harness path for standalone. The
+[runtime selection decision](../../../decisions/2026-11-23-antigravity-cli-acp-runtime.md)
+defines the priority and ownership.
 
-Resolution order:
+1. For native restore, select the variant on the saved conversation.
+2. For new host-local work, find `agy` on the host PATH or in Google's standard install location.
+3. Run a bounded `agy --version` from the host, outside any task workspace.
+   For version 1.5.0 or later, check bounded `agy acp --help` output for the exact worker flag.
+   A qualified CLI selects `[absolute-agy, "acp", "--process-per-session"]`.
+   The ACP handshake establishes readiness. [Google ACP flags](https://antigravity.google/docs/ide/extensions/acp#flags)
+4. If no CLI qualifies for new local work, select the complete standalone bundle.
+   Keep managed-bundle validation authoritative ahead of the manual PATH and harness checks.
+5. Report version, startup, authentication, and probe failures for the chosen runtime.
+   Propagate caller cancellation. Missing remote runtimes follow executor-local admission.
 
-1. Select the compiled, reviewed managed bundle when its versioned destination exists.
-2. Validate its complete manifest and both regular executable files. An invalid destination is an error, not a PATH fallback.
-3. If no managed destination exists, resolve the manual server through PATH and validate its sibling harness.
-4. For a manual override, resolve and validate the actual `ANTIGRAVITY_HARNESS_PATH` instead of accepting any non-empty value.
-5. Return unavailable when no complete runtime exists. Return context errors unchanged.
+Filesystem discovery checks the CLI candidate and the complete standalone bundle without spawning.
+Settings offers setup when qualification determines that only an older CLI is present.
+Reuse the selected variant throughout one launch or probe. Bind cached capabilities to its
+provenance and invalidate them on runtime change or explicit refresh. Discard work from stale probes.
+Host utility and profile previews use host resolution. Non-local task launch resolves only its executor command.
 
-Managed bundles use a provider subdirectory under the existing Kandev user cache, keyed by version, platform, and archive digest.
-Use absolute paths. Completed directories are immutable; launch never deletes or rewrites them.
-An external PATH installation remains externally owned. Installation never replaces it or rewrites PATH.
-No version selector, native auto-updater, SQL migration, or npm package identity is needed for this pinned first release.
+### CLI worker mode and MCP
 
-Filesystem discovery performs no subprocess calls.
-The existing capability probe separately establishes readiness and captures startup failures.
-A file-complete install can therefore be installed but not ready.
-A remote executor never receives a backend-local managed path.
+The resolver sets worker mode for each host-local CLI process, independent of the model and profile.
+Compose the effective task, resume, utility, and preview arguments before the wrapper applies.
+If a profile flag disables worker mode, put the required enabling flag after profile options and before any argument delimiter.
+Enabled duplicates are compatible. Keep profile settings and saved runtime associations intact.
+
+Use the HTTP capability advertised by the resulting ACP process. The common adapter delivers Core and selected packages.
+The [MCP startup repair](../../../plans/antigravity-cli-mcp-default/plan.md) records the regression and launch checks.
 
 ## Installation
 
@@ -137,31 +145,24 @@ Keep `AntigravityACP.InstallScript()` empty so remote bootstrap receives no shel
 Extend the current install job runner with a server-owned typed action, retaining the existing script path for other agents.
 Requests accept an agent identity, never a URL, shell command, extraction path, or arbitrary version.
 The controller selects the trusted Antigravity artifact for the host platform.
-Add `supports_local_install` to discovery DTOs and web agent types.
-Catalog filters and Install controls accept that capability or an existing install script.
-The binary bundle flow shows guidance rather than a fabricated shell command.
+Discovery projects `supports_local_install` for the pinned standalone installer.
+An eligible CLI satisfies installation. Use a vendor setup link for a missing or older CLI.
 
-The reviewed artifact table contains OS/architecture, exact version, Google URL, SHA-256, compressed-size limit, expanded-size limit, and two expected entry names.
-Cover Linux, Darwin, and Windows x64/arm64 only when the official artifact exists and the platform has qualification evidence.
-Fail unsupported combinations explicitly. Do not invent an artifact URL from a naming convention.
-Recheck registry checksums and the selected native version during implementation, then pin the reviewed values in code.
-
-Download to a task-owned staging directory with request context and bounded time/size.
-Verify digest before extraction. Accept only the expected server and harness regular files.
-Reject duplicate names, absolute paths, traversal, links, special files, excess entry count, and excess expanded bytes.
-Apply executable permissions on Unix. Publish the complete directory with atomic same-filesystem rename.
-Cancellation and failure remove staging only. Existing complete bundles remain untouched.
-A valid existing destination is an idempotent success.
-A corrupt or conflicting destination produces repair guidance; replacement requires stopping users first and must not overwrite a live bundle.
-No automatic update or garbage collection is part of this package.
+The compiled artifact table pins platform, version, Google URL, digest, size limits, and both entry names.
+Verify the digest in bounded staging. Extract each named regular file exactly once, with path containment.
+Publish the executable pair by atomic same-filesystem rename. Cancellation removes only staging.
+Reuse a valid destination. Report corrupt or conflicting directories for operator repair.
 
 Reuse install maintenance and operator-mutation guards. Office/task credentials cannot initiate global installation or authentication.
 After install, invalidate filesystem discovery and capability caches. A failed readiness probe does not become an install success claim about inference.
 
 ## Launch policy
 
-Local subscription operations share one effective policy after inherited and profile environments have been combined.
-Carry a small typed auth policy in the existing instance and inference configuration: selected method plus interactive permission.
+Local operations share one effective policy after environment merge. A typed CLI variant in
+instance and inference configuration selects the CLI policy. A missing variant selects the standalone policy.
+Advertise native CLI support through agentctl capability negotiation. A stale helper requires upgrade guidance.
+
+The standalone policy carries selected method and interactive permission.
 Use `acp_auth_policy: {method_id: "oauth-personal", allow_interactive: false}` on the internal wire contract.
 The dedicated setup instance sets `allow_interactive: true`; profiles and task requests cannot set it.
 Advertise `antigravity_personal_auth_v1` through existing agentctl capability negotiation before using this contract or transient auth status.
@@ -185,7 +186,9 @@ Use the resolved absolute agentctl executable, a private helper subcommand, and 
 It must work with spaces and Windows drive letters. Do not shell-expand URL arguments.
 A small helper is preferable to a remote OAuth bridge or a new credential reader.
 
-Keep native credential backend selection. Do not force file storage or copy `agy` credentials.
+Keep native credential backend selection. The CLI uses its vendor-owned default store under the host user home.
+Apply the shared-home validation and conflicting credential-mode filtering to CLI ACP.
+Use the selected worker command for CLI probes and tasks. The standalone harness path and `--uid=` belong to standalone.
 The native macOS keychain and Linux/Windows file backend remain vendor-owned.
 Shared profile flags and sandbox prefixes still apply. An unsupported wrapped environment must fail explicitly rather than bypass the subscription policy.
 
@@ -193,28 +196,24 @@ Shared profile flags and sandbox prefixes still apply. An unsupported wrapped en
 
 Add a narrow Antigravity policy to the existing compatibility helpers:
 
-- Override only wire `clientInfo` to `zed` version `0.0.0`.
-- Require `oauth-personal` in advertised methods for the local subscription path.
+- For standalone, use wire `clientInfo` `zed` version `0.0.0` and the explicit `oauth-personal` policy.
+- For CLI ACP, keep Kandev's regular wire identity and use the CLI's cached sign-in for `session/new` and resume.
 - Parse the vendor's consent prompt and structured errors.
 - Recognize native human-input requests.
 
 The adapter and utility executor both consume the same helpers.
+The utility allowlist verifies the built-in CLI variant's executable and `acp` invocation against host resolution.
 The policy covers task initialize, capability probes, model resolution probes, utility inference, sign-in, and restored sessions.
 Registered-agent acpdbg also uses the provider identity and local runtime policy; arbitrary raw `--exec` remains diagnostic.
-Do not globally rename Kandev or report `zed` as the product or task owner.
-This is a compatibility assumption about the vendor's client allowlist, not a guarantee of third-party model entitlement.
-The override is scoped to the Antigravity agent only; disabling that agent is the kill switch.
-No separate global identity flag is introduced because the vendor allowlist is the only reason for the override.
-
-Preserve `initialize` data before attempting authentication or `session/new`.
-On an unauthenticated result, probes return advertised auth methods and `auth_required`, without an empty successful catalog.
-Other providers retain the canonical identity and authentication path.
+Preserve `initialize` data before `session/new`. Classify auth from a typed failure or a
+recognized provider auth error. The method list describes options. Use ACP model
+and config options subject to the existing exact model-selection rules.
 
 ## Authentication
 
 ### Background operations
 
-After initialize, call native `authenticate` with `oauth-personal` before new/load/resume.
+For standalone, call native `authenticate` with `oauth-personal` before new/load/resume.
 Cached credentials and silent refresh remain native operations.
 If the server requires interactive consent, the stderr consumer recognizes its prompt before generic buffering or logging.
 Because the no-op browser helper prevents browser launch, the operation can cancel authentication and report `auth_required` promptly.
@@ -227,6 +226,14 @@ Use generation checks so a late auth result cannot initialize a replacement proc
 Only the explicitly interactive setup operation may retain a consent URL.
 
 ### Explicit local sign-in
+
+For CLI ACP, use the operator-only agent login PTY with
+`[absolute-agy, "acp", "--login"]` from the server's resolved variant. Revalidate
+the variant at start. Return a refreshable error if it changed. The CLI owns consent and storage.
+After exit or dismissal, run a fresh probe for readiness. Use the flow below for standalone.
+
+Standalone recovery links select the standalone consent flow even when new sessions use the CLI.
+Resolve and probe the standalone bundle directly for that attempt, with its own capability result.
 
 Add a small in-memory attempt owner to `hostutility.Manager`.
 It creates a dedicated temporary native agentctl instance, using existing runtime ownership and authenticated clients.
@@ -320,7 +327,7 @@ Never parse normal assistant prose or arbitrary tool output as a provider error.
 
 ### Errors hidden behind end_turn
 
-For the qualified release, use a small read-only native outcome reader, separate from usage accounting.
+For standalone 1.4.5, use the bounded read-only outcome reader.
 The candidate path is `~/.gemini/antigravity-acp/conversations/<native-session-id>.db`.
 Qualify the exact location and schema with the selected version before coding against them.
 T3 observes table `steps`, columns `idx`, `step_type`, `step_payload`, and error step type 17.
@@ -341,7 +348,8 @@ If the native version hides failures and the required outcome check is unavailab
 Do not emit success completion or auto-advance the workflow from an unverified outcome.
 Classify this as an unknown provider/runtime compatibility failure, not fabricated quota or auth.
 Missing journal data never triggers a replay or model switch.
-Once a later vendor version provides reliable structured failures, qualification may remove this reader through a separate contract update.
+CLI ACP uses its own wire evidence. The standalone journal and refusal heuristic apply to standalone only.
+Qualify CLI failure outcomes, including any error hidden behind `end_turn`, before claiming support.
 
 ### Recovery ownership
 
@@ -379,14 +387,15 @@ No fresh five-hour/weekly guarantee is implied; display whatever windows and res
 
 ## Setup UI
 
-Reuse the installed-agent card, install job events, capability statuses, and model refresh hooks.
-Add a focused Antigravity sign-in view instead of sending users to an unstructured host shell.
-Other agents retain their current PTY login dialogs.
-Task auth-required guidance links to this same view and preserves the task draft and task identity.
+Reuse the installed-agent card, profile status panel, install events, and refresh hooks.
+Project the resolved runtime from the backend. The list and profile use one sign-in action selection.
+CLI sign-in opens the existing agent login terminal. Standalone opens the Antigravity consent dialog.
+Task auth guidance links to the matching setup entry and preserves task identity and draft.
 
 Desktop composition:
 
-- The card offers Install ACP when missing, Sign in with Google when needed, and Ready after capability confirmation.
+- The installation section links to CLI setup and labels the pinned standalone install. An installed runtime shows its name.
+- The model status panel offers the matching sign-in action on authentication failure and enables model selection when ready.
 - A focused dialog shows subscription guidance, browser progress, Open Google sign-in, Copy link, Cancel, and clear retry state.
 - The dialog explains the separate ACP login and same-machine callback.
 
@@ -405,9 +414,11 @@ Use synthetic mock auth in browser tests; CI must not consume a real Google subs
 
 ## Persistence
 
-No application database migration is required.
-Managed runtime files are separate from the native store.
-Only runtime provenance/version and existing agent/profile data enter ordinary product responses.
+Record a tagged vendor adapter version for CLI ACP in `HarnessSessionGeneration.AdapterVersion`
+with its native conversation ID. Carry the same provenance in the existing ACP
+association for paths that lack a generation. A saved Antigravity ID without a
+tag denotes standalone. Restore reads the committed association before spawning.
+If a saved variant is unavailable, report a typed restore failure and preserve the recorded identity.
 Auth attempts and URLs remain in process memory. The vendor persists tokens and selected auth method.
 Usage and normalized failures use existing durable task contracts without raw native database payloads.
 
@@ -435,13 +446,10 @@ No new metrics service is required.
 
 ## Qualification
 
-The current Linux SIGILL prevents an unqualified success claim on the investigated host.
-The CPU 0 diagnostic suggests a native per-CPU indexing issue; that root cause remains an inference.
-Do not ship a universal affinity wrapper as its fix.
-Before marking local subscription support complete, run the reviewed native release without affinity on each claimed platform.
-Record startup, consent, authenticated model discovery, prompt, `/usage`, stop, resume, and two simultaneous tasks.
-If the Linux release remains broken, report that platform as blocked and preserve actionable diagnostics.
-Do not mark the live work order passed or quietly substitute `agy`.
+Record qualification for each variant and platform independently.
+For the CLI, record startup, authenticated models, a prompt, a failure, and resume under the same native ID.
+The standalone Linux crash remains open. Its release qualification uses an unmodified launch,
+then consent, models, prompt, `/usage`, stop, resume, and simultaneous tasks.
 
 ## Related decisions
 
@@ -450,6 +458,3 @@ Do not mark the live work order passed or quietly substitute `agy`.
 - [Operator-owned agent settings](../../../decisions/2026-07-24-operator-owned-agent-launcher-settings.md).
 - [Runtime update authority](../../../decisions/2026-10-01-agent-runtime-update-authority.md).
 - [ACP prompt-error runtime lifetime](../../../decisions/2026-10-29-acp-prompt-error-runtime-lifetime.md).
-
-These existing decisions supply the ownership rules. Provider-local choices and their alternatives are recorded here.
-No new generic authentication framework, account manager, or duplicate ADR is required.

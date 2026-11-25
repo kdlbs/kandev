@@ -1380,6 +1380,24 @@ func (c *GHClient) ListRepoDirectory(ctx context.Context, owner, repo, dir, ref 
 	return entries, nil
 }
 
+// ResolveRepoRefSHA returns the latest commit SHA for a repository branch,
+// tag, or commit ref.
+func (c *GHClient) ResolveRepoRefSHA(ctx context.Context, owner, repo, ref string) (string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return "", errors.New("resolve repository ref: empty ref")
+	}
+	out, err := c.run(ctx, "api", fmt.Sprintf("repos/%s/%s/commits", owner, repo),
+		"-X", "GET", "-f", "sha="+ref, "-f", "per_page=1")
+	if err != nil {
+		return "", fmt.Errorf("resolve repository ref: %w", err)
+	}
+	sha, err := decodeRepoCommitSHA([]byte(out))
+	if err != nil {
+		return "", fmt.Errorf("resolve repository ref: %w", err)
+	}
+	return sha, nil
+}
+
 // GetRepoFileContent fetches the raw decoded content of a single file via
 // `gh api repos/{owner}/{repo}/contents/{path}`. 404 (missing file), 401,
 // 403, 429, and any 5xx are promoted to a *GitHubAPIError, mirroring

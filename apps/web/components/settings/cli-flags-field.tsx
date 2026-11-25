@@ -223,6 +223,11 @@ function CuratedFlagsSection({
       {curated.map((setting) => {
         const entry = flags.find((f) => f.flag === setting.flag);
         const enabled = entry ? entry.enabled : setting.default;
+        const isLongContext = setting.key === "long_context";
+        const label = isLongContext ? t("agents:copilotLongContextFlag") : setting.label;
+        const description = isLongContext
+          ? t("agents:copilotLongContextFlagDescription")
+          : setting.description;
         return (
           <div
             key={setting.key}
@@ -230,8 +235,8 @@ function CuratedFlagsSection({
             data-testid={`cli-flag-curated-${setting.key}`}
           >
             <div className="flex-1 min-w-0 space-y-0.5">
-              <Label className={labelCls}>{setting.label}</Label>
-              <p className="text-xs text-muted-foreground">{setting.description}</p>
+              <Label className={labelCls}>{label}</Label>
+              <p className="text-xs text-muted-foreground">{description}</p>
               <code className="text-[10px] text-muted-foreground/80">{setting.flag}</code>
             </div>
             <Switch
@@ -241,8 +246,8 @@ function CuratedFlagsSection({
               data-testid={`cli-flag-curated-enabled-${setting.key}`}
               aria-label={
                 enabled
-                  ? t("agents:disableSetting", { name: setting.label })
-                  : t("agents:enableSetting", { name: setting.label })
+                  ? t("agents:disableSetting", { name: label })
+                  : t("agents:enableSetting", { name: label })
               }
             />
           </div>

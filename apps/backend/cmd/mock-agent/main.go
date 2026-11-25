@@ -50,23 +50,24 @@ var mcpServers map[string]mcpServerDef
 
 // mockAgent implements the acp.Agent interface for the mock agent.
 type mockAgent struct {
-	conn                           sessionUpdater
-	rawOut                         *serializedACPWriter
-	model                          string
-	copilotNativeSubscribed        bool
-	clientSupportsCompaction       bool
-	sessions                       map[acp.SessionId]bool
-	promptCancels                  map[acp.SessionId]context.CancelFunc
-	promptCancelHolds              map[acp.SessionId]chan struct{}
-	detachedWork                   map[acp.SessionId]map[*mockDetachedWork]struct{}
-	sessionMCPServers              map[acp.SessionId]map[string]mcpServerDef
-	sessionConfig                  map[acp.SessionId][]acp.SessionConfigOption
-	sessionModes                   map[acp.SessionId]acp.SessionModeId
-	commandsEmitted                map[acp.SessionId]bool
-	dynamicFallbackCounterSessions map[acp.SessionId]acp.SessionId
-	promptSuggestionSessions       map[acp.SessionId]bool
-	nextSessionID                  uint64
-	mu                             sync.Mutex
+	conn                               sessionUpdater
+	rawOut                             *serializedACPWriter
+	model                              string
+	copilotNativeSubscribed            bool
+	clientSupportsCompaction           bool
+	sessions                           map[acp.SessionId]bool
+	promptCancels                      map[acp.SessionId]context.CancelFunc
+	promptCancelHolds                  map[acp.SessionId]chan struct{}
+	detachedWork                       map[acp.SessionId]map[*mockDetachedWork]struct{}
+	sessionMCPServers                  map[acp.SessionId]map[string]mcpServerDef
+	sessionConfig                      map[acp.SessionId][]acp.SessionConfigOption
+	sessionModes                       map[acp.SessionId]acp.SessionModeId
+	commandsEmitted                    map[acp.SessionId]bool
+	copilotInterruptionRecoveryPending map[acp.SessionId]bool
+	dynamicFallbackCounterSessions     map[acp.SessionId]acp.SessionId
+	promptSuggestionSessions           map[acp.SessionId]bool
+	nextSessionID                      uint64
+	mu                                 sync.Mutex
 }
 
 var _ acp.Agent = (*mockAgent)(nil)
@@ -109,6 +110,11 @@ func main() {
 	mcpServers = parseMCPConfigFlag()
 	defer closeMCPClients()
 
+	version, input := inspectMockACPVersion(os.Stdin)
+	if version == 2 {
+		runACPPreviewFixture(input, os.Stdout)
+		return
+	}
 	ag := &mockAgent{
 		model:                          model,
 		sessions:                       make(map[acp.SessionId]bool),
@@ -122,7 +128,7 @@ func main() {
 	}
 	rawOut := newSerializedACPWriter(os.Stdout)
 	ag.rawOut = rawOut
-	asc := acp.NewAgentSideConnection(ag, rawOut, os.Stdin)
+	asc := acp.NewAgentSideConnection(ag, rawOut, input)
 	ag.conn = asc
 
 	<-asc.Done()
@@ -470,6 +476,9 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 	// Re-emit available commands after the session/load response flushes.
 	primeKandevMCPToolCatalog(ctx)
 	go a.emitAvailableCommandsAfterDelay(req.SessionId)
+	if err := a.emitCopilotInterruptionReplay(ctx, req.SessionId); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
 
 	return acp.LoadSessionResponse{
 		ConfigOptions: responseConfigOptions,
@@ -536,6 +545,9 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	}()
 
 	if resp, err, handled := a.handleCopilotNativeFixture(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
+	if resp, err, handled := a.handleCopilotInterruptionFixture(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
 	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)

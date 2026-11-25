@@ -597,9 +597,11 @@ func (s *Service) replayInitialPromptSubmission(
 		options.promptReferencesPrepared = true
 		options.ceilingEntryBinding = prepared.binding
 	}
+	// Dispatch-only: the resume continuation, and the session lifecycle lock it
+	// holds, ends at provider acceptance. Turn results arrive as agent events.
 	_, err := s.promptTask(
 		ctx, taskID, sessionID, prompt, "", planMode,
-		submission.Attachments, false, launchOriginManual, options,
+		submission.Attachments, true, launchOriginManual, options,
 	)
 	return err
 }

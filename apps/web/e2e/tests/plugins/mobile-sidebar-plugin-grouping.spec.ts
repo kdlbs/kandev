@@ -250,8 +250,26 @@ test("phone task switcher restores parent touch geometry after choosing a groupi
   await expect(next).toBeEnabled();
   await expect.poll(async () => (await next.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
   await expect.poll(async () => (await next.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44);
-  await next.scrollIntoViewIfNeeded();
+  // The scroll range can grow as offscreen task rows render.
+  const list = tasks.getByTestId("mobile-task-switcher-list");
+  let previousHeight = 0;
+  let stableSamples = 0;
+  await expect
+    .poll(async () => {
+      const { height, atBottom } = await list.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        return {
+          height: element.scrollHeight,
+          atBottom: element.scrollHeight - element.clientHeight - element.scrollTop <= 1,
+        };
+      });
+      stableSamples = atBottom && height === previousHeight ? stableSamples + 1 : 0;
+      previousHeight = height;
+      return stableSamples;
+    })
+    .toBeGreaterThanOrEqual(2);
   await expect(next).toBeInViewport({ ratio: 1 });
+  await next.tap({ trial: true });
   await testPage.screenshot({
     path: testInfo.outputPath("task-switcher-grouping-parent-restored.png"),
     animations: "disabled",

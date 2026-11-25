@@ -14,9 +14,11 @@ import { uninstallFixturePlugin } from "../../helpers/plugin-fixture";
 useRegularMode();
 
 async function expectTouchTarget(locator: Locator, label: string) {
-  const box = await locator.boundingBox();
-  expect(box, `${label} must have geometry`).not.toBeNull();
-  expect(box!.height, `${label} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+  await expect
+    .poll(async () => (await locator.boundingBox())?.height ?? 0, {
+      message: `${label} must be at least 44px tall`,
+    })
+    .toBeGreaterThanOrEqual(44);
 }
 
 test("phone users can configure and select a remote provider profile", async ({

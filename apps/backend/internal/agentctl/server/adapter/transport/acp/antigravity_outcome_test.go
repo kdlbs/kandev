@@ -436,6 +436,30 @@ func TestAntigravityCurrentTurnOutcome(t *testing.T) {
 	})
 }
 
+func TestAntigravityCLIPromptUsesWireOutcome(t *testing.T) {
+	root := newAntigravityJournalRoot(t)
+	dbPath := createAntigravityJournal(t, root, antigravityOutcomeSessionID, antigravityStepsSchema)
+	insertAntigravityStep(t, dbPath, 1, acpcompat.AntigravityErrorStepType, []byte(antigravityNewQuotaPayload))
+	fake := &antigravityOutcomeAgent{
+		sessionID: antigravityOutcomeSessionID,
+		version:   "1.5.15",
+		promptErr: genericPromptError("Internal error"),
+	}
+	a := newAntigravityOutcomeFixture(t, fake, root)
+	a.cfg.AuthPolicy = acpcompat.AntigravityAuthPolicyForRuntime(acpcompat.AntigravityRuntimeCLI, "1.5.15", false)
+
+	if err := a.Prompt(context.Background(), "wire failure", nil, 71); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	event := antigravityErrorEvent(t, a)
+	if event.ProviderError.Source != streams.ProviderErrorSourceAntigravityACP {
+		t.Fatalf("provider source = %q, want ACP wire outcome", event.ProviderError.Source)
+	}
+	if strings.Contains(strings.ToLower(event.Error), "quota reached") {
+		t.Fatalf("CLI prompt was classified from the standalone journal: %q", event.Error)
+	}
+}
+
 func TestAntigravityOutcomeEvidenceUnavailable(t *testing.T) {
 	t.Run("symlinked session database", func(t *testing.T) {
 		root := newAntigravityJournalRoot(t)
