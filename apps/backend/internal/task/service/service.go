@@ -486,6 +486,7 @@ type Service struct {
 	unitReach                       UnitReachResolver
 	userOrgs                        func(ctx context.Context, userID string) (string, error)
 	tasks                           repository.TaskRepository
+	sidebarGroupingResolver         sidebarGroupingResolver
 	taskRepos                       repository.TaskRepoRepository
 	workspaceFolders                repository.TaskWorkspaceFolderRepository
 	workflows                       repository.WorkflowRepository
@@ -632,9 +633,9 @@ type Service struct {
 	// task.updated events. Optional — unset omits the field's live update path
 	// and task.updated payloads read false/0/0, matching D9's defaults.
 	taskParkedProvider TaskParkedProvider
-	// officeApprovalGuard blocks a human move from completing an Office
-	// task with pending approvers. Optional; see SetOfficeApprovalGuard.
-	officeApprovalGuard OfficeApprovalGuard
+	// approverNameResolver adds display names when a completion policy refuses
+	// a human action. Policy enforcement remains in the repository transaction.
+	approverNameResolver ApproverNameResolver
 	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
 	// emitted per task. It bounds live-propagation task.updated emissions to an
 	// actual change of the aggregated three-state value.

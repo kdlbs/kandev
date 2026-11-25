@@ -4,11 +4,8 @@ import { useTranslation } from "react-i18next";
 import { IconBolt, IconListDetails, IconLoader2 } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
-import {
-  STATE_DOT_CLASS,
-  STATE_LABEL_KEY,
-  buildAutomationRows,
-} from "@/components/runs/automation-rows";
+import { buildAutomationRows } from "@/components/runs/automation-rows";
+import { automationRunPresentation } from "@/components/runs/automation-run-presentation";
 import type { AutomationRow } from "@/components/runs/automation-rows";
 import { useAutomationSummaries } from "@/components/runs/use-automation-summaries";
 import { useLiveRefresh } from "@/components/runs/use-live-refresh";
@@ -46,16 +43,7 @@ function OpenAutomationsLink({ active }: { active: boolean }) {
   );
 }
 
-/**
- * One automation. The dot answers "is this thing okay" at a glance — the same
- * question the runs list answers, from the same derivation, so the sidebar and
- * the list cannot disagree about an automation's health.
- *
- * The trailing time answers the other one: an automation is a thing that is
- * supposed to keep happening, and "when did it last happen" is what tells you
- * whether it is. It comes from the same `formatRelativeTime` the runs rail
- * prints beside each run, so the two surfaces phrase an age identically.
- */
+/** Newest outcome and age share one run; activity retains running/paused priority. */
 function AutomationRowLink({ row, active }: { row: AutomationRow; active: boolean }) {
   const { automation, state, lastRun } = row;
   const { t } = useTranslation();
@@ -65,12 +53,17 @@ function AutomationRowLink({ row, active }: { row: AutomationRow; active: boolea
   // freezes at whatever it said when the section was first opened — and a
   // stale age is worse than no age, because it reads as a fresh reading.
   useNow(30_000);
+  const presentation = automationRunPresentation(state, lastRun);
+  const age = lastRun ? formatRelativeTime(lastRun.created_at) : null;
+  const metadata = presentation.showOutcome
+    ? t("automations:runStatusWithAge", { status: t(presentation.outcomeLabelKey!), age })
+    : age;
   return (
     <Link
       href={`${AUTOMATIONS_HREF}/${automation.id}`}
       data-testid={`sidebar-automation-${automation.id}`}
       className={cn(
-        "flex items-center gap-2.5 px-2.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
+        "flex min-w-0 items-center gap-2.5 px-2.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
         active ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
       )}
     >
@@ -82,20 +75,24 @@ function AutomationRowLink({ row, active }: { row: AutomationRow; active: boolea
         />
       ) : (
         <span
-          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATE_DOT_CLASS[state])}
+          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", presentation.dotClass)}
           aria-hidden="true"
         />
       )}
-      {/* The dot is decorative, so the state reaches a screen reader here. */}
-      <span className="sr-only">{`${t(STATE_LABEL_KEY[state])}.`}</span>
+      <span className="sr-only">
+        {presentation.labelKeys
+          .filter((key) => !presentation.showOutcome || key !== presentation.outcomeLabelKey)
+          .map((key) => `${t(key)}.`)
+          .join(" ")}
+      </span>
       <span className="min-w-0 flex-1 truncate">{automation.name}</span>
       {lastRun && (
         <span
-          className="shrink-0 text-[11px] font-normal tabular-nums text-muted-foreground/70"
+          className="min-w-0 max-w-[60%] wrap-anywhere whitespace-normal text-right text-[11px] font-normal tabular-nums text-muted-foreground/70"
           data-testid={`sidebar-automation-last-run-${automation.id}`}
           title={t("automations:lastRan", { when: formatRelativeTime(lastRun.created_at) })}
         >
-          {formatRelativeTime(lastRun.created_at)}
+          {metadata}
         </span>
       )}
     </Link>

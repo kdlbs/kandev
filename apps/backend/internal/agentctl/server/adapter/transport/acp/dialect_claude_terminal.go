@@ -13,8 +13,10 @@ import (
 // same metadata name to the launch result, so only the exact inspected tuple
 // may interpret a null exit as job termination.
 const (
-	verifiedClaudeTerminalBridgeName    = "@agentclientprotocol/claude-agent-acp"
-	verifiedClaudeTerminalBridgeVersion = "0.97.0"
+	verifiedClaudeTerminalBridgeName           = "@agentclientprotocol/claude-agent-acp"
+	verifiedClaudeTerminalBridgeVersion        = "0.97.0"
+	verifiedClaudeTerminalBridgeManagedVersion = "0.107.0"
+	verifiedClaudeTerminalBridgeCurrentVersion = "0.109.0"
 )
 
 // connectedAgentIdentity returns the immutable initialize identity of the
@@ -52,9 +54,15 @@ func claudeBackgroundTerminalExit(
 }
 
 func verifiedClaudeTerminalBridge(agentID, agentName, agentVersion string) bool {
-	return agentID == claudeAgentID &&
-		agentName == verifiedClaudeTerminalBridgeName &&
-		agentVersion == verifiedClaudeTerminalBridgeVersion
+	if agentID != claudeAgentID || agentName != verifiedClaudeTerminalBridgeName {
+		return false
+	}
+	switch agentVersion {
+	case verifiedClaudeTerminalBridgeVersion, verifiedClaudeTerminalBridgeManagedVersion, verifiedClaudeTerminalBridgeCurrentVersion:
+		return true
+	default:
+		return false
+	}
 }
 
 func claudeActiveDetachedShell(payload *streams.NormalizedPayload) bool {
@@ -96,9 +104,8 @@ func claudeTerminalOutcomeUnavailable(terminal map[string]any) bool {
 }
 
 // preservesVerifiedClaudeBackgroundShell reports whether this adapter can
-// still deliver a tracked shell's own terminal evidence after the foreground
-// prompt ends. Only the exact verified bridge qualifies; legacy and unknown
-// implementations keep their prompt-end cleanup fallback.
+// still deliver a tracked shell's own terminal evidence after turn cleanup.
+// Only a completed launch from the verified bridge qualifies.
 func (a *Adapter) preservesVerifiedClaudeBackgroundShell(payload *streams.NormalizedPayload) bool {
 	name, version := a.connectedAgentIdentity()
 	if !verifiedClaudeTerminalBridge(a.agentID, name, version) {
@@ -108,9 +115,51 @@ func (a *Adapter) preservesVerifiedClaudeBackgroundShell(payload *streams.Normal
 	return work != nil &&
 		work.Kind == streams.BackgroundWorkKindShell &&
 		work.Detached &&
+		work.WorkID != "" &&
 		!work.Ended &&
 		payload.IsVerifiedBackgroundWork() &&
 		payload.IsActiveBackgroundWork()
+}
+
+// isStaleClaudeNativeToolFrameLocked keeps tool-call state scoped to the
+// adapter's current native session. Tool frames from an outgoing session can
+// omit shell metadata, so session ownership must be checked before inspecting
+// or mutating a reused tool-call ID.
+func (a *Adapter) isStaleClaudeNativeToolFrameLocked(sessionID string) bool {
+	name, version := a.connectedAgentIdentity()
+	if !verifiedClaudeTerminalBridge(a.agentID, name, version) || a.sessionID == "" || sessionID == a.sessionID {
+		return false
+	}
+	return true
+}
+
+func (a *Adapter) clearVerifiedClaudeShellBindingsLocked() {
+	name, version := a.connectedAgentIdentity()
+	if !verifiedClaudeTerminalBridge(a.agentID, name, version) {
+		return
+	}
+	a.claudeShellOutput.clear()
+	for toolCallID, payload := range a.activeToolCalls {
+		if payload != nil && payload.Kind() == streams.ToolKindShellExec {
+			delete(a.activeToolCalls, toolCallID)
+		}
+	}
+}
+
+func (a *Adapter) endUnconfirmedClaudeBackgroundShellLocked(
+	payload *streams.NormalizedPayload,
+	toolCallID string,
+) *streams.WorkloadRunObservation {
+	name, version := a.connectedAgentIdentity()
+	if !verifiedClaudeTerminalBridge(a.agentID, name, version) || payload == nil {
+		return nil
+	}
+	work := payload.BackgroundWork()
+	if work == nil || work.Kind != streams.BackgroundWorkKindShell || !work.Detached || work.WorkID != "" || work.Ended {
+		return nil
+	}
+	payload.SetBackgroundWorkIdentity(work.Kind, work.WorkID, work.Detached, true)
+	return claudeBackgroundTerminalObservation(payload, toolCallID, time.Now().UTC())
 }
 
 // claudeBackgroundTerminalObservation builds the typed terminal observation

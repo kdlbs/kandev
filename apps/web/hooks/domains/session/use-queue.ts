@@ -9,10 +9,7 @@ import {
   reorderQueuedEntries,
   QueueEntryNotFoundError,
   QueueEditConflictError,
-  sendQueuedNow,
-  setQueueAutoRun,
   type QueueEditLease,
-  setQueueAutoMerge,
 } from "@/lib/api/domains/queue-api";
 import type { QueueSessionIdentity } from "@/lib/api/domains/queue-api";
 import type {
@@ -24,6 +21,7 @@ import type { MessageAttachment } from "./use-queue-types";
 export type { MessageAttachment, QueueMessageInput } from "./use-queue-types";
 import { useQueueAdmissionAction } from "./use-queue-admission";
 import { useQueueRefetch, type QueueRefetch } from "./use-queue-refetch";
+import { useQueueAutomationActions, useSendNowAction } from "./use-queue-mutations";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
 import { generateUUID } from "@/lib/utils";
@@ -80,69 +78,6 @@ type QueueActionsArgs = {
 type BeginQueueOperation = ReturnType<typeof useQueueState>["beginQueueOperation"];
 type FinishQueueOperation = ReturnType<typeof useQueueState>["finishQueueOperation"];
 
-async function runQueueMutation(
-  identity: QueueSessionIdentity | null,
-  beginQueueOperation: BeginQueueOperation,
-  finishQueueOperation: FinishQueueOperation,
-  refetch: QueueRefetch,
-  mutate: (identity: QueueSessionIdentity) => Promise<unknown>,
-): Promise<void> {
-  if (!identity) return;
-  const { session_id: sessionId, session_incarnation_id: incarnationId } = identity;
-  const token = beginQueueOperation(sessionId, incarnationId);
-  if (!token) return;
-  let mutationError: unknown;
-  try {
-    try {
-      await mutate(identity);
-    } catch (error) {
-      mutationError = error;
-    }
-    try {
-      await refetch(sessionId, token);
-    } catch (reconcileError) {
-      if (mutationError) throw mutationError;
-      throw reconcileError;
-    }
-    if (mutationError) throw mutationError;
-  } finally {
-    finishQueueOperation(sessionId, token);
-  }
-}
-
-function useSendNowAction(
-  identity: QueueSessionIdentity | null,
-  beginQueueOperation: BeginQueueOperation,
-  finishQueueOperation: FinishQueueOperation,
-  refetch: QueueRefetch,
-) {
-  return useCallback(
-    (entryId: string) =>
-      runQueueMutation(identity, beginQueueOperation, finishQueueOperation, refetch, (current) =>
-        sendQueuedNow({ ...current, scope: "entry", entry_id: entryId }),
-      ),
-    [beginQueueOperation, finishQueueOperation, identity, refetch],
-  );
-}
-
-type BooleanQueueMutation = (identity: QueueSessionIdentity, enabled: boolean) => Promise<unknown>;
-
-function useBooleanQueueAction(
-  identity: QueueSessionIdentity | null,
-  beginQueueOperation: BeginQueueOperation,
-  finishQueueOperation: FinishQueueOperation,
-  refetch: QueueRefetch,
-  mutate: BooleanQueueMutation,
-) {
-  return useCallback(
-    (enabled: boolean) =>
-      runQueueMutation(identity, beginQueueOperation, finishQueueOperation, refetch, (current) =>
-        mutate(current, enabled),
-      ),
-    [beginQueueOperation, finishQueueOperation, identity, mutate, refetch],
-  );
-}
-
 /** Build an action set bound to the supplied session + slice setters. */
 function useQueueActions({
   identity,
@@ -189,20 +124,12 @@ function useQueueActions({
     finishQueueOperation,
     refetch,
   );
-  const setAutoRun = useBooleanQueueAction(
+  const { setAutoRun, setAutoMerge } = useQueueAutomationActions({
     identity,
     beginQueueOperation,
     finishQueueOperation,
     refetch,
-    setQueueAutoRun,
-  );
-  const setAutoMerge = useBooleanQueueAction(
-    identity,
-    beginQueueOperation,
-    finishQueueOperation,
-    refetch,
-    setQueueAutoMerge,
-  );
+  });
 
   const { editEntry, removeEntry, mergeEntry } = useEntryMutations({
     identity,
@@ -564,14 +491,25 @@ function useQueueRefresh(
 }
 
 function queueSummary(meta: QueueMeta | undefined, entries: QueuedMessage[]) {
+  if (!meta) {
+    return {
+      count: entries.length,
+      max: 0,
+      isFull: false,
+      mergeEnabled: true,
+      autoRun: true,
+      autoMerge: false,
+      autoMergeAvailable: false,
+    };
+  }
   return {
-    count: meta?.count ?? entries.length,
-    max: meta?.max ?? 0,
-    isFull: meta ? meta.count >= meta.max && meta.max > 0 : false,
-    mergeEnabled: meta?.mergeEnabled ?? true,
-    autoRun: meta?.autoRun ?? true,
-    autoMerge: meta?.autoMergeEnabled ?? false,
-    autoMergeAvailable: meta?.autoMergeAvailable ?? false,
+    count: meta.count ?? entries.length,
+    max: meta.max ?? 0,
+    isFull: meta.count >= meta.max && meta.max > 0,
+    mergeEnabled: meta.mergeEnabled ?? true,
+    autoRun: meta.autoRun ?? true,
+    autoMerge: meta.autoMergeEnabled ?? false,
+    autoMergeAvailable: meta.autoMergeAvailable ?? false,
   };
 }
 

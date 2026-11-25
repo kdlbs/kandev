@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { WsWatcher } from "../../helpers/causal-waits";
 import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
 import { waitForComposerQueueMode } from "../../helpers/type-while-busy";
@@ -205,6 +206,7 @@ export async function expectSendNowInterruptsRunningFIFOTurn(
   await expect(sendNow).toBeVisible();
   await expect(sendNow).toBeEnabled();
   if (mobile) {
+    await waitForFiniteAnimations(panel);
     const box = await sendNow.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.width).toBeGreaterThanOrEqual(44);

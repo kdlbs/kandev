@@ -280,6 +280,7 @@ func TestPluginHostData_Wire_Messages(t *testing.T) {
 			AuthorType:    taskmodels.MessageAuthorUser,
 			Content:       "<kandev-system>hidden</kandev-system>Visible text.",
 			Type:          taskmodels.MessageTypeMessage,
+			Metadata:      map[string]interface{}{"source": "plugin:discord", "has_hidden_prompts": true},
 			CreatedAt:     time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC),
 		}}
 		host := dialPluginHostOverWire(t, d.host)
@@ -289,6 +290,7 @@ func TestPluginHostData_Wire_Messages(t *testing.T) {
 		require.Len(t, msgs, 1)
 		require.Equal(t, "Visible text.", msgs[0].Content)
 		require.Equal(t, "user", msgs[0].AuthorType)
+		require.Equal(t, "plugin:discord", msgs[0].Source)
 	})
 }
 

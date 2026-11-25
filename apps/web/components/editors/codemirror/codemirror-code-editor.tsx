@@ -1,12 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
-import { Button } from "@kandev/ui/button";
-import { IconMessagePlus } from "@tabler/icons-react";
 import { vscodeDark } from "@uiw/codemirror-theme-vscode";
-import { EditorCommentPopover } from "@/components/task/editor-comment-popover";
+import { SelectionCommentSurface } from "@/components/shared/selection-comment/selection-comment-surface";
+import { lineRangeLabel } from "@/components/shared/selection-comment/line-range-label";
 import { CommentViewPopover } from "@/components/task/comment-view-popover";
 import { registerCodeMirrorCursorRevealer } from "@/hooks/file-editor-cursor";
 import { useCodeMirrorEditorState } from "./use-codemirror-editor-state";
@@ -19,7 +18,7 @@ import {
   revealCodeMirrorCursor,
   revealPendingCodeMirrorCursor,
 } from "./codemirror-cursor-navigation";
-import { useTranslation } from "react-i18next";
+import { EditorSelectionCommentTrigger } from "@/components/editors/editor-selection-comment-trigger";
 
 type FileEditorContentProps = {
   path: string;
@@ -35,6 +34,8 @@ type FileEditorContentProps = {
   worktreePath?: string;
   isSymlink?: boolean;
   repo?: string;
+  readOnly?: boolean;
+  showToolbar?: boolean;
   enableComments?: boolean;
   previewKind?: FilePreviewKind;
   onTogglePreview?: () => void;
@@ -49,35 +50,44 @@ type FileEditorContentProps = {
 
 type CodeMirrorEditorState = ReturnType<typeof useCodeMirrorEditorState>;
 
-function CodeMirrorOverlays({ state }: { state: CodeMirrorEditorState }) {
-  const { t } = useTranslation();
+function CodeMirrorOverlays({
+  state,
+  hostRef,
+  reserveRef,
+}: {
+  state: CodeMirrorEditorState;
+  hostRef: RefObject<HTMLElement | null>;
+  reserveRef: RefObject<HTMLElement | null>;
+}) {
   return (
     <>
       {state.floatingButtonPos && !state.textSelection && (
-        <Button
-          size="sm"
-          variant="secondary"
-          className="floating-comment-btn fixed z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
-          style={{ left: state.floatingButtonPos.x + 8, top: state.floatingButtonPos.y + 8 }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={state.handleFloatingButtonClick}
-        >
-          <IconMessagePlus className="h-3.5 w-3.5" />
-          {t("editors:comment")}
-        </Button>
+        <EditorSelectionCommentTrigger
+          touch={state.touch}
+          position={{ left: state.floatingButtonPos.x + 8, top: state.floatingButtonPos.y + 8 }}
+          positioning="fixed"
+          hostRef={hostRef}
+          reserveRef={reserveRef}
+          onOpen={() => state.handleFloatingButtonClick()}
+        />
       )}
       {state.textSelection && (
-        <EditorCommentPopover
+        <SelectionCommentSurface
+          key={`${state.commentScope}:${state.textSelection.startLine}:${state.textSelection.endLine}:${state.textSelection.text}`}
+          attachmentOptions={
+            state.attachmentTaskId ? { taskId: state.attachmentTaskId } : undefined
+          }
           selectedText={state.textSelection.text}
-          lineRange={{ start: state.textSelection.startLine, end: state.textSelection.endLine }}
+          contextLabel={lineRangeLabel(state.textSelection.startLine, state.textSelection.endLine)}
           position={state.textSelection.position}
-          onSubmit={state.handleCommentSubmit}
-          onSubmitAndRun={state.handleCommentSubmitAndRun}
+          onAdd={state.handleCommentSubmit}
+          onAddAndRun={state.handleCommentSubmitAndRun}
           onClose={state.handlePopoverClose}
         />
       )}
       {state.commentView && (
         <CommentViewPopover
+          taskId={state.attachmentTaskId}
           comments={state.commentView.comments}
           position={state.commentView.position}
           onDelete={state.handleDeleteComment}
@@ -95,6 +105,7 @@ function useCodeMirrorCodeEditorSetup(props: FileEditorContentProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<ReactCodeMirrorRef>(null);
+  const reserveRef = useRef<HTMLElement | null>(null);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   const state = useCodeMirrorEditorState({
     path,
@@ -104,6 +115,7 @@ function useCodeMirrorCodeEditorSetup(props: FileEditorContentProps) {
     isDirty,
     isSaving,
     sessionId,
+    readOnly: props.readOnly ?? false,
     enableComments: enableComments ?? false,
     onChange: props.onChange,
     onSave: props.onSave,
@@ -132,69 +144,84 @@ function useCodeMirrorCodeEditorSetup(props: FileEditorContentProps) {
       clearCodeMirrorCursorFlash(editorView);
     };
   }, [editorView, path, repo, sessionId]);
-  const handleCreateEditor = useCallback((view: EditorView) => setEditorView(view), []);
-  return { wrapperRef, editorAreaRef, editorRef, state, walkthroughRange, handleCreateEditor };
+  const handleCreateEditor = useCallback((view: EditorView) => {
+    setEditorView(view);
+    reserveRef.current = view.scrollDOM;
+  }, []);
+  return {
+    wrapperRef,
+    editorAreaRef,
+    editorRef,
+    reserveRef,
+    state,
+    walkthroughRange,
+    handleCreateEditor,
+  };
+}
+
+function CodeMirrorEditorToolbar({
+  props,
+  state,
+}: {
+  props: FileEditorContentProps;
+  state: CodeMirrorEditorState;
+}) {
+  if (props.showToolbar === false) return null;
+  return (
+    <CodeMirrorToolbar
+      path={props.path}
+      worktreePath={props.worktreePath}
+      isSymlink={props.isSymlink}
+      isDirty={props.isDirty}
+      isSaving={props.isSaving}
+      diffStats={state.diffStats}
+      wrapEnabled={state.wrapEnabled}
+      enableComments={props.enableComments ?? false}
+      sessionId={props.sessionId}
+      taskId={props.taskId}
+      repositoryId={props.repositoryId}
+      repositoryName={props.repo}
+      commentCount={state.comments.length}
+      hasRemoteUpdate={props.hasRemoteUpdate ?? false}
+      onToggleWrap={() => state.setWrapEnabled(!state.wrapEnabled)}
+      onSave={props.onSave}
+      onReloadFromAgent={props.onReloadFromAgent}
+      onDelete={props.onDelete}
+      onDownload={props.onDownload}
+      previewKind={props.previewKind}
+      onTogglePreview={props.onTogglePreview}
+      onPreviewHtml={props.onPreviewHtml}
+      isPublishingHtmlPreview={props.isPublishingHtmlPreview}
+    />
+  );
 }
 
 export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
+  const { content, readOnly } = props;
   const {
-    path,
-    content,
-    isDirty,
-    hasRemoteUpdate = false,
-    isSaving,
-    sessionId,
-    taskId,
-    repositoryId,
-    worktreePath,
-    isSymlink,
-    repo,
-    enableComments = false,
-    previewKind,
-    onTogglePreview,
-    onPreviewHtml,
-    isPublishingHtmlPreview,
-    onSave,
-    onReloadFromAgent,
-    onDelete,
-    onDownload,
-  } = props;
-  const { wrapperRef, editorAreaRef, editorRef, state, walkthroughRange, handleCreateEditor } =
-    useCodeMirrorCodeEditorSetup(props);
+    wrapperRef,
+    editorAreaRef,
+    editorRef,
+    reserveRef,
+    state,
+    walkthroughRange,
+    handleCreateEditor,
+  } = useCodeMirrorCodeEditorSetup(props);
 
   return (
     <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
-      <CodeMirrorToolbar
-        path={path}
-        worktreePath={worktreePath}
-        isSymlink={isSymlink}
-        isDirty={isDirty}
-        isSaving={isSaving}
-        diffStats={state.diffStats}
-        wrapEnabled={state.wrapEnabled}
-        enableComments={enableComments}
-        sessionId={sessionId}
-        taskId={taskId}
-        repositoryId={repositoryId}
-        repositoryName={repo}
-        commentCount={state.comments.length}
-        hasRemoteUpdate={hasRemoteUpdate}
-        onToggleWrap={() => state.setWrapEnabled(!state.wrapEnabled)}
-        onSave={onSave}
-        onReloadFromAgent={onReloadFromAgent}
-        onDelete={onDelete}
-        onDownload={onDownload}
-        previewKind={previewKind}
-        onTogglePreview={onTogglePreview}
-        onPreviewHtml={onPreviewHtml}
-        isPublishingHtmlPreview={isPublishingHtmlPreview}
-      />
-      <div ref={editorAreaRef} className="flex-1 overflow-hidden relative">
+      <CodeMirrorEditorToolbar props={props} state={state} />
+      <div
+        ref={editorAreaRef}
+        className="flex-1 overflow-hidden relative"
+        data-testid="codemirror-editor-area"
+      >
         <CodeMirror
           ref={editorRef}
           value={content}
           height="100%"
           theme={vscodeDark}
+          readOnly={readOnly}
           extensions={[...state.extensions, codeMirrorCursorFlashExtension]}
           onChange={state.handleChange}
           basicSetup={{
@@ -221,7 +248,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
             }}
           />
         ) : null}
-        <CodeMirrorOverlays state={state} />
+        <CodeMirrorOverlays state={state} hostRef={editorAreaRef} reserveRef={reserveRef} />
       </div>
     </div>
   );

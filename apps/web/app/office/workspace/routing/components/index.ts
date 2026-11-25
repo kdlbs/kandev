@@ -6,3 +6,5 @@ export { AgentPreviewTable } from "./agent-preview-table";
 export { ProviderHealthBanner } from "./provider-health-banner";
 export { WakeReasonTierCard, firstProviderWithTier } from "./wake-reason-tier-card";
 export { RoleTierCard } from "./role-tier-card";
+export { AuthorExclusionStepsCard, authorExclusionStepKey } from "./author-exclusion-steps-card";
+export type { AuthorExclusionDraft } from "./author-exclusion-steps-card";

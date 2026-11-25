@@ -242,6 +242,12 @@ function readSelectionCause(
     if (requested) cause.requested_model = requested;
     if (effective) cause.effective_model = effective;
     if (attempted) cause.attempted_model = attempted;
+  } else if (cause.code?.startsWith("thinking_level_")) {
+    cause.requested_setting = safeAgentErrorSelector(record.requested_setting);
+    cause.effective_setting = safeAgentErrorSelector(record.effective_setting);
+    cause.setting_config_id = safeAgentErrorSelector(record.setting_config_id);
+    if (record.setting_source === "agent_profile" || record.setting_source === "session_override")
+      cause.setting_source = record.setting_source;
   } else {
     const requested = safeAgentErrorSelector(record.requested_mode);
     const effective = safeAgentErrorSelector(record.effective_mode);
@@ -297,6 +303,7 @@ function boundedString(value: unknown, maxLength: number): string | undefined {
 
 function isKnownSelectionReason(code: string | undefined, reason: string): boolean {
   switch (code) {
+    case "thinking_level_unavailable":
     case "model_unavailable":
       return reason === "requested_not_advertised";
     case "model_selection_failed":
@@ -306,10 +313,13 @@ function isKnownSelectionReason(code: string | undefined, reason: string): boole
         "application_failed",
         "selection_missing",
       ].includes(reason);
+    case "thinking_level_failed":
     case "permission_mode_failed":
       return reason === "client_unavailable" || reason === "application_failed";
+    case "thinking_level_unconfirmed":
     case "permission_mode_unconfirmed":
       return reason === "confirmation_missing";
+    case "thinking_level_mismatch":
     case "permission_mode_mismatch":
       return reason === "effective_mismatch";
     default:

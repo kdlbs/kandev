@@ -62,11 +62,15 @@ func resolveAgentLaunch(ia agents.InferenceAgent, base []string) ([]string, []st
 	if !ok {
 		return base, nil, nil
 	}
-	command, values, err := resolver.ResolveLocalRuntime(context.Background())
+	selection, err := resolver.ResolveLocalRuntime(context.Background())
 	if err != nil {
 		return base, nil, err
 	}
-	env := acpcompat.MergeEnvMap(os.Environ(), values)
+	command := selection.Command
+	env := acpcompat.MergeEnvMap(os.Environ(), selection.Env)
+	if selection.Variant == acpcompat.AntigravityRuntimeCLI {
+		return command.Args(), acpcompat.StripAntigravityCredentialEnv(env), nil
+	}
 	harness := acpcompat.EnvValue(env, acpcompat.AntigravityHarnessPathEnv)
 	prepared, err := acpcompat.PrepareLocalAntigravityEnv(env, harness)
 	if err != nil {

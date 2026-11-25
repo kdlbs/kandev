@@ -3,7 +3,9 @@ import type { editor as monacoEditor } from "monaco-editor";
 import { createRoot, type Root } from "react-dom/client";
 import type { ReactNode } from "react";
 
-type ViewZoneEntry = { id: string; root: Root };
+import { observeCommentViewZone } from "./observe-comment-view-zone";
+
+type ViewZoneEntry = { id: string; root: Root; stopObserving: () => void };
 
 type AddZoneFn = (afterLine: number, heightPx: number, content: ReactNode) => void;
 
@@ -29,7 +31,10 @@ export function useEditorViewZoneComments(
     const oldZones = zonesRef.current;
     if (oldZones.length > 0) {
       editor.changeViewZones((accessor) => {
-        for (const z of oldZones) accessor.removeZone(z.id);
+        for (const z of oldZones) {
+          z.stopObserving();
+          accessor.removeZone(z.id);
+        }
       });
       const staleRoots = oldZones.map((z) => z.root);
       queueMicrotask(() => staleRoots.forEach((r) => r.unmount()));
@@ -42,19 +47,27 @@ export function useEditorViewZoneComments(
     const addZone: AddZoneFn = (afterLine, heightPx, content) => {
       const domNode = document.createElement("div");
       domNode.style.zIndex = "10";
-      const root = createRoot(domNode);
+      const zoneContent = document.createElement("div");
+      domNode.append(zoneContent);
+      const root = createRoot(zoneContent);
       root.render(content);
       let zoneId = "";
+      const zone = { afterLineNumber: afterLine, heightInPx: heightPx, domNode };
       editor.changeViewZones((accessor) => {
-        zoneId = accessor.addZone({ afterLineNumber: afterLine, heightInPx: heightPx, domNode });
+        zoneId = accessor.addZone(zone);
       });
-      newZones.push({ id: zoneId, root });
+      newZones.push({
+        id: zoneId,
+        root,
+        stopObserving: observeCommentViewZone(editor, zone, zoneId, zoneContent),
+      });
     };
 
     buildZones(addZone);
     zonesRef.current = newZones;
 
     return () => {
+      for (const zone of newZones) zone.stopObserving();
       try {
         editor.changeViewZones((accessor) => {
           for (const z of newZones) accessor.removeZone(z.id);

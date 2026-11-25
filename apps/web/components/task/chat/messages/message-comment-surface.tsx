@@ -15,6 +15,7 @@ import {
 import { useShallow } from "zustand/react/shallow";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useCommentsStore } from "@/lib/state/slices/comments";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import {
@@ -40,6 +41,8 @@ import {
 } from "./message-comment-decorations";
 import { MessageCommentControls, type CommentTarget } from "./message-comment-controls";
 import { useTranslation } from "react-i18next";
+import { useTouchSelectionTracking } from "@/hooks/use-touch-selection-tracking";
+import { useSelectionDockHost } from "@/components/shared/selection-action-dock";
 
 type MessageCommentSurfaceProps = {
   message: Message;
@@ -123,10 +126,45 @@ function usePendingCommentsForMessage(sessionId: string | null | undefined, mess
   );
 }
 
+function sameSelectionTarget(target: CommentTarget | null, selection: MessageSelection) {
+  return (
+    target !== null &&
+    !target.editingCommentId &&
+    target.selection.start === selection.start &&
+    target.selection.end === selection.end
+  );
+}
+
+function useTouchCommentTarget({
+  rootRef,
+  enabled,
+  target,
+  setTarget,
+  setNewSelection,
+}: {
+  rootRef: RefObject<HTMLDivElement | null>;
+  enabled: boolean;
+  target: CommentTarget | null;
+  setTarget: Dispatch<SetStateAction<CommentTarget | null>>;
+  setNewSelection: (selection: MessageSelection, openComposer: boolean) => void;
+}) {
+  const followSelection = useCallback(
+    (domSelection: Selection | null) => {
+      const root = rootRef.current;
+      const selection = root && domSelection ? getMessageSelection(root, domSelection) : null;
+      if (!selection) setTarget(null);
+      else if (!sameSelectionTarget(target, selection)) setNewSelection(selection, false);
+    },
+    [rootRef, setNewSelection, setTarget, target],
+  );
+  useTouchSelectionTracking(rootRef, enabled, followSelection);
+}
+
 function useCommentTargetState(
   rootRef: RefObject<HTMLDivElement | null>,
   isSelectable: boolean,
   messageId: string,
+  touch: boolean,
 ) {
   const [target, setTarget] = useState<CommentTarget | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -157,6 +195,13 @@ function useCommentTargetState(
   }, [isSelectable, rootRef, setNewSelection]);
 
   useMessageCommentMouseSelection(rootRef, isSelectable && !composerOpen, captureSelection);
+  useTouchCommentTarget({
+    rootRef,
+    enabled: touch && isSelectable && !composerOpen,
+    target,
+    setTarget,
+    setNewSelection,
+  });
 
   const openFromShortcut = useCallback(
     (selection: MessageSelection) => setNewSelection(selection, true),
@@ -165,7 +210,8 @@ function useCommentTargetState(
   useMessageCommentShortcut(rootRef, isSelectable, openFromShortcut);
 
   useEffect(() => {
-    if (!target || composerOpen) return;
+    // Touch selections own visibility through the live selection instead.
+    if (!target || composerOpen || touch) return;
     const dismiss = (event: Event) => {
       const element = event.target as HTMLElement | null;
       if (element?.closest('[data-testid="agent-message-comment-trigger"]')) return;
@@ -178,7 +224,7 @@ function useCommentTargetState(
       document.removeEventListener("pointerdown", dismiss, true);
       document.removeEventListener("scroll", dismissOnScroll, true);
     };
-  }, [composerOpen, target]);
+  }, [composerOpen, target, touch]);
 
   return { target, setTarget, composerOpen, setComposerOpen, close, captureSelection };
 }
@@ -206,6 +252,7 @@ function useExistingCommentHandlers(
         position,
         editingCommentId: comment.id,
         editingText: comment.text,
+        attachments: comment.attachments,
       });
       setComposerOpen(true);
       window.getSelection()?.removeAllRanges();
@@ -221,7 +268,6 @@ function useMessageCommentActions({
   sessionId,
   target,
   rootRef,
-  close,
   authorName,
 }: {
   authorName?: string;
@@ -229,7 +275,6 @@ function useMessageCommentActions({
   sessionId: string | null | undefined;
   target: CommentTarget | null;
   rootRef: RefObject<HTMLDivElement | null>;
-  close: () => void;
 }) {
   const { t } = useTranslation();
   const addComment = useCommentsStore((state) => state.addComment);
@@ -241,11 +286,14 @@ function useMessageCommentActions({
   useEffect(() => setSaveError(null), [target]);
 
   const saveComment = useCallback(
-    (feedback: string): AgentMessageComment | true | null => {
+    (feedback: string, attachments?: MessageAttachment[]): AgentMessageComment | true | null => {
       if (!target || !sessionId || !feedback.trim()) return null;
       if (target.editingCommentId) {
         setSaveError(null);
-        updateComment(target.editingCommentId, { text: feedback.trim() });
+        updateComment(target.editingCommentId, {
+          text: feedback.trim(),
+          ...(attachments && { attachments }),
+        });
         return true;
       }
       const renderedText = rootRef.current?.textContent ?? "";
@@ -258,6 +306,7 @@ function useMessageCommentActions({
         return null;
       }
       setSaveError(null);
+      if (attachments?.length) comment.attachments = attachments;
       addComment(comment);
       return comment;
     },
@@ -265,16 +314,16 @@ function useMessageCommentActions({
   );
 
   const handleAdd = useCallback(
-    (feedback: string) => {
-      if (!saveComment(feedback)) return false;
+    (feedback: string, attachments?: MessageAttachment[]) => {
+      if (!saveComment(feedback, attachments)) return false;
       return true;
     },
     [saveComment],
   );
 
   const handleRun = useCallback(
-    (feedback: string) => {
-      const comment = saveComment(feedback);
+    (feedback: string, attachments?: MessageAttachment[]) => {
+      const comment = saveComment(feedback, attachments);
       if (!comment) return false;
       if (comment !== true) {
         void runComment(comment).catch((error) =>
@@ -289,8 +338,7 @@ function useMessageCommentActions({
   const deleteComment = useCallback(() => {
     if (!target?.editingCommentId) return;
     removeComment(target.editingCommentId);
-    close();
-  }, [close, removeComment, target?.editingCommentId]);
+  }, [removeComment, target?.editingCommentId]);
   const handleDelete = target?.editingCommentId ? deleteComment : undefined;
 
   return { handleAdd, handleRun, handleDelete, saveError };
@@ -319,7 +367,8 @@ export function MessageCommentSurface({
   const useDrawer = useTouchDrawer();
   const pendingComments = usePendingCommentsForMessage(sessionId, message.id);
   const isSelectable = canSelectMessageText(message, sessionId, isTurnActive, readOnly);
-  const targetState = useCommentTargetState(rootRef, isSelectable, message.id);
+  const targetState = useCommentTargetState(rootRef, isSelectable, message.id, useDrawer);
+  const dockHostRef = useSelectionDockHost(rootRef);
   const { target, composerOpen, setTarget, setComposerOpen, close, captureSelection } = targetState;
   const openExistingComment = useExistingCommentHandlers(
     rootRef,
@@ -332,7 +381,6 @@ export function MessageCommentSurface({
     sessionId,
     target,
     rootRef,
-    close,
     authorName,
   });
   const handleRun = allowRun ? actions.handleRun : undefined;
@@ -369,6 +417,8 @@ export function MessageCommentSurface({
         <MessageCustomHighlightStyle highlightName={highlightName} />
       ) : null}
       <MessageCommentControls
+        taskId={allowRun ? message.task_id : null}
+        key={`${sessionId}:${message.id}`}
         target={target}
         composerOpen={composerOpen}
         useDrawer={useDrawer}
@@ -377,6 +427,7 @@ export function MessageCommentSurface({
         actions={actions}
         handleRun={handleRun}
         portalContainer={portalContainer}
+        dockHostRef={dockHostRef}
       />
     </>
   );

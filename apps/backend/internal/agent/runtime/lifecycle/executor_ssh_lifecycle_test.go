@@ -277,8 +277,8 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		switch r.URL.Path {
-		case "/auth/handshake":
+		switch {
+		case r.URL.Path == "/auth/handshake":
 			h.handshakes++
 			response := map[string]interface{}{"token": "launch-token"}
 			if h.launchBinding.Owner.TaskID != "" {
@@ -287,11 +287,21 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 				response["launch"] = receipt
 			}
 			_ = json.NewEncoder(w).Encode(response)
-		case "/api/v1/instances":
+		case r.URL.Path == "/api/v1/instances":
 			body, _ := io.ReadAll(r.Body)
 			h.createRequests = append(h.createRequests, string(body))
 			_, _ = io.WriteString(w, `{"id":"remote-instance","port":41234}`)
-		case "/health":
+		case strings.HasPrefix(r.URL.Path, "/api/v1/instances/"):
+			if r.Header.Get("Authorization") != "Bearer persisted-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			id := strings.TrimPrefix(r.URL.Path, "/api/v1/instances/")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"id": id, "port": 41234, "status": "running", "workspace_path": h.remoteHome,
+				"session_id": "session-1", "task_id": "task-1", "scoped_mcp_routes": true,
+			})
+		case r.URL.Path == "/health":
 			_, _ = io.WriteString(w, "ok")
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -329,7 +339,7 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 			}
 			return sshOut(pid + "\n")
 		case strings.Contains(command, "agentctl.log"):
-			return sshOut("HTTP server bound successfully\n")
+			return sshOut("{\"msg\":\"HTTP server bound successfully\",\"address\":\"127.0.0.1:41235\"}\n")
 		case strings.Contains(command, "kill -0"):
 			return sshOK
 		default:

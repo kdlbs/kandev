@@ -89,23 +89,6 @@ func TestSidebarTaskColorsDTOContract(t *testing.T) {
 	}
 }
 
-// TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences verifies the patch request exposes the Azure DevOps browse preferences field.
-func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing.T) {
-	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("AzureDevOpsBrowsePreferences")
-	if !ok || field.Tag.Get("json") != "azure_devops_browse_preferences,omitempty" {
-		t.Fatalf("Azure DevOps browse preferences patch field = %+v, want JSON preference field", field)
-	}
-}
-
-// TestFromUserSettingsMapsAzureDevOpsBrowsePreferences verifies the DTO passes the Azure DevOps browse preferences through unchanged.
-func TestFromUserSettingsMapsAzureDevOpsBrowsePreferences(t *testing.T) {
-	preferences := json.RawMessage(`{"project-1":{"teamId":"team-1"}}`)
-	settings := FromUserSettings(&models.UserSettings{AzureDevOpsBrowsePreferences: preferences})
-	if string(settings.AzureDevOpsBrowsePreferences) != string(preferences) {
-		t.Fatalf("AzureDevOpsBrowsePreferences = %s, want %s", settings.AzureDevOpsBrowsePreferences, preferences)
-	}
-}
-
 // TestUpdateUserSettingsRequestExposesKanbanHiddenStepIDs verifies the patch request exposes the kanban hidden step IDs field.
 func TestUpdateUserSettingsRequestExposesKanbanHiddenStepIDs(t *testing.T) {
 	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("KanbanHiddenStepIDs")

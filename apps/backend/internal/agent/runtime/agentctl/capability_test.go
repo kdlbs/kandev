@@ -29,3 +29,22 @@ func TestAntigravityCapabilityNegotiation(t *testing.T) {
 		t.Fatal("older sidecar was accepted")
 	}
 }
+
+func TestAntigravityCLIRuntimeRejectsRetainedPersonalAuthHelper(t *testing.T) {
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"capabilities":["antigravity_personal_auth_v1"]}`))
+	}))
+	defer old.Close()
+	policy := acpcompat.AntigravityAuthPolicyForRuntime(acpcompat.AntigravityRuntimeCLI, "1.5.15", false)
+	if err := newClient(old.URL, newTestLogger()).RequireCapability(context.Background(), acpcompat.AntigravityRuntimeCapability(policy)); err == nil {
+		t.Fatal("retained helper with standalone auth support accepted CLI runtime configuration")
+	}
+
+	current := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"capabilities":["antigravity_personal_auth_v1","antigravity_cli_runtime_v1"]}`))
+	}))
+	defer current.Close()
+	if err := newClient(current.URL, newTestLogger()).RequireCapability(context.Background(), acpcompat.AntigravityRuntimeCapability(policy)); err != nil {
+		t.Fatalf("CLI-capable helper rejected: %v", err)
+	}
+}

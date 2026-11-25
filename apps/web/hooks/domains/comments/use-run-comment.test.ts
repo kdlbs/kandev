@@ -14,6 +14,7 @@ import {
   makeWalkthroughComment,
   makeAgentMessageComment,
   makeReviewFileComment,
+  queuedReviewFile,
 } from "./use-run-comment.test-helpers";
 import { WebSocketRequestError } from "@/lib/ws/request-error";
 
@@ -95,7 +96,8 @@ vi.mock("@/lib/state/slices/comments", () => ({
   ),
 }));
 
-vi.mock("@/lib/state/slices/comments/format", () => ({
+vi.mock("@/lib/state/slices/comments/format", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/state/slices/comments/format")>()),
   formatReviewCommentsAsMarkdown: (comments: DiffComment[]) => `[diff] ${comments[0]?.text ?? ""}`,
   formatPlanCommentsAsMarkdown: (comments: PlanComment[]) => `[plan] ${comments[0]?.text ?? ""}`,
   formatPRFeedbackAsMarkdown: () => "[pr-feedback]",
@@ -315,17 +317,23 @@ describe("useRunComment — busy agent queues", () => {
     mockStoreState = makeStoreState("RUNNING");
     const { result } = renderCommentHook();
 
-    let res: { queued: boolean } | undefined;
-    await act(async () => {
-      res = await result.current.runComment(makeDiffComment());
-    });
-
-    expect(res).toEqual({ queued: true });
+    await expect(result.current.runComment(makeDiffComment())).resolves.toEqual({ queued: true });
     expect(mockAppendToQueue).toHaveBeenCalledWith(
       expect.objectContaining({ session_id: "sess-1", task_id: "task-1" }),
     );
     expect(mockRequest).not.toHaveBeenCalled();
     expect(mockMarkCommentsSent).toHaveBeenCalledWith(["c-1"]);
+  });
+
+  it("admits a queued review comment and its files together", async () => {
+    mockStoreState = makeStoreState("RUNNING");
+    const { result } = renderCommentHook();
+    const comment = { ...makeDiffComment(), attachments: [queuedReviewFile] };
+    await expect(result.current.runComment(comment)).resolves.toEqual({ queued: true });
+    expect(mockQueueMessage.mock.calls[0]?.[0].attachments).toEqual([
+      { ...queuedReviewFile, comment_id: queuedReviewFile.attachment_id },
+    ]);
+    expect(mockAppendToQueue).not.toHaveBeenCalled();
   });
 
   it("queues via appendToQueue when the selected session is STARTING", async () => {

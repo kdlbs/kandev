@@ -40,6 +40,10 @@ type BackendWorkflowTemplate = Omit<WorkflowTemplate, "default_steps"> & {
   default_steps?: BackendTemplateStep[];
 };
 
+type BackendListWorkflowStepsResponse = Omit<ListWorkflowStepsResponse, "steps"> & {
+  steps?: WorkflowStep[] | null;
+};
+
 export const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowTemplate => {
   const steps = template.default_steps ?? template.steps ?? [];
   const default_steps: StepDefinition[] = steps.map((step) => ({
@@ -96,13 +100,13 @@ export async function getWorkflowTemplate(templateId: string, options?: ApiReque
 
 // Workflow Step operations
 export async function listWorkflowSteps(workflowId: string, options?: ApiRequestOptions) {
-  const response = await fetchJson<ListWorkflowStepsResponse>(
+  const response = await fetchJson<BackendListWorkflowStepsResponse>(
     `/api/v1/workflows/${workflowId}/workflow/steps`,
     options,
   );
   return {
     ...response,
-    steps: response.steps.map((step) => ({
+    steps: (response.steps ?? []).map((step) => ({
       ...step,
       disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
       profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(

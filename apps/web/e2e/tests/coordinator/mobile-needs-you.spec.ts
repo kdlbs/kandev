@@ -10,8 +10,13 @@
 // kept separate so it can be dropped independently of this file's coverage.
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { waitForSessionState } from "../../helpers/session";
-import { linkToCoordinator, linkToCoordinatorNeedsYou } from "../../../lib/coordinator/links";
+import {
+  linkToCoordinator,
+  linkToCoordinatorNeedsYou,
+  linkToCoordinatorQueue,
+} from "../../../lib/coordinator/links";
 
 const MIN_TOUCH_TARGET_PX = 44;
 
@@ -24,6 +29,46 @@ async function expectNoHorizontalScroll(testPage: import("@playwright/test").Pag
 }
 
 test.describe("Coordinator screens on a phone viewport", () => {
+  test("the Goal and empty state fit the Needs you screen", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Mobile Empty State Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+    watchWs(testPage);
+    const [goalResponse] = await Promise.all([
+      waitForHttp(testPage, "GET", new RegExp(`/coordinators/${coordinator.id}/goal$`)),
+      testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id)),
+    ]);
+    expect(goalResponse.ok()).toBe(true);
+
+    const goal = testPage.getByTestId("goal-note");
+    const empty = testPage.getByTestId("empty-needs-you-state");
+    await expect(goal.getByRole("link", { name: "Set a goal" })).toBeVisible();
+    const workingLink = empty.getByRole("link", { name: "See what is running" });
+    await expect(workingLink).toBeVisible();
+    const strip = await testPage.getByTestId("coordinator-count-strip").boundingBox();
+    expect(strip).not.toBeNull();
+    for (const section of [goal, empty]) {
+      const box = await section.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeCloseTo(strip!.x, 0);
+      expect(box!.width).toBeCloseTo(strip!.width, 0);
+    }
+    await expectNoHorizontalScroll(testPage);
+    await Promise.all([
+      testPage.waitForURL(linkToCoordinatorQueue(seedData.workspaceId, coordinator.id, "working")),
+      workingLink.tap(),
+    ]);
+    await expect(testPage.getByTestId("queue-group-list")).toBeVisible();
+  });
+
   test("Needs you stacks in one column with 44px touch targets, no horizontal scroll and a pinned count strip (AC .008.1)", async ({
     testPage,
     apiClient,

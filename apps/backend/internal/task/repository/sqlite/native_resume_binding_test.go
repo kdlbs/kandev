@@ -175,6 +175,16 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 				require.NoError(t, err)
 				require.Equal(t, scenario == "legacy error", current.Metadata[models.SessionMetaKeyLastAgentError] == nil)
 			}
+			if scenario == "absent notice" {
+				current, err := repo.GetTaskSession(ctx, proof.SessionID)
+				require.NoError(t, err)
+				require.Equal(t, models.RecoveryNoticeSourceIdentity(models.AgentDeliveryRecovery{
+					SessionID: fixture.session.ID, IncarnationID: fixture.recovery.IncarnationID,
+					HarnessGeneration: fixture.recovery.HarnessGeneration,
+					SubmissionID:      fixture.recovery.SubmissionID, StreamID: fixture.recovery.StreamID,
+				}), current.Metadata[models.SessionMetaKeyRecoveryNoticePending],
+					"authenticated interrupted recovery must create a notice even when its snapshot was absent")
+			}
 			stored, err := repo.GetAgentDeliverySubmission(ctx, submission.ID)
 			require.NoError(t, err)
 			require.Equal(t, submission.State, stored.State)

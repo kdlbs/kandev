@@ -132,6 +132,20 @@ type SessionCapabilityProvider interface {
 	SupportsSessionLoad() bool
 }
 
+// ACPProtocolVersion returns the adapter's reported ACP version, or zero if unavailable.
+func ACPProtocolVersion(adpt AgentAdapter) uint16 {
+	if reporter, ok := adpt.(interface{ ACPProtocolVersion() uint16 }); ok {
+		return reporter.ACPProtocolVersion()
+	}
+	return 0
+}
+
+// SessionOperationAuthMethodsProvider exposes the initialize method snapshot
+// for a typed session-operation failure response.
+type SessionOperationAuthMethodsProvider interface {
+	GetSessionOperationAuthMethods() []streams.AuthMethodInfo
+}
+
 // StderrProviderSetter is an optional interface implemented by adapters that can use
 // stderr output for error context. The process manager checks for this interface
 // and calls SetStderrProvider if available.
@@ -149,6 +163,13 @@ type ModeSettableAdapter interface {
 // support changing the session model (e.g., ACP adapters with session/set_model).
 type ModelSettableAdapter interface {
 	SetModel(ctx context.Context, modelID string) error
+}
+
+// ModelConfigurationResultAdapter reports only values read from the response
+// to the model change request. Session update notifications remain useful for
+// selector state, but are not evidence for the request that caused them.
+type ModelConfigurationResultAdapter interface {
+	SetModelWithResult(ctx context.Context, modelID string) (streams.ConfigurationResult, error)
 }
 
 // SessionModelStateProvider exposes the model catalog returned by the most
@@ -186,6 +207,12 @@ type ProviderErrorContextProvider interface {
 // aren't covered by mode/model.
 type ConfigOptionSettableAdapter interface {
 	SetConfigOption(ctx context.Context, key, value string) error
+}
+
+// ConfigOptionResultAdapter exposes the value returned by the correlated ACP
+// set_config_option response when the provider includes it.
+type ConfigOptionResultAdapter interface {
+	SetConfigOptionWithResult(ctx context.Context, key, value string) (streams.ConfigurationResult, error)
 }
 
 // SessionResettableAdapter is an optional interface implemented by adapters that
@@ -303,6 +330,18 @@ type AgentAdapter interface {
 	RequiresProcessKill() bool
 }
 
+// MCPAttachmentEventPublisher routes best-effort attachment diagnostics through
+// the adapter's ordered event queue when one is available.
+type MCPAttachmentEventPublisher interface {
+	TryPublishMCPAttachmentEvent(AgentEvent, func(AgentEvent) (AgentEvent, error)) (bool, error)
+}
+
+// MCPAttachmentEventPersisterSetter lets an adapter commit its own attachment
+// events through the same ordered journal path used for observations.
+type MCPAttachmentEventPersisterSetter interface {
+	SetMCPAttachmentEventPersister(func(AgentEvent) (AgentEvent, error))
+}
+
 // McpServerConfig holds configuration for an MCP server.
 type McpServerConfig struct {
 	// Name is the human-readable name of the MCP server
@@ -328,8 +367,17 @@ type McpServerConfig struct {
 
 // Config holds configuration for creating adapters
 type Config struct {
+	// ACPProtocolVersion requests a specific wire version for an ACP launch.
+	// Zero uses the legacy v1 transport.
+	ACPProtocolVersion uint16
+
 	// WorkDir is the working directory for the agent
 	WorkDir string
+
+	// ClaudeConfigDir is the effective Claude Code data root from the launch
+	// environment. The ACP transport uses it only for qualified Monitor
+	// completion evidence.
+	ClaudeConfigDir string
 
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
@@ -423,6 +471,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 	}
 	return &shared.Config{
 		WorkDir:                    c.WorkDir,
+		ClaudeConfigDir:            c.ClaudeConfigDir,
 		AutoApprove:                c.AutoApprove,
 		McpServers:                 mcpServers,
 		ProjectMCPDelivery:         c.ProjectMCPDelivery.Clone(),

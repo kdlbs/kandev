@@ -8,7 +8,7 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
-const claudePermissionOtherActionType = "other"
+const claudePermissionOtherActionType = acpToolCallKindOther
 
 // newClaudeACPDialect enables only the compatibility translations verified
 // against Claude ACP frames. Other providers retain their normal identity path.

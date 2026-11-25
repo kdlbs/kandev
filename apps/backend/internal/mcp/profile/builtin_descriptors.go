@@ -79,7 +79,9 @@ func BuiltinToolActions(name string) []string {
 	}
 	actions := []string{"mcp." + strings.TrimSuffix(name, "_kandev")}
 	switch name {
-	case "ask_user_question_kandev", "ask_parent_question_kandev":
+	case "ask_user_question_kandev":
+		actions = append(actions, ws.ActionMCPClarificationTimeout, ws.ActionMCPCancelNativeClarification)
+	case "ask_parent_question_kandev":
 		actions = append(actions, ws.ActionMCPClarificationTimeout)
 	case "transfer_task_kandev":
 		actions = append(actions, ws.ActionMCPAuditTaskTransferAttempt)

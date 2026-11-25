@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { selectVisibleWorkflows } from "@/lib/kanban/workflow-swimlanes";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { useSwimlaneRenderData, useWorkflowSwimlaneData } from "./use-swimlane-render-data";
 import type { Repository } from "@/lib/types/http";
@@ -324,6 +325,44 @@ describe("bounded board candidates", () => {
       "populated",
       "offscreen-empty",
     ]);
+  });
+
+  it("retains a taskless lane only when its hidden step still exists", () => {
+    const { result } = renderOverview();
+    const stale = "stale";
+    const live = "live";
+    act(() => {
+      result.current.store.setState((state) => ({
+        workflows: {
+          ...state.workflows,
+          items: [
+            { id: stale, name: "Stale hidden step", workspaceId: "workspace" },
+            { id: live, name: "Live hidden step", workspaceId: "workspace" },
+          ],
+        },
+        kanbanMulti: {
+          ...state.kanbanMulti,
+          snapshots: {
+            [stale]: { ...snapshot(stale), tasks: [] },
+            [live]: { ...snapshot(live), tasks: [] },
+          },
+        },
+        userSettings: {
+          ...state.userSettings,
+          hiddenWorkflowStepIds: { [stale]: ["deleted-step"], [live]: ["live-step"] },
+        },
+      }));
+    });
+
+    const { orderedWorkflows, hasLiveHiddenSteps, getFilteredTasks } = result.current.data;
+    const visible = selectVisibleWorkflows({
+      workflowFilter: null,
+      orderedWorkflows,
+      hasLiveHiddenSteps,
+      hasTasks: (id) => getFilteredTasks(id).length > 0,
+      showEmptyBoard: false,
+    });
+    expect(visible.map(({ id }) => id)).toEqual([live]);
   });
 
   it("retains unloaded All-workflow lanes only in the active workspace", () => {

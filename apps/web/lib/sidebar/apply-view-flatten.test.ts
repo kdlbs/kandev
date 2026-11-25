@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import {
   computeMixedWorkflowSelection,
-  flattenVisibleTaskIds,
   sortIdsByVisibleOrder,
   type GroupedSidebarList,
 } from "./apply-view";
+import { flattenVisibleSidebarTasks } from "./visible-task-order";
 
 function task(id: string): TaskSwitcherItem {
   return { id, title: id };
@@ -18,20 +18,20 @@ function grouped(
   return { groups, subTasksByParentId: new Map(Object.entries(subs)) };
 }
 
-describe("flattenVisibleTaskIds", () => {
+describe("flattenVisibleSidebarTasks", () => {
   it("walks groups then tasks in render order", () => {
     const g = grouped([
       { key: "g1", label: "G1", tasks: [task("a"), task("b")] },
       { key: "g2", label: "G2", tasks: [task("c")] },
     ]);
-    expect(flattenVisibleTaskIds(g, [], [])).toEqual(["a", "b", "c"]);
+    expect(flattenVisibleSidebarTasks(g, [], []).taskIds).toEqual(["a", "b", "c"]);
   });
 
   it("expands subtasks depth-first under their parent", () => {
     const g = grouped([{ key: "g1", label: "G1", tasks: [task("a"), task("d")] }], {
       a: [task("a1"), task("a2")],
     });
-    expect(flattenVisibleTaskIds(g, [], [])).toEqual(["a", "a1", "a2", "d"]);
+    expect(flattenVisibleSidebarTasks(g, [], []).taskIds).toEqual(["a", "a1", "a2", "d"]);
   });
 
   it("skips tasks in collapsed groups", () => {
@@ -39,12 +39,12 @@ describe("flattenVisibleTaskIds", () => {
       { key: "g1", label: "G1", tasks: [task("a")] },
       { key: "g2", label: "G2", tasks: [task("b")] },
     ]);
-    expect(flattenVisibleTaskIds(g, ["g2"], [])).toEqual(["a"]);
+    expect(flattenVisibleSidebarTasks(g, ["g2"], []).taskIds).toEqual(["a"]);
   });
 
   it("hides subtasks of a collapsed parent but keeps the parent", () => {
     const g = grouped([{ key: "g1", label: "G1", tasks: [task("a")] }], { a: [task("a1")] });
-    expect(flattenVisibleTaskIds(g, [], ["a"])).toEqual(["a"]);
+    expect(flattenVisibleSidebarTasks(g, [], ["a"]).taskIds).toEqual(["a"]);
   });
 });
 

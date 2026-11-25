@@ -4,6 +4,7 @@ import { IconChevronDown, IconChevronRight, IconPlus } from "@tabler/icons-react
 import { Button } from "@kandev/ui/button";
 import { Sheet, SheetContent } from "@kandev/ui/sheet";
 import { TaskSwitcherDrawer } from "./task-switcher-drawer";
+import { keepMoveOpenForPromptSuggestions } from "../workflow-move-surface";
 
 export function InlineTaskHeader({
   expanded,
@@ -86,6 +87,7 @@ export function TaskPickerSurface({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         onCloseAutoFocus={handleCloseAutoFocus}
+        onEscapeKeyDown={keepMoveOpenForPromptSuggestions}
         showCloseButton={false}
         side="left"
         className="w-[85vw] max-w-sm p-0 flex flex-col"

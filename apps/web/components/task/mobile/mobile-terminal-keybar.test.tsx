@@ -82,6 +82,59 @@ describe("MobileTerminalKeybar single-key emission", () => {
     expect(lastData()).toBe("\t");
   });
 
+  // @covers AC-CLI-MOBILE-PASSTHROUGH-NAV-001.2, AC-CLI-MOBILE-PASSTHROUGH-NAV-001.11
+  it("sends one carriage return to the default sender on Enter tap", () => {
+    render(<MobileTerminalKeybar sessionId={SESSION_ID} visible={true} />);
+    tap("keybar-key-enter");
+    expect(lastData()).toBe("\r");
+    expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends one carriage return to the inline sender on Enter tap", () => {
+    const inline = vi.fn();
+    render(<MobileTerminalKeybar sessionId={SESSION_ID} visible={true} onSend={inline} />);
+    tap("keybar-key-enter");
+    expect(inline).toHaveBeenCalledTimes(1);
+    expect(inline).toHaveBeenCalledWith("\r");
+  });
+
+  // @covers AC-CLI-MOBILE-PASSTHROUGH-NAV-001.9, AC-CLI-MOBILE-PASSTHROUGH-NAV-001.10, AC-CLI-MOBILE-PASSTHROUGH-NAV-001.11
+  it("places menu keys before modifiers and marks the horizontal overflow cue decorative", () => {
+    render(<MobileTerminalKeybar sessionId={SESSION_ID} visible={true} />);
+    const keyIds = Array.from(
+      screen
+        .getByTestId(KEYBAR_ROOT)
+        .querySelectorAll<HTMLButtonElement>('[data-testid^="keybar-key-"]'),
+    ).map((button) => button.dataset.testid?.replace("keybar-key-", ""));
+
+    expect(keyIds.slice(0, 11)).toEqual([
+      "esc",
+      "up",
+      "down",
+      "left",
+      "right",
+      "enter",
+      "tab",
+      "ctrl",
+      "shift",
+      "ctrl-c",
+      "ctrl-d",
+    ]);
+    expect(screen.getByTestId("keybar-scroll-cue").getAttribute("aria-hidden")).toBe("true");
+  });
+
+  // @covers AC-CLI-MOBILE-PASSTHROUGH-NAV-001.9, AC-CLI-MOBILE-PASSTHROUGH-NAV-001.10, AC-CLI-MOBILE-PASSTHROUGH-NAV-001.11
+  it("keeps focus-ring clearance inside the horizontal scrolling region", () => {
+    render(<MobileTerminalKeybar sessionId={SESSION_ID} visible={true} />);
+    const scroller = screen.getByTestId("mobile-terminal-keybar-scroller");
+    const cue = screen.getByTestId("keybar-scroll-cue");
+
+    expect(scroller.classList.contains("overflow-x-auto")).toBe(true);
+    expect(scroller.classList.contains("px-2")).toBe(true);
+    expect(scroller.classList.contains("py-1.5")).toBe(true);
+    expect(cue.parentElement).toBe(scroller.parentElement);
+  });
+
   it("sends arrow escape sequences", () => {
     render(<MobileTerminalKeybar sessionId={SESSION_ID} visible={true} />);
     tap(UP_KEY);

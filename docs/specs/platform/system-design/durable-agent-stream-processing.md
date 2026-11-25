@@ -252,6 +252,15 @@ native-anchored budget. If the budget expires while the stream remains
 connected, one final five-second authority read under that stream distinguishes
 a racing commit from missing authority. Stream cancellation releases the wait.
 
+Successor generations (explicit fresh start and the context continuation in
+[harness continuity](../../agents/requirements/harness-session-continuity.md)) use the
+same successor wait: until the new SQL generation commits, events from the
+successor stream wait for it instead of being compared with the predecessor
+generation. Both launch kinds must mark the execution as starting a successor,
+so `replacementGenerationPending` covers `ForceContextContinuation` as well as
+`ReplacesNativeConversation`. Missing authority after the bounded wait still
+fails closed.
+
 An initialization error completes all pending results with that cause. Caller
 cancellation, Stop, manager shutdown, and an obsolete startup attempt release
 their pending waits. Completion must revalidate the captured attempt before

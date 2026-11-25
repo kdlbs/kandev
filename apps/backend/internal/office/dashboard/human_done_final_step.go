@@ -28,6 +28,10 @@ type FinalStepMoveResult struct {
 	Status   string
 	StepID   string
 	StepName string
+	OldState string
+	// ActivityHandled indicates that the task service recorded the state
+	// activity before publishing the canonical event.
+	ActivityHandled bool
 	// Queued reports a move that is waiting for room under the step's WIP
 	// limit; the task keeps its prior state until the step admits it.
 	Queued bool
@@ -65,11 +69,11 @@ func (s *DashboardService) UpdateTaskStatusAsHuman(
 	if normaliseStatus(req.NewStatus) != stateCompleted || s.finalStepMover == nil {
 		return nil, s.UpdateTaskStatus(ctx, req)
 	}
-	terminal, hasStep, err := s.repo.IsTaskWorkflowStepTerminal(ctx, req.TaskID)
+	final, hasStep, err := s.repo.IsTaskOnFinalStep(ctx, req.TaskID)
 	if err != nil {
 		return nil, fmt.Errorf("human done: resolve workflow step: %w", err)
 	}
-	if !hasStep || terminal {
+	if !hasStep || final {
 		if s.humanDoneCompleter != nil {
 			return s.completeHumanDone(ctx, req)
 		}
@@ -79,8 +83,10 @@ func (s *DashboardService) UpdateTaskStatusAsHuman(
 	if err != nil {
 		return nil, err
 	}
+	postCommitCtx, cancelPostCommit := detachedPostCommitContext(ctx)
+	defer cancelPostCommit()
 	result.Status = dbStateToOfficeStatus(result.State)
-	s.maybeCreateStatusComment(ctx, req)
+	s.maybeCreateStatusComment(postCommitCtx, req)
 	return result, nil
 }
 
@@ -98,21 +104,19 @@ func (s *DashboardService) completeHumanDone(ctx context.Context, req TaskStatus
 	if err != nil {
 		return nil, err
 	}
-	preStatus := ""
-	if fields, err := s.repo.GetTaskExecutionFields(ctx, req.TaskID); err == nil && fields != nil {
-		preStatus = fields.State
-	}
 	result, err := s.humanDoneCompleter.CompleteOfficeTaskAsHuman(ctx, req.TaskID, stepID)
 	if err != nil {
 		return nil, err
 	}
+	postCommitCtx, cancelPostCommit := detachedPostCommitContext(ctx)
+	defer cancelPostCommit()
 	result.Status = dbStateToOfficeStatus(result.State)
-	commentID := s.maybeCreateStatusComment(ctx, req)
-	if !req.SuppressStatusActivity {
-		s.logTaskStatusChangeActivity(ctx, req)
+	commentID := s.maybeCreateStatusComment(postCommitCtx, req)
+	if !result.ActivityHandled {
+		s.logTaskStatusChangeActivity(postCommitCtx, req)
 	}
-	s.publishTaskStatusChanged(ctx, req)
-	s.publishCanonicalTaskUpdated(ctx, req.TaskID)
-	s.runReactivityForStatus(ctx, req, commentID, preStatus)
+	s.publishTaskStatusChanged(postCommitCtx, req)
+	s.publishCanonicalTaskUpdated(postCommitCtx, req.TaskID)
+	s.runReactivityForStatus(postCommitCtx, req, commentID, result.OldState)
 	return result, nil
 }

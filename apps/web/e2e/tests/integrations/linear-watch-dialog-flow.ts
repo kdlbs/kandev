@@ -49,7 +49,7 @@ async function openCreate(page: Page, fixture: LinearWatchFixture, mobile: boole
   await choose(page, "Agent Profile", fixture.agentLabel, mobile);
   await choose(page, "Executor Profile", fixture.profileName, mobile);
   // Keep the disposable watch paused; this suite never launches provider tasks.
-  await press(dialog.getByRole("switch"), mobile);
+  await press(dialog.getByRole("switch", { name: "Enabled", exact: true }), mobile);
 }
 async function readWatches(api: ApiClient, workspaceId: string) {
   return (

@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -179,8 +180,9 @@ func (s *Service) processOnTurnCompleteWithCause(
 	if cause == turnCompletionCauseUserCancellation {
 		ctx = cancellationTransitionAttribution(ctx)
 	}
-	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true)
-	return true
+	transitionCapture := &workflowTransitionErrorCapture{}
+	s.executeStepTransition(withWorkflowTransitionErrorCapture(ctx, transitionCapture), taskID, sessionID, currentStep, targetStepID, true)
+	return transitionCapture.err == nil
 }
 
 func (s *Service) shouldSkipLegacyTurnCompletion(
@@ -489,11 +491,11 @@ func (s *Service) onTurnStartTaskAdmission(ctx context.Context, taskID string) (
 // If false, only the step change is applied (used for on_turn_start where the user is about to send a message).
 func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool) {
 	settleFailedTransitionSession := func(transitionErr error) {
+		recordWorkflowTransitionError(ctx, transitionErr)
 		if triggerOnEnter {
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
 			return
 		}
-		recordWorkflowTransitionError(ctx, transitionErr)
 		s.reportWorkflowTurnStartPreparationError(
 			ctx,
 			taskID,
@@ -524,6 +526,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Atomically admit the target step before exit side effects. A full target
 	// is represented as a durable destination queue entry instead of a failed
 	// transition.
+	oldState := task.State
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
 	// Capture the completion signal before admission and carry its handoff on
@@ -554,6 +557,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	}
 	applied, err := s.updateTransitionTaskWithCapacityAndEffect(transitionCtx, task, fromStepID, targetStep)
 	if err != nil {
+		s.recordCompletionGateRefusal(ctx, taskID, fromStepID, sessionID, err)
 		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
@@ -587,6 +591,10 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Publish task updated event via the task service so the payload carries
 	// the full context (session counts, primary session, repositories).
 	s.publishTaskUpdated(ctx, task)
+	if task.State == v1.TaskStateCompleted && task.State != oldState {
+		s.publishTaskStateChanged(ctx, task, oldState)
+		s.processParentChildrenCompletedForTaskState(ctx, taskID, task.State)
+	}
 	if !queued {
 		s.processParentChildrenCompletedForTerminalStepMove(ctx, taskID, toStepID)
 	}
@@ -738,6 +746,10 @@ func (s *Service) updateTransitionTaskWithCapacityAndEffect(
 			)
 			return applied, err
 		}
+	}
+	if appliedRepo, ok := s.repo.(workflowMoveAdmissionAppliedRepository); ok {
+		_, applied, err := appliedRepo.UpdateTaskWithWorkflowStepAdmissionReportingApplied(ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit)
+		return applied, err
 	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
@@ -1829,7 +1841,8 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 		return fmt.Errorf("load next step after promoted step %s: %w", targetStep.ID, err)
 	}
 	oldState := task.State
-	if wfmodels.IsTerminalStep(targetStep, next) {
+	// Queue promotion derives lifecycle state from the completing-step policy.
+	if wfmodels.CompletesTaskOnEnter(targetStep, next) {
 		if !models.IsTerminalTaskState(task.State) {
 			task.State = v1.TaskStateCompleted
 		}
@@ -3363,7 +3376,7 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 	endPolicy models.WorkflowProfileSessionEndPolicy,
 	validatedExisting *models.TaskSession,
 	workflowRoute *models.WorkflowSessionRoute,
-) (*models.TaskSession, error) {
+) (result *models.TaskSession, switchErr error) {
 	startPolicy = models.NormalizeWorkflowProfileSessionStartPolicy(string(startPolicy))
 	endPolicy = models.NormalizeWorkflowProfileSessionEndPolicy(string(endPolicy))
 	s.logger.Info("switching session for workflow step agent profile change",
@@ -3400,10 +3413,19 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 	}
 
 	// Signal to the frontend that the task is preparing a new agent.
+	priorTaskState := dbTask.State
+	schedulingWritten := false
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to set task SCHEDULING during agent switch",
 			zap.String("task_id", taskID), zap.Error(err))
+	} else {
+		schedulingWritten = true
 	}
+	defer func() {
+		if switchErr != nil && schedulingWritten {
+			s.restoreTaskStateAfterWorkflowSwitchFailure(ctx, taskID, priorTaskState)
+		}
+	}()
 
 	if existing != nil {
 		var reused *models.TaskSession
@@ -3434,6 +3456,22 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
 	return s.createNewSessionForStepWithEndPolicyAndRoute(
 		ctx, taskID, currentSession, newAgentProfileID, endPolicy, workflowRoute,
 	)
+}
+
+func (s *Service) restoreTaskStateAfterWorkflowSwitchFailure(ctx context.Context, taskID string, priorState v1.TaskState) {
+	restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
+		restoreCtx, taskID, priorState, []v1.TaskState{v1.TaskStateScheduling},
+	)
+	if err != nil {
+		s.logger.Warn("failed to restore task state after workflow session switch",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if updated {
+		s.publishTaskUpdatedByID(restoreCtx, taskID)
+	}
 }
 
 // findReusableSessionForProfile returns the most-recently-updated
@@ -4391,13 +4429,20 @@ func (s *Service) preflightExplicitWorkflowStepCredentials(
 	if err != nil {
 		return err
 	}
+	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)
 	targetSession := currentSession
-	if s.resolveStepProfileSessionStartPolicy(targetStep) == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
+	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse && resolution.session != nil {
 		targetSession = resolution.session
+		if targetSession.ID == currentSession.ID {
+			return nil
+		}
 	}
 	task, err := s.preflightTaskProjection(ctx, taskID, candidate)
 	if err != nil {
 		return fmt.Errorf("get task for explicit credential preflight: %w", err)
+	}
+	if err := s.preflightDestinationExecutorAdmission(ctx, task, targetSession); err != nil {
+		return err
 	}
 	return s.executor.PreflightManagedGitCredentials(
 		ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
@@ -4439,9 +4484,39 @@ func (s *Service) preflightFixedWorkflowStepCredentials(
 	if err != nil {
 		return fmt.Errorf("get task for credential preflight: %w", err)
 	}
+	if err := s.preflightDestinationExecutorAdmission(ctx, task, targetSession); err != nil {
+		return err
+	}
 	return s.executor.PreflightManagedGitCredentials(
 		ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
 	)
+}
+
+func (s *Service) preflightDestinationExecutorAdmission(
+	ctx context.Context,
+	task *models.Task,
+	targetSession *models.TaskSession,
+) error {
+	if task == nil || targetSession == nil {
+		return nil
+	}
+	err := s.executor.PreflightSessionExecutorAdmission(
+		ctx,
+		task.ToAPI(),
+		targetSession.ExecutorID,
+		targetSession.ExecutorProfileID,
+		targetSession.TaskEnvironmentID,
+	)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) ||
+		errors.Is(err, models.ErrExecutorNotFound) ||
+		errors.Is(err, models.ErrExecutorMutationDenied) ||
+		errors.Is(err, models.ErrExecutorOwnershipInvalid) {
+		return fmt.Errorf("%w: %w", workflowmove.ErrDestinationExecutorUnavailable, err)
+	}
+	return err
 }
 
 func (s *Service) preflightTaskProjection(ctx context.Context, taskID string, candidate *models.Task) (*models.Task, error) {
@@ -4588,7 +4663,23 @@ func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, ses
 // engine.DispatchStepEntry (Repository.dispatchStepEntry's call chain),
 // entirely outside processOnEnter. See
 // docs/specs/office/system-design/step-entry-dispatch-convergence.md.
-func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, transitionID int64, sourceStep *wfmodels.WorkflowStep) {
+func (s *Service) processOnEnter(
+	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+	taskDescription string, transitionID int64, sourceStep *wfmodels.WorkflowStep,
+) {
+	s.processOnEnterWithCompletion(ctx, taskID, session, step, taskDescription, transitionID, sourceStep, nil)
+}
+
+func (s *Service) processOnEnterWithCompletion(
+	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+	taskDescription string, transitionID int64, sourceStep *wfmodels.WorkflowStep,
+	onComplete func(bool),
+) {
+	complete := func(delivered bool) {
+		if onComplete != nil {
+			onComplete(delivered)
+		}
+	}
 	// The step transition is already durable before on_enter runs. Its effects
 	// must finish even if the request or agent-event context that triggered the
 	// transition is cancelled.
@@ -4596,12 +4687,14 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
 	if !s.workflowEntryDispatchIsCurrentForSession(ctx, taskID, session.ID, step, transitionID) {
+		complete(false)
 		return
 	}
 	// Switch session if this step requires a different agent profile.
 	var ok bool
 	prevSessionID := session.ID
 	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step, sourceStep, transitionID); !ok {
+		complete(false)
 		return
 	}
 	sessionSwitched := session.ID != prevSessionID
@@ -4630,6 +4723,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// silence the event and orphan the queue. handleAgentReady runs
 		// on_turn_complete against the new step and drains the queue itself.
 		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+			complete(true)
 			return
 		}
 		s.queueMoveInstructionsForSession(ctx, taskID, sessionID, step)
@@ -4639,6 +4733,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// launchAfterOnEnterDispatch (no on_enter actions, no profile switch),
 		// so a single-use claim helper covers it.
 		s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, newStepHandoffOnce())
+		complete(true)
 		return
 	}
 
@@ -4653,6 +4748,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 			s.persistWorkflowResetFailure(ctx, taskID, sessionID, step.ID, step.Name, executionID, err)
 		})
 		if resetErr != nil {
+			complete(false)
 			return
 		}
 		s.markIdleAfterReset(ctx, taskID, sessionID, session, step, isPassthrough)
@@ -4671,20 +4767,45 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 	dispatchResult := s.dispatchOnEnterActions(ctx, taskID, session, step, isPassthrough, hasPlanMode)
 
-	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched, transitionID)
+	s.launchAfterOnEnterDispatchWithCompletion(
+		ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart,
+		sessionSwitched, complete, transitionID,
+	)
 }
 
-// launchAfterOnEnterDispatch runs the auto-start decision that follows
-// on_enter action dispatch: passthrough vs. ACP auto-start, the
-// profile-switch fallback launch, and the plain wait-for-input path.
-// Extracted from processOnEnter to keep that function's complexity within
-// the repo's lint thresholds.
-//
-//nolint:cyclop,funlen,gocognit // profile-switch recovery has independent terminal and retry branches.
 func (s *Service) launchAfterOnEnterDispatch(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
 	taskDescription string, hasPlanMode, hasAutoStart, sessionSwitched bool, entryIDs ...int64,
 ) {
+	s.launchAfterOnEnterDispatchWithCompletion(
+		ctx, taskID, session, step, taskDescription, hasPlanMode, hasAutoStart, sessionSwitched, nil, entryIDs...,
+	)
+}
+
+// launchAfterOnEnterDispatchWithCompletion runs the auto-start decision that
+// follows on_enter action dispatch: passthrough vs. ACP auto-start, the
+// profile-switch fallback launch, and the plain wait-for-input path. Extracted
+// from processOnEnter to keep that function's complexity within the repo's
+// lint thresholds.
+//
+//nolint:cyclop,funlen,gocognit // profile-switch recovery has independent terminal and retry branches.
+func (s *Service) launchAfterOnEnterDispatchWithCompletion(
+	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+	taskDescription string, hasPlanMode, hasAutoStart, sessionSwitched bool,
+	onComplete func(bool), entryIDs ...int64,
+) {
+	completed := false
+	deferred := false
+	complete := func(delivered bool) {
+		if onComplete != nil {
+			onComplete(delivered)
+		}
+	}
+	defer func() {
+		if !deferred {
+			complete(completed)
+		}
+	}()
 	if !s.workflowEntryDispatchIsCurrentForSession(ctx, taskID, session.ID, step, entryIDs...) {
 		return
 	}
@@ -4717,6 +4838,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 			// that prompt once; the destination's automatic prompt must not
 			// create a competing passthrough turn.
 			s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
+			completed = true
 			return
 		}
 		// Started passthrough path: write prompt directly to PTY stdin.
@@ -4729,6 +4851,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 			// are materialized and the handoff is not stranded in the queue. This
 			// branch still DISPATCHES, so it carries the completion handoff too.
 			s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
+			completed = true
 			return
 		}
 		// Claimed after the actionability decision above (effectivePrompt was
@@ -4744,6 +4867,8 @@ func (s *Service) launchAfterOnEnterDispatch(
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		} else {
+			completed = true
 		}
 
 	case hasAutoStart:
@@ -4755,7 +4880,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 			ctx, taskID, session, step, effectivePrompt, hasPlanMode, true, handoffOnce, promptReferenceContext,
 		); err != nil {
 			if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
-				s.replaceTerminalizedAutoStartSession(
+				completed = s.replaceTerminalizedAutoStartSession(
 					ctx, taskID, taskDescription, session, step, isPassthrough, hasPlanMode, handoffOnce, err,
 				)
 				return
@@ -4767,6 +4892,8 @@ func (s *Service) launchAfterOnEnterDispatch(
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		} else {
+			completed = true
 		}
 
 	default:
@@ -4788,7 +4915,10 @@ func (s *Service) launchAfterOnEnterDispatch(
 			// to atomically detect concurrent terminalization. If the session is
 			// already terminal, create a replacement directly for automatic recovery states instead of attempting
 			// an auto-start that will fail and lose the hand-off. An explicit cancellation remains terminal.
+			deferred = true
 			go func() {
+				asyncCompleted := false
+				defer func() { complete(asyncCompleted) }()
 				asyncCtx := context.WithoutCancel(ctx)
 				lock, release := s.acquireCancelInFlightGuard(sessionID)
 				lock.Lock()
@@ -4834,6 +4964,8 @@ func (s *Service) launchAfterOnEnterDispatch(
 							zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
 						s.setSessionWaitingForInput(asyncCtx, taskID, replacement.ID, replacement)
 						s.publishSessionWaitingEvent(asyncCtx, taskID, replacement.ID, stepID, replacement)
+					} else {
+						asyncCompleted = true
 					}
 					return
 				}
@@ -4878,6 +5010,8 @@ func (s *Service) launchAfterOnEnterDispatch(
 								zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
 							s.setSessionWaitingForInput(asyncCtx, taskID, replacement.ID, replacement)
 							s.publishSessionWaitingEvent(asyncCtx, taskID, replacement.ID, stepID, replacement)
+						} else {
+							asyncCompleted = true
 						}
 						return
 					}
@@ -4888,11 +5022,14 @@ func (s *Service) launchAfterOnEnterDispatch(
 					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, fresh)
 					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, fresh)
 					s.drainQueuedMessageForPromptableSessionWithHandoff(asyncCtx, taskID, sessionID, stepID, handoffOnce)
+					return
 				}
+				asyncCompleted = true
 			}()
 			return
 		}
 		if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+			completed = true
 			return
 		}
 		// An existing session that neither auto-starts nor switches profile would
@@ -4908,6 +5045,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 		// from inline processOnEnter. This is the ordinary no-on_enter-actions
 		// step shape, so it carries the completion handoff too.
 		s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
+		completed = true
 	}
 
 }
@@ -4920,12 +5058,12 @@ func (s *Service) launchAfterOnEnterDispatch(
 func (s *Service) replaceTerminalizedAutoStartSession(
 	ctx context.Context, taskID, taskDescription string, session *models.TaskSession, step *wfmodels.WorkflowStep,
 	isPassthrough, hasPlanMode bool, handoffOnce *stepHandoffOnce, err error,
-) {
+) bool {
 	sessionID := session.ID
 	if workflowAutoStartWasCancelled(err) {
 		s.logger.Info("workflow auto-start cancelled before dispatch; not creating replacement",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID))
-		return
+		return false
 	}
 	s.logger.Info("creating fresh workflow session after reused session terminalized",
 		zap.String("task_id", taskID), zap.String("session_id", sessionID))
@@ -4937,7 +5075,7 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 	if replacementErr != nil {
 		s.logger.Error("failed to create replacement after reused session terminalized",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
-		return
+		return false
 	}
 	replacementCtx := withCeilingEntryBindingForSession(ctx, replacement.ID)
 	replacementPrompt, replacementReferenceContext, promptErr := s.buildWorkflowEntryPrompt(
@@ -4945,7 +5083,7 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 	)
 	if promptErr != nil {
 		s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
-		return
+		return false
 	}
 	if replacementErr = s.autoStartStepPromptWithPromptContext(
 		replacementCtx, taskID, replacement, step, replacementPrompt, hasPlanMode, true, handoffOnce,
@@ -4955,7 +5093,9 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 			zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
 		s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
 		s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, step.ID, replacement)
+		return false
 	}
+	return true
 }
 
 func (s *Service) handleWorkflowEntryPromptError(
@@ -4974,6 +5114,8 @@ func (s *Service) handleWorkflowEntryPromptError(
 	s.publishSessionWaitingEvent(ctx, taskID, session.ID, step.ID, session)
 }
 
+const metaKeyWorkflowMoveInstructions = "workflow_move_instructions"
+
 // queueMoveInstructionsForSession delivers one-shot workflow-move instructions
 // to an existing session that will not otherwise receive the overlaid step
 // prompt (no auto-start, no profile switch). It is a no-op for ordinary steps
@@ -4988,7 +5130,7 @@ func (s *Service) queueMoveInstructionsForSession(ctx context.Context, taskID, s
 	}
 	if _, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx, sessionID, taskID, block, "",
-		messagequeue.QueuedByUser, false, nil, nil,
+		messagequeue.QueuedByUser, false, nil, map[string]interface{}{metaKeyWorkflowMoveInstructions: true},
 	); err != nil {
 		s.logger.Warn("failed to queue one-shot workflow move instructions",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
@@ -6839,8 +6981,8 @@ func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, bas
 		attachments = make([]v1.MessageAttachment, 0, len(msg.Attachments))
 		for _, a := range msg.Attachments {
 			attachments = append(attachments, v1.MessageAttachment{
-				Type:         a.Type,
-				AttachmentID: a.AttachmentID,
+				Type:      a.Type,
+				CommentID: a.CommentID, AttachmentID: a.AttachmentID,
 				Data:         a.Data,
 				MimeType:     a.MimeType,
 				Name:         a.Name,
@@ -6931,8 +7073,8 @@ func toQueuedAttachments(attachments []v1.MessageAttachment) []messagequeue.Mess
 	queued := make([]messagequeue.MessageAttachment, 0, len(attachments))
 	for _, attachment := range attachments {
 		queued = append(queued, messagequeue.MessageAttachment{
-			Type:         attachment.Type,
-			AttachmentID: attachment.AttachmentID,
+			Type:      attachment.Type,
+			CommentID: attachment.CommentID, AttachmentID: attachment.AttachmentID,
 			Data:         attachment.Data,
 			MimeType:     attachment.MimeType,
 			Name:         attachment.Name,
@@ -7834,6 +7976,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	if effect != nil && agentDeliveryEffectCarriesDeliveryIdentity(effect) && !isBoundAgentDeliveryWorkflowEffect(effect) {
 		s.logger.Warn("deferring workflow completion with incomplete delivery identity",
 			zap.String("task_id", taskID), zap.String("effect_key", effect.EffectKey))
+		s.surfaceDeferredOfficeCompletion(ctx, taskID, session.ID)
 		return false
 	}
 	if models.IsCompletionFollowUpSession(session.Metadata) {
@@ -8299,7 +8442,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 			if !steptelemetry.HasTrigger(transitionCtx) {
 				transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
 			}
-			committedTask, oldWorkflowID, applied, wipLimit, err := s.workflowStore.applyTransitionIfAtStepRaw(
+			committedTask, oldWorkflowID, oldState, applied, wipLimit, err := s.workflowStore.applyTransitionIfAtStepRaw(
 				transitionCtx, taskID, fromStepID, toStepID,
 			)
 			if err != nil {
@@ -8313,6 +8456,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 			// The raw CAS commit intentionally has no side effects. The shared
 			// lifecycle helper performs the remaining task-level work below.
 			s.publishTaskUpdated(ctx, committedTask, oldWorkflowID)
+			s.workflowStore.publishCommittedCompletion(ctx, committedTask, oldState)
 			s.workflowStore.pullNextTaskOnVacate(ctx, fromStepID, taskID)
 			return workflowTransitionCommitResult{
 				Applied:        true,
@@ -8321,6 +8465,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 				WIPLimit:       wipLimit,
 			}, nil
 		},
+		nil,
 	)
 	if commitErr != nil {
 		return false, fmt.Errorf("commit guarded transition: %w", commitErr)
@@ -8373,10 +8518,20 @@ func (s *Service) applyEngineTransitionWithMode(
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	mode transitionLifecycleMode,
 ) bool {
+	return s.applyEngineTransitionWithModeAndOnEnterCompletion(
+		ctx, taskID, session, result, trigger, taskDescription, mode, nil,
+	)
+}
+
+func (s *Service) applyEngineTransitionWithModeAndOnEnterCompletion(
+	ctx context.Context, taskID string, session *models.TaskSession,
+	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
+	mode transitionLifecycleMode, onEnterComplete func(bool),
+) bool {
 	return s.applyEngineTransitionWithCommitResultMode(ctx, taskID, session, result, trigger, taskDescription, mode,
 		func(commitCtx context.Context) (workflowTransitionCommitResult, error) {
 			return s.workflowStore.applyTransitionReportingApplied(commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger)
-		})
+		}, onEnterComplete)
 }
 
 func (s *Service) recoverCompletedTurnAfterWorkflowPreflightFailure(
@@ -8441,7 +8596,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		func(commitCtx context.Context) (workflowTransitionCommitResult, error) {
 			applied, err := commit(commitCtx)
 			return workflowTransitionCommitResult{Applied: applied}, err
-		})
+		}, nil)
 }
 
 // applyEngineTransitionWithCommitResultMode gates destination lifecycle work
@@ -8452,6 +8607,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	ctx context.Context, taskID string, session *models.TaskSession,
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	mode transitionLifecycleMode, commit func(context.Context) (workflowTransitionCommitResult, error),
+	onEnterComplete func(bool),
 ) bool {
 	ctx = withWorkflowMetaCache(ctx)
 	sessionLifecycle := mode != transitionLifecycleGuardedDecision
@@ -8509,7 +8665,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 		settleFailedTransitionSession()
 		return false
 	}
-	if sessionLifecycle {
+	if sessionLifecycle && !terminalTarget {
 		s.processOnExit(ctx, taskID, session, fromStep)
 	}
 
@@ -8532,6 +8688,7 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	commitResult, err := commit(applyCtx)
 	if err != nil {
 		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
+		s.recordCompletionGateRefusal(ctx, taskID, result.FromStepID, session.ID, err)
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
@@ -8544,6 +8701,10 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
+	}
+
+	if sessionLifecycle && terminalTarget {
+		s.processOnExit(ctx, taskID, session, fromStep)
 	}
 
 	// ADR 0015 — record the audit row before the pending signal (if any) is
@@ -8661,7 +8822,10 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	// The caller may still hold the source session guard, but this work runs
 	// asynchronously after that guard is released. Clear the synchronous
 	// ownership marker so profile-switch parking acquires its own guard.
-	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, transitionID, fromStep)
+	s.launchProcessOnEnter(
+		withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep,
+		taskDescription, transitionID, fromStep, onEnterComplete,
+	)
 	return true
 }
 
@@ -8739,6 +8903,7 @@ func (s *Service) launchProcessOnEnter(
 	taskDescription string,
 	transitionID int64,
 	sourceStep *wfmodels.WorkflowStep,
+	onComplete func(bool),
 ) {
 	go func() {
 		defer func() {
@@ -8746,7 +8911,7 @@ func (s *Service) launchProcessOnEnter(
 				s.onProcessOnEnterComplete()
 			}
 		}()
-		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, transitionID, sourceStep)
+		s.processOnEnterWithCompletion(ctx, taskID, session, targetStep, taskDescription, transitionID, sourceStep, onComplete)
 	}()
 }
 

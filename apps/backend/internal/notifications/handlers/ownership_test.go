@@ -28,7 +28,7 @@ import (
 // controller, service and SQLite store together.
 const testUserHeader = "X-Test-User"
 
-func newProviderAPI(t *testing.T) *gin.Engine {
+func newProviderAPI(t *testing.T, middleware ...gin.HandlerFunc) *gin.Engine {
 	t.Helper()
 	// Keep the auto-provisioned system provider out: SystemProvider.Available()
 	// is true on desktop platforms and would vary the seeded provider count.
@@ -58,6 +58,7 @@ func newProviderAPI(t *testing.T) *gin.Engine {
 		}
 		c.Next()
 	})
+	router.Use(middleware...)
 	RegisterRoutes(router, controller.NewController(service.NewService(repo, nil, nil, log, nil, false)), log)
 	return router
 }

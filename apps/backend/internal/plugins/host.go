@@ -39,13 +39,14 @@ type pluginHost struct {
 	// host_data.go; this embed only remains as defense-in-depth.
 	pluginsdk.UnimplementedHostData
 
-	service         *Service
-	pluginID        string
-	installationID  string
-	commandStore    *state.CommandStore
-	capabilities    manifest.Capabilities
-	exactSnapshotMu sync.Mutex
-	exactSnapshots  *exactReadSnapshotStore
+	service             *Service
+	pluginID            string
+	installationID      string
+	commandStore        *state.CommandStore
+	capabilities        manifest.Capabilities
+	hasSidebarGroupings bool
+	exactSnapshotMu     sync.Mutex
+	exactSnapshots      *exactReadSnapshotStore
 	// repositoryProviders is the manifest-declared set of provider IDs this
 	// plugin owns. Only these IDs may use the trusted remote-descriptor path
 	// when creating a task; a plugin cannot claim another provider merely by
@@ -191,14 +192,22 @@ func (h *pluginHost) SetState(ctx context.Context, scope, scopeID, key string, v
 	if err != nil {
 		return fmt.Errorf("plugins: marshal state value: %w", err)
 	}
-	return h.state.Set(ctx, h.pluginID, scope, scopeID, key, raw)
+	if err := h.state.Set(ctx, h.pluginID, scope, scopeID, key, raw); err != nil {
+		return err
+	}
+	h.notifySidebarGroupingState(ctx, scope, scopeID)
+	return nil
 }
 
 func (h *pluginHost) DeleteState(ctx context.Context, scope, scopeID, key string) error {
 	if !h.capabilities.State {
 		return permissionDenied("state")
 	}
-	return h.state.Delete(ctx, h.pluginID, scope, scopeID, key)
+	if err := h.state.Delete(ctx, h.pluginID, scope, scopeID, key); err != nil {
+		return err
+	}
+	h.notifySidebarGroupingState(ctx, scope, scopeID)
+	return nil
 }
 
 func (h *pluginHost) ListState(ctx context.Context, scope, scopeID string) ([]pluginsdk.StateEntry, error) {

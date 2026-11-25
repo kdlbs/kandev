@@ -17,7 +17,13 @@ import { ContextChip } from "./context-chip";
 // The image chip intentionally owns the preview, delivery toggle, and retry
 // affordance so they stay synchronized on narrow/mobile composers.
 // eslint-disable-next-line max-lines-per-function, complexity
-export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextItem }) {
+export const ImageItem = memo(function ImageItem({
+  item,
+  showDeliveryMode = true,
+}: {
+  item: ImageContextItem;
+  showDeliveryMode?: boolean;
+}) {
   const { t } = useTranslation("chat");
   const { isFinePointer } = useResponsiveBreakpoint();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -124,7 +130,7 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
         )}
       </div>
     ) : undefined;
-  if (deliveryMode === "path") {
+  if (showDeliveryMode && deliveryMode === "path") {
     leadingIcon = (
       <span className="relative h-3 w-3 shrink-0" aria-hidden="true">
         <IconFile className="h-3 w-3 text-muted-foreground" />
@@ -146,7 +152,7 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
       <ContextChip
         kind="image"
         label={item.label}
-        thumbnail={deliveryMode === "prompt" ? previewSrc : undefined}
+        thumbnail={leadingIcon ? undefined : previewSrc}
         leadingIcon={leadingIcon}
         preview={preview}
         onClick={previewSrc ? handleClick : undefined}

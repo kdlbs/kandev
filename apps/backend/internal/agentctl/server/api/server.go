@@ -4,7 +4,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"io"
 	"net/http"
 	"net/http/pprof"
@@ -25,8 +24,10 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/opencode"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/internal/system/metrics"
@@ -35,15 +36,16 @@ import (
 
 // Server is the HTTP API server for a single agent instance.
 type Server struct {
-	cfg              *config.InstanceConfig
-	procMgr          *process.Manager
-	mcpServer        *mcp.Server
-	mcpBackendClient *mcp.ChannelBackendClient
-	logger           *logger.Logger
-	router           *gin.Engine
-	portProxies      *portProxyCache
-	metricsCollector *metrics.Collector
-	lspInstaller     lspInstallerRegistry
+	cfg                           *config.InstanceConfig
+	procMgr                       *process.Manager
+	mcpServer                     *mcp.Server
+	mcpBackendClient              *mcp.ChannelBackendClient
+	logger                        *logger.Logger
+	router                        *gin.Engine
+	portProxies                   *portProxyCache
+	metricsCollector              *metrics.Collector
+	lspInstaller                  lspInstallerRegistry
+	builtinMCPRejectionLogLimiter builtinMCPRejectionLogLimiter
 
 	// credentialSource, when set via SetCredentialSource, authenticates this
 	// instance's requests and streams against the control server's single
@@ -96,6 +98,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	}
 
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
+	s.router.Use(s.rejectUnboundBuiltinMCPRoutes())
 	// Exempt paths from auth:
 	// - /health: liveness probe
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
@@ -137,6 +140,8 @@ func (s *Server) setupRoutes() {
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
 		api.GET("/agent/launch-wrapper", s.handleLaunchWrapper)
+		api.POST("/agent/opencode/credentials", s.handleOpenCodeCredentials)
+		api.GET("/agent/opencode/credentials", s.handleOpenCodeCredentialStatus)
 		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
 		api.POST("/start", s.handleStart)
@@ -147,6 +152,9 @@ func (s *Server) setupRoutes() {
 		api.GET("/agent/stream", s.handleAgentStreamWS)
 		api.GET("/agent/session", s.handleAgentSessionAssociation)
 		api.GET("/agent/delivery", s.handleDeliveryStatus)
+		api.GET("/agent/delivery/successors", s.handleDeliverySuccessorStreams)
+		api.POST("/agent/delivery/stream/abandon", s.handleDeliverySuccessorAbandon)
+		api.POST("/agent/delivery/stream/abandon-bootstrap", s.handleFailedBootstrapDeliveryAbandon)
 		api.POST("/agent/submissions", s.handleDeliverySubmission)
 		api.GET("/agent/submissions", s.handleDeliverySubmissions)
 		api.GET("/agent/submissions/:id", s.handleDeliverySubmissionByID)
@@ -184,7 +192,11 @@ func (s *Server) setupRoutes() {
 
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
+		api.GET("/workspace/root-files", s.handleWorkspaceRootFiles)
 		api.GET("/workspace/image-preview", s.handleQuestionImage)
+		api.POST("/workspace/file-preview/prepare", s.handlePrepareFilePreview)
+		api.POST("/workspace/file-preview/read", s.handleReadFilePreview)
+		api.POST("/workspace/file-preview/cancel", s.handleCancelFilePreview)
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
@@ -284,7 +296,11 @@ func (s *Server) setupRoutes() {
 
 	// MCP routes (if MCP server is configured)
 	if s.mcpServer != nil {
-		s.mcpServer.RegisterRoutes(s.router)
+		nativeRoutes := gin.IRouter(s.router)
+		if s.cfg.NativeMCPRoutePrefix != "" {
+			nativeRoutes = s.router.Group(s.cfg.NativeMCPRoutePrefix)
+		}
+		s.mcpServer.RegisterRoutes(nativeRoutes)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
 		api.PUT("/mcp/builtin-binding", s.handlePrepareBuiltinMCP)
 		api.GET("/mcp/builtin-binding", func(c *gin.Context) { c.JSON(http.StatusOK, s.mcpServer.Profile()) })
@@ -529,6 +545,7 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
+	OpenCodeRuntime opencode.Runtime   `json:"opencode_runtime,omitzero"`
 	LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
 	Command         string             `json:"command"`
 	AgentArgs       optionalArgs       `json:"agent_args"`
@@ -536,6 +553,7 @@ type AgentConfigureRequest struct {
 	ContinueArgs    optionalArgs       `json:"continue_args"`
 	Env             map[string]string  `json:"env,omitempty"`
 	ReplaceEnv      bool               `json:"replace_env,omitempty"`
+	PreferACPV2     bool               `json:"prefer_acp_v2,omitempty"`
 	// ProjectMCPDelivery carries execution-bound project-file delivery
 	// evidence. It is trusted only on an authenticated control request and is
 	// validated against this instance before accepted configuration changes.
@@ -591,6 +609,10 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for project MCP delivery"})
 		return
 	}
+	if req.PreferACPV2 && !c.GetBool(authenticatedControlContextKey) {
+		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for ACP v2 preview"})
+		return
+	}
 	if req.InstallContext != nil && (!c.GetBool(authenticatedControlContextKey) || !req.InstallContext.Valid()) {
 		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated installer provenance is required for reusable repairs"})
 		return
@@ -604,17 +626,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	var configureErr error
-	switch {
-	case req.ReplaceEnv && req.InstallContext != nil:
-		configureErr = s.procMgr.ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.InstallContext, req.LaunchWrapper)
-	case req.ReplaceEnv:
-		configureErr = s.procMgr.ConfigureWithEnvironmentAndProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
-	case req.InstallContext != nil:
-		configureErr = s.procMgr.ConfigureWithProjectDeliveryAndInstallContext(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.InstallContext, req.LaunchWrapper)
-	default:
-		configureErr = s.procMgr.ConfigureWithProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
-	}
+	configureErr := s.procMgr.ConfigureRuntime(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ReplaceEnv, req.PreferACPV2, req.ProjectMCPDelivery, req.InstallContext, req.OpenCodeRuntime, req.LaunchWrapper)
 	if configureErr != nil {
 		s.logger.Error("failed to configure agent",
 			append(s.agentConfigureFailureFields(configureErr), zap.Error(configureErr))...)

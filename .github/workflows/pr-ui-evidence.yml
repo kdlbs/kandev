@@ -1,0 +1,65 @@
+name: UI screenshot evidence
+
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted workflow evaluates pull request metadata only
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to reevaluate
+        required: true
+        type: number
+
+concurrency:
+  group: pr-ui-evidence-${{ github.event.pull_request.number || inputs.pr_number }}
+  queue: max
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  evidence:
+    name: UI screenshots
+    if: >-
+      (
+        github.event_name != 'workflow_dispatch' ||
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      ) &&
+      (
+        github.event_name != 'pull_request_target' ||
+        (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+        github.event.label.name == 'no-screenshots-allow'
+      ) &&
+      (
+        github.event_name != 'pull_request_target' ||
+        github.event.action != 'edited' ||
+        github.event.changes.body != null ||
+        github.event.changes.base != null
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TRUSTED_CHECKOUT_SHA: ${{ github.workflow_sha }}
+
+    steps:
+      - name: Checkout trusted screenshot validator
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ env.TRUSTED_CHECKOUT_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Run UI screenshot evidence evaluator
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
+          TRUSTED_CHECKOUT_SHA: ${{ env.TRUSTED_CHECKOUT_SHA }}
+        run: node .github/scripts/pr-ui-evidence.cjs

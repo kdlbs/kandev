@@ -12,9 +12,10 @@ import {
 } from "./composer-action-layout-helpers";
 import {
   expectMoveInstructionsDelivered,
+  expectMoveSavedPromptDelivered,
   fillMoveOverrides,
-  MOVE_INSTRUCTIONS,
   seedMoveOverrideFixture,
+  selectMoveSavedPrompt,
   TARGET_STEP_MESSAGE,
   waitForMoveRequest,
 } from "./workflow-step-move-overrides-helpers";
@@ -66,10 +67,10 @@ async function expectTargetStep(
 }
 
 /**
- * Verifies phone progression stays above utilities, reachable on the right, and moves the task.
+ * Verifies phone progression leads the utility row, stays contained when crowded, and moves the task.
  * @covers AC-UI-COMPOSER-ACTION-WRAP-001.2, .3, .4
  */
-test("keeps the wrapped mobile workflow action on the right and moves the task", async ({
+test("keeps the mobile workflow action inline with the utilities and moves the task", async ({
   testPage,
   apiClient,
   seedData,
@@ -114,7 +115,7 @@ test("keeps the wrapped mobile workflow action on the right and moves the task",
     await testPage.setViewportSize({ width: 393, height: 844 });
     await expect(chat.getByTestId("proceed-next-step")).toHaveText("Open PR");
     await expect(chat.getByTestId("auto-scroll-toggle-button")).toBeHidden();
-    await expectComposerActionLayout(chat, { touch: true });
+    await expectComposerActionLayout(chat, { wrapped: false, touch: true });
     await apiClient.saveUserSettings({
       show_transcript_auto_scroll_control: true,
       show_scroll_to_start: true,
@@ -131,7 +132,7 @@ test("keeps the wrapped mobile workflow action on the right and moves the task",
     await expectComposerActionLayout(chat, { wrapped: true, touch: true });
     if (prCapture.capturing) await prepareComposerCapture(chat);
     await prCapture.screenshot("workflow-action-touch-phone", {
-      caption: "Phone workflow action above the transcript utility icons",
+      caption: "Phone workflow action sharing the transcript utility row",
     });
 
     let releaseMove!: () => void;
@@ -216,21 +217,27 @@ test("submits mobile move options with an attached keyboard", async ({
     "workflow-move-submit",
     true,
   );
-  await fillMoveOverrides(testPage);
-  const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
-  await testPage.getByTestId("workflow-move-instructions").press("Meta+Enter");
+  await fillMoveOverrides(testPage, { instructions: "" });
+  const savedPrompt = await selectMoveSavedPrompt(testPage, apiClient, "touch");
+  try {
+    const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
+    await testPage.getByTestId("workflow-move-instructions").press("Meta+Enter");
 
-  expect((await moveRequest).postDataJSON()).toEqual({
-    workflow_id: expect.any(String),
-    workflow_step_id: fixture.targetStepId,
-    position: 0,
-    entry_options: {
-      reset_context: true,
-      instructions: MOVE_INSTRUCTIONS,
-    },
-  });
-  await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
-  await expectMoveInstructionsDelivered(fixture.session);
+    expect((await moveRequest).postDataJSON()).toEqual({
+      workflow_id: expect.any(String),
+      workflow_step_id: fixture.targetStepId,
+      position: 0,
+      entry_options: {
+        reset_context: true,
+        instructions: savedPrompt.instructions,
+      },
+    });
+    await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
+    await expectMoveInstructionsDelivered(fixture.session);
+    await expectMoveSavedPromptDelivered(apiClient, fixture.primarySessionId);
+  } finally {
+    await apiClient.deletePrompt(savedPrompt.id);
+  }
 });
 
 test("opens move options from the mobile task-switcher context menu", async ({
@@ -269,26 +276,33 @@ test("opens move options from the mobile task-switcher context menu", async ({
   await moveWithOptions.tap();
 
   await expect(taskSheet).toBeHidden();
-  await expectMoveOptionsDrawer(testPage);
-  await fillMoveOverrides(testPage);
-  const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
-  await testPage.getByTestId("workflow-move-submit").tap();
+  const form = await expectMoveOptionsDrawer(testPage);
+  await expect(form).toHaveCSS("overflow-y", "auto");
+  await fillMoveOverrides(testPage, { instructions: "" });
+  const savedPrompt = await selectMoveSavedPrompt(testPage, apiClient, "touch");
+  try {
+    const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
+    await testPage.getByTestId("workflow-move-submit").tap();
 
-  expect((await moveRequest).postDataJSON()).toEqual({
-    workflow_id: expect.any(String),
-    workflow_step_id: fixture.targetStepId,
-    position: 0,
-    entry_options: {
-      reset_context: true,
-      instructions: MOVE_INSTRUCTIONS,
-    },
-  });
-  await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
-  // Submitting a move from the task-switcher clears the move-options request but
-  // leaves the switcher drawer itself open on top of the chat, so it intercepts
-  // pointer events on the delivered instruction message. Dismiss it before
-  // asserting the chat received the one-shot instructions.
-  await testPage.keyboard.press("Escape");
-  await expect(taskSheet).toBeHidden();
-  await expectMoveInstructionsDelivered(fixture.session);
+    expect((await moveRequest).postDataJSON()).toEqual({
+      workflow_id: expect.any(String),
+      workflow_step_id: fixture.targetStepId,
+      position: 0,
+      entry_options: {
+        reset_context: true,
+        instructions: savedPrompt.instructions,
+      },
+    });
+    await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
+    // Submitting a move from the task-switcher clears the move-options request but
+    // leaves the switcher drawer itself open on top of the chat, so it intercepts
+    // pointer events on the delivered instruction message. Dismiss it before
+    // asserting the chat received the one-shot instructions.
+    await testPage.keyboard.press("Escape");
+    await expect(taskSheet).toBeHidden();
+    await expectMoveInstructionsDelivered(fixture.session);
+    await expectMoveSavedPromptDelivered(apiClient, fixture.primarySessionId);
+  } finally {
+    await apiClient.deletePrompt(savedPrompt.id);
+  }
 });

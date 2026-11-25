@@ -2,7 +2,10 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -25,6 +28,18 @@ func TestAntigravitySessionAuthentication(t *testing.T) {
 	}
 }
 
+func TestAntigravityCLIAuthenticationIsDeniedBeforeACP(t *testing.T) {
+	a := &Adapter{
+		agentID: acpcompat.AntigravityAgentID,
+		cfg: &shared.Config{AuthPolicy: acpcompat.AntigravityAuthPolicyForRuntime(
+			acpcompat.AntigravityRuntimeCLI, "1.5.15", false,
+		)},
+	}
+	if err := a.Authenticate(context.Background(), acpcompat.AntigravityPersonalAuthMethod); !errors.Is(err, acpcompat.ErrTaskAuthenticationDenied) {
+		t.Fatalf("CLI task authentication error = %v, want task-authentication denial before ACP", err)
+	}
+}
+
 func TestAntigravityBackgroundConsent(t *testing.T) {
 	a := &Adapter{
 		agentID: acpcompat.AntigravityAgentID,
@@ -41,5 +56,19 @@ func TestAntigravityBackgroundConsent(t *testing.T) {
 	}
 	if _, keep := a.SanitizeStderrLine(line); !keep {
 		t.Fatal("consent line was dropped without a redacted marker")
+	}
+}
+
+func TestAntigravityCLIUsesDefaultWireIdentityAndCachedAuth(t *testing.T) {
+	policy := acpcompat.AntigravityAuthPolicyForRuntime(acpcompat.AntigravityRuntimeCLI, "1.5.15", false)
+	if policy.MethodID != "" {
+		t.Fatalf("CLI auth method = %q, want no standalone auth method", policy.MethodID)
+	}
+	if info := clientInfoForAgent(acpcompat.AntigravityAgentID, policy); info.Name != "kandev-agentctl" {
+		t.Fatalf("CLI clientInfo = %+v, want default agentctl identity", info)
+	}
+	a := &Adapter{agentID: acpcompat.AntigravityAgentID, cfg: &shared.Config{AuthPolicy: policy}}
+	if err := a.applyAntigravityPersonalAuth(context.Background(), acp.InitializeResponse{}); err != nil {
+		t.Fatalf("CLI attempted standalone auth: %v", err)
 	}
 }

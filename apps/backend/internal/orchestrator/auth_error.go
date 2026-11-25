@@ -5,11 +5,48 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // isAuthError returns true if the error message indicates an authentication failure.
 func isAuthError(errorMsg string) bool {
 	return routingerr.IsAuthenticationFailureDiagnostic(errorMsg)
+}
+
+// isAuthenticationRecoveryFailure uses typed evidence whenever it exists.
+// Text classification remains for older records that have no structured
+// cause or routing code.
+func isAuthenticationRecoveryFailure(data watcher.AgentEventData) bool {
+	if data.FailureCode == string(routingerr.CodeAuthRequired) {
+		return true
+	}
+	causes := models.NormalizeAgentErrorCauses(data.Causes)
+	if len(causes) > 0 {
+		for _, cause := range causes {
+			if cause.Code == models.AgentErrorCauseCodeAuthenticationRequired {
+				return true
+			}
+		}
+		return false
+	}
+	return isAuthError(data.ErrorMessage)
+}
+
+func normalizeRecoveryAuthMethods(methods []streams.AuthMethodInfo) []streams.AuthMethodInfo {
+	if len(methods) == 0 {
+		return nil
+	}
+	projected := agentctltypes.NormalizeSessionOperationFailure(&agentctltypes.SessionOperationFailure{
+		Code:        agentctltypes.SessionOperationFailureCodeAuthenticationRequired,
+		AuthMethods: methods,
+	})
+	if projected == nil {
+		return nil
+	}
+	return projected.AuthMethods
 }
 
 // extractReadableAuthError attempts to extract a human-readable authentication

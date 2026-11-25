@@ -21,6 +21,8 @@ func TestManageTaskChangeRequestSchemaAndDispatch(t *testing.T) {
 
 	tool, ok := s.mcpServer.ListTools()["manage_task_change_request_kandev"]
 	require.True(t, ok, "neutral task change request tool must be registered")
+	assert.Contains(t, tool.Tool.Description, "Kandev repository ID")
+	assert.Contains(t, tool.Tool.Description, "attached to the target task")
 
 	var schema map[string]interface{}
 	require.NoError(t, json.Unmarshal(tool.Tool.RawInputSchema, &schema))

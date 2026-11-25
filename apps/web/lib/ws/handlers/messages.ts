@@ -1,5 +1,6 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import { messageTimestampNanoseconds } from "@/lib/state/slices/session/message-timestamp";
 import type { MessageAddedPayload } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { sessionId, taskId, type Message, type MessageType } from "@/lib/types/http";
@@ -86,8 +87,10 @@ function isOlderThanCurrentSnapshot(store: StoreApi<AppState>, payload: MessageP
     .messages.bySession[
       sessionId(payload.session_id)
     ]?.find((message) => message.id === payload.message_id);
-  if (!current?.updated_at) return false;
-  return !payload.updated_at || current.updated_at > payload.updated_at;
+  const currentTimestamp = messageTimestampNanoseconds(current?.updated_at);
+  if (currentTimestamp === null) return false;
+  const incomingTimestamp = messageTimestampNanoseconds(payload.updated_at);
+  return incomingTimestamp === null || currentTimestamp > incomingTimestamp;
 }
 
 function applyPendingActionProjection(store: StoreApi<AppState>, payload: MessagePayload): void {

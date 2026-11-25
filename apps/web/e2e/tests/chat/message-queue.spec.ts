@@ -85,8 +85,6 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
 }
 
 test.describe("Quick chat queue", () => {
-  test.describe.configure({ retries: 1 });
-
   test("keyboard and button queue submissions preserve panel controls and deliver both messages", async ({
     testPage,
   }) => {
@@ -272,6 +270,16 @@ test.describe("Task session queue", () => {
     await expect(entries).toHaveCount(3, { timeout: 10_000 });
     await expect(entries.nth(1)).toHaveText("separate third");
     await expect(entries.nth(2)).toHaveText("separate fourth");
+    await autoMerge.click();
+    await expect(autoMerge).toHaveAttribute("data-state", "checked");
+    await expect(entries).toHaveCount(1);
+    await expect(entries).toHaveText(
+      "automatic first\n\nautomatic second\n\nseparate third\n\nseparate fourth",
+    );
+    await testPage.reload();
+    await session.waitForLoad();
+    await openQueuePanel(session.activeChat());
+    await expect(session.activeChat().getByTestId("queue-entry-text")).toHaveCount(1);
   });
 
   test("automatic merge accepts a compatible message into a full queue", async ({

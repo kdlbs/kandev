@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
@@ -19,12 +20,20 @@ type sessionModeRequest struct {
 	uncertain            bool
 }
 
-func selectSessionModeOption(config []streams.ConfigOption, modes []streams.SessionModeInfo, modeID, configID string) (streams.ConfigOption, bool, error) {
-	option, found := modeConfigOption(config)
+func selectSessionModeOption(config []streams.ConfigOption, modes []streams.SessionModeInfo, modeID, configID string, agentIDs ...string) (streams.ConfigOption, bool, error) {
+	agentID := ""
+	if len(agentIDs) > 0 {
+		agentID = agentIDs[0]
+	}
+	option, found := acpcompat.SessionModeOption(agentID, config)
+	if agentID == acpcompat.PiAgentID && !found && len(config) > 0 {
+		return option, false, fmt.Errorf("active session has no unambiguous thinking option")
+	}
 	if configID != "" {
+		advertised := found
 		found = false
 		for _, candidate := range config {
-			if candidate.ID == configID && isModeConfigOption(candidate) {
+			if candidate.ID == configID && advertised && candidate.ID == option.ID {
 				option, found = candidate, true
 				break
 			}
@@ -69,7 +78,7 @@ func (a *Adapter) setConfigSessionMode(ctx context.Context, request sessionModeR
 	}
 	if len(response.ConfigOptions) > 0 {
 		a.emitAuthoritativeConfigOptions(request.sessionID, request.option.ID, response.ConfigOptions, request.models, true, request.generation)
-		if effective := currentModeFromConfig(convertACPConfigOptions(response.ConfigOptions)); effective != "" {
+		if effective := a.currentModeFromConfig(convertACPConfigOptions(response.ConfigOptions)); effective != "" {
 			return streams.ModeResult{Requested: request.modeID, Effective: effective, Confirmed: true}, true, nil
 		}
 	}
@@ -98,7 +107,7 @@ func (a *Adapter) alreadySatisfiedLegacyMode(
 		a.currentModeID != modeID || a.modeOutcomeUncertain {
 		return 0, false, nil
 	}
-	if _, hasModeOption := modeConfigOption(a.availableConfigOptions); hasModeOption {
+	if _, hasModeOption := a.modeConfigOption(a.availableConfigOptions); hasModeOption {
 		return 0, false, nil
 	}
 	if !legacyModesAdvertise(a.availableModes, modeID) {

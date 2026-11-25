@@ -28,6 +28,24 @@ Agent messages and task plans can contain Mermaid diagrams whose labels use ordi
 - **AC-UI-MERMAID-RENDERING-001.7:** When Kandev normalized the source before the failed render, the console error also includes the full normalized source so users can distinguish invalid input from a normalization defect.
 - **AC-UI-MERMAID-RENDERING-001.8:** Failed diagram source remains in the browser console and Kandev's in-memory frontend log buffer; Kandev does not transmit it unless the user explicitly includes browser logs in a diagnostic report.
 
+### REQ-UI-MERMAID-RENDERING-002: Markdown diagram boundaries
+
+**Intent:** A missing separator after a diagram fence must not hide subsequent prose when the intended boundary can be verified.
+
+Supported recovery concerns Markdown code blocks explicitly tagged `mermaid`.
+The apparent closing run starts a line, with at most three leading spaces, and directly precedes non-whitespace text.
+It contains at least three backticks. The complete diagram must be invalid, and the prefix before that run must be valid.
+
+#### Acceptance criteria
+
+- **AC-UI-MERMAID-RENDERING-002.1:** For supported input, Kandev shall show the diagram and following prose separately. Recovery requires invalid full diagram source and valid diagram source before the apparent closing run.
+- **AC-UI-MERMAID-RENDERING-002.2:** Valid Mermaid content shall retain its source semantics, including multiline labels that contain apparent fence text.
+- **AC-UI-MERMAID-RENDERING-002.3:** Other languages, enclosing literal fences, and content without an eligible closing run shall retain their existing behavior. An invalid candidate diagram shall retain the existing error fallback.
+- **AC-UI-MERMAID-RENDERING-002.4:** Recovery shall leave stored message content, transport chunks, and message identity unchanged.
+- **AC-UI-MERMAID-RENDERING-002.5:** The recovered diagram and prose shall appear in the same order on desktop, phone, and a subsequent page reload.
+- **AC-UI-MERMAID-RENDERING-002.6:** Superseded or cancelled recovery work shall not publish an earlier diagram or prose. Successful recovery shall not show a transient diagram-error notification from the failed full-source probe.
+- **AC-UI-MERMAID-RENDERING-002.7:** Recovered prose shall use the same Markdown formatting, document reference definitions, and task/file-link context as adjacent chat prose. Existing HTML and URL restrictions shall remain effective.
+
 ## Migrated source detail
 
 ## Why
@@ -95,6 +113,8 @@ has an unambiguous Mermaid-safe representation.
 ## Out of scope
 
 - General repair of arbitrary invalid Mermaid syntax.
+- Reconstruction of native assistant-message boundaries without provider evidence.
+- Recovery inside task-plan rich-text nodes or untagged diagram blocks.
 - Changes to Mermaid error-toast copy, visual presentation, or diagram controls.
 - Changes to layout, responsive composition, or touch interaction.
 - Redaction of diagram source from the explicitly requested failure diagnostic.
@@ -102,3 +122,6 @@ has an unambiguous Mermaid-safe representation.
 ## Implementation plan
 
 - [Mermaid sequence-message semicolon rendering](../../../plans/mermaid-sequence-semicolon-rendering/plan.md)
+- [Cursor Mermaid fence recovery](../../../plans/cursor-mermaid-fence-recovery/plan.md).
+
+The [Markdown boundary design](../system-design/mermaid-markdown-boundaries.md) defines the recovery for `REQ-UI-MERMAID-RENDERING-002`.

@@ -1,6 +1,6 @@
 import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import {
   closeQuickTerminals,
   openDesktopQuickTerminal,
@@ -156,7 +156,7 @@ test.describe("quick terminal shell recovery", () => {
     }
   });
 
-  test("recovers after backend restart while the browser remains open", async ({
+  test("recovers an open browser terminal after the required restart reload", async ({
     testPage,
     apiClient,
     seedData,
@@ -171,7 +171,20 @@ test.describe("quick terminal shell recovery", () => {
       if (!tabId) throw new Error("Quick Terminal tab is missing its stable ID");
       const original = await readQuickTerminalDescriptor(apiClient, seedData.workspaceId, tabId);
 
+      await testPage.waitForLoadState("networkidle");
+      const systemInfoRecovered = waitForHttp(testPage, "GET", /^\/api\/v1\/system\/info$/, {
+        predicate: (response) => response.ok(),
+      });
       await backend.restart();
+      await systemInfoRecovered;
+      const reload = testPage.getByTestId("backend-reload-required-alert");
+      await expect(reload).toBeVisible();
+      await testPage.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await reload.getByRole("button", { name: "Reload page", exact: true }).click();
+      await expect(testPage.getByTestId("app-shell")).toBeVisible();
+      await expect(reload).toHaveCount(0);
+      await testPage.getByTestId("sidebar-quick-terminal-shortcut").click();
       await expect(
         dialog.getByRole("button", { name: "Start new shell", exact: true }),
       ).toBeVisible();

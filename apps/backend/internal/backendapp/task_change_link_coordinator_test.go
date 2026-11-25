@@ -339,6 +339,7 @@ func TestTaskChangeCoordinatorRejectsCrossProviderReplaceWithoutMutation(t *test
 	}
 }
 
+// @covers AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-003.3
 func TestTaskChangeCoordinatorReplaceRollsBackNewLinkWhenOldUnlinkFails(t *testing.T) {
 	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
 	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
@@ -367,6 +368,7 @@ func TestTaskChangeCoordinatorReplaceRollsBackNewLinkWhenOldUnlinkFails(t *testi
 	}
 }
 
+// @covers AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-003.3
 func TestTaskChangeCoordinatorReportsRollbackFailure(t *testing.T) {
 	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
 	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
@@ -399,6 +401,7 @@ func TestTaskChangeCoordinatorReportsRollbackFailure(t *testing.T) {
 	assert.NotContains(t, result.RollbackError, "rollback failed")
 }
 
+// @covers AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-003.3
 func TestTaskChangeCoordinatorUnlinksStaleAssociationWithoutCurrentRepository(t *testing.T) {
 	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
 	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
