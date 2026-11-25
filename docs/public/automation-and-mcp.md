@@ -115,11 +115,11 @@ The editor reads top to bottom, and each choice sits above the fields it changes
 5. Under **Instructions**, enter an optional task-title template and the instructions. **Show placeholders** lists the trigger's placeholders; typing `{{` in a prompt also offers them.
 6. Under **Agent**, select an agent profile and executor profile. Passthrough profiles are not offered. Worktree and Local-compatible profiles can run without a repository in a task-owned scratch workspace.
 7. Add one or more repository and base-branch pairs, or leave the list empty. The selector is the same searchable paired-chip control used by New Task. A discovered repository is registered in the workspace when the automation is saved. An empty list uses a task-scoped scratch workspace and does not create a Git worktree. Kandev never selects the workspace's first repository for you.
-8. The **Tools** row names the enabled tools. Select it to choose [MCP access](#choose-mcp-access) and, for automation-history runs, [plugin tools](#opt-in-plugin-tools). It opens by itself when saved MCP choices conflict or approved plugin tools need review.
+8. The **Tools** row names the enabled tools. Select it to choose [MCP access](#choose-mcp-access) and, for automation-history runs, [plugin tools](#opt-in-plugin-tools). It opens by itself when MCP choices cannot load, saved MCP choices conflict, or approved plugin tools need review.
 9. Under **If a run fails**, choose [automatic retries](#automatic-retries).
 10. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
 
-![Automation editor showing repository access, run destination, context between runs, concurrency, and Save changes.](../screenshots/automation-editor.png)
+![Automation editor showing Where runs go with a Normal task destination and its workflow, Repeat runs with the task for each run and max concurrent runs, Instructions, and Save changes.](../screenshots/automation-editor.png)
 
 The form can save an empty agent or executor selection, but launch still needs a usable profile. Scheduled, manual, webhook, and provider-triggered runs can remain repository-free. When a provider event supplies an exact repository through its established contract, Kandev uses that event context. A GitHub pull-request run with configured repository access checks out that PR's head branch and uses its base branch.
 
@@ -170,7 +170,7 @@ The editor has two exclusive layouts:
 - **Scheduled**: one schedule plus at most one GitHub condition;
 - **Webhook**: one authenticated webhook trigger. Switching to webhook deletes the schedule and condition, and switching back deletes the webhook trigger.
 
-In the current backend, the schedule and GitHub PR condition are independent triggers. A non-empty schedule creates generic scheduled runs, while the PR trigger separately polls GitHub. Adding a PR condition does not constrain the scheduled run. Clear the schedule expression if the automation should run only for matching PRs.
+In the current backend, the schedule and GitHub PR condition are independent triggers. A non-empty schedule creates generic scheduled runs, while the PR trigger separately polls GitHub. Adding a PR condition does not constrain the scheduled run. Choose **No schedule** if the automation should run only for matching PRs.
 
 ### Webhook delivery contract
 

@@ -69,10 +69,8 @@ func (e *GitHubEvaluator) endPRContinuation(ctx context.Context, a *Automation, 
 	if pr.State == githubPRStateMerged || pr.MergedAt != nil {
 		action, outcome = normalizePREndAction(a.PRMergedAction), githubPRStateMerged
 	}
-	if action != PREndActionKeep {
-		if !e.applyPREndAction(ctx, a, m, action, outcome) {
-			return
-		}
+	if !e.applyPREndAction(ctx, a, m, action, outcome) {
+		return
 	}
 	if err := e.svc.Store().DeletePRContinuation(ctx, a.ID, m.PRSubject, m.TaskID); err != nil {
 		e.logger.Warn("failed to remove PR continuation", zap.String("automation_id", a.ID),
@@ -84,16 +82,21 @@ func (e *GitHubEvaluator) endPRContinuation(ctx context.Context, a *Automation, 
 		zap.String("task_id", m.TaskID), zap.String("outcome", outcome), zap.String("action", string(action)))
 }
 
-// applyPREndAction archives or deletes the PR task. It reports false when
-// the action must be retried later.
+// applyPREndAction applies the end-of-PR action once the PR task is idle. It
+// reports false when the action must be retried later. Every action, keep
+// included, waits for an idle task: a run still working on the PR keeps its
+// mapping, so a reopen during that run continues the same task.
 func (e *GitHubEvaluator) applyPREndAction(
 	ctx context.Context, a *Automation, m *PRContinuation, action PREndAction, outcome string,
 ) bool {
-	if e.svc.prTasks == nil {
-		return false
-	}
 	busy, err := e.svc.prTaskBusy(ctx, a.ID, m.TaskID)
 	if err != nil || busy {
+		return false
+	}
+	if action == PREndActionKeep {
+		return true
+	}
+	if e.svc.prTasks == nil {
 		return false
 	}
 	switch action {

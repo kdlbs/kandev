@@ -446,6 +446,7 @@ func (s *Store) initSchema() error {
 		{"automations.pr_merged_action", `ALTER TABLE automations ADD COLUMN pr_merged_action TEXT NOT NULL DEFAULT 'keep'`},
 		{"automations.pr_closed_action", `ALTER TABLE automations ADD COLUMN pr_closed_action TEXT NOT NULL DEFAULT 'keep'`},
 		{"automation_pr_observations.tracked_events", `ALTER TABLE automation_pr_observations ADD COLUMN tracked_events TEXT NOT NULL DEFAULT ''`},
+		{"automation_pr_observations.pending_review_generation", `ALTER TABLE automation_pr_observations ADD COLUMN pending_review_generation BIGINT NOT NULL DEFAULT 0`},
 	}
 	for _, migration := range migrations {
 		if err := migrate.Apply(migration.name, migration.stmt); err != nil {

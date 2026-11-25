@@ -29,7 +29,7 @@ test.describe("Automation settings page", () => {
     );
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
-    const retryModes = testPage.getByRole("group", { name: "Automatic retries", exact: true });
+    const retryModes = testPage.getByRole("radiogroup", { name: "Automatic retries", exact: true });
     await expect(retryModes).toBeVisible();
     await expect(testPage.locator("#automation-retry-history")).toHaveCount(0);
     const finite = retryModes.getByRole("radio", { name: "Fixed number of times" });
@@ -44,7 +44,7 @@ test.describe("Automation settings page", () => {
 
     await testPage.getByRole("radio", { name: "Managed conversation" }).click();
     await expect(testPage.locator("#automation-retry-finite")).toHaveCount(0);
-    await expect(testPage.getByRole("group", { name: "Task for each run" })).toHaveCount(0);
+    await expect(testPage.getByRole("radiogroup", { name: "Task for each run" })).toHaveCount(0);
     await expect(testPage.getByTestId("automation-agent-section")).toHaveCount(0);
     await expect(testPage.getByTestId("automation-failure-section")).toHaveCount(0);
     await expect(testPage.getByText("Workflow", { exact: true })).toHaveCount(0);
@@ -68,6 +68,38 @@ test.describe("Automation settings page", () => {
     );
   });
 
+  // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.7
+  test("removes a saved schedule when No schedule is saved", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    const automation = await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Scheduled cleanup",
+    });
+    await apiClient.seedTrigger({
+      automationId: automation.id,
+      type: "scheduled",
+      config: { cron_expression: "0 9 * * *", timezone: "UTC" },
+      enabled: true,
+    });
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
+    await expect(automations.frequencySelector).toHaveText("every day");
+
+    await automations.selectFrequency("No schedule");
+    await automations.saveButton.click();
+    await automations.waitForSaved();
+    const saved = await apiClient.wsRequest<{ triggers?: { type: string }[] }>("automation.get", {
+      id: automation.id,
+    });
+    expect((saved.triggers ?? []).map((trigger) => trigger.type)).not.toContain("scheduled");
+
+    await testPage.reload();
+    await expect(automations.frequencySelector).toHaveText("No schedule");
+  });
+
   // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.3
   test("marks the selected option with a fill and outline in both themes", async ({
     testPage,
@@ -75,7 +107,7 @@ test.describe("Automation settings page", () => {
   }) => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
-    const group = testPage.getByRole("group", { name: "Run destination" });
+    const group = testPage.getByRole("radiogroup", { name: "Run destination" });
     const selected = group.getByRole("radio", { name: "Automation history" });
     const other = group.getByRole("radio", { name: "Normal task" });
     await expect(selected).toBeChecked();
@@ -147,7 +179,7 @@ test.describe("Automations settings page", () => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
 
-    const taskChoice = testPage.getByRole("group", { name: "Task for each run" });
+    const taskChoice = testPage.getByRole("radiogroup", { name: "Task for each run" });
     await expect(taskChoice).toBeVisible();
     await expect(testPage.locator("#automation-continuation-description")).toHaveText(
       "Each run starts with its own conversation and files. Runs can overlap.",
@@ -159,13 +191,13 @@ test.describe("Automations settings page", () => {
     const order = [
       heading("When"),
       heading("Where runs go"),
-      testPage.getByRole("group", { name: "Run destination" }),
+      testPage.getByRole("radiogroup", { name: "Run destination" }),
       testPage.getByText("Workflow", { exact: true }),
       heading("Repeat runs"),
       taskChoice,
       testPage.getByRole("spinbutton", { name: "Max concurrent runs" }),
       heading("Instructions"),
-      testPage.getByText("Task title", { exact: true }),
+      testPage.getByLabel("Task title", { exact: true }),
       testPage.getByTestId("automation-prompt-editor"),
       heading("Agent"),
       testPage.getByTestId("automation-agent-tools-toggle"),

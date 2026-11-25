@@ -63,32 +63,40 @@ shows each choice first and its detail on demand.
   the name with the **Enabled** switch; **When**; **Where runs go**; **Repeat
   runs**; **Instructions**; **Agent**; **If a run fails**; recent runs; and
   deletion. A section with nothing to show for the selected run destination
-  shall be absent.
+  shall be absent. A new automation shall be created in the state its
+  **Enabled** switch shows.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-002.2:** **Where runs go** shall hold
   **Run destination**, then the workflow (required for normal tasks, optional
   for automation history) or, for managed conversations, the conversation.
-  **Repeat runs** shall hold **Task for each run** with its per-PR options,
+  Choosing a managed conversation shall return **Task for each run** to **New
+  task each run** and clear its per-PR options; a managed conversation shall
+  never save a workflow or a hidden repeat-run choice. **Repeat runs** shall hold **Task for each run** with its per-PR options,
   then **Max concurrent runs**. **Instructions** shall hold the task title, the
   instructions, the follow-up instructions, and one placeholder list.
   **Agent** shall hold the agent and executor profiles, repository access, and
-  the tools.
+  the tools. Picking the workflow that is already selected shall keep the
+  chosen steps. Each section shall show as changed when any field inside it,
+  including the tools, differs from the saved automation.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-002.3:** **Run destination**, **Task for
-  each run**, and **Automatic retries** shall each be one labelled single
-  choice with short option labels side by side on desktop and stacked on
+  each run**, and **Automatic retries** shall each be one labelled radio group
+  with short option labels side by side on desktop and stacked on
   phones. One line shall describe the selected option. With a fine pointer,
   each other option shall describe itself in a tooltip on hover or keyboard
   focus. The selected option shall differ from the others by fill and outline,
   not only by text weight, in light and dark themes. Each option shall provide
   a touch target of at least 44 pixels on phones and coarse pointers. Pressing
-  the selected option shall keep it selected.
+  the selected option shall keep it selected, and the arrow keys shall move
+  the selection.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-002.4:** The trigger's placeholders shall be
   listed once for all prompts, behind a collapsed **Show placeholders**
   disclosure. Prompt editors shall keep offering placeholders as the user
   types.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-002.5:** **Tools** in **Agent** shall group
   MCP access and plugin tools behind a collapsed disclosure whose summary names
-  the enabled tools. It shall open by itself when saved MCP choices conflict or
-  approved plugin tools need review.
+  the enabled tools. It shall open by itself each time the MCP choices fail to
+  load, saved MCP choices conflict, or approved plugin tools need review, and
+  shall still close on request. When the MCP choices fail to load, the summary
+  shall say so.
   The Configuration package's authority note shall appear in that package's
   details.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-002.6:** When **One shared task** is

@@ -25,8 +25,8 @@ const TOUCH_ITEM_CLASS_NAME = "[@media(pointer:coarse)]:min-h-11";
 const STAY_IN_STEP = "__stay__";
 const PR_END_ACTIONS: PREndAction[] = ["keep", "archive", "delete"];
 
-/** Clears every per-PR option, used when another policy is chosen. */
-function clearPRContinuation(updateField: UpdateField) {
+/** Clears every per-PR option, used when another policy or destination is chosen. */
+export function clearPRContinuation(updateField: UpdateField) {
   updateField("followUpPrompt", "");
   updateField("prContinuationStepId", "");
   updateField("prMergedAction", "keep");

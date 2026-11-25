@@ -83,7 +83,7 @@ test.describe("Automation deletion confirmation on mobile", () => {
     );
     await expect(testPage.getByTestId("automation-editor")).toBeVisible({ timeout: 15_000 });
 
-    const retryModes = testPage.getByRole("group", { name: "Automatic retries", exact: true });
+    const retryModes = testPage.getByRole("radiogroup", { name: "Automatic retries", exact: true });
     await expect(retryModes).toBeVisible();
     const finite = retryModes.getByRole("radio", { name: "Fixed number of times" });
     await finite.tap();

@@ -22,7 +22,9 @@ func (e *GitHubEvaluator) evaluatePRRepo(
 		return
 	}
 	var observations map[int]*PRObservation
-	if sel.observes() {
+	// Opened eligibility also reads observations: a PR this trigger already
+	// observed under another event is not new to it.
+	if sel.observes() || (sel.opened && !cfg.IncludeExistingPRs) {
 		observations, err = e.svc.Store().ListPRObservations(ctx, t.ID, repo.Owner, repo.Name)
 		if err != nil {
 			e.logger.Warn("failed to load PR observations",
@@ -70,7 +72,7 @@ func (e *GitHubEvaluator) evaluatePR(
 		return
 	}
 	firing, next := choosePRFollowUp(pr, cfg, sel, obs, matched, e.now())
-	if firing != nil && firing.event == PREventReviewRequested && !e.assignReviewGeneration(ctx, t, repo, pr, obs, firing) {
+	if firing != nil && firing.event == PREventReviewRequested && !e.reserveReviewGeneration(ctx, t, repo, pr, next, firing) {
 		firing = nil
 	}
 	if firing == nil {
@@ -135,22 +137,38 @@ func (e *GitHubEvaluator) recordOpenedOutcome(
 	}
 }
 
-// assignReviewGeneration gives a review_requested firing the next sequence
-// after every key this automation already used for the PR, so a reopened PR,
-// a recreated trigger, or a second trigger never reuses a held dedup key. It
-// reports false when the run history cannot be read; the poll retries.
-func (e *GitHubEvaluator) assignReviewGeneration(
-	ctx context.Context, t *AutomationTrigger, repo github.RepoFilter, pr *github.PR, obs *PRObservation, firing *prFiring,
+// reserveReviewGeneration gives a review_requested firing its dedup key and
+// stores it on the observation before dispatch. A retry of the same request
+// reuses the reserved generation, so a run committed before its observation
+// advanced deduplicates instead of dispatching again. A new request takes the
+// next sequence after every key this automation already used for the PR, so a
+// reopened PR, a recreated trigger, or a second trigger never reuses a held
+// key. It reports false when the run history cannot be read or the
+// reservation cannot be stored; the poll retries.
+func (e *GitHubEvaluator) reserveReviewGeneration(
+	ctx context.Context, t *AutomationTrigger, repo github.RepoFilter, pr *github.PR, next *PRObservation, firing *prFiring,
 ) bool {
 	prefix := reviewRequestDedupPrefix(repo.Owner, repo.Name, pr.Number)
+	if next.PendingReviewGeneration > 0 {
+		firing.generation = next.PendingReviewGeneration
+		firing.dedupKey = fmt.Sprintf("%s%d", prefix, firing.generation)
+		return true
+	}
 	used, err := e.svc.Store().MaxReviewRequestGeneration(ctx, t.AutomationID, prefix)
 	if err != nil {
 		e.logger.Warn("failed to read review-request generation; retrying next poll",
 			zap.String("trigger_id", t.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
 		return false
 	}
-	firing.generation = max(obs.ReviewGeneration, used) + 1
+	firing.generation = max(next.ReviewGeneration, used) + 1
 	firing.dedupKey = fmt.Sprintf("%s%d", prefix, firing.generation)
+	next.PendingReviewGeneration = firing.generation
+	if err := e.svc.Store().UpsertPRObservation(ctx, next); err != nil {
+		e.logger.Warn("failed to reserve review-request generation; retrying next poll",
+			zap.String("trigger_id", t.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
+		next.PendingReviewGeneration = 0
+		return false
+	}
 	return true
 }
 

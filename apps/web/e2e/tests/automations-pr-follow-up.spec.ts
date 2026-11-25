@@ -109,7 +109,7 @@ test.describe("automations — GitHub PR follow-up", () => {
     // The choice sits above the field it reveals, and the follow-up sits
     // directly under the first-run instructions.
     const choiceBox = await testPage
-      .getByRole("group", { name: "Task for each run" })
+      .getByRole("radiogroup", { name: "Task for each run" })
       .boundingBox();
     const instructionsBox = await testPage.getByTestId("automation-prompt-editor").boundingBox();
     const followUpBox = await followUp.boundingBox();

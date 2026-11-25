@@ -149,7 +149,7 @@ describe("end-of-PR actions", () => {
 describe("task for each run wording", () => {
   it("names the choice by the task each run uses", () => {
     renderSection(form());
-    expect(screen.getByRole("group", { name: "Task for each run" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Task for each run" })).toBeTruthy();
     expect(
       screen.getByText("Each run starts with its own conversation and files. Runs can overlap."),
     ).toBeTruthy();

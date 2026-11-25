@@ -136,7 +136,7 @@ export type AutomationPluginToolOptionsResponse = {
   groups: AutomationPluginToolGroup[];
 };
 
-export type Automation = {
+export type Automation = PRContinuationSettings & {
   mcp_selection?: AutomationMCPSelection | null;
   mcp_selection_revision?: number;
   id: string;
@@ -157,10 +157,6 @@ export type Automation = {
   max_concurrent_runs: number;
   /** How later firings get their task and conversation context. */
   continuation_policy?: ContinuationPolicy;
-  follow_up_prompt?: string;
-  pr_continuation_step_id?: string;
-  pr_merged_action?: PREndAction;
-  pr_closed_action?: PREndAction;
   managed_destination?: ManagedConversationDestination;
   retry_policy?: RetryPolicy;
   /** Exact plugin tools approved by the last native editor save. */
@@ -375,7 +371,7 @@ export type TriggerTypeInfo = {
 
 // --- Request/response DTOs ---
 
-export type CreateAutomationRequest = {
+export type CreateAutomationRequest = PRContinuationSettings & {
   mcp_selection?: AutomationMCPSelection;
   workspace_id: string;
   name: string;
@@ -391,10 +387,6 @@ export type CreateAutomationRequest = {
   task_title_template?: string;
   max_concurrent_runs?: number;
   continuation_policy?: ContinuationPolicy;
-  follow_up_prompt?: string;
-  pr_continuation_step_id?: string;
-  pr_merged_action?: PREndAction;
-  pr_closed_action?: PREndAction;
   managed_destination?: ManagedConversationDestination;
   task_mode?: TaskMode;
   repository_mode?: RepositoryMode;
@@ -407,7 +399,7 @@ export type CreateAutomationRequest = {
   }>;
 };
 
-export type UpdateAutomationRequest = {
+export type UpdateAutomationRequest = PRContinuationSettings & {
   mcp_selection?: AutomationMCPSelection;
   expected_mcp_selection_revision?: number;
   name?: string;
@@ -423,10 +415,6 @@ export type UpdateAutomationRequest = {
   enabled?: boolean;
   max_concurrent_runs?: number;
   continuation_policy?: ContinuationPolicy;
-  follow_up_prompt?: string;
-  pr_continuation_step_id?: string;
-  pr_merged_action?: PREndAction;
-  pr_closed_action?: PREndAction;
   managed_destination?: ManagedConversationDestination;
   task_mode?: TaskMode;
   repository_mode?: RepositoryMode;

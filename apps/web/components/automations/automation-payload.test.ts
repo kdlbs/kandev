@@ -251,6 +251,32 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
   });
 });
 
+describe("save boundary normalization", () => {
+  it("never saves a hidden workflow or repeat-run choice for a managed conversation", () => {
+    const form = baseForm({
+      taskMode: "managed_conversation",
+      workflowId: "wf-1",
+      continuationPolicy: "reuse_per_pr",
+      followUpPrompt: "Review",
+      prMergedAction: "archive",
+    });
+    for (const payload of [
+      buildCreatePayload("ws-1", form, [], []),
+      buildUpdatePayload(form, []),
+    ]) {
+      expect(payload.workflow_id).toBe("");
+      expect(payload.continuation_policy).toBe("new_task");
+      expect(payload.follow_up_prompt).toBe("");
+      expect(payload.pr_merged_action).toBe("keep");
+    }
+  });
+
+  it("creates a disabled automation when Enabled is off", () => {
+    expect(buildCreatePayload("ws-1", baseForm({ enabled: false }), [], []).enabled).toBe(false);
+    expect(buildCreatePayload("ws-1", baseForm({ enabled: true }), [], []).enabled).toBe(true);
+  });
+});
+
 describe("managed destination and retry payloads", () => {
   it("persists only the portable managed destination identity", () => {
     const form = baseForm({

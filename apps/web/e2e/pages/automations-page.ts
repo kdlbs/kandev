@@ -93,18 +93,16 @@ export class AutomationsPage {
   }
 
   /**
-   * Wait until an edit save finishes. The save button relabels while saving,
-   * so its absence alone does not mean the trigger updates have landed.
+   * Wait until an edit save finishes, including its trigger updates and the
+   * final reload. The bar can unmount mid-save once every field is clean, so
+   * only the positive saved status proves the whole save completed.
    */
   async waitForSaved() {
-    const bar = this.page.getByTestId("settings-floating-save");
-    await expect
-      .poll(
-        async () =>
-          (await bar.count()) === 0 || (await bar.getAttribute("data-status")) === "saved",
-        { timeout: 15_000 },
-      )
-      .toBe(true);
+    await expect(this.page.getByTestId("settings-floating-save")).toHaveAttribute(
+      "data-status",
+      "saved",
+      { timeout: 15_000 },
+    );
   }
 
   /** Select a workflow by clicking the selector and picking an item by name. */

@@ -7,6 +7,7 @@ import { Switch } from "@kandev/ui/switch";
 import type { AutomationTrigger, TriggerTypeInfo } from "@/lib/types/automation";
 import { type CreatedWebhookDetails, type FormState } from "./automation-payload";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
+import { EditorSection } from "./editor-section";
 import { RequiredFieldLabel } from "./required-field-label";
 import { TriggersSection } from "./triggers-section";
 import { WebhookCreatedDialog } from "./webhook-created-dialog";
@@ -104,29 +105,24 @@ export function WhenSection({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-2">
-      <div>
-        <h3 className="text-base font-medium">{t("automations:whenTitle")}</h3>
-        <p className="text-sm text-muted-foreground">{t("automations:whenDescription")}</p>
-      </div>
-      <div
-        className="rounded-lg border bg-card p-4"
-        data-settings-dirty={isDirty}
-        data-settings-dirty-level="container"
-      >
-        <TriggersSection
-          triggers={triggerActions.allTriggers}
-          automationId={currentId}
-          workspaceId={workspaceId}
-          triggerTypes={triggerTypes}
-          savedTriggers={savedTriggers}
-          onAddTrigger={triggerActions.handleAdd}
-          onUpdateTrigger={triggerActions.handleUpdate}
-          onToggleTrigger={triggerActions.handleToggle}
-          onDeleteTrigger={triggerActions.handleDelete}
-        />
-      </div>
-    </div>
+    <EditorSection
+      title={t("automations:whenTitle")}
+      description={t("automations:whenDescription")}
+      dirty={isDirty}
+      testId="automation-when-section"
+    >
+      <TriggersSection
+        triggers={triggerActions.allTriggers}
+        automationId={currentId}
+        workspaceId={workspaceId}
+        triggerTypes={triggerTypes}
+        savedTriggers={savedTriggers}
+        onAddTrigger={triggerActions.handleAdd}
+        onUpdateTrigger={triggerActions.handleUpdate}
+        onToggleTrigger={triggerActions.handleToggle}
+        onDeleteTrigger={triggerActions.handleDelete}
+      />
+    </EditorSection>
   );
 }
 

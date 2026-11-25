@@ -5,6 +5,7 @@ import type { TaskMode } from "@/lib/types/automation";
 import type { FormState } from "./automation-payload";
 import { ManagedConversationDestinationSelector } from "./managed-conversation-destination-selector";
 import { SegmentedChoice, type SegmentedOption } from "./segmented-choice";
+import { clearPRContinuation } from "./automation-continuation-section";
 
 type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 
@@ -48,6 +49,11 @@ export function TargetModeSection({
         onValueChange={(mode) => {
           updateField("taskMode", mode);
           if (mode !== "normal_task") updateField("prContinuationStepId", "");
+          // A managed conversation has no repeat-run choice, so none may stay hidden.
+          if (mode === "managed_conversation") {
+            updateField("continuationPolicy", "new_task");
+            clearPRContinuation(updateField);
+          }
         }}
         isDirty={form.taskMode !== savedForm.taskMode}
         testId="automation-task-mode"

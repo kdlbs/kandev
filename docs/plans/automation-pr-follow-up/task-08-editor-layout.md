@@ -97,6 +97,22 @@ Second round, done on 2026-11-25:
 - The PR follow-up save helpers waited for the relabelled save button to
   disappear and could reload mid-save. They now wait for the saved status.
 
+Third round, after a cross-provider review, done on 2026-11-25:
+
+- Switching to a managed conversation returns **Task for each run** to a new
+  task; the save payload never sends a managed conversation's hidden workflow
+  or per-PR options. Reselecting the current workflow keeps the chosen steps.
+- Segmented choices are a Radix radio group, so the arrow keys move the
+  selection. The Tools row opens on each new problem but still closes, says
+  when MCP choices cannot load, and marks the Agent card changed for tool
+  edits. GitHub PR event rows stay 44 px on tablets and coarse pointers, with
+  help in a separate `SettingsInfo` button. The task title is labelled.
+- Backend: review-request generations are reserved before dispatch, an
+  `opened`-only trigger reads observations, and `keep` waits for an idle task.
+  A new automation saves the **Enabled** state it shows.
+- Desktop automation E2E (9 specs, chromium): 66 passed.
+- Phone automation E2E (7 specs, mobile-chrome): 15 passed.
+
 Deviation: the mockup's lowercase trigger summary uses the localized event
 labels as written ("PR: Opened, New commits, Review requested"), because
 lowercasing is not locale-safe. Tooltips are disabled on coarse pointers,

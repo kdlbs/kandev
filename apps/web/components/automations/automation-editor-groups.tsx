@@ -1,6 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -15,9 +14,12 @@ import { ContinuationPolicySection, FollowUpPromptField } from "./automation-con
 import { TargetModeSection } from "./automation-target-mode-section";
 import {
   AgentToolsDisclosure,
+  isMCPSelectionDirty,
+  isPluginToolsDirty,
   type AgentToolsDisclosureProps,
 } from "./automation-agent-tools-section";
 import { isAutomationFieldDirty } from "./automation-editor-sections";
+import { EditorSection } from "./editor-section";
 
 type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 
@@ -29,37 +31,6 @@ type GroupProps = {
 
 function isDirty(form: FormState, savedForm: FormState, fields: Array<keyof FormState>): boolean {
   return fields.some((field) => isAutomationFieldDirty(form, savedForm, field));
-}
-
-/** A section heading over one card that reports whether anything inside changed. */
-export function EditorSection({
-  title,
-  description,
-  dirty,
-  testId,
-  children,
-}: {
-  title: string;
-  description?: string;
-  dirty: boolean;
-  testId: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="space-y-2" data-testid={testId}>
-      <div>
-        <h3 className="text-base font-medium">{title}</h3>
-        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
-      </div>
-      <div
-        className="space-y-4 rounded-lg border bg-card p-4"
-        data-settings-dirty={dirty}
-        data-settings-dirty-level="container"
-      >
-        {children}
-      </div>
-    </section>
-  );
 }
 
 /** Where runs go: the run destination, then the workflow or conversation it needs. */
@@ -90,6 +61,7 @@ export function DestinationSection({
           taskMode={form.taskMode}
           isDirty={isDirty(form, savedForm, ["workflowId"])}
           onWorkflowChange={(value) => {
+            if (value === form.workflowId) return;
             updateField("workflowId", value);
             updateField("workflowStepId", "");
             updateField("prContinuationStepId", "");
@@ -178,8 +150,12 @@ function TaskTitleField({
   const { inputRef, clampChange } = useTaskTitleSelectionRestore(form.taskTitleTemplate);
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">{t("automations:taskTitleLabel")}</Label>
+      <Label htmlFor="automation-task-title" className="text-xs">
+        {t("automations:taskTitleLabel")}
+      </Label>
       <Input
+        id="automation-task-title"
+        aria-describedby="automation-task-title-help"
         ref={inputRef}
         value={form.taskTitleTemplate}
         data-settings-dirty={isDirty(form, savedForm, ["taskTitleTemplate"])}
@@ -188,7 +164,9 @@ function TaskTitleField({
         // persisted value, not copy. The fallback is the example hint.
         placeholder={defaultTaskTitle || t("automations:taskTitlePlaceholder")}
       />
-      <p className="text-xs text-muted-foreground">{t("automations:taskTitleHelp")}</p>
+      <p id="automation-task-title-help" className="text-xs text-muted-foreground">
+        {t("automations:taskTitleHelp")}
+      </p>
     </div>
   );
 }
@@ -249,11 +227,11 @@ export function AgentSection(props: AgentToolsDisclosureProps) {
     <EditorSection
       title={t("automations:agentTitle")}
       description={t("automations:agentDescription")}
-      dirty={isDirty(form, savedForm, [
-        "agentProfileId",
-        "executorProfileId",
-        "repositorySelections",
-      ])}
+      dirty={
+        isDirty(form, savedForm, ["agentProfileId", "executorProfileId", "repositorySelections"]) ||
+        isMCPSelectionDirty(form, savedForm) ||
+        (form.taskMode === "automation_run" && isPluginToolsDirty(form, savedForm))
+      }
       testId="automation-agent-section"
     >
       <ConfigSection

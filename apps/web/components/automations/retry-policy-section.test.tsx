@@ -31,7 +31,7 @@ function renderSection(current: RetryPolicy) {
 describe("RetryPolicySection", () => {
   it("offers the retry modes as one labelled choice", () => {
     renderSection(policy());
-    expect(screen.getByRole("group", { name: "Automatic retries" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Automatic retries" })).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Don't retry" }).getAttribute("aria-checked")).toBe(
       "true",
     );

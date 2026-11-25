@@ -67,18 +67,26 @@ func TestEndOfPRKeepRemovesMappingOnly(t *testing.T) {
 
 // @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-009.3
 func TestEndOfPRActionWaitsWhileTaskBusy(t *testing.T) {
-	f, controller := newEndActionFixture(t, PREndActionArchive, PREndActionArchive)
-	controller.busy = true
-	f.transport.ended[17] = "merged"
-	f.setPRs(followUpPR{Number: 18, Head: "a"})
-	f.evaluate()
-	require.Empty(t, controller.archived)
-	require.Equal(t, "task-17", f.mapping(t, "acme/widget#17"), "a busy task keeps its mapping for retry")
+	for _, action := range []PREndAction{PREndActionArchive, PREndActionKeep} {
+		t.Run(string(action), func(t *testing.T) {
+			f, controller := newEndActionFixture(t, action, action)
+			controller.busy = true
+			f.transport.ended[17] = "merged"
+			f.setPRs(followUpPR{Number: 18, Head: "a"})
+			f.evaluate()
+			require.Empty(t, controller.archived)
+			require.Equal(t, "task-17", f.mapping(t, "acme/widget#17"), "a busy task keeps its mapping for retry")
 
-	controller.busy = false
-	f.evaluate()
-	require.Equal(t, []string{"task-17"}, controller.archived)
-	require.Empty(t, f.mapping(t, "acme/widget#17"))
+			controller.busy = false
+			f.evaluate()
+			require.Empty(t, f.mapping(t, "acme/widget#17"))
+			if action == PREndActionArchive {
+				require.Equal(t, []string{"task-17"}, controller.archived)
+			} else {
+				require.Empty(t, controller.archived)
+			}
+		})
+	}
 }
 
 func TestEndOfPRActionSkipsPartialListingAndFailedRead(t *testing.T) {

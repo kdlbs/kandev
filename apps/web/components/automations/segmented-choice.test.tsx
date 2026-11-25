@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SegmentedChoice } from "./segmented-choice";
@@ -36,9 +36,18 @@ function renderChoice(value: "a" | "b" = "a") {
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.3
 describe("SegmentedChoice", () => {
+  it("moves the choice with the arrow keys like a radio group", async () => {
+    const onValueChange = renderChoice("a");
+    const alpha = screen.getByRole("radio", { name: "Alpha" });
+    alpha.focus();
+    fireEvent.keyDown(alpha, { key: "ArrowRight" });
+    // Radix moves roving focus on the next task.
+    await waitFor(() => expect(onValueChange).toHaveBeenCalledWith("b"));
+  });
+
   it("exposes the options as named radios in a labelled group", () => {
     renderChoice("b");
-    const group = screen.getByRole("group", { name: "Example choice" });
+    const group = screen.getByRole("radiogroup", { name: "Example choice" });
     expect(group).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Alpha" }).getAttribute("aria-checked")).toBe("false");
     expect(screen.getByRole("radio", { name: "Beta" }).getAttribute("aria-checked")).toBe("true");
@@ -48,7 +57,7 @@ describe("SegmentedChoice", () => {
     renderChoice("a");
     const description = screen.getByText("Alpha runs alone.");
     expect(screen.queryByText("Beta runs together.")).toBeNull();
-    const group = screen.getByRole("group", { name: "Example choice" });
+    const group = screen.getByRole("radiogroup", { name: "Example choice" });
     expect(group.getAttribute("aria-describedby")).toBe(description.id);
   });
 

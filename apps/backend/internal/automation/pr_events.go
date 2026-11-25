@@ -215,7 +215,8 @@ func cloneObservation(obs *PRObservation) *PRObservation {
 
 func observationsEqual(a, b *PRObservation) bool {
 	if a.HeadSHA != b.HeadSHA || a.PendingHeadSHA != b.PendingHeadSHA || a.TrackedEvents != b.TrackedEvents ||
-		a.ReviewGeneration != b.ReviewGeneration || !slices.Equal(a.Requested, b.Requested) {
+		a.ReviewGeneration != b.ReviewGeneration || a.PendingReviewGeneration != b.PendingReviewGeneration ||
+		!slices.Equal(a.Requested, b.Requested) {
 		return false
 	}
 	if (a.PendingSince == nil) != (b.PendingSince == nil) {
@@ -246,6 +247,7 @@ func choosePRFollowUp(
 	if !matched {
 		next.HeadSHA, next.Requested = pr.HeadSHA, current
 		next.PendingHeadSHA, next.PendingSince = "", nil
+		next.PendingReviewGeneration = 0
 		return nil, next
 	}
 	if firing := chooseNewCommits(pr, cfg, sel, next, now); firing != nil {
@@ -259,6 +261,7 @@ func choosePRFollowUp(
 		}
 	}
 	next.Requested = current
+	next.PendingReviewGeneration = 0
 	return nil, next
 }
 
@@ -297,6 +300,7 @@ func processedObservation(obs *PRObservation, pr *github.PR, firing *prFiring, s
 	next.TrackedEvents = sel.trackedFor(obs)
 	next.HeadSHA, next.Requested = pr.HeadSHA, requestedReviewerKeys(pr)
 	next.PendingHeadSHA, next.PendingSince = "", nil
+	next.PendingReviewGeneration = 0
 	if firing.event == PREventReviewRequested {
 		next.ReviewGeneration = firing.generation
 	}

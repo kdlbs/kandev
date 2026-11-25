@@ -150,6 +150,8 @@ Each row holds:
 - `head_sha`.
 - `requested` (sorted JSON list of lowercased logins and team keys).
 - `review_generation`.
+- `pending_review_generation`, the generation reserved for a review request
+  before its firing is dispatched.
 - `pending_head_sha` and `pending_since`, which track the quiet period.
 
 The evaluator computes candidates for each listed PR:
@@ -165,7 +167,10 @@ The evaluator computes candidates for each listed PR:
   matching reviewers in the current requested set, minus `row.requested`, is
   not empty.
 - **`opened` candidate:** the event is selected, the PR matches the filters,
-  no run holds `pr:o/r#n`, and the PR is eligible. With
+  no run holds `pr:o/r#n`, and the PR is eligible. Without
+  `include_existing_prs`, the evaluator reads the rows even when `opened` is
+  the only selected event, so a PR already observed under another event is
+  not treated as new. With
   `include_existing_prs`, every PR is eligible. Otherwise a PR is eligible
   when its row, if any, tracks `opened`, and its `created_at` is zero or not
   before the trigger's `created_at`. A row that does not track `opened` means
@@ -195,11 +200,16 @@ Dedup keys:
 | `new_commits` | `pr:o/r#n@<head_sha>` |
 | `review_requested` | `pr:o/r#n/review-requested/<generation>` |
 
-A review firing's generation is allocated when it fires: one more than the
+A review firing's generation is reserved before it fires: one more than the
 larger of the row's `review_generation` and the highest generation already in
 this automation's run dedup keys for the PR. A reopened PR, a recreated
 trigger, or a second trigger with another reviewer filter therefore never
-reuses a key that an earlier request holds.
+reuses a key that an earlier request holds. The evaluator stores the
+reservation in `pending_review_generation` and dispatches only after that
+write succeeds. A retry of the same transition reuses the reserved key, so a
+run committed before its observation advanced deduplicates instead of firing
+again. Processing any firing, or the transition disappearing, clears the
+reservation.
 
 Each row also stores `tracked_events`, the events the trigger selected when
 the row was written, including `opened`. When an event is added to the trigger, the
@@ -365,8 +375,8 @@ for each mapping (automationID, subject in this repo) whose PR is not in the lis
   if read fails or pr.State == open -> skip (retry next poll)
   reload the automation; skip unless it is still enabled and reuse_per_pr
   action = merged ? PRMergedAction : PRClosedAction
+  if HasActiveRunForTask || busy(task) -> skip (retry next poll), for every action including keep
   if action != keep
-    if HasActiveRunForTask || busy(task) -> skip (retry next poll)
     archive: task service ArchiveTask; delete: DeleteTaskWithLifecycleAndReason(reason="automation: PR merged|closed")
     an already archived or missing task counts as done, so delete never removes a task a person archived
   delete mapping
@@ -447,6 +457,7 @@ CREATE TABLE IF NOT EXISTS automation_pr_observations (
   head_sha          TEXT NOT NULL,
   requested         TEXT NOT NULL DEFAULT '[]',
   review_generation BIGINT NOT NULL DEFAULT 0,
+  pending_review_generation BIGINT NOT NULL DEFAULT 0,
   pending_head_sha  TEXT NOT NULL DEFAULT '',
   pending_since     TIMESTAMP NULL,
   tracked_events    TEXT NOT NULL DEFAULT '',

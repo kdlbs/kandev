@@ -170,3 +170,13 @@ describe("GitHub PR already-open pull requests", () => {
     expect(onUpdate).toHaveBeenLastCalledWith({ ...config, include_existing_prs: true });
   });
 });
+
+describe("GitHub PR event help", () => {
+  it("offers each event's help as its own button that leaves the event unchanged", () => {
+    const { onUpdate } = renderConfig({ events: ["opened"], repos: [] });
+    const help = screen.getByRole("button", { name: "About New commits" });
+    expect(help.closest("label")).toBeNull();
+    fireEvent.click(help);
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+});

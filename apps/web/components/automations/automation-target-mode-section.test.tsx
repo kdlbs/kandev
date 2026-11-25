@@ -61,7 +61,7 @@ function renderSection(current: FormState) {
 describe("TargetModeSection", () => {
   it("offers the three destinations and describes the selected one", () => {
     renderSection(form());
-    expect(screen.getByRole("group", { name: "Run destination" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Run destination" })).toBeTruthy();
     expect(
       screen.getByRole("radio", { name: "Automation history" }).getAttribute("aria-checked"),
     ).toBe("true");
@@ -79,6 +79,25 @@ describe("TargetModeSection", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Automation history" }));
     expect(updateField).toHaveBeenCalledWith("taskMode", "automation_run");
     expect(updateField).toHaveBeenCalledWith("prContinuationStepId", "");
+  });
+
+  it("returns repeat runs to a new task when switching to a managed conversation", () => {
+    const updateField = renderSection(
+      form({
+        taskMode: "normal_task",
+        continuationPolicy: "reuse_per_pr",
+        followUpPrompt: "Review the new commits",
+        prMergedAction: "archive",
+        prClosedAction: "delete",
+      }),
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "Managed conversation" }));
+    expect(updateField).toHaveBeenCalledWith("taskMode", "managed_conversation");
+    expect(updateField).toHaveBeenCalledWith("continuationPolicy", "new_task");
+    expect(updateField).toHaveBeenCalledWith("followUpPrompt", "");
+    expect(updateField).toHaveBeenCalledWith("prContinuationStepId", "");
+    expect(updateField).toHaveBeenCalledWith("prMergedAction", "keep");
+    expect(updateField).toHaveBeenCalledWith("prClosedAction", "keep");
   });
 
   it("asks for a plugin conversation only for managed conversations", () => {

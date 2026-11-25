@@ -43,7 +43,7 @@ test.describe("Automations settings on mobile", () => {
     // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.3, AC-OFFICE-AUTOMATION-CONTINUITY-001.6
     // Phones stack the options so each label stays readable and each target
     // stays touch-sized.
-    const taskChoice = testPage.getByRole("group", { name: "Task for each run" });
+    const taskChoice = testPage.getByRole("radiogroup", { name: "Task for each run" });
     await expect(taskChoice).toBeVisible();
     const newTask = taskChoice.getByRole("radio", { name: "New task each run" });
     const reuse = taskChoice.getByRole("radio", { name: "One shared task" });

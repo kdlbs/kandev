@@ -78,6 +78,28 @@ func TestOpenedAddedLaterSkipsPullRequestsAlreadyObserved(t *testing.T) {
 	require.Equal(t, []string{"pr:acme/widget#6"}, openedRunKeys(t, f))
 }
 
+// Replacing every follow-up event with opened alone still honors the PRs the
+// trigger observed before, rather than backfilling them.
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.10
+func TestOpenedOnlyAfterFollowUpEventsSkipsPullRequestsAlreadyObserved(t *testing.T) {
+	f := newPRFollowUpFixture(t, followUpPR{Number: 5, Head: "e1"})
+	trigger := f.addTrigger(t, newCommitsEvents)
+	f.evaluate()
+	require.NotNil(t, f.observation(t, trigger, 5))
+
+	enabled := true
+	config := json.RawMessage(`{` + eventSelectionRepo + openedEvents + `}`)
+	require.NoError(t, f.svc.UpdateTrigger(context.Background(), trigger.ID, &UpdateTriggerRequest{
+		Enabled: &enabled, Config: &config,
+	}))
+	f.evaluate()
+	require.Empty(t, f.runs(t), "PR #5 was observed before opened was selected")
+
+	f.setPRs(followUpPR{Number: 5, Head: "e1"}, followUpPR{Number: 6, Head: "f1"})
+	f.evaluate()
+	require.Equal(t, []string{"pr:acme/widget#6"}, openedRunKeys(t, f))
+}
+
 // @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.10
 func TestOpenedDoesNotResubmitAHeldKey(t *testing.T) {
 	f := newPRFollowUpFixture(t, followUpPR{Number: 7, Head: "g1"})

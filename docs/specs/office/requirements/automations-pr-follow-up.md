@@ -10,11 +10,8 @@ owners:
 
 ## Overview
 
-A `github_pr` automation can start a review when a pull request opens, but
-cannot follow up on pushes or review requests, and leaves the task behind when
-the pull request ends.
-
-This capability adds two events to the `github_pr` trigger:
+A `github_pr` automation could start a review when a pull request opened, but
+not follow up on pushes or review requests. This capability adds two events:
 
 - **New commits**, with an optional quiet period.
 - **Review requested.**
@@ -24,8 +21,8 @@ follow-up continues the task that handled the pull request earlier, can use its
 own prompt, and can move the task to a chosen workflow step. When the pull
 request is merged or closed, Kandev can archive or delete that task.
 
-The office system owns automation triggers, admission, continuation, and task
-lifecycle. The GitHub integration only supplies pull-request reads.
+The office system owns triggers, admission, continuation, and task lifecycle.
+GitHub only supplies pull-request reads.
 
 Source: [issue #5464](https://github.com/kdlbs/kandev/issues/5464).
 
@@ -111,7 +108,8 @@ review the new changes without manual restarts.
   the system shall fire it once per matching pull request, with dedup key
   `pr:<owner>/<repo>#<number>`. By default it shall fire only for a pull
   request created at or after the trigger's creation, and not for one whose
-  stored observation shows it was open before `opened` was selected. An
+  stored observation shows it was open before `opened` was selected, even
+  as the only event. An
   unknown creation time counts as new. When `include_existing_prs` is true,
   every matching open pull request shall fire once. A poll shall not resubmit
   an `opened` firing whose dedup key is held. Any combination of the three
@@ -311,7 +309,7 @@ automated reviewer, so that it reviews my changes when I say they are ready.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-007.4:** The dedup key shall be
   `pr:<owner>/<repo>#<number>/review-requested/<generation>`, where the
   generation increases by one for each processed review-request transition of
-  that pull request.
+  that pull request. A retry of the same transition shall reuse its key.
 
 ### REQ-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-008: Use a separate follow-up prompt
 
@@ -355,8 +353,8 @@ reviews.
   `pr_merged_action` to its PR task. If it is closed without merging, the
   system shall apply `pr_closed_action`.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-009.3:** When the PR task is busy, the
-  system shall postpone the action and retry it on later polls until the task
-  is no longer busy.
+  system shall postpone every action, including `keep`, and retry it on later
+  polls until the task is no longer busy.
 - **AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-009.4:** After the action is applied,
   including `keep`, the system shall remove the PR-subject mapping. A reopened
   pull request then gets a new task.

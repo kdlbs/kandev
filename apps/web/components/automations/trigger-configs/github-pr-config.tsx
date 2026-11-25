@@ -6,9 +6,8 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconInfoCircle } from "@tabler/icons-react";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
+import { SettingsInfo } from "@/components/settings/settings-info";
 import type { RepoFilter } from "@/lib/types/github";
 import { PR_EVENTS } from "./pr-events";
 
@@ -111,6 +110,9 @@ export function GitHubPRConfig({ config, workspaceId, onUpdate }: GitHubPRConfig
   );
 }
 
+// Rows stay 44 px tall on phones, tablets, and any coarse pointer.
+const TOUCH_ROW_CLASS_NAME = "min-h-11 md:[@media(pointer:fine)]:min-h-0";
+
 type FieldProps = {
   config: Record<string, unknown>;
   onUpdate: (config: Record<string, unknown>) => void;
@@ -121,7 +123,7 @@ function IncludeExistingInput({ config, onUpdate }: FieldProps) {
   const checked = (config.include_existing_prs as boolean) ?? false;
   return (
     <div className="space-y-1">
-      <label className="flex min-h-11 items-center gap-1.5 cursor-pointer sm:min-h-0">
+      <label className={`flex items-center gap-1.5 cursor-pointer ${TOUCH_ROW_CLASS_NAME}`}>
         <Checkbox
           checked={checked}
           onCheckedChange={(value) => onUpdate({ ...config, include_existing_prs: value === true })}
@@ -230,23 +232,17 @@ function EventsSection({
       <Label className="text-xs">{t("automations:eventsLabel")}</Label>
       <div className="flex flex-wrap gap-3">
         {PR_EVENTS.map((evt) => (
-          <label
-            key={evt.value}
-            className="flex min-h-11 items-center gap-1.5 cursor-pointer sm:min-h-0"
-          >
-            <Checkbox
-              checked={events.includes(evt.value)}
-              onCheckedChange={() => onToggle(evt.value)}
-              className="cursor-pointer"
-            />
-            <span className="text-sm">{t(evt.labelKey)}</span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <IconInfoCircle className="h-3 w-3 text-muted-foreground" />
-              </TooltipTrigger>
-              <TooltipContent className="max-w-[220px]">{t(evt.tooltipKey)}</TooltipContent>
-            </Tooltip>
-          </label>
+          <div key={evt.value} className="flex items-center gap-0.5">
+            <label className={`flex items-center gap-1.5 cursor-pointer ${TOUCH_ROW_CLASS_NAME}`}>
+              <Checkbox
+                checked={events.includes(evt.value)}
+                onCheckedChange={() => onToggle(evt.value)}
+                className="cursor-pointer"
+              />
+              <span className="text-sm">{t(evt.labelKey)}</span>
+            </label>
+            <SettingsInfo label={t(evt.labelKey)}>{t(evt.tooltipKey)}</SettingsInfo>
+          </div>
         ))}
       </div>
     </div>

@@ -59,17 +59,21 @@ its dirty state covers every field it renders.
 `AgentToolsDisclosure` is a `Collapsible`, closed by default. Its trigger shows
 `summarizeAgentTools`: the labels of enabled built-in packages in catalog
 order, the names of selected workspace servers, and a count of selected plugin
-tools, joined with `Intl.ListFormat` for the active language. It opens when an
-MCP save conflict needs a reload or an approved plugin tool needs review, so
-neither warning hides behind the summary. It owns the `useAutomationMCPOptions` request
+tools, joined with `Intl.ListFormat` for the active language, or a failure
+line when the MCP choices cannot load. It opens each time the MCP choices fail
+to load, an MCP save conflict needs a reload, or an approved plugin tool needs
+review, so no warning hides behind the summary; after that it follows the
+person's toggles. `isMCPSelectionDirty` and `isPluginToolsDirty` compare the
+canonical selections for both the disclosure and the Agent card's changed
+state. It owns the `useAutomationMCPOptions` request
 and passes the result to `AutomationMCPAccess`, so the summary and the
 switches read one response.
 
 ## Segmented choice
 
-`SegmentedChoice` wraps the shipped `ToggleGroup` primitive with
-`type="single"`. Its items have the `radio` role inside a `group` named by the
-visible heading, and the group's `aria-describedby` points at the line that
+`SegmentedChoice` wraps the Radix `RadioGroup` primitive. Its items have the
+`radio` role inside a `radiogroup` named by the visible heading, and the arrow
+keys move the selection, and the group's `aria-describedby` points at the line that
 describes the selected option. Each other item's description is a
 controlled `Tooltip`: it never opens for the selected item, stays closed when
 the selection changes, and is disabled on coarse pointers, where a tap selects
@@ -78,9 +82,9 @@ The selected item has a primary-tinted fill and an inset primary outline, so
 it stands out from the muted group in both themes. The styles key on
 `aria-checked`, because the wrapping tooltip trigger replaces the item's
 `data-state` with its own open state.
-A single toggle group emits an empty value when the selected item is pressed
-again; the wrapper ignores it, so a choice is never cleared. Below the `sm`
-breakpoint the group stacks vertically. Items are at least 44 pixels high
+Pressing the selected item again keeps it selected. Below the `sm`
+breakpoint the group stacks vertically and its arrow-key orientation becomes
+vertical. Items are at least 44 pixels high
 below `md` and on coarse pointers. Item IDs keep the earlier radio IDs, such
 as `automation-retry-finite`.
 

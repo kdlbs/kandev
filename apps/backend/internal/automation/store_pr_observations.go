@@ -14,7 +14,8 @@ import (
 
 // prObservationTablesSQL stores, per github_pr trigger and open pull request,
 // what the evaluator last processed: the head SHA, the requested reviewers,
-// the review-request generation, and a pending quiet-period head.
+// the review-request generation, a review-request generation reserved before
+// dispatch, and a pending quiet-period head.
 const prObservationTablesSQL = `
 	CREATE TABLE IF NOT EXISTS automation_pr_observations (
 		trigger_id TEXT NOT NULL REFERENCES automation_triggers(id) ON DELETE CASCADE,
@@ -24,6 +25,7 @@ const prObservationTablesSQL = `
 		head_sha TEXT NOT NULL,
 		requested TEXT NOT NULL DEFAULT '[]',
 		review_generation BIGINT NOT NULL DEFAULT 0,
+		pending_review_generation BIGINT NOT NULL DEFAULT 0,
 		pending_head_sha TEXT NOT NULL DEFAULT '',
 		pending_since {{timestamp}},
 		tracked_events TEXT NOT NULL DEFAULT '',
@@ -42,8 +44,13 @@ type PRObservation struct {
 	HeadSHA          string
 	Requested        []string
 	ReviewGeneration int64
-	PendingHeadSHA   string
-	PendingSince     *time.Time
+	// PendingReviewGeneration is the generation reserved for a review request
+	// before its run was dispatched. A retry of the same request reuses it, so
+	// a run committed without its observation advancing is never dispatched
+	// again under a new key.
+	PendingReviewGeneration int64
+	PendingHeadSHA          string
+	PendingSince            *time.Time
 	// TrackedEvents lists the follow-up events this observation was recorded
 	// for, so an event added later starts from its own baseline.
 	TrackedEvents string
@@ -57,6 +64,7 @@ type prObservationRow struct {
 	HeadSHA          string       `db:"head_sha"`
 	Requested        string       `db:"requested"`
 	ReviewGeneration int64        `db:"review_generation"`
+	PendingReviewGen int64        `db:"pending_review_generation"`
 	PendingHeadSHA   string       `db:"pending_head_sha"`
 	PendingSince     sql.NullTime `db:"pending_since"`
 	TrackedEvents    string       `db:"tracked_events"`
@@ -65,8 +73,9 @@ type prObservationRow struct {
 func (r prObservationRow) toObservation() (*PRObservation, error) {
 	obs := &PRObservation{
 		TriggerID: r.TriggerID, RepoOwner: r.RepoOwner, RepoName: r.RepoName, PRNumber: r.PRNumber,
-		HeadSHA: r.HeadSHA, ReviewGeneration: r.ReviewGeneration, PendingHeadSHA: r.PendingHeadSHA,
-		TrackedEvents: r.TrackedEvents,
+		HeadSHA: r.HeadSHA, ReviewGeneration: r.ReviewGeneration, PendingReviewGeneration: r.PendingReviewGen,
+		PendingHeadSHA: r.PendingHeadSHA,
+		TrackedEvents:  r.TrackedEvents,
 	}
 	if r.PendingSince.Valid {
 		since := r.PendingSince.Time.UTC()
@@ -84,7 +93,7 @@ func (s *Store) ListPRObservations(ctx context.Context, triggerID, owner, repo s
 	var rows []prObservationRow
 	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT trigger_id, repo_owner, repo_name, pr_number, head_sha, requested,
-			review_generation, pending_head_sha, pending_since, tracked_events
+			review_generation, pending_review_generation, pending_head_sha, pending_since, tracked_events
 		FROM automation_pr_observations
 		WHERE trigger_id = ? AND repo_owner = ? AND repo_name = ?`), triggerID, owner, repo)
 	if err != nil {
@@ -123,18 +132,19 @@ func (s *Store) UpsertPRObservation(ctx context.Context, obs *PRObservation) err
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO automation_pr_observations (
 			trigger_id, repo_owner, repo_name, pr_number, head_sha, requested,
-			review_generation, pending_head_sha, pending_since, tracked_events, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			review_generation, pending_review_generation, pending_head_sha, pending_since, tracked_events, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(trigger_id, repo_owner, repo_name, pr_number) DO UPDATE SET
 			head_sha = excluded.head_sha,
 			requested = excluded.requested,
 			review_generation = excluded.review_generation,
+			pending_review_generation = excluded.pending_review_generation,
 			pending_head_sha = excluded.pending_head_sha,
 			pending_since = excluded.pending_since,
 			tracked_events = excluded.tracked_events,
 			updated_at = excluded.updated_at`),
 		obs.TriggerID, obs.RepoOwner, obs.RepoName, obs.PRNumber, obs.HeadSHA, string(encoded),
-		obs.ReviewGeneration, obs.PendingHeadSHA, pendingSince, obs.TrackedEvents, time.Now().UTC())
+		obs.ReviewGeneration, obs.PendingReviewGeneration, obs.PendingHeadSHA, pendingSince, obs.TrackedEvents, time.Now().UTC())
 	return err
 }
 

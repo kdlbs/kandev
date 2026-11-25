@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { IconChevronDown } from "@tabler/icons-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { Separator } from "@kandev/ui/separator";
@@ -9,7 +10,11 @@ import { useAutomationMCPOptions } from "@/hooks/domains/settings/use-automation
 import type { AutomationPluginToolGroup } from "@/lib/types/automation";
 import { canonicalMCPSelection, canonicalPluginTools, type FormState } from "./automation-payload";
 import { normalizeRepositorySelections } from "./automation-repository-selection";
-import { AutomationMCPAccess, effectiveMCPSelection } from "./automation-mcp-access";
+import {
+  AutomationMCPAccess,
+  effectiveMCPSelection,
+  type MCPOptionsState,
+} from "./automation-mcp-access";
 import { AutomationPluginTools, staleSelectionNames } from "./automation-plugin-tools";
 import { summarizeAgentTools } from "./agent-tools-summary";
 
@@ -37,6 +42,33 @@ function selectedRepositoryIds(form: FormState, supportsMultiRepo: boolean): str
     .map((item) => item.id);
 }
 
+/** Whether the MCP choices differ from the saved ones, ignoring order. */
+export function isMCPSelectionDirty(form: FormState, savedForm: FormState): boolean {
+  return (
+    JSON.stringify(canonicalMCPSelection(form.mcpSelection)) !==
+    JSON.stringify(canonicalMCPSelection(savedForm.mcpSelection))
+  );
+}
+
+/** Whether the plugin tool grants differ from the saved ones, ignoring order. */
+export function isPluginToolsDirty(form: FormState, savedForm: FormState): boolean {
+  return (
+    JSON.stringify(canonicalPluginTools(form.pluginTools)) !==
+    JSON.stringify(canonicalPluginTools(savedForm.pluginTools))
+  );
+}
+
+/** Opens once each time a problem appears, then follows the person's toggles. */
+function useAttentionDisclosure(needsAttention: boolean) {
+  const [open, setOpen] = useState(needsAttention);
+  const [attention, setAttention] = useState(needsAttention);
+  if (attention !== needsAttention) {
+    setAttention(needsAttention);
+    if (needsAttention) setOpen(true);
+  }
+  return [open, setOpen] as const;
+}
+
 function pluginToolsNeedReview(
   savedForm: FormState,
   pluginTools: AgentToolsDisclosureProps["pluginTools"],
@@ -45,9 +77,35 @@ function pluginToolsNeedReview(
   return staleSelectionNames(savedForm.pluginTools, pluginTools.groups).length > 0;
 }
 
+function toolsSummary({
+  form,
+  optionsState,
+  showPluginTools,
+  t,
+  language,
+}: {
+  form: FormState;
+  optionsState: MCPOptionsState;
+  showPluginTools: boolean;
+  t: TFunction;
+  language: string;
+}): string {
+  if (optionsState.options) {
+    return summarizeAgentTools({
+      selection: effectiveMCPSelection(form.mcpSelection, optionsState.options, form.taskMode),
+      options: optionsState.options,
+      pluginTools: showPluginTools ? form.pluginTools : [],
+      translate: t,
+      language,
+    });
+  }
+  return t(optionsState.error ? "automations:toolsSummaryUnavailable" : "common:loading");
+}
+
 /**
  * MCP access and plugin tools behind one summary line. It opens by itself when
- * saved MCP choices conflict or approved plugin tools need review.
+ * the MCP choices cannot load, saved MCP choices conflict, or approved plugin
+ * tools need review.
  */
 export function AgentToolsDisclosure({
   form,
@@ -59,28 +117,21 @@ export function AgentToolsDisclosure({
   pluginTools,
 }: AgentToolsDisclosureProps) {
   const { t, i18n } = useTranslation();
-  const [open, setOpen] = useState(false);
   const optionsState = useAutomationMCPOptions(
     workspaceId,
     form.agentProfileId,
     selectedRepositoryIds(form, supportsMultiRepo),
   );
   const showPluginTools = form.taskMode === "automation_run";
-  const needsAttention =
-    mcp.saveFailed || (showPluginTools && pluginToolsNeedReview(savedForm, pluginTools));
-  const expanded = open || needsAttention;
-  const summary = optionsState.options
-    ? summarizeAgentTools({
-        selection: effectiveMCPSelection(form.mcpSelection, optionsState.options, form.taskMode),
-        options: optionsState.options,
-        pluginTools: showPluginTools ? form.pluginTools : [],
-        translate: t,
-        language: i18n.language,
-      })
-    : t("common:loading");
+  const [open, setOpen] = useAttentionDisclosure(
+    optionsState.error ||
+      mcp.saveFailed ||
+      (showPluginTools && pluginToolsNeedReview(savedForm, pluginTools)),
+  );
+  const summary = toolsSummary({ form, optionsState, showPluginTools, t, language: i18n.language });
   return (
     <Collapsible
-      open={expanded}
+      open={open}
       onOpenChange={setOpen}
       className="space-y-4"
       data-testid="automation-agent-tools"
@@ -98,7 +149,7 @@ export function AgentToolsDisclosure({
           </span>
         </span>
         <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-          {t(expanded ? "automations:toolsDone" : "automations:toolsEdit")}
+          {t(open ? "automations:toolsDone" : "automations:toolsEdit")}
           <IconChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
         </span>
       </CollapsibleTrigger>
@@ -110,10 +161,7 @@ export function AgentToolsDisclosure({
           taskMode={form.taskMode}
           selection={form.mcpSelection}
           onChange={(value) => updateField("mcpSelection", value)}
-          isDirty={
-            JSON.stringify(canonicalMCPSelection(form.mcpSelection)) !==
-            JSON.stringify(canonicalMCPSelection(savedForm.mcpSelection))
-          }
+          isDirty={isMCPSelectionDirty(form, savedForm)}
         />
         {showPluginTools ? (
           <>
@@ -126,10 +174,7 @@ export function AgentToolsDisclosure({
               selection={form.pluginTools}
               onChange={(value) => updateField("pluginTools", value)}
               onRetry={pluginTools.reload}
-              isDirty={
-                JSON.stringify(canonicalPluginTools(form.pluginTools)) !==
-                JSON.stringify(canonicalPluginTools(savedForm.pluginTools))
-              }
+              isDirty={isPluginToolsDirty(form, savedForm)}
             />
           </>
         ) : null}
