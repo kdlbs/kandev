@@ -44,6 +44,12 @@ task. An observer cannot distinguish slow work from a crashed owner, so the
 observable `FoundUnsettled` outcome remains diagnostic. Only the internal
 Runtime may claim expired creation work and act from its durable manifest.
 
+The reserved Quick Chat namespace has one narrower endpoint-owned recovery
+path: an authenticated same-token POST may resume its exact retained Quick Chat
+when the Quick Chat adapter resolves it before `CreateTask` and serializes work
+for that creation. This exception does not apply to generic task creation,
+MCP/Office callers, a `CreateTask` `FoundUnsettled` result, or status lookup.
+
 **`creation_complete` has exactly one meaning:** the returned task completed its
 required synchronous creation manifest. It says nothing about agent liveness.
 The tuple `deduplicated: true` plus `creation_complete: false` means another

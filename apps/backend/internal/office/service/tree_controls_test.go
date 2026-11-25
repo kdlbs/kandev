@@ -2,12 +2,106 @@ package service_test
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"sync"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/office/models"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/service"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
+
+type treeControlTaskStateWriter struct {
+	repo *officesqlite.Repository
+}
+
+func (w treeControlTaskStateWriter) CommitTaskState(
+	ctx context.Context, taskID string, write taskmodels.TaskStateWrite,
+) (taskmodels.TaskStateChange, error) {
+	tx, err := w.repo.Writer().BeginTxx(ctx, nil)
+	if err != nil {
+		return taskmodels.TaskStateChange{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	task, err := readTreeControlTask(ctx, tx, taskID)
+	if err != nil {
+		return taskmodels.TaskStateChange{}, err
+	}
+	current := task.State
+	guardMatched := (write.ExpectedState == nil || current == *write.ExpectedState) &&
+		(write.ExpectedWorkflowStepID == nil || task.WorkflowStepID == *write.ExpectedWorkflowStepID)
+	alreadyAtTarget := write.AcceptIfAlreadyAtTarget && write.ExpectedState != nil && current == write.State &&
+		(write.ExpectedWorkflowStepID == nil || task.WorkflowStepID == *write.ExpectedWorkflowStepID)
+	if !guardMatched && !alreadyAtTarget {
+		return taskmodels.TaskStateChange{}, nil
+	}
+	changed := current != write.State
+	if changed {
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET state=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, write.State, taskID); err != nil {
+			return taskmodels.TaskStateChange{}, err
+		}
+		task.State = write.State
+	}
+	if err := tx.Commit(); err != nil {
+		return taskmodels.TaskStateChange{}, err
+	}
+	return taskmodels.TaskStateChange{Matched: true, Changed: changed, OldState: current, Task: task}, nil
+}
+
+func (w treeControlTaskStateWriter) CommitTaskStateBatch(
+	ctx context.Context, write taskmodels.TaskStateBatchWrite,
+) ([]taskmodels.TaskStateChange, error) {
+	tx, err := w.repo.Writer().BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	changes := make([]taskmodels.TaskStateChange, 0, len(write.TaskIDs))
+	seen := make(map[string]struct{}, len(write.TaskIDs))
+	for _, taskID := range write.TaskIDs {
+		if _, ok := seen[taskID]; ok {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		task, err := readTreeControlTask(ctx, tx, taskID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		oldState := task.State
+		if oldState == write.State {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET state=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, write.State, taskID); err != nil {
+			return nil, err
+		}
+		task.State = write.State
+		changes = append(changes, taskmodels.TaskStateChange{
+			Matched: true, Changed: true, OldState: oldState, Task: task,
+		})
+	}
+	for _, taskID := range write.ReleaseCheckoutTaskIDs {
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET checkout_agent_id='',checkout_at=NULL,checkout_run_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`, taskID); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return changes, nil
+}
+
+func readTreeControlTask(ctx context.Context, tx *sqlx.Tx, taskID string) (*taskmodels.Task, error) {
+	task := new(taskmodels.Task)
+	err := tx.QueryRowxContext(ctx, `SELECT id, workspace_id, workflow_id, workflow_step_id, state, title, created_at, updated_at FROM tasks WHERE id=?`, taskID).
+		Scan(&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &task.State, &task.Title, &task.CreatedAt, &task.UpdatedAt)
+	return task, err
+}
 
 type mockTaskCanceller struct {
 	mu      sync.Mutex
@@ -33,6 +127,19 @@ func insertTreeControlTask(t *testing.T, svc *service.Service, id, parentID, sta
 		INSERT INTO tasks (id, workspace_id, title, state, parent_id, created_at, updated_at)
 		VALUES (?, 'ws-1', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`, id, id, state, parentID)
+}
+
+type treeTestTaskStateChangePublisher struct{}
+
+func (treeTestTaskStateChangePublisher) PublishCommittedTaskStateChange(context.Context, taskmodels.TaskStateChange, bool) {
+}
+
+func setTreeTaskStateServices(t *testing.T, svc *service.Service) {
+	t.Helper()
+	writer := treeControlTaskStateWriter{repo: svc.RepoForTest()}
+	svc.SetTaskStateWriter(writer)
+	svc.SetTaskStateBatchWriter(writer)
+	svc.SetTaskStateChangePublisher(treeTestTaskStateChangePublisher{})
 }
 
 func TestPauseTaskTree(t *testing.T) {
@@ -97,6 +204,7 @@ func TestPauseTaskTree_RecordsTerminalShapeForCancelledRuns(t *testing.T) {
 
 func TestCancelAndRestoreTaskTree(t *testing.T) {
 	svc := newTestService(t)
+	setTreeTaskStateServices(t, svc)
 	ctx := context.Background()
 	insertTreeControlTask(t, svc, "root", "", "IN_PROGRESS")
 	insertTreeControlTask(t, svc, "child", "root", "TODO")
@@ -146,6 +254,7 @@ func TestCancelAndRestoreTaskTree(t *testing.T) {
 // CancelTaskTree's own repo.CancelRunsForTasks call site.
 func TestCancelTaskTree_RecordsTerminalShapeForCancelledRuns(t *testing.T) {
 	svc := newTestService(t)
+	setTreeTaskStateServices(t, svc)
 	ctx := context.Background()
 	insertTreeControlTask(t, svc, "root", "", "IN_PROGRESS")
 

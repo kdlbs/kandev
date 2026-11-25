@@ -1,3 +1,4 @@
+import { attachCommentFile } from "../../helpers/comment-attachment";
 import { assertCommentSurvivesForeground } from "./plan-comment-foreground-helpers";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
@@ -6,6 +7,10 @@ import { waitForStableActiveSession } from "../../helpers/session-store";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import {
+  readSessionMessageIdsContaining,
+  waitForNewSessionMessage,
+} from "../../helpers/session-resume-prompt-queue";
 import {
   assertPlainSendDuringRecovery,
   assertLegacyRecoveryPreservesDraft,
@@ -117,6 +122,7 @@ test.describe("task-owned plan comments", () => {
     const textarea = await openPlanCommentComposer(testPage, session);
     const sendComment = "Send this feedback only to the selected secondary session";
     await textarea.fill(sendComment);
+    const attachmentId = await attachCommentFile(testPage, testPage, "plan-note.txt");
     await testPage.getByRole("button", { name: "Add", exact: true }).click();
     await expect(session.planPanel.locator(".comment-badge[data-comment-id]")).toHaveCount(1);
 
@@ -131,6 +137,12 @@ test.describe("task-owned plan comments", () => {
     await session.waitForLoad();
     await waitForStableActiveSession(testPage, secondary.id);
     await expect(session.activeChat().getByText("1 plan comment", { exact: true })).toBeVisible();
+    await session.activeChat().getByRole("button", { name: "1 plan comment", exact: true }).hover();
+    await expect(testPage.getByRole("link", { name: "plan-note.txt" })).toHaveAttribute(
+      "href",
+      new RegExp(attachmentId),
+    );
+    const beforeSend = await readSessionMessageIdsContaining(apiClient, secondary.id, sendComment);
     await session.sendMessage("Apply the selected feedback here");
 
     await expect
@@ -140,7 +152,9 @@ test.describe("task-owned plan comments", () => {
             (message) =>
               message.author_type === "user" &&
               message.content.includes(sendComment) &&
-              message.content.includes("Apply the selected feedback here"),
+              message.content.includes("Apply the selected feedback here") &&
+              Array.isArray(message.metadata?.attachments) &&
+              message.metadata.attachments.some((file) => file.attachment_id === attachmentId),
           ),
         { timeout: 30_000 },
       )
@@ -153,6 +167,8 @@ test.describe("task-owned plan comments", () => {
     await expect(session.planPanel.locator(".comment-badge[data-comment-id]")).toHaveCount(0, {
       timeout: 15_000,
     });
+    await waitForNewSessionMessage(apiClient, secondary.id, beforeSend, sendComment);
+    await waitForSessions(apiClient, task.id, 2);
     await session.waitForChatIdle({ timeout: 45_000 });
     // A completed seed turn can auto-promote the secondary. Pin the intended
     // primary so this flow isolates selected-session Send from primary Run.
@@ -171,6 +187,7 @@ test.describe("task-owned plan comments", () => {
     await runTextarea.fill(runComment);
     const run = testPage.getByRole("button", { name: "Run", exact: true });
     await expect(run).toBeEnabled();
+    const beforeRun = await readSessionMessageIdsContaining(apiClient, primary.id, runComment);
     await run.click();
 
     await expect
@@ -190,6 +207,19 @@ test.describe("task-owned plan comments", () => {
     await expect(session.planPanel.locator(".comment-badge[data-comment-id]")).toHaveCount(0, {
       timeout: 15_000,
     });
+    await waitForNewSessionMessage(apiClient, primary.id, beforeRun, runComment);
+    await waitForSessions(apiClient, task.id, 2);
+    for (const [target, comment] of [
+      [secondary.id, sendComment],
+      [primary.id, runComment],
+    ]) {
+      const { messages } = await apiClient.listSessionMessages(target);
+      expect(
+        messages.filter(
+          (message) => message.author_type === "user" && message.content.includes(comment),
+        ),
+      ).toHaveLength(1);
+    }
   });
 });
 

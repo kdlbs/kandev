@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 )
 
 // methodSessionUpdate is the ACP notification an agent streams for every
@@ -32,17 +34,20 @@ func IsAuthErrorMessage(s string) bool {
 // high-level fields we extract from `initialize` and `session/new` so the
 // CLI's `matrix` summary and the skill don't have to re-parse JSONL.
 type ProbeResult struct {
-	ProtocolVersion int
-	AgentName       string
-	AgentVersion    string
-	AuthMethods     []string
-	Models          []string
-	CurrentModelID  string
-	Modes           []string
-	CurrentModeID   string
-	SessionID       string
-	MCPHTTP         bool
-	MCPSSE          bool
+	RequestedVersion int
+	ProtocolVersion  int
+	AgentName        string
+	AgentVersion     string
+	AuthMethods      []string
+	Models           []string
+	CurrentModelID   string
+	Modes            []string
+	CurrentModeID    string
+	SessionID        string
+	MCPHTTP          bool
+	MCPSSE           bool
+	modelConfigID    string
+	modeConfigID     string
 }
 
 // MCPProbeResult describes what was delivered to an agent separately from
@@ -63,13 +68,16 @@ func Probe(ctx context.Context, r *Runner) (*ProbeResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize: %w", err)
 	}
+	if err := sendAntigravityAuthIfNeeded(ctx, r, initResp); err != nil {
+		return nil, fmt.Errorf("authenticate: %w", err)
+	}
 
 	newResp, err := sendSessionNew(ctx, r)
 	if err != nil {
 		return nil, fmt.Errorf("session/new: %w", err)
 	}
 
-	return buildProbeResult(initResp, newResp), nil
+	return r.probeResult(initResp, newResp), nil
 }
 
 // MCPProbe runs initialize and injects a short-lived HTTP sentinel into
@@ -78,6 +86,12 @@ func MCPProbe(ctx context.Context, r *Runner) (*MCPProbeResult, error) {
 	initResp, err := sendInitialize(ctx, r)
 	if err != nil {
 		return nil, fmt.Errorf("initialize: %w", err)
+	}
+	if err := sendAntigravityAuthIfNeeded(ctx, r, initResp); err != nil {
+		return nil, fmt.Errorf("authenticate: %w", err)
+	}
+	if r.cfg.ProtocolVersion == 2 && !buildProbeResult(initResp, nil).MCPHTTP {
+		return nil, errors.New("ACP v2 peer did not advertise HTTP MCP support")
 	}
 	sentinel := NewMCPSentinel(r.rec)
 	defer sentinel.Close()
@@ -90,7 +104,7 @@ func MCPProbe(ctx context.Context, r *Runner) (*MCPProbeResult, error) {
 		return nil, fmt.Errorf("session/new: %w", err)
 	}
 	result := &MCPProbeResult{
-		ProbeResult: *buildProbeResult(initResp, newResp),
+		ProbeResult: *r.probeResult(initResp, newResp),
 		Delivered:   true,
 	}
 	// Give an asynchronously connecting agent a small, bounded opportunity to
@@ -108,7 +122,7 @@ func MCPProbe(ctx context.Context, r *Runner) (*MCPProbeResult, error) {
 
 // PromptOptions configures the Prompt operation.
 type PromptOptions struct {
-	Model  string // if non-empty, set via session/set_model (or unstable variant)
+	Model  string // if non-empty, set through a model config option or the legacy method
 	Mode   string // if non-empty, set via session/set_mode
 	Prompt string // required — text body of the session/prompt request
 	// Linger, when > 0, keeps the session open after session/prompt returns
@@ -150,33 +164,44 @@ func Prompt(ctx context.Context, r *Runner, opts PromptOptions) (*PromptResult, 
 		return nil, err
 	}
 
-	if opts.Model != "" {
-		if err := sendSetModel(ctx, r, probe.SessionID, opts.Model); err != nil {
-			return nil, fmt.Errorf("session/set_model: %w", err)
+	if probe.ProtocolVersion == 2 {
+		if err := applyV2Selections(ctx, r, probe, opts); err != nil {
+			return nil, err
 		}
-	}
-	if opts.Mode != "" {
-		if err := sendSetMode(ctx, r, probe.SessionID, opts.Mode); err != nil {
-			return nil, fmt.Errorf("session/set_mode: %w", err)
-		}
+	} else if err := applyV1Selections(ctx, r, probe, opts); err != nil {
+		return nil, err
 	}
 
 	text, err := sendPromptAndCollect(ctx, r, probe.SessionID, opts.Prompt)
 	if err != nil {
 		return nil, fmt.Errorf("session/prompt: %w", err)
 	}
-
 	if opts.Linger > 0 {
 		lingerAfterPrompt(ctx, r, opts.Linger)
 	}
-
 	return &PromptResult{ProbeResult: *probe, Text: text}, nil
+}
+
+func applyV1Selections(ctx context.Context, r *Runner, probe *ProbeResult, opts PromptOptions) error {
+	if opts.Model != "" {
+		if err := sendModelSelection(ctx, r, probe.SessionID, opts.Model, probe.modelConfigID); err != nil {
+			return fmt.Errorf("model selection: %w", err)
+		}
+	}
+	if opts.Mode != "" {
+		if err := sendSetMode(ctx, r, probe.SessionID, opts.Mode); err != nil {
+			return fmt.Errorf("session/set_mode: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // lingerAfterPrompt keeps draining out-of-band frames for the given duration
 // after session/prompt has already returned its stopReason. Every frame is
 // still recorded by the read loop, and NextOOB auto-replies to any
-// agent-initiated request so the agent does not hang. This exists to capture a
+// agent-initiated request so the agent does not hang; a native human question
+// stops the drain without a response. This exists to capture a
 // delayed async update (e.g. Cursor pushing a background subagent result on the
 // same session after end_turn). We swallow the terminal error: a deadline or a
 // child that exits first are both expected ways to stop lingering.
@@ -196,15 +221,17 @@ func SessionLoad(ctx context.Context, r *Runner, opts SessionLoadOptions) (*Sess
 	if err != nil {
 		return nil, fmt.Errorf("initialize: %w", err)
 	}
-	req, _ := r.Framer().NewRequest("session/load", sessionLoadParams(opts.SessionID, r.cfg.Workdir))
-	resp, err := r.Request(ctx, req)
+	if err := sendAntigravityAuthIfNeeded(ctx, r, initResp); err != nil {
+		return nil, fmt.Errorf("authenticate: %w", err)
+	}
+	resp, err := loadSession(ctx, r, opts.SessionID)
 	if err != nil {
-		return nil, fmt.Errorf("session/load: %w", err)
+		return nil, err
 	}
-	if errMap, ok := resp["error"].(map[string]any); ok {
-		return nil, fmt.Errorf("session/load error: %v", errMap["message"])
+	result := &SessionLoadResult{ProbeResult: *r.probeResult(initResp, resp)}
+	if result.SessionID == "" {
+		result.SessionID = opts.SessionID
 	}
-	result := &SessionLoadResult{ProbeResult: *buildProbeResult(initResp, resp)}
 	if opts.Prompt == "" {
 		return result, nil
 	}
@@ -213,6 +240,25 @@ func SessionLoad(ctx context.Context, r *Runner, opts SessionLoadOptions) (*Sess
 		return nil, fmt.Errorf("session/prompt: %w", err)
 	}
 	return result, nil
+}
+
+func loadSession(ctx context.Context, r *Runner, sessionID string) (Frame, error) {
+	method := "session/load"
+	params := sessionLoadParams(sessionID, r.cfg.Workdir)
+	if r.cfg.ProtocolVersion == 2 {
+		method = "session/resume"
+		params["replayFrom"] = map[string]any{"type": "start"}
+	}
+	resp, err := sessionSetup(ctx, r, method, params)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", method, err)
+	}
+	if r.cfg.ProtocolVersion == 2 {
+		if err := awaitV2Replay(ctx, r, sessionID); err != nil {
+			return nil, fmt.Errorf("session/resume replay: %w", err)
+		}
+	}
+	return resp, nil
 }
 
 func sessionLoadParams(sessionID, workdir string) map[string]any {
@@ -226,25 +272,141 @@ func sessionLoadParams(sessionID, workdir string) map[string]any {
 // --- JSON-RPC helpers ---
 
 func sendInitialize(ctx context.Context, r *Runner) (Frame, error) {
-	req, _ := r.Framer().NewRequest("initialize", map[string]any{
-		"protocolVersion": 1,
-		"clientInfo": map[string]any{
-			"name":    "acpdbg",
-			"version": "0.1.0",
-		},
-		"clientCapabilities": map[string]any{
-			"fs":       map[string]any{"readTextFile": false, "writeTextFile": false},
-			"terminal": false,
-		},
+	variant := acpcompat.AntigravityRuntimeForCommand(r.cfg.Command)
+	params := initializeParamsForRuntime(r.cfg.AgentID, r.cfg.ClientCapabilities, r.cfg.AIRCapabilities, variant)
+	if r.cfg.ProtocolVersion == 2 {
+		params = initializeV2Params(r.cfg)
+	}
+	resp, err := rpcRequest(ctx, r, "initialize", params)
+	result, _ := resp["result"].(map[string]any)
+	version, _ := result["protocolVersion"].(float64)
+	if err == nil && r.cfg.ProtocolVersion == 2 {
+		err = validateV2Initialize(result)
+	}
+	_ = r.rec.Meta("initialize", map[string]any{
+		"requested_version": r.cfg.ProtocolVersion, "selected_version": version, "success": err == nil,
 	})
-	resp, err := r.Request(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	if errMap, ok := resp["error"].(map[string]any); ok {
-		return nil, fmt.Errorf("%v", errMap["message"])
-	}
 	return resp, nil
+}
+
+// sendAntigravityAuthIfNeeded explicitly selects the personal subscription
+// before session/new or session/load for a registered Antigravity debugger
+// run. Raw --exec runs keep their existing diagnostic behavior.
+func sendAntigravityAuthIfNeeded(ctx context.Context, r *Runner, initResp Frame) error {
+	if r.cfg.ProtocolVersion == 2 || r.cfg.AgentID != acpcompat.AntigravityAgentID {
+		return nil
+	}
+	if acpcompat.AntigravityRuntimeForCommand(r.cfg.Command) == acpcompat.AntigravityRuntimeCLI {
+		return nil
+	}
+	if !antigravityAuthMethodAdvertised(initResp) {
+		return errors.New("antigravity did not advertise oauth-personal")
+	}
+	req, _ := r.Framer().NewRequest("authenticate", map[string]any{
+		"methodId": acpcompat.AntigravityPersonalAuthMethod,
+	})
+	resp, err := r.Request(ctx, req)
+	if err != nil {
+		return err
+	}
+	if errMap, ok := resp["error"].(map[string]any); ok {
+		return fmt.Errorf("%v", errMap["message"])
+	}
+	return nil
+}
+
+func antigravityAuthMethodAdvertised(initResp Frame) bool {
+	result, _ := initResp["result"].(map[string]any)
+	methods, _ := result["authMethods"].([]any)
+	for _, raw := range methods {
+		method, _ := raw.(map[string]any)
+		if method["id"] == acpcompat.AntigravityPersonalAuthMethod {
+			return true
+		}
+	}
+	return false
+}
+
+// initializeParams merges custom and AIR capabilities with the baseline client
+// capabilities used by the debugger.
+func initializeParams(clientCapabilities map[string]any, airCapabilities []string) map[string]any {
+	return initializeParamsForAgent("", clientCapabilities, airCapabilities)
+}
+
+// initializeParamsForAgent keeps the registered Antigravity debugger on the
+// same wire identity as a live product session.
+func initializeParamsForAgent(agentID string, clientCapabilities map[string]any, airCapabilities []string) map[string]any {
+	return initializeParamsForRuntime(agentID, clientCapabilities, airCapabilities, acpcompat.AntigravityRuntimeStandalone)
+}
+
+func initializeParamsForRuntime(agentID string, clientCapabilities map[string]any, airCapabilities []string, variant string) map[string]any {
+	capabilities := map[string]any{
+		"fs":       map[string]any{"readTextFile": false, "writeTextFile": false},
+		"terminal": false,
+	}
+	capabilities = mergeCapabilityObjects(capabilities, clientCapabilities)
+	if len(airCapabilities) > 0 {
+		capabilities = mergeCapabilityObjects(capabilities, map[string]any{
+			"_meta": map[string]any{
+				"jetbrains": map[string]any{
+					"air": map[string]any{
+						"version":      1,
+						"capabilities": airCapabilities,
+					},
+				},
+			},
+		})
+	}
+	return map[string]any{
+		"protocolVersion":    1,
+		"clientInfo":         acpdbgClientInfo(agentID, variant),
+		"clientCapabilities": capabilities,
+	}
+}
+
+func acpdbgClientInfo(agentID, variant string) map[string]any {
+	policy := acpcompat.AntigravityAuthPolicyForRuntime(variant, "", false)
+	if name, version := acpcompat.ClientInfoForLaunch(agentID, policy); name != "" {
+		return map[string]any{"name": name, "version": version}
+	}
+	return map[string]any{"name": "acpdbg", "version": "0.1.0"}
+}
+
+func mergeCapabilityObjects(base, override map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(override))
+	for key, value := range base {
+		merged[key] = cloneCapabilityValue(value)
+	}
+	for key, value := range override {
+		baseObject, baseIsObject := merged[key].(map[string]any)
+		overrideObject, overrideIsObject := value.(map[string]any)
+		if baseIsObject && overrideIsObject {
+			merged[key] = mergeCapabilityObjects(baseObject, overrideObject)
+			continue
+		}
+		merged[key] = cloneCapabilityValue(value)
+	}
+	return merged
+}
+
+func cloneCapabilityValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return mergeCapabilityObjects(nil, typed)
+	case []any:
+		cloned := make([]any, len(typed))
+		for i, item := range typed {
+			cloned[i] = cloneCapabilityValue(item)
+		}
+		return cloned
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return value
+	}
 }
 
 func sendSessionNew(ctx context.Context, r *Runner) (Frame, error) {
@@ -252,16 +414,26 @@ func sendSessionNew(ctx context.Context, r *Runner) (Frame, error) {
 }
 
 func sendSessionNewWithMCP(ctx context.Context, r *Runner, mcpServers []any) (Frame, error) {
-	req, _ := r.Framer().NewRequest("session/new", map[string]any{
+	return sessionSetup(ctx, r, "session/new", map[string]any{
 		"cwd":        r.cfg.Workdir,
 		"mcpServers": mcpServers,
 	})
+}
+
+func sessionSetup(ctx context.Context, r *Runner, method string, params map[string]any) (Frame, error) {
+	resp, err := rpcRequest(ctx, r, method, params)
+	_ = r.rec.Meta("session_setup", map[string]any{"method": method, "success": err == nil})
+	return resp, err
+}
+
+func rpcRequest(ctx context.Context, r *Runner, method string, params map[string]any) (Frame, error) {
+	req, _ := r.Framer().NewRequest(method, params)
 	resp, err := r.Request(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	if errMap, ok := resp["error"].(map[string]any); ok {
-		return nil, fmt.Errorf("%v", errMap["message"])
+		return resp, fmt.Errorf("%v", errMap["message"])
 	}
 	return resp, nil
 }
@@ -276,6 +448,38 @@ func sendSetModel(ctx context.Context, r *Runner, sessionID, modelID string) err
 		return err
 	}
 	if errMap, ok := resp["error"].(map[string]any); ok {
+		return fmt.Errorf("%v", errMap["message"])
+	}
+	return nil
+}
+
+var errACPMethodNotFound = errors.New("ACP method not found")
+
+func sendModelSelection(ctx context.Context, r *Runner, sessionID, modelID, configID string) error {
+	if configID != "" {
+		if err := sendSetConfigOption(ctx, r, sessionID, configID, modelID); err == nil {
+			return nil
+		} else if !errors.Is(err, errACPMethodNotFound) {
+			return err
+		}
+	}
+	return sendSetModel(ctx, r, sessionID, modelID)
+}
+
+func sendSetConfigOption(ctx context.Context, r *Runner, sessionID, configID, value string) error {
+	req, _ := r.Framer().NewRequest("session/set_config_option", map[string]any{
+		"sessionId": sessionID,
+		"configId":  configID,
+		"value":     value,
+	})
+	resp, err := r.Request(ctx, req)
+	if err != nil {
+		return err
+	}
+	if errMap, ok := resp["error"].(map[string]any); ok {
+		if code, ok := errMap["code"].(float64); ok && int(code) == -32601 {
+			return errACPMethodNotFound
+		}
 		return fmt.Errorf("%v", errMap["message"])
 	}
 	return nil
@@ -297,6 +501,9 @@ func sendSetMode(ctx context.Context, r *Runner, sessionID, modeID string) error
 }
 
 func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt string) (string, error) {
+	if r.cfg.ProtocolVersion == 2 {
+		return promptV2(ctx, r, sessionID, prompt)
+	}
 	req, promptID := r.Framer().NewRequest("session/prompt", map[string]any{
 		"sessionId": sessionID,
 		"prompt": []any{
@@ -307,33 +514,24 @@ func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt stri
 	// We can't use r.Request here because we want to drain update
 	// notifications while waiting for the response. Write directly and
 	// loop on the OOB channel + a pending response future.
-	if err := r.rec.Sent(req); err != nil {
-		return "", err
-	}
-
-	respCh, err := r.registerPending(promptID)
-	if err != nil {
-		return "", err
-	}
-	// Every exit path drops the waiter, including the ones that give up before
-	// a response arrives, so the map does not accumulate dead entries.
-	defer func() {
-		r.mu.Lock()
-		delete(r.pending, promptID)
-		r.mu.Unlock()
-	}()
-
 	var text strings.Builder
 
 	// drain consumes everything currently queued. Frames that arrived before
 	// the prompt was written are answered but never collected: a session/load
 	// replay leaves the whole conversation history queued, and folding that
 	// into the prompt's text would return the transcript instead of the reply.
-	drain := func(collect bool) {
+	// It reports true when it stopped at a native human question, which must
+	// stay unanswered.
+	drain := func(collect bool) bool {
 		for {
 			frame, ok, _ := r.popOOB()
 			if !ok {
-				return
+				return false
+			}
+			if isHumanQuestionFrame(r.cfg.AgentID, frame) {
+				// The frame is already recorded. Writing any response would
+				// invent the user's answer, so stop the capture instead.
+				return true
 			}
 			// Agent-initiated request: auto-reply so it doesn't hang.
 			if frame.Method() != "" && frame.ID() != nil {
@@ -350,13 +548,33 @@ func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt stri
 		}
 	}
 
-	drain(false)
+	if drain(false) {
+		return text.String(), ErrHumanQuestionPending
+	}
+	if err := r.rec.Sent(req); err != nil {
+		return "", err
+	}
+
+	respCh, err := r.registerPending(promptID)
+	if err != nil {
+		return "", err
+	}
+	// Every exit path drops the waiter, including the ones that give up before
+	// a response arrives, so the map does not accumulate dead entries.
+	defer func() {
+		r.mu.Lock()
+		delete(r.pending, promptID)
+		r.mu.Unlock()
+	}()
+
 	if err := r.framer.Write(req); err != nil {
 		return "", err
 	}
 
 	for {
-		drain(true)
+		if drain(true) {
+			return text.String(), ErrHumanQuestionPending
+		}
 
 		select {
 		case resp, ok := <-respCh:
@@ -374,7 +592,9 @@ func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt stri
 			}
 			// The read loop is serial and the agent emits every chunk before
 			// the response, so anything left queued belongs to this prompt.
-			drain(true)
+			if drain(true) {
+				return text.String(), ErrHumanQuestionPending
+			}
 			if errMap, ok := resp["error"].(map[string]any); ok {
 				return text.String(), fmt.Errorf("%v", errMap["message"])
 			}
@@ -382,10 +602,6 @@ func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt stri
 		case <-r.oobWake:
 		case <-ctx.Done():
 			return text.String(), ctx.Err()
-		}
-
-		if r.oobFinished() {
-			return text.String(), io.EOF
 		}
 	}
 }
@@ -445,9 +661,19 @@ func buildProbeResult(initResp, newResp Frame) *ProbeResult {
 	return out
 }
 
+func (r *Runner) probeResult(initResp, sessionResp Frame) *ProbeResult {
+	out := buildProbeResult(initResp, sessionResp)
+	out.RequestedVersion = r.cfg.ProtocolVersion
+	return out
+}
+
 func parseInitResult(initResult map[string]any, out *ProbeResult) {
 	if pv, ok := initResult["protocolVersion"].(float64); ok {
 		out.ProtocolVersion = int(pv)
+	}
+	if out.ProtocolVersion == 2 {
+		parseV2InitResult(initResult, out)
+		return
 	}
 	if info, ok := initResult["agentInfo"].(map[string]any); ok {
 		out.AgentName, _ = info["name"].(string)
@@ -466,6 +692,14 @@ func parseInitResult(initResult map[string]any, out *ProbeResult) {
 
 func parseSessionResult(newResult map[string]any, out *ProbeResult) {
 	out.SessionID, _ = newResult["sessionId"].(string)
+	if out.ProtocolVersion == 2 {
+		out.modelConfigID = extractV2ConfigID(newResult, "model")
+		out.modeConfigID = extractV2ConfigID(newResult, "mode")
+		out.CurrentModelID, out.Models = extractSelectConfigOption(newResult, "model")
+		out.CurrentModeID, out.Modes = extractSelectConfigOption(newResult, "mode")
+		return
+	}
+	out.modelConfigID = extractModelConfigOptionID(newResult)
 	if models, ok := newResult["models"].(map[string]any); ok {
 		out.CurrentModelID, _ = models["currentModelId"].(string)
 		if avail, ok := models["availableModels"].([]any); ok {
@@ -482,6 +716,23 @@ func parseSessionResult(newResult map[string]any, out *ProbeResult) {
 	} else {
 		out.CurrentModeID, out.Modes = extractSelectConfigOption(newResult, "mode")
 	}
+}
+
+func extractModelConfigOptionID(newResult map[string]any) string {
+	options, ok := newResult["configOptions"].([]any)
+	if !ok {
+		return ""
+	}
+	for _, item := range options {
+		option, ok := item.(map[string]any)
+		if !ok || option["type"] != "select" || option["category"] != "model" {
+			continue
+		}
+		if id, ok := option["id"].(string); ok && id != "" {
+			return id
+		}
+	}
+	return ""
 }
 
 func extractSelectConfigOption(newResult map[string]any, category string) (string, []string) {

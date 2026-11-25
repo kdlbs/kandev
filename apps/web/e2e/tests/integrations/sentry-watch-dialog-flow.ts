@@ -39,6 +39,8 @@ async function choose(page: Page, label: string, option: string, mobile: boolean
     .getByRole("combobox");
   await press(trigger, mobile);
   await press(page.getByRole("listbox").getByRole("option", { name: option, exact: true }), mobile);
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await expect(trigger).toBeFocused();
 }
 async function openCreate(page: Page, fixture: SentryWatchFixture, mobile: boolean) {
   await press(page.getByRole("button", { name: "New watcher", exact: true }), mobile);
@@ -55,6 +57,8 @@ async function openCreate(page: Page, fixture: SentryWatchFixture, mobile: boole
     mobile,
   );
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await expect(dialog.getByTestId("sentry-watch-project-trigger")).toBeFocused();
   await choose(page, "Workflow", fixture.name, mobile);
   await choose(page, "Workflow Step", `${fixture.name} step`, mobile);
   await choose(page, "Agent Profile", fixture.agentLabel, mobile);

@@ -25,6 +25,34 @@ type Capability = { supported: boolean; mode: string; adapter?: string; reason?:
 const CAPABILITY_URL = "**/api/v1/system/restart-capability";
 const RUNTIME_FLAGS_URL = "**/api/v1/runtime-flags";
 
+export const ACP_V2_CARD = "feature-toggle-features.acpV2";
+
+export async function saveAcpV2RestartOverride(page: Page, touch: boolean) {
+  const settings = await gotoFeatureToggles(page);
+  const card = settings.getByTestId(ACP_V2_CARD);
+  const toggle = card.getByRole("switch", { name: "Toggle ACP v2 preview" });
+  const activate = (target: Locator) => (touch ? target.tap() : target.click());
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+
+  await expect(toggle).not.toBeChecked();
+  await expect(toggle).toBeEnabled();
+  await activate(toggle);
+  await expect(toggle).toBeChecked();
+  try {
+    await activate(save);
+    await expect(settings.getByText("Restart required", { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(toggle).toBeChecked();
+    await expect(settings.getByText("Restart required", { exact: true })).toBeVisible();
+  } finally {
+    const useDefault = card.getByRole("button", { name: "Use default", exact: true });
+    if (await useDefault.isEnabled()) {
+      await activate(useDefault);
+      await activate(save);
+    }
+  }
+}
+
 export async function stubFeatureToggles(page: Page, capability: Capability) {
   await page.route(CAPABILITY_URL, (route) =>
     route.fulfill({

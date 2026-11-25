@@ -41,7 +41,7 @@ func TestRuntimeUpdateSummaryClaimsMembersAndRetriesFailedProvider(t *testing.T)
 	local := &captureProvider{}
 	external := &failOnceProvider{}
 	newService := func() *Service {
-		svc := NewService(repo, nil, nil, log, nil)
+		svc := NewService(repo, nil, nil, log, nil, false)
 		svc.providers[models.ProviderTypeLocal] = local
 		svc.providers[models.ProviderTypeApprise] = external
 		return svc
@@ -89,6 +89,7 @@ func TestRuntimeUpdateSummaryClaimsMembersAndRetriesFailedProvider(t *testing.T)
 
 // @covers AC-AGENTS-RUNTIME-NOTIFY-003.3, AC-AGENTS-RUNTIME-NOTIFY-003.5
 func TestRuntimeUpdateSummaryKeepsRecipientClaimsIsolated(t *testing.T) {
+	t.Setenv(desktopNativeNotificationsEnv, "true")
 	ctx := context.Background()
 	log, _ := logger.NewFromZap(zap.NewNop())
 	repo := newMultiUserRepository()
@@ -102,7 +103,7 @@ func TestRuntimeUpdateSummaryKeepsRecipientClaimsIsolated(t *testing.T) {
 		}
 	}
 	local := &captureProvider{}
-	svc := NewService(repo, nil, nil, log, nil)
+	svc := NewService(repo, nil, nil, log, nil, false)
 	svc.providers[models.ProviderTypeLocal] = local
 	svc.HandleAgentRuntimeUpdates(ctx, []agents.RuntimeUpdateNotice{
 		{AgentID: "gemini", RuntimeID: "npm:@google/gemini-cli", DisplayName: "Gemini", PreviousVersion: "1.0.0", Version: "2.0.0", Status: "available", OccurrenceID: "gemini-2"},
@@ -137,6 +138,7 @@ func TestRuntimeUpdateSummaryUsesNamedNoticeForOneClaimedMember(t *testing.T) {
 
 // @covers AC-AGENTS-RUNTIME-NOTIFY-003.3, AC-AGENTS-RUNTIME-NOTIFY-003.5
 func TestRuntimeUpdateSummaryOmitsFailedMemberClaimAndRetriesItAlone(t *testing.T) {
+	t.Setenv(desktopNativeNotificationsEnv, "true")
 	log, _ := logger.NewFromZap(zap.NewNop())
 	base := &notificationTestRepository{
 		providers: []*models.Provider{{ID: "local", UserID: "user-1", Type: models.ProviderTypeLocal, Enabled: true}},
@@ -146,7 +148,7 @@ func TestRuntimeUpdateSummaryOmitsFailedMemberClaimAndRetriesItAlone(t *testing.
 	}
 	repo := &failRuntimeDeliveryOnce{notificationTestRepository: base, occurrenceID: "gemini-2"}
 	local := &captureProvider{}
-	svc := NewService(repo, nil, nil, log, nil)
+	svc := NewService(repo, nil, nil, log, nil, false)
 	svc.providers[models.ProviderTypeLocal] = local
 	notices := []agents.RuntimeUpdateNotice{
 		{AgentID: "codex-app-server", RuntimeID: "npm:@openai/codex", DisplayName: "Codex", PreviousVersion: "1.0.0", Version: "3.0.0", Status: "available", OccurrenceID: "codex-3", URL: "/settings/agents#runtime-update-codex-app-server"},

@@ -27,6 +27,7 @@ import type * as SettingsSliceTypes from "./slices/settings/types";
 import type * as UISliceTypes from "./slices/ui/types";
 import type { AgentUpdateJob } from "@/lib/api";
 import type { InstallJob, NotificationProvidersUpdate } from "./slices/settings/types";
+import type { UserShellScope } from "./user-shell-scope";
 import {
   defaultWorkspaceState,
   defaultSettingsState,
@@ -35,7 +36,6 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultGitLabState,
-  defaultAzureDevOpsState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
@@ -84,6 +84,10 @@ import type { AppStateExtraActions } from "./app-state-extra-actions";
 import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
 import type { GitStatusRefreshState } from "./slices/session-runtime/types";
 import type {
+  ConfigurationFeedbackActions,
+  ConfigurationFeedbackState,
+} from "./slices/session-runtime/session-configuration-feedback";
+import type {
   AvailableCommand,
   SessionModeEntry,
   AgentCapabilitiesEntry,
@@ -119,6 +123,7 @@ export type AppState = KanbanSlice & {
   agentProfiles: (typeof defaultSettingsState)["agentProfiles"];
   installJobs: (typeof defaultSettingsState)["installJobs"];
   updateJobs: (typeof defaultSettingsState)["updateJobs"];
+  runtimeUpdateBatch: (typeof defaultSettingsState)["runtimeUpdateBatch"];
   agentRuntimeUpdates: (typeof defaultSettingsState)["agentRuntimeUpdates"];
   editors: (typeof defaultSettingsState)["editors"];
   prompts: (typeof defaultSettingsState)["prompts"];
@@ -172,6 +177,7 @@ export type AppState = KanbanSlice & {
   usageInvalidation: (typeof defaultSessionRuntimeState)["usageInvalidation"];
   sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
   embeddedVscodeSupport: (typeof defaultSessionRuntimeState)["embeddedVscodeSupport"];
+  workspaceRootFiles: (typeof defaultSessionRuntimeState)["workspaceRootFiles"];
   backgroundWork: (typeof defaultSessionRuntimeState)["backgroundWork"];
 
   // GitHub slice
@@ -195,10 +201,6 @@ export type AppState = KanbanSlice & {
   gitlabActionPresets: (typeof defaultGitLabState)["gitlabActionPresets"];
   gitlabStatus: (typeof defaultGitLabState)["gitlabStatus"];
   taskMRAutomation: (typeof defaultGitLabState)["taskMRAutomation"];
-
-  // Azure DevOps slice
-  azureDevOpsTaskPullRequests: (typeof defaultAzureDevOpsState)["azureDevOpsTaskPullRequests"];
-  azureDevOpsTaskWorkItems: (typeof defaultAzureDevOpsState)["azureDevOpsTaskWorkItems"];
 
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
@@ -310,6 +312,7 @@ export type AppState = KanbanSlice & {
   upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
   appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
   clearAgentUpdateJob: (agentName: string) => void;
+  setRuntimeUpdateBatch: SettingsSliceTypes.SettingsSliceActions["setRuntimeUpdateBatch"];
   setSSHReachability: (record: SSHReachabilityRecord) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
   upsertRepository: (workspaceId: string, repository: Repository) => void;
@@ -376,6 +379,7 @@ export type AppState = KanbanSlice & {
   ) => void;
   clearShellOutput: (sessionId: string) => void;
   appendProcessOutput: (processId: string, data: string) => void;
+  setWorkspaceRootFiles: import("./slices/session-runtime/types").SessionRuntimeSliceActions["setWorkspaceRootFiles"];
   upsertProcessStatus: (status: ProcessStatusEntry) => void;
   clearProcessOutput: (processId: string) => void;
   setActiveProcess: (sessionId: string, processId: string) => void;
@@ -463,6 +467,7 @@ export type AppState = KanbanSlice & {
   ) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
+  claimEmptyTurnNotice: import("./slices/session/types").SessionSliceActions["claimEmptyTurnNotice"];
   mergeTurnChangePage: (
     sessionId: string,
     summaries: TurnChangeSetSummary[],
@@ -561,7 +566,18 @@ export type AppState = KanbanSlice & {
     refresh: GitStatusRefreshState | null,
   ) => void;
   clearGitStatus: (sessionId: string) => void;
+  clearGitRepositoryStatus: (
+    sessionId: string,
+    environmentId: string,
+    repositoryName: string,
+  ) => void;
   clearLegacyGitStatusEntry: (sessionId: string) => void;
+  invalidateGitStatusInventory: (sessionId: string) => void;
+  reconcileGitStatusInventory: (
+    environmentId: string,
+    generation: number,
+    scopes: readonly string[],
+  ) => boolean;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setSessionCommits: (
     sessionId: string,
@@ -664,12 +680,17 @@ export type AppState = KanbanSlice & {
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions
-  setUserShells: (sessionId: string, shells: UserShellInfo[]) => void;
-  setUserShellsLoading: (sessionId: string, loading: boolean) => void;
-  addUserShell: (sessionId: string, shell: UserShellInfo) => void;
-  removeUserShell: (sessionId: string, terminalId: string) => void;
+  setUserShells: (
+    scope: UserShellScope,
+    shells: UserShellInfo[],
+    sharedGeneration?: number,
+  ) => void;
+  setUserShellsLoading: (scope: UserShellScope, loading: boolean) => void;
+  setUserShellsFailed: (scope: UserShellScope) => void;
+  addUserShell: (scope: UserShellScope, shell: UserShellInfo) => void;
+  removeUserShell: (scope: UserShellScope, terminalId: string) => void;
   updateUserShell: (
-    environmentId: string,
+    scope: UserShellScope,
     terminalId: string,
     patch: Partial<Omit<UserShellInfo, "terminalId">>,
   ) => void;
@@ -680,6 +701,7 @@ export type AppState = KanbanSlice & {
     entry: import("./slices/session-runtime/types").LaunchWarningEntry,
   ) => void;
   clearLaunchWarning: (sessionId: string) => void;
+  beginBackgroundWorkRead: (sessionId: string) => number;
   setBackgroundWorkloads: (
     sessionId: string,
     workloads: import("@/lib/types/background-work").WorkloadRunObservation[],
@@ -697,6 +719,7 @@ export type AppState = KanbanSlice & {
   setBackgroundWorkLoading: (sessionId: string, loading: boolean) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
   createSidebarView: UIA["createSidebarView"];
+  selectSidebarPluginGrouping: UIA["selectSidebarPluginGrouping"];
   updateSidebarDraft: UIA["updateSidebarDraft"];
   saveSidebarDraftAs: UIA["saveSidebarDraftAs"];
   saveSidebarDraftOverwrite: UIA["saveSidebarDraftOverwrite"];
@@ -749,6 +772,8 @@ export type AppState = KanbanSlice & {
   dismissAgentError: UIA["dismissAgentError"];
 } & TaskOverviewSlice &
   AppStateExtraActions &
+  ConfigurationFeedbackState &
+  ConfigurationFeedbackActions &
   Pick<
     UIA,
     | "setQuickChatInitialPrompt"
@@ -767,7 +792,11 @@ export type AppState = KanbanSlice & {
 // without fabricating placeholder values for the rest.
 export type HydrationState = Omit<
   Partial<AppState>,
-  "system" | "quickChat" | "gitStatusDisplay"
+  | "system"
+  | "quickChat"
+  | "gitStatusDisplay"
+  | keyof ConfigurationFeedbackState
+  | keyof ConfigurationFeedbackActions
 > & {
   quickChat?: Partial<AppState["quickChat"]>;
   system?: Partial<AppState["system"]>;

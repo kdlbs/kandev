@@ -16,7 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -61,6 +61,9 @@ var exactReadMethods = []exactMethod{
 	{method: exactReadChangeEvidence, capability: "host.v2.read:change_requests", description: "Read linked change-request evidence"},
 	{method: exactReadTaskUsage, capability: "host.v2.read:usage", description: "Read task and session usage totals"},
 	{method: exactReadSourceIssueCapabilities, capability: "host.v2.read:source_issues", description: "Read operations for one task's linked Jira or Linear issue"},
+	{method: automationHistoryListDefinitionsMethod, capability: automationHistoryCapability, description: "Read a bounded workspace automation definition snapshot"},
+	{method: automationHistoryListRunsMethod, capability: automationHistoryCapability, description: "Read a bounded workspace automation run snapshot"},
+	{method: automationHistoryGetRunMethod, capability: automationHistoryCapability, description: "Refresh one workspace automation run observation"},
 }
 
 type exactTaskObservationSource interface {
@@ -548,7 +551,9 @@ func (h *pluginHost) GetInteraction(ctx context.Context, q pluginsdk.ExactIntera
 		return pluginsdk.ExactInteractionObservation{}, pluginsdk.HostReadReceipt{}, status.Error(codes.NotFound, "interaction was not found")
 	}
 	dto := interactionModelToDTO(model)
-	return pluginsdk.ExactInteractionObservation{Interaction: dto, ResourceVersion: digestPublicValue(dto), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}, singleReadReceipt(identity, q.RequestID), nil
+	version := digestPublicValue(dto)
+	h.attributeInteraction(ctx, &dto)
+	return pluginsdk.ExactInteractionObservation{Interaction: dto, ResourceVersion: version, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}, singleReadReceipt(identity, q.RequestID), nil
 }
 
 //nolint:cyclop,funlen,gocognit // The page applies approval scope, redaction, and cursor rules to message data.

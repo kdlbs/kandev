@@ -38,7 +38,7 @@ queue](../../tasks/requirements/run-scheduling.md) and
 - **AC-OFFICE-SCHEDULER-001.5:** The shared runs scheduler and cron loop stop and join before database cleanup during graceful shutdown.
 - **AC-OFFICE-SCHEDULER-001.6:** Has a `source` discriminator (see table below) plus a typed payload.
 - **AC-OFFICE-SCHEDULER-001.7:** Carries an `idempotency_key`. The queue uses a 24-hour lookup for recent duplicates and a durable unique key for persisted identities.
-- **AC-OFFICE-SCHEDULER-001.8:** Is coalesced into an in-flight run when one exists for the same agent (claim-time merge).
+- **AC-OFFICE-SCHEDULER-001.8:** Is coalesced into an in-flight run when one exists for the same agent (claim-time merge). A routine-source wake is coalesced only into a run from the same routine; otherwise, it creates a fresh run.
 - **AC-OFFICE-SCHEDULER-001.9:** A cron routine trigger's day-of-month and day-of-week fields are ORed when both are restricted, matching `crontab(5)` (`0 0 13 * 5` fires on the 13th of the month OR any Friday, not only Friday the 13th).
 - **AC-OFFICE-SCHEDULER-001.10:** A cron routine trigger's wall-clock slot fires at most once across a DST transition: a slot that does not exist (spring-forward) is skipped, a slot that occurs twice (fall-back) fires only on its first occurrence, and no existing slot is ever lost. This holds for every IANA zone, including `Australia/Lord_Howe`, the only zone with a 30-minute DST shift.
 - **AC-OFFICE-SCHEDULER-001.11:** A cron routine trigger that can never fire (an impossible date, or an empty expression) is rejected at trigger-create time with a client error, not accepted as a silent no-op or a wrong daily fallback.
@@ -46,6 +46,9 @@ queue](../../tasks/requirements/run-scheduling.md) and
 - **AC-OFFICE-SCHEDULER-001.13:** A routine run in `task_created` with no linked task is not an active run. The next dispatch that finds it for its fingerprint closes it as `failed` and does not skip or coalesce into it. A heavy run whose linked task is live still gates its fingerprint.
 - **AC-OFFICE-SCHEDULER-001.14:** The IANA timezone database is embedded in the distributed binary (`time/tzdata`), so a zone named by a routine trigger resolves with no system zoneinfo directory and no build-machine `GOROOT`, as on a deployed Windows host.
 - **AC-OFFICE-SCHEDULER-001.15:** A run whose launch fails validation of its built agent or continue command is not retried with backoff. It escalates at once, as after the last retry, because every attempt would build the same command and leave another failed session.
+- **AC-OFFICE-SCHEDULER-001.16:** A taskless routine wake preserves its registered routine ID, name, and work description in the actual agent prompt, including target, evidence, and output references. Non-routine wakes do not inherit that content.
+- **AC-OFFICE-SCHEDULER-001.17:** A task in the trusted system Routine workflow of an Office-enabled workspace has Office identity. The workflow must belong to the same workspace, be system-owned, and use the builtin routine template. A copied workflow name/template, another workspace's workflow, or a non-Office workspace grants no Office identity. Existing caller and task-mode authorization remains in force.
+- **AC-OFFICE-SCHEDULER-001.18:** A heavy task template may declare an optional nonnegative `required_subtask_count`. Trusted creation persists this minimum before auto-start; generic task metadata cannot forge or clear it. Every task-state completion write and completion-step entry use the task repository's transaction and are blocked until enough same-workspace, durable, assigned children exist. Failed/cancelled children and archived unfinished children do not count; archived completed assignments do. This verifies assignment, not child-content quality. Existing completed tasks and templates without a minimum are not reopened or replayed.
 
 ### REQ-OFFICE-SCHEDULER-002: Assignment wake admission
 
@@ -57,7 +60,8 @@ producer of a `task_assigned` run for an Office task's assignee (reactivity's as
 handler, the event-subscriber path, and unstarted-task recovery) applies the same eligibility
 predicate: the task's current workflow step must have an `auto_start_agent` on_enter action, or the
 task must have no workflow step at all (a task outside any workflow keeps its prior step behaviour). This
-also holds assignment wakes while any blocker remains nonterminal under Office blocker policy.
+also holds assignment wakes while any blocker is unsatisfied under the
+[Office blocker terminal policy](blocker-terminal-policy.md).
 It does not touch Review/Approval's separate reviewer/approver wake path.
 
 #### Acceptance criteria
@@ -78,11 +82,11 @@ It does not touch Review/Approval's separate reviewer/approver wake path.
   is logged at Warn.
 
 - **AC-OFFICE-SCHEDULER-002.5:** When at least one persisted blocker of an Office task is
-  nonterminal, task-created/task-updated assignment events, assignee reactivity, and unstarted-task
+  pending or failed (`REQ-OFFICE-BLOCKER-POLICY-001`), task-created/task-updated assignment events, assignee reactivity, and unstarted-task
   recovery shall admit zero `task_assigned` runs for that task. A mixture of completed and pending
   blockers shall remain held, including when the task has no step or its step cannot be resolved.
-- **AC-OFFICE-SCHEDULER-002.6:** When a task has no blockers or all blockers are terminal under
-  existing Office policy, the blocker condition shall permit the existing assignment admission.
+- **AC-OFFICE-SCHEDULER-002.6:** When a task has no blockers or all blockers are satisfied under
+  `REQ-OFFICE-BLOCKER-POLICY-001`, the blocker condition shall permit the existing assignment admission.
   A refused wake shall not remove the runner, consume its assignment occurrence, or suppress the
   previous assignee's interrupt.
 - **AC-OFFICE-SCHEDULER-002.7:** When the final pending blocker completes successfully, an
@@ -95,12 +99,10 @@ It does not touch Review/Approval's separate reviewer/approver wake path.
   positively known to be pending. An unknown blocker shall not override a known pending blocker,
   regardless of their order. A later recovery pass shall reconsider tasks held by pending blockers
   under its existing candidate and quota rules.
-- **AC-OFFICE-SCHEDULER-002.9:** This repair shall retain Office's existing classification of
-  `COMPLETED`, `FAILED`, and `CANCELLED` as terminal. Archiving shall not itself change that
-  classification; a missing blocker shall follow the unknown-read rule above. Generic Kanban
+- **AC-OFFICE-SCHEDULER-002.9:** Blocker classification, including archived and missing
+  blockers, shall follow `REQ-OFFICE-BLOCKER-POLICY-001`. Generic Kanban
   dependency policy, assignment generation and deduplication, rate limiting, pause/replay, causation,
-  and reviewer/approver wakes shall retain their existing behavior. Failure/cancellation dependency
-  policy reconciliation is separate work.
+  and reviewer/approver wakes shall retain their existing behavior.
 
 ### REQ-OFFICE-SCHEDULER-003: Create-time assignee validation and runner seat
 

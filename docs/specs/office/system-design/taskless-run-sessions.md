@@ -36,6 +36,7 @@ current code rather than the contract, it says so.
 | .5, .6 | Outstanding lifecycle and recovery work |
 | .7 | Runtime admission and security |
 | .8 | Persistence; launch flow; outstanding lifecycle scope (replay clause) |
+| .9 | Permission requests |
 
 All criteria belong to REQ-OFFICE-TASKLESS-001.
 
@@ -315,6 +316,53 @@ from here. Inspect `office/service/event_subscribers.go` and `office/costs` for
 the write boundary. Keep bounded output/continuation semantics rather than
 introducing a new interactive chat UI. Run-detail session links must target a
 run-owned surface, never a task-session URL for a nonexistent task.
+
+## Permission requests
+
+agentctl holds an ACP permission request open until the backend answers it,
+including an auto-approval, which agentctl delivers only after the backend
+claims the decision. A taskless turn has no task session, no permission message
+and no UI, so nothing else can answer it; an unanswered request blocks the turn
+indefinitely and keeps the run claimed against the agent's concurrency ceiling.
+
+The runtime publishes a run-owned permission request on
+`permission_request.received.<run_session_id>`, mirroring the agent-stream
+subject rule, and the payload carries the owner fields named in Events and
+observation plus the execution ID. A subject with an empty final token matches
+no `*` subscriber, so the run session ID is required. Task permission handling
+in the orchestrator ignores run-owned requests by explicit owner-kind check; it
+must not store task messages or call task-session resolution for them.
+
+Office subscribes to the same subject family and admits a request through the
+event-admission rule above (claimed run, exact attempt, execution ID). It then
+decides. Office does not read an auto-approve setting itself: agentctl marks
+the request from the launched execution profile, which provider routing may
+have selected ([agents-03](agents-03.md)).
+
+| Request | Decision |
+| --- | --- |
+| auto-approval already delivered by agentctl (option set, not pending; older agentctl) | record `approved`; deliver nothing |
+| auto-approval pending (the launched execution profile auto-approves; agentctl marks the request) | resolve with the offered auto-approval option |
+| otherwise, a reject option is offered | resolve with the first reject option |
+| otherwise | cancel the request |
+
+Office appends a `permission.decision` run event naming the decision, the
+option kind and the request title before it delivers the answer, so a delivery
+failure still leaves evidence on the run. If that write fails, Office still
+delivers the answer and logs the full decision at error level: withholding the
+answer would block the turn again. Delivery goes through execution-keyed runtime
+calls (`ResolveRunPermission`, `CancelRunPermission`), because a run-owned
+execution has no task session ID to look up. A stale request (attempt
+superseded, run no longer claimed, execution already stopped) is dropped
+without delivery, and a not-found answer is not retried. Any other delivery
+failure is retried twice with short backoff; if it still fails, Office stops
+the execution with reason `office_permission_answer_failed`, and the run
+settles through the existing stop path. Otherwise the turn reaches its own
+outcome through the normal AgentReady or failure path.
+
+A turn that hangs for a reason other than a permission request remains a known
+gap, tracked with the outstanding lifecycle work below; the generic stale-claim
+sweep requeues such a run without stopping its execution.
 
 ## Outstanding: stop controls and restart recovery
 

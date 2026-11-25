@@ -214,6 +214,7 @@ func RunGH(ctx context.Context, cmd *exec.Cmd) error {
 		return err
 	}
 	defer release()
+	prepareGHCommand(cmd)
 	return cmd.Run()
 }
 
@@ -223,6 +224,7 @@ func RunGHOutput(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
 		return nil, err
 	}
 	defer release()
+	prepareGHCommand(cmd)
 	return cmd.Output()
 }
 
@@ -232,6 +234,7 @@ func RunGHCombinedOutput(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
 		return nil, err
 	}
 	defer release()
+	prepareGHCommand(cmd)
 	return cmd.CombinedOutput()
 }
 
@@ -263,6 +266,7 @@ func RunGHCombinedAfterAcquire(
 	execCtx, cancel := withExecTimeout(ctx, execTimeout)
 	defer cancel()
 	cmd := build(execCtx)
+	prepareGHCommand(cmd)
 	out, runErr := cmd.CombinedOutput()
 	return out, runErr, execCtx.Err()
 }
@@ -282,6 +286,7 @@ func RunGHAfterAcquire(
 	execCtx, cancel := withExecTimeout(ctx, execTimeout)
 	defer cancel()
 	cmd := build(execCtx)
+	prepareGHCommand(cmd)
 	runErr := cmd.Run()
 	return runErr, execCtx.Err()
 }

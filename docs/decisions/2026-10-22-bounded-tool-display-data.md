@@ -43,3 +43,5 @@ and allocation after source decoding; native/provider memory is outside scope.
 [Requirements](../specs/platform/requirements/bounded-tool-delivery.md),
 [design](../specs/platform/system-design/bounded-tool-delivery.md) and
 [focused plan](../plans/bounded-tool-delivery/plan.md).
+
+The [all-tool boundary decision](2026-10-27-all-tool-delivery-boundary.md) extends this policy to typed reports and increases event capacity.

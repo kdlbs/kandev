@@ -17,13 +17,12 @@ steps, queued launches, and task process contracts.
 ## Ownership
 
 Owns task identity, metadata, [workspace discovery](requirements/workspace-search.md),
-documents, attachments, parent and dependency relationships, creation, launch,
-runtime state publication, workflow definitions and transitions, completion
-signals, and task scheduling.
+documents, attachments, hierarchy, creation, launch, runtime state, workflows,
+completion, and scheduling.
 
 Turn change sets bind immutable repository intervals to capture policy,
-historical content availability, and transcript anchors. Workspaces supply
-checkout identity; runtime supplies ordered executor access.
+history, and transcript anchors. Workspaces own checkout identity; runtime owns
+ordered executor access.
 
 ## Exclusions
 
@@ -71,6 +70,7 @@ checkout identity; runtime supplies ordered executor access.
 - [Link Existing Task to External References](requirements/link-existing-task-github-issue.md)
 - [MCP-Created Task Agent Profile Default](requirements/mcp-task-agent-profile-default.md)
 - [MCP Tool Name Stability](requirements/mcp-tool-name-stability.md)
+- [MCP task priority](requirements/mcp-task-priority.md)
 - [MCP workspace modes](requirements/mcp-workspace-mode.md)
 - [Missing task route recovery](requirements/missing-task-route-recovery.md)
 - [Task model unification](requirements/model-unification.md)
@@ -85,7 +85,7 @@ checkout identity; runtime supplies ordered executor access.
 - [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
 - [Prompt attachments](requirements/prompt-attachments.md)
 - [Saved Prompt Delivery](requirements/saved-prompt-delivery.md)
-- [Quick Chat Sessions, Persistence, and Expiration](requirements/quick-chat-expiration.md)
+- [Quick Chat Sessions and Persistence](requirements/quick-chat-expiration.md)
 - [Quick Chat Agent Titles](requirements/quick-chat-agent-titles.md)
 - [Quick Chat Repository Context](requirements/quick-chat-repository-context.md)
 - [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)
@@ -133,6 +133,7 @@ checkout identity; runtime supplies ordered executor access.
 - [User Question Turn Boundary](requirements/user-question-turn-boundary.md)
 - [WIP Limits and Visible Overflow Queues](requirements/wip-limit-pull-system.md)
 - [Tasks Without Repositories](requirements/without-repositories.md)
+- [Workspace root files](requirements/workspace-root-files.md)
 - [Workflow completion-signal payload delivery](requirements/workflow-completion-signal-payload-delivery.md)
 - [Cancelled Turn Completion](requirements/workflow-cancelled-turn-completion.md)
 - [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
@@ -165,6 +166,7 @@ checkout identity; runtime supplies ordered executor access.
 
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
+- [Workspace root files](system-design/workspace-root-files.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
 - [Command-panel archived task results](system-design/command-panel-archived-task-results.md)
 - [Detached Workspace Continuity](system-design/detached-workspace-continuity.md)
@@ -217,6 +219,7 @@ checkout identity; runtime supplies ordered executor access.
 - [Audited cross-workspace task transfers](system-design/cross-workspace-task-transfer.md)
 - [Task Create Launch Preview](system-design/task-create-launch-preview.md)
 - [Task priority visibility](system-design/task-priority-visibility.md)
+- [MCP task priority](system-design/mcp-task-priority.md)
 - [Board priority sort and filter](system-design/board-priority-sort-filter.md)
 - [Threads task actions](system-design/threads-task-actions.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)

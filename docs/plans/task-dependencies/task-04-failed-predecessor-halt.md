@@ -5,7 +5,12 @@ status: done
 wave: 4
 depends_on: ["03-resolve-and-auto-start"]
 plan: "plan.md"
-spec: "../../specs/tasks/system-design/task-dependencies.md"
+requirements:
+  - REQ-TASKS-TASK-DEPENDENCIES-001
+acceptance_criteria:
+  - AC-TASKS-TASK-DEPENDENCIES-001.2
+system_design:
+  - ../../specs/tasks/system-design/task-dependencies.md
 ---
 
 # Task 04: Halt Chains on a Failed Predecessor
@@ -27,8 +32,9 @@ spec: "../../specs/tasks/system-design/task-dependencies.md"
 - Retrying the failed predecessor to successful completion unblocks the
   dependent and fires its intent exactly once.
 - Removing the edge unblocks the dependent without firing its intent.
-- An archived predecessor reads as `pending`, not `failed` and not `resolved`;
-  the dependent stays blocked and the predecessor is listed as pending.
+- An archived predecessor keeps its state-derived outcome: completed resolves,
+  failed/cancelled fail, and unfinished work remains pending. The dependency
+  edge remains present.
 - Deleting a predecessor removes the edges in both directions, may unblock the
   dependent, and does **not** fire its intent — deletion is not success.
 - Kandev never auto-retries a failed predecessor and never auto-removes an edge.
@@ -46,7 +52,9 @@ spec: "../../specs/tasks/system-design/task-dependencies.md"
 4. Failing test: one notification is raised per transition.
 5. Failing test: retry-to-success unblocks and launches exactly once.
 6. Failing test: edge removal unblocks without launching.
-7. Failing test: archived predecessor reads as pending.
+7. Failing tests: archived completed, failed, cancelled, and unfinished
+   predecessors keep their state-derived dependency outcomes in the start gate
+   and task view.
 8. Failing test: predecessor deletion removes both edge directions, unblocks,
    and launches nothing.
 9. Failing test: reopening a predecessor after the dependent launched leaves the
@@ -84,4 +92,5 @@ Task 03 — the resolution subscriber is where the failure branch lives.
 
 Mark this task `in_progress` before the RED tests and `done` only after the
 listed commands pass. Record the once-per-transition mechanism, the notification
-constant, and the delete-versus-archive difference in this file and `plan.md`.
+constant, and that deletion removes edges while archive preserves them and their
+state-derived outcomes in this file and `plan.md`.

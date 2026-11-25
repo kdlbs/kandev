@@ -37,4 +37,12 @@ const (
 	prStateApproved = "approved"
 	prStateChanges  = "changes_requested"
 	prStateDirty    = "dirty"
+
+	prCIStateNone             = "none"
+	prCIStateFailed           = "failed"
+	prCIStateApprovalRequired = "approval_required"
+	prCIStateAttention        = "attention"
+	prCIStateInProgress       = "in_progress"
+	prStateUnstable           = "unstable"
+	prStateActionRequired     = "action_required"
 )

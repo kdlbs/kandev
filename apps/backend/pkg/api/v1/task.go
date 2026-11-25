@@ -160,6 +160,7 @@ type TaskWorkspaceFolder struct {
 
 // Task represents a Kanban task
 type Task struct {
+	ExecutionGrade         string                 `json:"execution_grade"`
 	ID                     string                 `json:"id"`
 	WorkspaceID            string                 `json:"workspace_id"`
 	InitialWorkspaceLayout string                 `json:"initial_workspace_layout,omitempty"`
@@ -247,6 +248,7 @@ type TaskEvent struct {
 // Type determines the ACP content block: "image" → ImageBlock, "audio" → AudioBlock,
 // "resource" → ResourceBlock (text or blob based on MIME type).
 type MessageAttachment struct {
+	CommentID    string `json:"comment_id,omitempty"`
 	Type         string `json:"type"`                    // "image", "audio", "resource"
 	AttachmentID string `json:"attachment_id,omitempty"` // File-backed attachment descriptor ID
 	Data         string `json:"data,omitempty"`          // Base64-encoded data
@@ -254,10 +256,18 @@ type MessageAttachment struct {
 	Name         string `json:"name,omitempty"`          // Display name (e.g., filename)
 	SizeBytes    int64  `json:"size_bytes,omitempty"`    // Raw byte size for file-backed descriptors
 	DeliveryMode string `json:"delivery_mode,omitempty"` // "prompt" (native/default) or "path"
+	// Path is a trusted runtime-only executor path. It is never serialized into
+	// durable message or queue metadata.
+	Path string `json:"-"`
 }
 
+const (
+	attachmentDeliveryPath   = "path"
+	attachmentDeliveryPrompt = "prompt"
+)
+
 func (a MessageAttachment) HasValidDeliveryMode() bool {
-	return a.DeliveryMode == "" || a.DeliveryMode == "prompt" || a.DeliveryMode == "path"
+	return a.DeliveryMode == "" || a.DeliveryMode == attachmentDeliveryPrompt || a.DeliveryMode == attachmentDeliveryPath
 }
 
 // ContextFileMeta represents a context file reference attached to a message.
@@ -288,6 +298,10 @@ type Message struct {
 	// ascending, ties by id ascending), present only on user messages
 	// produced by an indexed server payload; omitted when zero.
 	PromptIndex int `json:"prompt_index,omitempty"`
+	// TurnErrorAcknowledgementFailed is response-only feedback for an accepted
+	// manual prompt whose client-observed turn-error acknowledgement could not
+	// be persisted. The message itself was accepted; the badge remains visible.
+	TurnErrorAcknowledgementFailed bool `json:"turn_error_acknowledgement_failed,omitempty"`
 }
 
 // CreateMessageRequest for adding a message to a task session

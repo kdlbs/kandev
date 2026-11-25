@@ -27,6 +27,7 @@ const CAPABILITY_READY = "ready" as const;
 type ModelOptionsState = {
   requestKey: string;
   status: CapabilityStatus | "failed";
+  reasonCode?: string;
   options: ConfigOptionEntry[];
   error: string | null;
   isLoading: boolean;
@@ -79,7 +80,7 @@ export function useProfileModelOptions({
     resolution.matchingOptionState,
   );
   const needsReconciliation = shouldReconcileOptions(
-    onChange,
+    profileReconciliationHandler(agentName, onChange),
     hasUserSelectedModel,
     resolution.matchingOptionState,
     profile,
@@ -105,6 +106,7 @@ export function useProfileModelOptions({
   return {
     configOptions,
     configStatus: isStaticContext ? "ok" : resolution.matchingOptionState?.status,
+    configReasonCode: resolution.matchingOptionState?.reasonCode,
     configError: resolution.matchingOptionState?.error ?? null,
     configIsLoading: Boolean(resolution.matchingOptionState?.isLoading),
     isConfigResolutionPending,
@@ -339,6 +341,7 @@ async function storeResolvedModelOptions({
   setOptionState({
     requestKey: key,
     status: response.status,
+    reasonCode: response.reason_code,
     options: response.status === "ok" ? (response.config_options ?? []) : [],
     error: response.error ?? null,
     isLoading: false,
@@ -415,4 +418,8 @@ function shouldReconcileOptions(
   if (!onChange || !hasUserSelectedModel || optionState?.status !== "ok") return false;
   const nextValues = reconcileConfigOptionValues(profile.config_options, configOptions);
   return JSON.stringify(nextValues) !== JSON.stringify(profile.config_options ?? {});
+}
+
+function profileReconciliationHandler(agentName: string, onChange: ModelOptionsInput["onChange"]) {
+  return agentName === "pi-acp" ? undefined : onChange;
 }

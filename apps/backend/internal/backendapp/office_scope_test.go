@@ -163,6 +163,8 @@ func officeScopeCases() []officeScopeCase {
 		{"workspace", http.MethodGet, "/api/v1/office/workspaces/:wsId/agents", "", ""},
 		{"workspace-pause", http.MethodPost, "/api/v1/office/workspaces/:wsId/pause", "", `{"reason":"incident"}`},
 		{"workspace-resume", http.MethodPost, "/api/v1/office/workspaces/:wsId/resume", "", `{}`},
+		{"workspace-author-exclusion", http.MethodPut, "/api/v1/office/workspaces/:wsId/routing/author-exclusion", "",
+			`{"changes":[{"step_id":"s","role":"reviewer","enabled":true}]}`},
 		{"inbox-dismiss", http.MethodPost, "/api/v1/office/inbox/dismiss", "/api/v1/office/inbox/dismiss",
 			`{"kind":"agent_run_failed","item_id":"run-user-a"}`},
 	}
@@ -186,6 +188,8 @@ func officeMixedParamCases() []officeScopeCase {
 			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/labels", ""},
 		{"task-label-remove", http.MethodDelete, "/api/v1/office/workspaces/:wsId/tasks/:taskId/labels/:labelName",
 			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/labels/l-user-a", ""},
+		{"task-label-remove-query", http.MethodDelete, "/api/v1/office/workspaces/:wsId/tasks/:taskId/labels",
+			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/labels?name=area%2Fbackend", ""},
 		{"task-quorum", http.MethodGet, "/api/v1/office/workspaces/:wsId/tasks/:taskId/quorum",
 			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/quorum", ""},
 	}
@@ -321,6 +325,11 @@ func TestOfficeScopeRequiresWorkspaceManageForPauseMutations(t *testing.T) {
 	for _, tc := range []officeScopeCase{
 		{name: "pause", method: http.MethodPost, pattern: "/api/v1/office/workspaces/:wsId/pause", body: `{"reason":"incident"}`},
 		{name: "resume", method: http.MethodPost, pattern: "/api/v1/office/workspaces/:wsId/resume", body: `{}`},
+		{
+			name: "review on a different provider", method: http.MethodPut,
+			pattern: "/api/v1/office/workspaces/:wsId/routing/author-exclusion",
+			body:    `{"changes":[{"step_id":"s","role":"reviewer","enabled":true}]}`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var reached string

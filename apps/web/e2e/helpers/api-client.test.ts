@@ -1,6 +1,42 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, removeRoutingProfileReferences } from "./api-client";
 import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
+import type { Agent } from "../../lib/types/http-agents";
+
+describe("ApiClient.cleanupTestProfiles", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the provided agent snapshot instead of fetching it again", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        if (url.endsWith("/api/v1/agents")) {
+          return Response.json({ agents: [], total: 0 });
+        }
+        if (url.endsWith("/api/v1/agent-profiles/profile-1?force=true")) {
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const agents = [{ id: "mock-agent", profiles: [{ id: "profile-1" }] }] as unknown as Agent[];
+
+    await new ApiClient("http://backend.test").cleanupTestProfiles(["keep"], agents);
+
+    expect(requests).toEqual([
+      "http://backend.test/api/v1/app-state?path=%2Fsettings%2Fagents",
+      "http://backend.test/api/v1/agent-profiles/profile-1?force=true",
+    ]);
+  });
+});
 
 describe("ApiClient.createAgentProfile", () => {
   afterEach(() => {
@@ -353,5 +389,68 @@ describe("explicit session detail inspection", () => {
       metadata: { acp: { session_id: "native" } },
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("ApiClient.createSentryInstance", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // The class previously declared this method twice. The retained (later)
+  // implementation must keep its workspace scope, payload, and return value.
+  it("scopes the request to the workspace and preserves the instance payload", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+        return Response.json({ interimSettingsInterlockToken: "test-token" });
+      }
+      if (url.endsWith("/api/v1/sentry/instances?workspace_id=workspace-1")) {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          workspaceId: "workspace-1",
+          name: "Primary Sentry",
+          url: "https://sentry.acme.example.com",
+          secret: "sntrys_token",
+          authMethod: "auth_token",
+        });
+        return Response.json({ id: "instance-1", name: "Primary Sentry" });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const instance = await new ApiClient("http://backend.test").createSentryInstance({
+      workspaceId: "workspace-1",
+      name: "Primary Sentry",
+      url: "https://sentry.acme.example.com",
+      secret: "sntrys_token",
+    });
+
+    expect(instance).toMatchObject({ id: "instance-1" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("defaults the instance URL when the caller omits it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        expect(url).toBe("http://backend.test/api/v1/sentry/instances?workspace_id=workspace-1");
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toMatchObject({ url: "https://sentry.io" });
+        return Response.json({ id: "instance-2" });
+      }),
+    );
+
+    const instance = await new ApiClient("http://backend.test").createSentryInstance({
+      workspaceId: "workspace-1",
+      name: "Default Sentry",
+      secret: "sntrys_token",
+    });
+
+    expect(instance.id).toBe("instance-2");
   });
 });

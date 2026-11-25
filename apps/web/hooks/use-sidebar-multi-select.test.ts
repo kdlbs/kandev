@@ -110,7 +110,12 @@ describe("useSidebarMultiSelect", () => {
 
     // Range from the realigned anchor "a" to "c" includes the in-between "x".
     // A stale "b" anchor (absent from orderedIds) would fall back to just {a, c}.
-    act(() => result.current.selectRange("c", ["a", "x", "c"]));
+    act(() =>
+      result.current.selectRange(
+        "c",
+        ["a", "x", "c"].map((taskId) => ({ taskId, key: taskId })),
+      ),
+    );
     expect(result.current.selectedIds).toEqual(new Set(["a", "x", "c"]));
   });
 

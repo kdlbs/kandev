@@ -17,6 +17,9 @@ var copilotACPLogoDark []byte
 
 const copilotACPPackage = "@github/copilot"
 
+// CopilotACPAgentID is the registry identifier for Copilot's ACP provider.
+const CopilotACPAgentID = "copilot-acp"
+
 // copilotNativeBinary is the standalone CLI installed by the @github/copilot
 // npm package. It remains available for discovery and preflight checks, but
 // ACP launches always use the exact package pin.
@@ -56,7 +59,7 @@ func NewCopilotACP() *CopilotACP {
 	}
 }
 
-func (a *CopilotACP) ID() string          { return "copilot-acp" }
+func (a *CopilotACP) ID() string          { return CopilotACPAgentID }
 func (a *CopilotACP) Name() string        { return "Copilot ACP Agent" }
 func (a *CopilotACP) DisplayName() string { return "Copilot" }
 func (a *CopilotACP) Description() string {
@@ -146,6 +149,15 @@ func (a *CopilotACP) PermissionSettings() map[string]PermissionSetting {
 // (see acp-debug captures) shows it does not suppress session/request_permission
 // frames. Only `--allow-all-tools` and the other `--allow-all-*` flags do.
 var copilotPermSettings = map[string]PermissionSetting{
+	"long_context": {
+		Supported:    true,
+		Default:      false,
+		Label:        "Long context",
+		Description:  "Request a larger context window for new sessions on supported models. May use more AI credits.",
+		ApplyMethod:  PermissionApplyMethodCLIFlag,
+		CLIFlag:      "--context",
+		CLIFlagValue: "long_context",
+	},
 	"allow_all_tools": {
 		Supported: true,
 		// Enabled by default so autonomous runs don't stall on per-tool-call

@@ -58,11 +58,7 @@ func TestResumedDeliveryBootstrapWaitsForFirstGeneration(t *testing.T) {
 				_, err := manager.prepareAgentEvent(ctx, execution, nil, repo, event)
 				processed <- err
 			}()
-			select {
-			case <-repo.firstRead:
-			case <-ctx.Done():
-				return nil
-			}
+			// The setup event waits for native initialization, not the reverse.
 			response, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true, "session_id": "bootstrap-native"})
 			return response
 		}

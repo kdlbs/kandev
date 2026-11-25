@@ -26,6 +26,11 @@ system_design:
 
 ## Summary
 
+Extend the common incomplete-cache probe helper when that package lands.
+Do not create a second profile installation or publication path.
+The common helper is supplied by
+[cache-recovery Task 02](../managed-npm-cache-recovery/task-02-automatic-runtime-recovery.md).
+
 Reuse one bounded retry helper for agent-wide host capabilities, concrete
 profile baseline discovery, and dependent model-option resolution. A successful
 private preparation becomes the result for exactly the authorized context

@@ -25,8 +25,8 @@ function buildPortProxyUrl(sessionId: string, port: number): string {
 
 function buildTunnelUrl(tunnelPort: number): string {
   const backendUrl = getBackendConfig().apiBaseUrl;
-  const { protocol, hostname } = new URL(backendUrl);
-  return `${protocol}//${hostname}:${tunnelPort}/`;
+  const { hostname } = new URL(backendUrl);
+  return `http://${hostname}:${tunnelPort}/`;
 }
 
 export function InfoTip({ text }: { text: string }) {

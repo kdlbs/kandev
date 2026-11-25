@@ -7,8 +7,10 @@ import {
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
-const MAX_SIDEBAR_STATUS_SUMMARIES = 200;
-const MAX_SIDEBAR_SUMMARY_WORKSPACES = 8;
+import {
+  MAX_SIDEBAR_STATUS_SUMMARIES,
+  MAX_SIDEBAR_SUMMARY_WORKSPACES,
+} from "@/lib/task-status-summary";
 
 type TaskStatusSummaryUpdatedMessage = Parameters<
   NonNullable<WsHandlers["task.status_summary.updated"]>

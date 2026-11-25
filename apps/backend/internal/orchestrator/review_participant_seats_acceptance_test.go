@@ -166,7 +166,7 @@ func newReviewSeatsTestEnv(t *testing.T) *reviewSeatsTestEnv {
 		taskRepo:     mockTasks,
 		agentManager: agentMgr,
 		messageQueue: messagequeue.NewServiceMemory(log),
-		executor:     executor.NewExecutor(agentMgr, taskRepo, log, executor.ExecutorConfig{}),
+		executor:     withTestCapabilities(executor.NewExecutor(agentMgr, taskRepo, log, executor.ExecutorConfig{})),
 	}
 	svc.SetWorkflowStepGetter(sg)
 	svc.SetEngineRunQueue(runQueue)

@@ -5,30 +5,33 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
+
 	"github.com/jmoiron/sqlx"
 )
 
 const settingsKey = "tool_payload_retention"
 
-func readRecord(ctx context.Context, q sqlx.QueryerContext) (record, error) {
+// recordVersion 2 is the combined tool-detail and historical-content scope.
+// Version 1 tool-only approvals must not authorize the wider destructive scope.
+const recordVersion = 2
+
+type queryerContextWithRebind interface {
+	sqlx.QueryerContext
+	Rebind(string) string
+}
+
+func readRecord(ctx context.Context, q queryerContextWithRebind) (record, error) {
 	var raw string
-	err := sqlx.GetContext(ctx, q, &raw, `SELECT value FROM settings WHERE key=?`, settingsKey)
+	err := sqlx.GetContext(ctx, q, &raw, q.Rebind(`SELECT value FROM settings WHERE key=?`), settingsKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultRecord(), nil
 	}
 	if err != nil {
 		return record{}, err
 	}
-	var r record
-	if json.Unmarshal([]byte(raw), &r) != nil || r.Version != 1 || r.Policy.Age.Validate() != nil || r.Policy.Revision < 0 {
-		return record{}, errors.New("invalid_stored_policy")
-	}
-	switch r.Preparation.State {
-	case stateNone, statePending, stateRunning, stateFailed, stateReady:
-	default:
-		return record{}, errors.New("invalid_preparation")
-	}
-	if err := validateRecord(r); err != nil {
+	r, err := decodeStoredRecord(raw)
+	if err != nil {
 		return record{}, err
 	}
 	r.Supported = true
@@ -36,6 +39,57 @@ func readRecord(ctx context.Context, q sqlx.QueryerContext) (record, error) {
 		r.Operation.Skipped = map[string]int64{}
 	}
 	return r, nil
+}
+
+func decodeStoredRecord(raw string) (record, error) {
+	var r record
+	if err := json.Unmarshal([]byte(raw), &r); err != nil {
+		return record{}, errors.New("invalid_stored_policy")
+	}
+	if (r.Version != 1 && r.Version != recordVersion) || r.Policy.Age.Validate() != nil || r.Policy.Revision < 0 {
+		return record{}, errors.New("invalid_stored_policy")
+	}
+	legacyApproval := r.Version == 1
+	if legacyApproval && validateRecord(r) != nil {
+		return record{}, errors.New("invalid_stored_policy")
+	}
+	if !validPreparationState(r.Preparation.State) {
+		return record{}, errors.New("invalid_preparation")
+	}
+	if err := validateRecord(r); err != nil {
+		return record{}, err
+	}
+	if legacyApproval {
+		r = migrateToolOnlyRecord(r)
+	}
+	return r, nil
+}
+
+func validPreparationState(state string) bool {
+	switch state {
+	case stateNone, statePending, stateRunning, stateFailed, stateReady:
+		return true
+	default:
+		return false
+	}
+}
+
+// migrateToolOnlyRecord preserves the selected period and revision but clears
+// the old approval. The wider scope requires the existing preparation choice
+// once before any destructive work.
+func migrateToolOnlyRecord(r record) record {
+	r.Version = recordVersion
+	r.Policy.Enabled = false
+	r.Preparation = Preparation{State: stateNone}
+	r.PreparationDetail = ""
+	r.ApprovedRevision = 0
+	r.Receipt = ""
+	r.FirstMutation = false
+	r.NextDueAt = nil
+	if r.Operation != nil && r.Operation.State == stateRunning {
+		finishOperation(&r, stateCancelled, "scope_migrated", time.Now())
+	}
+	return r
 }
 
 func validateRecord(r record) error {

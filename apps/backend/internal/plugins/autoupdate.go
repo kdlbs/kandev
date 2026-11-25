@@ -62,6 +62,8 @@ func (s *Service) SetPluginAutoUpdate(id string, v *bool) (*store.Record, error)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.recordPersistMu.Lock()
+	defer s.recordPersistMu.Unlock()
 
 	prev, ok := s.registry.Get(id)
 	if !ok {

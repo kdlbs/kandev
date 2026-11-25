@@ -234,7 +234,7 @@ func TestCreateStepsFromTemplate(t *testing.T) {
 
 		unknown := doJSON(t, h.router, http.MethodPost, "/api/v1/workflows/workflow-1/workflow/steps",
 			map[string]interface{}{"template_id": "nope"})
-		requireJSONError(t, unknown, http.StatusNotFound, "Step not found")
+		requireJSONError(t, unknown, http.StatusNotFound, "Template not found")
 		if names := listStepNames(t, h, "workflow-1"); len(names) != 0 {
 			t.Fatalf("rejected apply wrote %v", names)
 		}
@@ -333,7 +333,7 @@ func TestUpdateStepMalformedJSON(t *testing.T) {
 // does not offer the user a download of nothing.
 func TestExportSingleWorkflowFailureIs500(t *testing.T) {
 	h := setupStepRouter(t)
-	h.service.SetWorkflowProvider(&fakeWorkflowProvider{})
+	h.setWorkflowProvider(&fakeWorkflowProvider{})
 	rec := doJSON(t, h.router, http.MethodGet, "/api/v1/workflows/nope/export", nil)
 	requireJSONError(t, rec, http.StatusInternalServerError, "Failed to export workflow")
 }

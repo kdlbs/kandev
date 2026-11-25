@@ -78,6 +78,8 @@ type SchedulerIntegration struct {
 	// taskContexts feeds PromptContext.HandoffContext on every run.
 	// nil-safe: when unconfigured, the handoff section is omitted.
 	taskContexts TaskContextProvider
+	// creationAttachments supplies the task's explicit creation set.
+	creationAttachments TaskCreationAttachmentReader
 }
 
 // SetTaskContextProvider wires the office task-handoffs prompt
@@ -85,6 +87,27 @@ type SchedulerIntegration struct {
 // constructed.
 func (si *SchedulerIntegration) SetTaskContextProvider(p TaskContextProvider) {
 	si.taskContexts = p
+}
+
+// TaskCreationAttachmentReader supplies the explicit ordered creation set for
+// a task-bound launch. It must never include later chat or session claims.
+type TaskCreationAttachmentReader interface {
+	ReadTaskCreationAttachments(ctx context.Context, taskID string) ([]v1.MessageAttachment, error)
+}
+
+// SetTaskCreationAttachmentReader wires the task-owned creation attachment
+// reader used for every task-bound Office launch.
+func (si *SchedulerIntegration) SetTaskCreationAttachmentReader(reader TaskCreationAttachmentReader) {
+	si.creationAttachments = reader
+}
+
+func (si *SchedulerIntegration) launchCreationAttachments(
+	ctx context.Context, taskID string,
+) ([]v1.MessageAttachment, error) {
+	if taskID == "" || si.creationAttachments == nil {
+		return nil, nil
+	}
+	return si.creationAttachments.ReadTaskCreationAttachments(ctx, taskID)
 }
 
 // NewSchedulerIntegration creates a new SchedulerIntegration.
@@ -226,17 +249,148 @@ func (si *SchedulerIntegration) liftParkedRoutingRuns(ctx context.Context) {
 }
 
 func (si *SchedulerIntegration) recoverStaleClaimedRuns(ctx context.Context) {
-	count, err := si.svc.repo.RecoverStale(ctx, time.Now().UTC().Add(-staleClaimedRunAge))
+	cutoff := time.Now().UTC().Add(-staleClaimedRunAge)
+	candidates, err := si.svc.repo.RunsRepository().ListStaleClaimedRuns(ctx, cutoff)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
 		}
-		si.logger.Error("failed to recover stale claimed runs", zap.Error(err))
+		si.logger.Error("failed to list stale claimed runs", zap.Error(err))
 		return
+	}
+	var count int64
+	for _, run := range candidates {
+		if ctx.Err() != nil {
+			return
+		}
+		if !si.canRecoverStaleClaimedRun(ctx, run) {
+			continue
+		}
+		recovered, err := si.svc.repo.RunsRepository().RecoverStaleClaimedRun(ctx, run, cutoff)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			si.logger.Warn("failed to recover stale claimed run",
+				zap.String("run_id", run.ID), zap.Error(err))
+			continue
+		}
+		if recovered {
+			count++
+		}
 	}
 	if count > 0 {
 		si.logger.Info("recovered stale claimed runs", zap.Int64("count", count))
 	}
+}
+
+func (si *SchedulerIntegration) canRecoverStaleClaimedRun(ctx context.Context, run *runsmodels.Run) bool {
+	taskID := si.extractTaskID(run.Payload)
+	if taskID == "" {
+		return si.canRecoverTasklessClaim(ctx, run)
+	}
+
+	return si.canRecoverTaskClaim(ctx, run, taskID)
+}
+
+func (si *SchedulerIntegration) canRecoverTasklessClaim(ctx context.Context, run *runsmodels.Run) bool {
+	if run.ClaimedAt == nil {
+		return false
+	}
+	sessions, err := si.svc.repo.ListRunSessions(ctx, run.ID)
+	if err != nil {
+		if ctx.Err() == nil {
+			si.logger.Warn("stale taskless run recovery deferred because attempts could not be read",
+				zap.String("run_id", run.ID), zap.Error(err))
+		}
+		return false
+	}
+	if len(sessions) == 0 {
+		return run.SessionID == ""
+	}
+	for _, session := range sessions {
+		// A reservation created during this claim transfers recovery to the
+		// run-session lifecycle, including its completion-in-flight window.
+		if session.State == models.RunSessionStatePreparing || session.State == models.RunSessionStateRunning ||
+			session.CreatedAt.IsZero() || !session.CreatedAt.Before(*run.ClaimedAt) {
+			return false
+		}
+	}
+	// Terminal attempts from earlier claims do not own this retry. The
+	// scheduler can requeue it if the new claim never reserved an attempt.
+	return true
+}
+
+func (si *SchedulerIntegration) canRecoverTaskClaim(ctx context.Context, run *runsmodels.Run, taskID string) bool {
+	probe := si.svc.runClaimSessionProbe
+	sessions, err := si.findTaskSessionsForClaim(ctx, run, taskID, probe)
+	if err != nil {
+		si.logClaimSessionLookupFailure(ctx, run.ID, taskID, err)
+		return false
+	}
+	if len(sessions) == 0 {
+		return run.SessionID == ""
+	}
+	for _, session := range sessions {
+		if session.SessionID != "" && si.preserveSessionOwnedClaim(ctx, run.ID, session, probe) {
+			return false
+		}
+	}
+	return true
+}
+
+func (si *SchedulerIntegration) findTaskSessionsForClaim(
+	ctx context.Context, run *runsmodels.Run, taskID string, probe RunClaimSessionProbe,
+) ([]RunClaimSessionEvidence, error) {
+	if probe == nil {
+		si.logger.Warn("stale task run recovery deferred because session lookup is unavailable",
+			zap.String("run_id", run.ID), zap.String("task_id", taskID))
+		return nil, errors.New("run claim session lookup unavailable")
+	}
+	if run.ClaimedAt == nil {
+		return nil, errors.New("run claim timestamp is unavailable")
+	}
+	return probe.FindTaskSessionsForClaim(ctx, taskID, run.AgentProfileID, run.SessionID, *run.ClaimedAt)
+}
+
+func (si *SchedulerIntegration) logClaimSessionLookupFailure(ctx context.Context, runID, taskID string, err error) {
+	if ctx.Err() == nil {
+		si.logger.Warn("stale task run recovery deferred because session lookup failed",
+			zap.String("run_id", runID), zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
+func (si *SchedulerIntegration) preserveSessionOwnedClaim(
+	ctx context.Context, runID string, session RunClaimSessionEvidence, probe RunClaimSessionProbe,
+) bool {
+	if probe == nil {
+		si.logger.Warn("stale task run recovery deferred because runtime probe is unavailable",
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
+	}
+	live, err := probe.ProbeAgentRunningForSession(ctx, session.SessionID)
+	if err != nil {
+		if ctx.Err() == nil {
+			si.logger.Warn("stale task run recovery deferred because runtime liveness is uncertain",
+				zap.String("run_id", runID), zap.String("session_id", session.SessionID), zap.Error(err))
+		}
+		return true
+	}
+	if live {
+		si.logger.Debug("stale run recovery deferred for live task session",
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
+	}
+	if session.TurnStartedAfterClaim {
+		// A turn accepted after this claim proves launch even after its process
+		// stopped and before Office completion settles the run.
+		si.logger.Debug("stale run recovery deferred for task turn owned by claim",
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
+	}
+	si.logger.Debug("stale run recovery found no live or current task turn",
+		zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+	return false
 }
 
 // reapStaleCheckouts is the backstop for task checkouts that never got
@@ -451,10 +605,19 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		zap.String("run_id", run.ID),
 		zap.Int("env_count", len(env)))
 
+	creationAttachments, err := si.launchCreationAttachments(ctx, taskID)
+	if err != nil {
+		si.logger.Warn("creation attachment read failed; retrying run",
+			zap.String("run_id", run.ID), zap.String("task_id", taskID), zap.Error(err))
+		si.releaseCheckoutIfNeeded(ctx, run)
+		_ = si.svc.HandleRunFailure(ctx, run, err)
+		return
+	}
 	launchCtx := LaunchContext{
 		ExecutorID:           execCfg.Type,
 		CausingRunID:         run.ID,
 		Prompt:               prompt,
+		Attachments:          creationAttachments,
 		Env:                  env,
 		ProfileID:            profileID,
 		AdditionalSkillSlugs: decisionSkillSlugs(runCtx.AvailableActions),
@@ -786,7 +949,7 @@ func (si *SchedulerIntegration) launchAgent(
 		return false
 	}
 	if err != nil {
-		if si.parkSessionRecoveryRun(ctx, run, err) {
+		if si.deferCircuitSuspension(ctx, run, err) || si.parkSessionRecoveryRun(ctx, run, err) {
 			si.releaseCheckoutIfNeeded(ctx, run)
 			return false
 		}
@@ -815,11 +978,9 @@ func (si *SchedulerIntegration) launchAgent(
 // (the same status the routed dispatch path uses for the identical
 // disposition, see scheduler.SchedulerService.handleLaunchDeferred) keeps
 // the scheduler's own wake-up loop from ever picking the run back up on
-// its own. There is no reconciliation path back from the orchestrator's
-// ceiling state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
-// require a durable operator-visible record here, not a lift mechanism), so
-// the run stays parked until an operator finds it and clears the routing
-// block by hand.
+// its own. The orchestrator's ceiling replay owns reconciliation: it settles
+// the exact run when the launch is admitted, ready or terminal events recover
+// failed settlement writes, and a terminal drop fails the parked run.
 func (si *SchedulerIntegration) handleLaunchDeferred(ctx context.Context, run *runsmodels.Run) {
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.AppendRunEvent(ctx, run.ID, "adapter.invoke", "info", map[string]interface{}{
@@ -860,6 +1021,29 @@ func (si *SchedulerIntegration) persistLaunchedSession(
 			zap.String("run_id", runID), zap.String("session_id", sessionID))
 		IncLoopSessionPersistFailed(workspaceID)
 	}
+}
+
+type circuitSuspensionSignal interface {
+	CircuitSuspendedUntil() time.Time
+}
+
+// deferCircuitSuspension preserves retry budget when no provider call was made.
+func (si *SchedulerIntegration) deferCircuitSuspension(ctx context.Context, run *runsmodels.Run, launchErr error) bool {
+	var signal circuitSuspensionSignal
+	if run == nil || !errors.As(launchErr, &signal) {
+		return false
+	}
+	until := signal.CircuitSuspendedUntil()
+	var err error
+	if until.IsZero() {
+		err = si.svc.repo.ParkRunForProviderCapacity(ctx, run.ID, routing.StatusBlockedActionRequired, time.Time{})
+	} else {
+		err = si.svc.repo.ScheduleRetry(ctx, run.ID, until, run.RetryCount)
+	}
+	if err != nil {
+		si.logger.Error("failed to defer circuit-suspended run", zap.String("run_id", run.ID), zap.Error(err))
+	}
+	return true
 }
 
 type sessionRecoveryRequiredSignal interface {
@@ -1062,7 +1246,7 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 	}
 	launched, parked, err := rd.DispatchWithRouting(ctx, run, agent, launch)
 	if err != nil {
-		if si.parkSessionRecoveryRun(ctx, run, err) {
+		if si.deferCircuitSuspension(ctx, run, err) || si.parkSessionRecoveryRun(ctx, run, err) {
 			si.releaseCheckoutIfNeeded(ctx, run)
 			return true, false
 		}
@@ -1241,6 +1425,7 @@ func (si *SchedulerIntegration) buildPromptContext(
 	pc := &PromptContext{Reason: reason}
 	pc.OneTimeInstructions = parsed[RunPayloadOneTimeInstructionsKey]
 	applyRoutineCatchUpContext(pc, reason, contextSnapshot)
+	si.enrichRoutineWorkContext(ctx, pc, reason, contextSnapshot)
 
 	if taskID := parsed["task_id"]; taskID != "" {
 		si.enrichTaskContext(ctx, pc, taskID)
@@ -1279,6 +1464,19 @@ func (si *SchedulerIntegration) buildPromptContext(
 		if parsed["stage_type"] != "" {
 			pc.StageType = si.svc.resolveGateCommentStage(ctx, parsed)
 		}
+	}
+
+	if reason == RunReasonHandoffCompleted {
+		pc.HandoffDeliveryTaskID = parsed["delivery_task_id"]
+		pc.HandoffDeliveryTitle = parsed["delivery_title"]
+		pc.HandoffDeliveryState = parsed["delivery_state"]
+		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
+	}
+
+	if reason == RunReasonTaskBlockerFailed ||
+		strings.Contains(payload, `"blocker_failure_alerts"`) ||
+		strings.Contains(contextSnapshot, `"blocker_failure_alerts"`) {
+		si.enrichBlockerFailedContext(ctx, pc, payload, contextSnapshot)
 	}
 
 	if reason == RunReasonAgentError {

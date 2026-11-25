@@ -6,10 +6,23 @@ import (
 	"errors"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/auth/store"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 )
+
+// ErrCredentialLookupUnavailable reports that a required credential, account,
+// or organization read failed, so authentication could not decide. It is not a
+// definitive rejection: the credential may still be valid once storage
+// recovers.
+var ErrCredentialLookupUnavailable = errors.New("credential lookup unavailable")
+
+// errAccountInactive marks a stored account that is no longer active. It is
+// deliberately distinct from lookup failures so a disabled account remains a
+// definitive rejection rather than an unavailable verification.
+var errAccountInactive = errors.New("account inactive")
 
 // Login verifies email+password and mints a browser session. The returned
 // string is the raw session token to place in the cookie.
@@ -42,7 +55,8 @@ func (s *Service) Login(ctx context.Context, email, password, userAgent, ip stri
 	// a session that fails on the very next request. The message is distinct
 	// from ErrInvalidCredentials on purpose: the credentials were correct, and
 	// telling the user their password is wrong would send them to reset it.
-	if !s.orgUsable(ctx, user.OrgID) {
+	usable, err := s.orgUsable(ctx, user.OrgID)
+	if err != nil || !usable {
 		return nil, "", ErrOrgUnavailable
 	}
 	token, err := s.createSession(ctx, user.ID, userAgent, ip)
@@ -85,22 +99,32 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentSessionID, 
 // refreshes the stored session IP, but only when non-empty and differing
 // from the recorded value (an empty ip never overwrites; same-IP requests
 // only touch timestamps).
-func (s *Service) ResolveSessionToken(ctx context.Context, token, ip string) (authn.Identity, bool) {
+//
+// A known-invalid credential returns ok=false with a nil error. A required
+// store read that failed returns an error wrapping
+// ErrCredentialLookupUnavailable and no identity.
+func (s *Service) ResolveSessionToken(ctx context.Context, token, ip string) (authn.Identity, bool, error) {
 	if token == "" {
-		return authn.Identity{}, false
+		return authn.Identity{}, false, nil
 	}
 	sess, err := s.store.GetSessionByTokenHash(ctx, HashToken(token))
 	if err != nil {
-		return authn.Identity{}, false
+		if errors.Is(err, store.ErrNotFound) {
+			return authn.Identity{}, false, nil
+		}
+		return authn.Identity{}, false, s.lookupUnavailable("session", "session_read", err)
 	}
 	now := time.Now().UTC()
 	if sess.ExpiresAt.Before(now) {
 		_ = s.store.DeleteSession(ctx, sess.ID, sess.UserID)
-		return authn.Identity{}, false
+		return authn.Identity{}, false, nil
 	}
 	user, err := s.activeUser(ctx, sess.UserID)
 	if err != nil {
-		return authn.Identity{}, false
+		if errors.Is(err, errAccountInactive) || errors.Is(err, sql.ErrNoRows) {
+			return authn.Identity{}, false, nil
+		}
+		return authn.Identity{}, false, s.lookupUnavailable("session", "account_read", err)
 	}
 	if now.Sub(sess.LastSeenAt) > sessionTouchInterval {
 		refreshIP := ""
@@ -109,38 +133,77 @@ func (s *Service) ResolveSessionToken(ctx context.Context, token, ip string) (au
 		}
 		_ = s.store.TouchSession(ctx, sess.ID, now, now.Add(s.SessionTTL()), refreshIP)
 	}
-	if !s.orgUsable(ctx, user.OrgID) {
-		return authn.Identity{}, false
+	usable, err := s.orgUsable(ctx, user.OrgID)
+	if err != nil {
+		return authn.Identity{}, false, s.lookupUnavailable("session", "organization_read", err)
 	}
-	return identityOf(user, sess.ID, ""), true
+	if !usable {
+		return authn.Identity{}, false, nil
+	}
+	return identityOf(user, sess.ID, ""), true, nil
 }
 
 // ResolveBearer authenticates an Authorization bearer credential when it is a
 // kandev personal access token. Non-PAT bearers (e.g. office agent JWTs)
-// return false so the caller can defer to their own validators.
-func (s *Service) ResolveBearer(ctx context.Context, token string) (authn.Identity, bool) {
+// return false with a nil error so the caller can defer to their own
+// validators.
+func (s *Service) ResolveBearer(ctx context.Context, token string) (authn.Identity, bool, error) {
 	if !IsPATFormat(token) {
-		return authn.Identity{}, false
+		return authn.Identity{}, false, nil
 	}
 	record, err := s.store.GetAPITokenByHash(ctx, HashToken(token))
 	if err != nil {
-		return authn.Identity{}, false
+		if errors.Is(err, store.ErrNotFound) {
+			return authn.Identity{}, false, nil
+		}
+		return authn.Identity{}, false, s.lookupUnavailable("pat", "token_read", err)
 	}
 	now := time.Now().UTC()
 	if record.ExpiresAt != nil && record.ExpiresAt.Before(now) {
-		return authn.Identity{}, false
+		return authn.Identity{}, false, nil
 	}
 	user, err := s.activeUser(ctx, record.UserID)
 	if err != nil {
-		return authn.Identity{}, false
+		if errors.Is(err, errAccountInactive) || errors.Is(err, sql.ErrNoRows) {
+			return authn.Identity{}, false, nil
+		}
+		return authn.Identity{}, false, s.lookupUnavailable("pat", "account_read", err)
 	}
 	if record.LastUsedAt == nil || now.Sub(*record.LastUsedAt) > sessionTouchInterval {
 		_ = s.store.TouchAPIToken(ctx, record.ID, now)
 	}
-	if !s.orgUsable(ctx, user.OrgID) {
-		return authn.Identity{}, false
+	usable, err := s.orgUsable(ctx, user.OrgID)
+	if err != nil {
+		return authn.Identity{}, false, s.lookupUnavailable("pat", "organization_read", err)
 	}
-	return identityOf(user, "", record.ID), true
+	if !usable {
+		return authn.Identity{}, false, nil
+	}
+	return identityOf(user, "", record.ID), true, nil
+}
+
+// lookupUnavailable records one bounded diagnostic for a failed required read
+// and returns the uncertain result. Error text and request material stay out
+// of the log: store errors can contain DSNs, SQL, or values.
+func (s *Service) lookupUnavailable(credentialKind, operation string, err error) error {
+	if s.log != nil {
+		s.log.Warn("auth.credential_lookup_failed",
+			zap.String("credential_kind", credentialKind),
+			zap.String("operation", operation),
+			zap.String("category", lookupErrorCategory(err)))
+	}
+	return errors.Join(ErrCredentialLookupUnavailable, err)
+}
+
+func lookupErrorCategory(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	default:
+		return "store_error"
+	}
 }
 
 // IdentityForUser resolves a stored user ID to the identity that user carries
@@ -162,7 +225,8 @@ func (s *Service) IdentityForUser(ctx context.Context, userID string) (authn.Ide
 	if err != nil {
 		return authn.Identity{}, false
 	}
-	if !s.orgUsable(ctx, user.OrgID) {
+	usable, err := s.orgUsable(ctx, user.OrgID)
+	if err != nil || !usable {
 		return authn.Identity{}, false
 	}
 	return identityOf(user, "", ""), true
@@ -205,7 +269,7 @@ func (s *Service) activeUser(ctx context.Context, userID string) (*usermodels.Us
 		return nil, err
 	}
 	if user.Status != usermodels.StatusActive {
-		return nil, errors.New("user disabled")
+		return nil, errAccountInactive
 	}
 	return user, nil
 }
@@ -250,7 +314,14 @@ func (s *Service) ResolveUserIdentity(ctx context.Context, userID string) (authn
 	if err != nil {
 		return authn.Identity{}, false, errors.Join(ErrIdentityUnavailable, err)
 	}
-	if user.Status != usermodels.StatusActive || !s.orgUsable(ctx, user.OrgID) {
+	if user.Status != usermodels.StatusActive {
+		return authn.Identity{}, false, nil
+	}
+	usable, err := s.orgUsable(ctx, user.OrgID)
+	if err != nil {
+		return authn.Identity{}, false, errors.Join(ErrIdentityUnavailable, err)
+	}
+	if !usable {
 		return authn.Identity{}, false, nil
 	}
 	return identityOf(user, "", ""), true, nil

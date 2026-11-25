@@ -73,7 +73,7 @@ type Repository interface {
 	UpdateRunStatus(ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string) error
 	// UpdateRunStatusIfTaskCreated closes out a run only while it is still
 	// task_created, returning whether this call was the one that closed
-	// it. Used by both the TaskMoved-driven SyncRunStatus and the
+	// it. Used by both the task-state-driven SyncRunStatus and the
 	// concurrency gate's own inline check (applyConcurrencyPolicy), which
 	// can both observe the same terminal task; the conditional WHERE
 	// clause is what lets exactly one of them win instead of a
@@ -179,6 +179,11 @@ type RoutineTaskCreator interface {
 		ctx context.Context,
 		workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID string,
 	) (string, error)
+}
+
+// Required assignments must be written before create-time auto-start can run.
+type routineTaskCreatorWithRequirements interface {
+	CreateOfficeTaskInWorkflowWithRequirements(context.Context, string, string, string, string, string, string, string, int) (string, error)
 }
 
 // RoutineService provides routine CRUD, trigger management, and dispatch logic.
@@ -1194,7 +1199,7 @@ func (s *RoutineService) checkPauseGate(ctx context.Context, workspaceID, routin
 // materialiseRoutineRun branches on tmpl.Title to choose the lightweight
 // (taskless) or heavy (real task) path. The heavy path transitions the
 // run to models.RoutineRunStatusTaskCreated and attaches the new task's
-// id — that status stays until the linked task reaches a terminal step
+// id — that status stays until the linked task reaches a terminal state
 // (see SyncRunStatus). The lightweight path has no task to wait on, so
 // it resolves to a terminal status (done/failed) immediately; see
 // materialiseLightweightRoutineRun.
@@ -1230,14 +1235,19 @@ func (s *RoutineService) materialiseHeavyRoutineRun(
 	run *RoutineRun,
 	title, description string,
 ) error {
+	var template taskTemplate
+	if err := json.Unmarshal([]byte(routine.TaskTemplate), &template); err != nil {
+		return fmt.Errorf("invalid routine task template: %w", err)
+	}
+	required := template.RequiredSubtaskCount
+	if required < 0 {
+		return fmt.Errorf("required subtask count must not be negative")
+	}
 	workflowID, err := s.workflowEnsurer.EnsureRoutineWorkflow(ctx, routine.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("ensure routine workflow: %w", err)
 	}
-	taskID, err := s.taskCreator.CreateOfficeTaskInWorkflow(
-		ctx, routine.WorkspaceID, "", routine.AssigneeAgentProfileID,
-		workflowID, title, description, routine.ID,
-	)
+	taskID, err := s.createRoutineTaskWithContext(ctx, routine, workflowID, title, description, template)
 	if err != nil {
 		return fmt.Errorf("create routine task: %w", err)
 	}
@@ -1399,13 +1409,10 @@ func marshalRoutinePayload(routineID string, vars map[string]string, gap *gapSum
 	return string(b), nil
 }
 
-// selfHealIfTaskTerminal is the pull-based counterpart to SyncRunStatus:
-// SyncRunStatus is driven by the TaskMoved event, but nothing in
-// production populates the step names that event needs
-// (office-routine-runs R1), so the gate cannot rely on that event alone
-// ever clearing it. Reading the linked task's real state here means a
-// heavy run's gate self-heals at the next fire even when that event
-// never arrives. An empty LinkedTaskID on a task_created row is never
+// selfHealIfTaskTerminal is the pull-based counterpart to SyncRunStatus.
+// Reading the linked task's real state here means a heavy run's gate
+// self-heals at the next fire even if its task.state_changed event was
+// not delivered. An empty LinkedTaskID on a task_created row is never
 // produced by current code (materialiseHeavyRoutineRun always sets both
 // together), so such a row can only be a stale write from before that
 // invariant held. Its fingerprint would otherwise gate every future fire
@@ -1498,11 +1505,11 @@ func (s *RoutineService) FireManual(
 }
 
 // SyncRunStatus closes out the heavy routine run linked to taskID when
-// that task reaches a terminal step. This is the writer for the
+// that task reaches a terminal state. This is the writer for the
 // terminal side of D2 in the office-routine-runs triage: heavy runs
 // stay in RoutineRunStatusTaskCreated (an active gate) until their task
 // finishes, and this is what clears the gate. terminalStatus is
-// "cancelled" for a task moved to the Cancelled step, "failed" for
+// "cancelled" for a cancelled task, "failed" for
 // a failed task, and "done" for a completed task. A taskID with no
 // linked run is not an error — most tasks aren't routine-created. An
 // empty taskID is rejected outright: linked_task_id defaults to "" for
@@ -1547,8 +1554,11 @@ func (s *RoutineService) closeOutRun(ctx context.Context, run *RoutineRun, termi
 // -- helpers --
 
 type taskTemplate struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Title                string   `json:"title"`
+	Description          string   `json:"description"`
+	ProjectID            string   `json:"project_id,omitempty"`
+	BlockedBy            []string `json:"blocked_by,omitempty"`
+	RequiredSubtaskCount int      `json:"required_subtask_count,omitempty"`
 }
 
 func parseTaskTemplate(raw string) taskTemplate {

@@ -35,7 +35,8 @@ provider API keys. The mobile project uses Chromium with Pixel-5 emulation,
 so the same browser installation serves both commands.
 
 Select the project before the spec path. The default `chromium` project excludes
-`mobile-*.spec.ts`, auth, routing, and container suites. If a file reports
+mobile specs, auth and routing suites, container tests, and the isolated
+first-profile tests. If a file reports
 `No tests found`, check its owning project before changing the file or filters.
 Pass runner options such as `--project` before any `--` separator; options after
 the separator are forwarded to Playwright and do not select the managed runner's
@@ -84,15 +85,18 @@ artifact, and each shard validates that immutable identity after download.
 `KANDEV_E2E_BIN` selects a custom backend binary. The setup still checks the
 local mock agent and other required artifacts.
 
-Recovery tests also require `bin/e2e-delivery-fixture`. The managed runner builds
-it with `make build-e2e-delivery-fixture`. CI and Docker runs use the compiled
+Recovery tests also require `bin/e2e-delivery-fixture`, and Send Now claim-loss
+tests require `bin/e2e-send-now-fixture`. The managed runner builds both with
+`make build-e2e-delivery-fixture build-e2e-send-now-fixture`. CI and Docker runs
+use the compiled
 fixture, so test execution does not require Go. Its test-only source has its own
 freshness check. The fixture fills an isolated, stopped session's retained
 journal to the shipped 256 MiB limit and checks pruning after Retry.
 
 ## Playwright projects
 
-The suite is split into six projects. Pick one with `--project=<name>`.
+The suite uses separate projects for browser targets and tests that need an
+isolated backend worker. Pick one with `--project=<name>`.
 
 ### `routing`
 
@@ -128,6 +132,12 @@ pnpm e2e:raw
 ### `mobile-chrome`
 
 Same as `chromium` but on Playwright's Pixel-5 viewport, gated on `tests/**/mobile-*.spec.ts`. Runs in the same CI shard matrix as `chromium`.
+
+### `first-profile-capability` and `mobile-first-profile-capability`
+
+Run the desktop and phone first-profile capability tests in dedicated backend
+workers. These tests require a clean agent registry and database before they
+create the first saved profile. The projects run in the normal CI shard matrix.
 
 ### `containers` — **Docker required**
 
@@ -255,8 +265,9 @@ Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (fl
 ### Duration-aware CI sharding
 
 CI creates an ephemeral manifest for each cohort from the current test catalog.
-The normal cohort has 28 shards and runs `chromium` plus `mobile-chrome`; the
-container cohort has 6 shards and runs `containers`. The independent
+The normal cohort has 28 shards and runs desktop, phone, and isolated
+first-profile projects. The container cohort has 6 shards and runs
+`containers`. The independent
 `kubernetes-compat` matrix is deliberately excluded from both catalogs. The manifest assigns
 project/file units with a deterministic longest-processing-time planner. Matrix
 jobs pass the assigned files to `run-planned-shard.sh`; they do not use ordinal
@@ -336,10 +347,10 @@ baseline.
 
 ### Flake rate and trend
 
-CI retries hide flakes: with `retries: 3` and `failOnFlakyTests: false`, a test
-that fails and then passes never fails the build. The **E2E flake rate** section
-of the `e2e-report` job summary makes that number visible without downloading
-anything. It reports, for the run:
+CI allows three retries and accepts tests that pass after a retry. Set
+`E2E_FAIL_ON_FLAKY=1` for a diagnostic run that fails on retry passes. The
+**E2E flake rate** section of the `e2e-report` job summary reports these results
+without requiring a download:
 
 - the flake count, the number of executed tests, and the rate per 1000;
 - the baseline (median of the last 10 recorded runs) and the change against it;
@@ -432,7 +443,7 @@ storage reporting are filtered by the process-scoped ownership label.
 
 ## Mocked vs real
 
-- **Mocked**: Azure DevOps (`KANDEV_MOCK_AZURE_DEVOPS=true`), Jira (`KANDEV_MOCK_JIRA=true`), Linear (`KANDEV_MOCK_LINEAR=true`), GitHub (`KANDEV_MOCK_GITHUB=true`), and the agent process itself (`KANDEV_MOCK_AGENT=only`). These are third-party services or external processes we don't want CI to depend on.
+- **Mocked**: Jira (`KANDEV_MOCK_JIRA=true`), Linear (`KANDEV_MOCK_LINEAR=true`), GitHub (`KANDEV_MOCK_GITHUB=true`), and the agent process itself (`KANDEV_MOCK_AGENT=only`). These are third-party services or external processes we don't want CI to depend on.
 - **Real**: Everything inside the kandev backend — orchestrator, lifecycle manager, agentctl, SSH/SFTP, Docker SDK, Kubernetes API/exec/port-forward, git, and worktree manager. The point of e2e is to exercise the real code paths.
 
 The SSH and Kubernetes executors have no mock controller. SSH tests use a real Docker-hosted sshd target. Kubernetes tests use a real Kind API server, node, scheduler, storage provisioner, Pod exec, and port-forward; fault injection operates on those resources directly.

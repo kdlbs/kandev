@@ -455,6 +455,8 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await uploadPackage(testPage, PACKAGE_PATH);
     const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
     await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+    await expect(pluginRow).toHaveCSS("padding-inline-start", "12px");
+    await expect(pluginRow).toHaveCSS("padding-inline-end", "12px");
 
     await pluginRow.getByRole("button", { name: "Uninstall" }).click();
     const rowConfirmation = testPage.getByTestId("plugin-uninstall-confirm-popover");
@@ -467,7 +469,11 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(testPage).toHaveURL(new RegExp(`/settings/plugins/${PLUGIN_ID}$`));
     const detail = testPage.getByTestId(`plugin-detail-${PLUGIN_ID}`);
     await expect(detail).toBeVisible();
-    await detail.getByRole("button", { name: "Uninstall" }).click();
+    const uninstallButton = detail.getByRole("button", { name: "Uninstall" });
+    await uninstallButton.evaluate((button) =>
+      button.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }),
+    );
+    await uninstallButton.click();
 
     const detailConfirmation = testPage.getByTestId("plugin-uninstall-confirm-popover");
     await expect(detailConfirmation).toContainText("Kandev E2E Fixture Plugin");

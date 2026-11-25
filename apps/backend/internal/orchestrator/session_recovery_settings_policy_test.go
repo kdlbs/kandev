@@ -335,7 +335,7 @@ func TestRecoverSessionProviderRestoredPolicyReachesLifecycleLaunchRequest(t *te
 		repo: repo, sessionID: sessionID, taskID: taskID, onStartCalled: &started,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	response, err := svc.RecoverSessionWithSettingsPolicy(
 		ctx, taskID, sessionID, recoveryActionResume, executor.ResumeSettingsPolicyProviderRestored,

@@ -284,6 +284,7 @@ test.describe("Configuration Chat", () => {
     await popover.getByRole("button", { name: "Expand clarification" }).click();
     await expect(clarification.getByText("Which database", { exact: false })).toBeVisible();
     await clarification.getByText("PostgreSQL", { exact: true }).click();
+    await clarification.getByRole("button", { name: "Send answer" }).click();
     await expect(clarification).not.toBeVisible({ timeout: 30_000 });
   });
 });

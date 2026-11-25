@@ -9,6 +9,7 @@
 export const KEY_SEQUENCES = {
   esc: "\x1b",
   tab: "\t",
+  enter: "\r",
   up: "\x1b[A",
   down: "\x1b[B",
   right: "\x1b[C",
@@ -21,3 +22,14 @@ export const KEY_SEQUENCES = {
   ctrlD: "\x04",
   ctrlZ: "\x1a",
 } as const;
+
+export type ArrowKey = "up" | "down" | "left" | "right";
+
+export function isArrowKey(key: string): key is ArrowKey {
+  return key === "up" || key === "down" || key === "left" || key === "right";
+}
+
+export function arrowSequence(key: ArrowKey, application: boolean): string {
+  const normal = KEY_SEQUENCES[key];
+  return application ? `\x1bO${normal.slice(2)}` : normal;
+}

@@ -449,7 +449,7 @@ func (r *RemoteDockerExecutor) reconnectToContainer(
 	delegate := r.reconnectDelegate(session)
 	instance, err := delegate.reconnectToContainer(ctx, session.dockerClient, req)
 	if err != nil {
-		if errors.Is(err, errContainerEndpointResolution) {
+		if errors.Is(err, errContainerEndpointResolution) || errors.Is(err, errReconnectOwnerBlocked) {
 			return nil, err
 		}
 		r.logger.Info("remote docker: could not reconnect, launching fresh",
@@ -570,6 +570,10 @@ func (r *RemoteDockerExecutor) removeLegacySessionDir(ctx context.Context, insta
 	if !shouldRunExecutorCleanup(instance.StopReason) || instance.InstanceID == "" {
 		return
 	}
+	agentctlInstanceID := getMetadataString(instance.Metadata, MetadataKeyRemoteDockerAgentctlInstanceID)
+	if agentctlInstanceID == "" {
+		agentctlInstanceID = instance.InstanceID
+	}
 
 	r.mu.Lock()
 	session := r.sessions[instance.InstanceID]
@@ -587,7 +591,7 @@ func (r *RemoteDockerExecutor) removeLegacySessionDir(ctx context.Context, insta
 			zap.String("instance_id", instance.InstanceID), zap.Error(err))
 		return
 	}
-	dir := path.Join(root, "agent-sessions", instance.InstanceID)
+	dir := path.Join(root, "agent-sessions", agentctlInstanceID)
 
 	if _, stderr, err := runSSHCommand(cleanupCtx, session.sshClient, "rm -rf "+shellQuote(dir)); err != nil {
 		r.logger.Warn("remote docker: failed to remove the remote agent session dir",
@@ -612,7 +616,8 @@ func (r *RemoteDockerExecutor) StopInstance(ctx context.Context, instance *Execu
 	// through a fresh connection from the persisted target.
 	defer r.releaseSession(instance.InstanceID)
 	defer r.forgetTarget(instance.InstanceID)
-	teardown := force || instance.AgentStopFailed || shouldTeardownDockerContainer(instance.StopReason)
+	teardown := force || shouldTeardownDockerContainer(instance.StopReason) ||
+		(instance.AgentStopFailed && !shouldPreserveRemoteDockerStopReason(instance.StopReason))
 
 	r.removeLegacySessionDir(ctx, instance)
 

@@ -116,6 +116,10 @@ configuration control.
   admissions and interactive execution requests without terminating work already
   admitted. Read-only recovery of an existing execution shall not authorize new
   prompts or provision new compute without a valid launch actor.
+- **AC-EXECUTORS-OWNERSHIP-004.5:** A retained session's legacy `local` or
+  `local_pc` executor selection shall resolve to the built-in local executor only
+  when no real or retired row has that ID. Ownership, profile and storage errors
+  shall remain authoritative.
 
 ### REQ-EXECUTORS-OWNERSHIP-005: Accountable autonomous launches
 

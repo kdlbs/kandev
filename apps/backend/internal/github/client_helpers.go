@@ -190,6 +190,7 @@ func newPRStatusWithCheckState(
 		PendingReviewCount: pendingReviewCount,
 		ChecksTotal:        total,
 		ChecksPassing:      passing,
+		CheckSummary:       summarizeSelectedChecks(pr.HeadSHA, checks),
 		// REST path actually counted check runs + reviews — distinguish
 		// from the batched-GraphQL path that only carries rollup state.
 		ChecksPopulated:       true,

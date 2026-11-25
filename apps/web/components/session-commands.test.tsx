@@ -109,7 +109,7 @@ describe("session palette copy", () => {
         git: gitOptions.git as unknown as Parameters<typeof buildGitCommands>[0]["git"],
         t: markerT,
       }),
-      ...buildWorkspaceCommands("session-A", markerT),
+      ...buildWorkspaceCommands("session-A", markerT, vi.fn()),
       ...buildPanelCommands(
         {
           addBrowser: vi.fn(),

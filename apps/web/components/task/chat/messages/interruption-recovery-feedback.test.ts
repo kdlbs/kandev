@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  continuationActivityConfirmed,
   continuationPhase,
   interruptionRecoveryKey,
   retryNoticeVisible,
+  retainedTurnAttemptsKey,
   retainedTurnRecoveryKey,
 } from "./interruption-recovery-feedback";
 
@@ -45,6 +47,31 @@ describe("provider interruption feedback", () => {
       continuationPhase({ retrying: true, recovery_mode: "continue", recovery_phase: "unknown" }),
     ).toBeUndefined();
   });
+  it("confirms resumed activity only with boolean true and a continuing continuation", () => {
+    const confirmed = {
+      retrying: true,
+      recovery_mode: "continue",
+      recovery_phase: "continuing",
+      recovery_activity_confirmed: true,
+    };
+    expect(continuationActivityConfirmed(confirmed)).toBe(true);
+    expect(
+      continuationActivityConfirmed({ ...confirmed, recovery_activity_confirmed: false }),
+    ).toBe(false);
+    expect(
+      continuationActivityConfirmed({ ...confirmed, recovery_activity_confirmed: undefined }),
+    ).toBe(false);
+    expect(
+      continuationActivityConfirmed({
+        ...confirmed,
+        recovery_activity_confirmed: "true" as unknown as boolean,
+      }),
+    ).toBe(false);
+    expect(continuationActivityConfirmed({ ...confirmed, retrying: false })).toBe(false);
+    expect(continuationActivityConfirmed({ ...confirmed, recovery_mode: "replay" })).toBe(false);
+    expect(continuationActivityConfirmed({ ...confirmed, recovery_phase: "waiting" })).toBe(false);
+    expect(retryNoticeVisible("RUNNING", confirmed)).toBe(true);
+  });
   it("reports exhaustion only with actual started attempts", () => {
     expect(
       interruptionRecoveryKey({ recovery_disposition: "exhausted", attempts_started: 0 }),
@@ -81,6 +108,64 @@ describe("capacity recovery deadline feedback", () => {
         recovery_disposition: "refused",
         attempts_started: 0,
       }),
-    ).toBe("chat:retainedTurnRecoveryStoppedBody");
+    ).toBe("chat:retainedTurnRecoveryUnknownBody");
+  });
+});
+
+describe("retained interruption refusal feedback", () => {
+  it.each([
+    ["unsafe_work", "chat:retainedTurnRecoveryUnsafeBody"],
+    ["unsupported_restore", "chat:retainedTurnRecoveryUnsupportedBody"],
+    ["missing_evidence", "chat:retainedTurnRecoveryEvidenceBody"],
+  ])("explains the attested refusal reason %s without claiming an attempt ran", (reason, key) => {
+    expect(
+      retainedTurnRecoveryKey({
+        runtime_retained: true,
+        recovery_disposition: "refused",
+        recovery_reason: reason,
+        attempts_started: 0,
+      }),
+    ).toBe(key);
+  });
+
+  it("uses neutral copy for historical and unknown refusal reasons", () => {
+    expect(
+      retainedTurnRecoveryKey({ runtime_retained: true, recovery_disposition: "refused" }),
+    ).toBe("chat:retainedTurnRecoveryUnknownBody");
+    expect(
+      retainedTurnRecoveryKey({
+        runtime_retained: true,
+        recovery_disposition: "refused",
+        recovery_reason: "future_reason",
+        attempts_started: 0,
+      }),
+    ).toBe("chat:retainedTurnRecoveryUnknownBody");
+  });
+
+  it("reports actual attempts only when a refused recovery started them", () => {
+    expect(
+      retainedTurnAttemptsKey({ recovery_disposition: "refused", attempts_started: 0 }),
+    ).toBeUndefined();
+    expect(retainedTurnAttemptsKey({ recovery_disposition: "refused", attempts_started: 2 })).toBe(
+      "chat:retainedTurnRecoveryAttemptsStarted",
+    );
+    expect(
+      retainedTurnAttemptsKey({ recovery_disposition: "exhausted", attempts_started: 2 }),
+    ).toBeUndefined();
+    expect(
+      retainedTurnRecoveryKey({
+        runtime_retained: true,
+        recovery_disposition: "refused",
+        recovery_reason: "unsupported_restore",
+        attempts_started: 2,
+      }),
+    ).toBe("chat:retainedTurnRecoveryUnsupportedBody");
+    expect(
+      retainedTurnRecoveryKey({
+        runtime_retained: true,
+        recovery_disposition: "exhausted",
+        attempts_started: 5,
+      }),
+    ).toBe("chat:retainedTurnRecoveryExhaustedBody");
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
 import {
   IconChevronDown,
   IconChevronRight,
@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useTranslation } from "react-i18next";
-import Link from "@/components/routing/app-link";
+import { InboxOpenTaskLink } from "./inbox-open-task-link";
 import { useAppStore } from "@/components/state-provider";
 import { toast } from "@/lib/toast/sonner";
 import { formatRelativeTime } from "@/lib/i18n/formats";
@@ -41,7 +41,6 @@ import {
   rowSecondaryText,
 } from "@/lib/needs-you-inbox/row-presentation";
 import { resolveThreadSessionStatus } from "@/lib/threads/thread-session-status";
-import { linkToTask } from "@/lib/links";
 import type { TaskSessionState } from "@/lib/types/http";
 import type {
   LateClarificationSnapshot,
@@ -113,20 +112,24 @@ function useRowOutcomeNotice(primaryText: string, bumpRefreshTick: () => void) {
 
 function RowActionsMenu({
   disabled,
-  taskHref,
+  taskId,
+  sessionId,
   onDismiss,
   onSnooze,
 }: {
   disabled: boolean;
-  taskHref: string;
+  taskId: string;
+  sessionId: string;
   onDismiss: () => void;
   onSnooze: (duration: ClarificationInboxSnoozeDuration) => void;
 }) {
   const { t } = useTranslation();
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
+          ref={triggerRef}
           type="button"
           variant="ghost"
           size="icon"
@@ -139,9 +142,14 @@ function RowActionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem asChild className="cursor-pointer">
-          <Link href={taskHref} data-testid="needs-you-inbox-open-task-menu-item">
+          <InboxOpenTaskLink
+            taskId={taskId}
+            sessionId={sessionId}
+            returnFocusRef={triggerRef}
+            data-testid="needs-you-inbox-open-task-menu-item"
+          >
             {t("needsYouInbox:openTask")}
-          </Link>
+          </InboxOpenTaskLink>
         </DropdownMenuItem>
         <DropdownMenuItem className="cursor-pointer" onSelect={onDismiss}>
           {t("needsYouInbox:dismiss")}
@@ -167,29 +175,28 @@ function RowActionsMenu({
   );
 }
 
-function taskHrefForBundle(bundle: ClarificationInboxBundle): string {
-  return linkToTask(bundle.task_id, { sessionId: bundle.session_id ?? undefined });
-}
-
 // eslint-disable-next-line max-lines-per-function -- the row keeps its responsive actions and inline panel together.
 export function NeedsYouInboxRow({
   bundle,
+  allocationRef,
   onLateAnswer,
   lateAnswerState,
 }: {
   bundle: ClarificationInboxBundle;
+  allocationRef?: RefObject<HTMLElement | null>;
   onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
   lateAnswerState?: LateClarificationState;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
+  const rowHeaderRef = useRef<HTMLDivElement>(null);
+  const reservedSiblingRefs = useMemo(() => [rowHeaderRef], []);
   const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
 
   const primaryText = rowPrimaryText(bundle, t("needsYouInbox:questionFromAgent"));
   const secondaryText = rowSecondaryText(bundle);
   const questionCount = rowQuestionCount(bundle);
-  const taskHref = taskHrefForBundle(bundle);
   const relativeTime = formatRelativeTime(bundle.created_at);
   const statusLabel = t(
     resolveThreadSessionStatus({
@@ -212,7 +219,7 @@ export function NeedsYouInboxRow({
 
   return (
     <div ref={rowRef} data-testid="needs-you-inbox-row" data-pending-id={bundle.pending_id}>
-      <div className="flex items-center gap-3 px-4 py-2.5">
+      <div ref={rowHeaderRef} className="flex items-center gap-3 px-4 py-2.5">
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
@@ -256,13 +263,18 @@ export function NeedsYouInboxRow({
           size="sm"
           className="hidden shrink-0 cursor-pointer sm:inline-flex"
         >
-          <Link href={taskHref} data-testid="needs-you-inbox-open-task">
+          <InboxOpenTaskLink
+            taskId={bundle.task_id}
+            sessionId={bundle.session_id}
+            data-testid="needs-you-inbox-open-task"
+          >
             {t("needsYouInbox:openTask")}
-          </Link>
+          </InboxOpenTaskLink>
         </Button>
         <RowActionsMenu
           disabled={dismissing || snoozing}
-          taskHref={taskHref}
+          taskId={bundle.task_id}
+          sessionId={bundle.session_id}
           onDismiss={() =>
             void runDismiss(() => dismissClarificationInboxBundle(bundle.pending_id))
           }
@@ -280,7 +292,10 @@ export function NeedsYouInboxRow({
           onLateAnswer={onLateAnswer}
           lateAnswerState={lateAnswerState}
           shortcutScopeRef={rowRef}
-          maxHeightVh={50}
+          initialMaxHeightVh={50}
+          allocationRef={allocationRef}
+          anchorRef={rowRef}
+          reservedSiblingRefs={reservedSiblingRefs}
         />
       )}
     </div>

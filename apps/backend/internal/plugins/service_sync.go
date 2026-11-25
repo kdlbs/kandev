@@ -199,12 +199,13 @@ func (s *Service) registerSideload(id, version string) error {
 	}
 
 	rec := &store.Record{
-		Manifest:       *m,
-		Status:         StatusDisabled,
-		InstallationID: uuid.NewString(),
-		InstallPath:    versionDir,
-		Signed:         false,
-		InstalledAt:    time.Now().UTC(),
+		Manifest:               *m,
+		Status:                 StatusDisabled,
+		InstallationID:         uuid.NewString(),
+		AgentToolPolicyVersion: uuid.NewString(),
+		InstallPath:            versionDir,
+		Signed:                 false,
+		InstalledAt:            time.Now().UTC(),
 	}
 	if err := s.store.Save(rec); err != nil {
 		return fmt.Errorf("persist sideloaded record: %w", err)

@@ -76,5 +76,20 @@
   "filtersButton_one": "筛选（{{count}}）",
   "filtersButton_other": "筛选（{{count}}）",
   "appliedWorkflow": "工作流：{{name}}",
-  "appliedRepository": "仓库：{{name}}"
+  "appliedRepository": "仓库：{{name}}",
+  "ungrouped": "未分组",
+  "collaborationTitle": "工作区协作",
+  "collaborationDescription": "{{workspace}} 中的 {{task}}。管理此对话对其他工作区的访问范围。",
+  "collaborationNativePermissions": "读取、报告、提示和控制互相独立。现有用户权限仍然适用。取消全部四项即可撤销访问。",
+  "collaborationRead": "读取",
+  "collaborationReport": "报告",
+  "collaborationPrompt": "提示",
+  "collaborationControl": "控制",
+  "collaborationTargetUnavailable": "您目前没有此目标的现有读取权限。已保存的授权仅供查看，无法编辑。",
+  "collaborationLoadDenied": "您无权管理此对话的工作区访问。",
+  "collaborationLoadFailed": "无法加载工作区访问。编辑内容已保留，请重新加载后再保存。",
+  "collaborationSaveDenied": "权限被拒绝，无法保存此行。编辑内容已保留。",
+  "collaborationSaveFailed": "无法保存此行。编辑内容已保留。",
+  "collaborationNoTargets": "没有其他可用的工作区。",
+  "collaborationRetry": "重新加载"
 }

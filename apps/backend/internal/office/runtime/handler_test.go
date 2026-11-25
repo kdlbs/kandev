@@ -38,6 +38,7 @@ type handlerHarness struct {
 	decisions  *recordingDecisionRecorder
 	agentSvc   *agents.AgentService
 	repository *sqlite.Repository
+	taskReads  *recordingTaskReads
 }
 
 type handlerCommentWriter struct {
@@ -89,6 +90,7 @@ type handlerTaskCreator struct {
 	taskScopes     map[string]taskScope
 	workspaceReads []string
 	projectReads   []string
+	relations      []shared.AgentTaskRelations
 }
 
 func (r *handlerTaskCreator) GetTaskWorkspaceID(_ context.Context, taskID string) (string, error) {
@@ -116,8 +118,10 @@ func (r *handlerTaskCreator) CreateOfficeTaskAsAgent(
 	_ string,
 	_ string,
 	_ string,
+	relations shared.AgentTaskRelations,
 ) (string, error) {
 	r.calls++
+	r.relations = append(r.relations, relations)
 	r.rootWorkspaces = append(r.rootWorkspaces, workspaceID)
 	r.rootProjects = append(r.rootProjects, projectID)
 	r.assignees = append(r.assignees, assigneeAgentID)
@@ -132,8 +136,10 @@ func (r *handlerTaskCreator) CreateOfficeSubtaskAsAgent(
 	_ string,
 	_ string,
 	_ string,
+	relations shared.AgentTaskRelations,
 ) (string, error) {
 	r.calls++
+	r.relations = append(r.relations, relations)
 	r.assignees = append(r.assignees, assigneeAgentID)
 	return "task-created", nil
 }
@@ -966,6 +972,7 @@ func newRuntimeHandlerHarnessWithProjectManagerAndLogger(
 	}
 	runEvents := &recordingRunEvents{}
 	decisions := &recordingDecisionRecorder{}
+	taskReads := &recordingTaskReads{allowed: map[[2]string]bool{}}
 	router := gin.New()
 	RegisterRoutes(router.Group(""), NewHandler(
 		agentSvc,
@@ -977,6 +984,7 @@ func newRuntimeHandlerHarnessWithProjectManagerAndLogger(
 			Projects:      projectManager,
 			Runs:          runs,
 			AgentModifier: agentSvc,
+			TaskReads:     taskReads,
 		}),
 		nil,
 		runEvents,
@@ -996,6 +1004,7 @@ func newRuntimeHandlerHarnessWithProjectManagerAndLogger(
 		decisions:  decisions,
 		agentSvc:   agentSvc,
 		repository: repo,
+		taskReads:  taskReads,
 	}
 }
 

@@ -23,7 +23,7 @@ Users want to operate on Kandev workspaces, workflows, agents, and tasks from co
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.2:** Users register Kandev as an MCP server in their external coding agent using one of:
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.3:** Streamable HTTP: `http://localhost:38429/mcp`
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.4:** SSE: `http://localhost:38429/mcp/sse`
-- **AC-INTEGRATIONS-EXTERNAL-MCP-001.5:** The external endpoint exposes the **config-mode tool surface** plus `create_task_kandev` (no plan tools, no `ask_user_question_kandev`).
+- **AC-INTEGRATIONS-EXTERNAL-MCP-001.5:** The external endpoint exposes the **config-mode tool surface** plus `create_task_kandev` and `update_task_kandev` (no plan tools, no `ask_user_question_kandev`). The [task-owned priority contract](../../tasks/requirements/mcp-task-priority.md) defines priority writes.
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.6:** The endpoint requires a personal access token when Kandev authentication is enabled. It remains open when authentication is disabled.
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.7:** The Settings UI shows the URL and ready-to-paste config snippets for popular agents.
 - **AC-INTEGRATIONS-EXTERNAL-MCP-001.8:** The existing per-`agentctl` MCP behavior is unchanged — the same tool definitions back both endpoints.
@@ -68,7 +68,7 @@ Users want to operate on Kandev workspaces, workflows, agents, and tasks from co
 - Users register Kandev as an MCP server in their external coding agent using one of:
   - Streamable HTTP: `http://localhost:38429/mcp`
   - SSE: `http://localhost:38429/mcp/sse`
-- The external endpoint exposes the **config-mode tool surface** plus `create_task_kandev` (no plan tools, no `ask_user_question_kandev`).
+- The external endpoint exposes the **config-mode tool surface** plus `create_task_kandev` and `update_task_kandev` (no plan tools, no `ask_user_question_kandev`).
 - The endpoint requires a personal access token when Kandev authentication is enabled. It remains open when authentication is disabled.
 - The Settings UI shows the URL and ready-to-paste config snippets for popular agents.
 - The existing per-`agentctl` MCP behavior is unchanged — the same tool definitions back both endpoints.

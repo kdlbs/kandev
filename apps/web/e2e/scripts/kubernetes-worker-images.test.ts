@@ -19,10 +19,9 @@ beforeEach(() => {
   for (const directory of [binDir, fixtureDir, imageDir, path.join(root, "tools")]) {
     fs.mkdirSync(directory, { recursive: true });
   }
-  fs.copyFileSync(
-    path.resolve("e2e/fixtures/kubernetes-worker-images.ts"),
-    path.join(fixtureDir, "kubernetes-worker-images.ts"),
-  );
+  for (const file of ["kubernetes-worker-images.ts", "fixture-command.ts"]) {
+    fs.copyFileSync(path.resolve("e2e/fixtures", file), path.join(fixtureDir, file));
+  }
   for (const file of ["pins.env", "Dockerfile"]) {
     fs.copyFileSync(path.resolve("../../k8s/worker-images", file), path.join(imageDir, file));
   }
@@ -31,7 +30,11 @@ beforeEach(() => {
 const fs = require("node:fs"), path = require("node:path");
 const command = path.basename(process.argv[1]), args = process.argv.slice(2);
 fs.appendFileSync(process.env.IMAGE_COMMAND_LOG, JSON.stringify({ command, args }) + "\\n");
-if (process.env.FAIL_IMAGE_TRANSFER === "1" && command === "kind" && args.some(arg => arg.endsWith("node-pnpm-harness"))) process.exit(1);
+if (process.env.FAIL_IMAGE_TRANSFER === "1" && command === "kind" && args.some(arg => arg.endsWith("node-pnpm-harness"))) {
+  process.stdout.write("o".repeat(10_000) + "kind-load-stdout-tail");
+  process.stderr.write("e".repeat(10_000) + "kind-load-stderr-tail");
+  process.exit(17);
+}
 `;
   for (const name of ["docker", "kind"]) {
     fs.writeFileSync(path.join(root, "tools", name), command, { mode: 0o755 });
@@ -67,6 +70,7 @@ function run(fail = false): string {
     stdio: "pipe",
     env: {
       ...process.env,
+      E2E_DEBUG: "",
       PATH: `${path.join(root, "tools")}${path.delimiter}${process.env.PATH}`,
       IMAGE_COMMAND_LOG: commandLog,
       FAIL_IMAGE_TRANSFER: fail ? "1" : "0",
@@ -105,7 +109,18 @@ it("builds all recipes and loads only final images referenced by worker presets"
 });
 
 it("cleans owned images and propagates a failed final transfer", () => {
-  expect(() => run(true)).toThrow();
+  let failure: unknown;
+  try {
+    run(true);
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(Error);
+  const message = (failure as Error).message;
+  expect(message).toContain("kind-load-stdout-tail");
+  expect(message).toContain("kind-load-stderr-tail");
+  expect(message).toContain("exit code: 17");
+  expect(message.length).toBeLessThan(10_000);
   const all = commands();
   const built = all.filter(({ command, args }) => command === "docker" && args[0] === "build");
   const removed = all.filter(({ args }) => args[0] === "image" && args[1] === "rm");

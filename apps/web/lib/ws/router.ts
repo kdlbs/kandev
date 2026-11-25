@@ -9,8 +9,10 @@ import { registerAgentCapabilitiesHandlers } from "@/lib/ws/handlers/agent-capab
 import { registerSessionModelsHandlers } from "@/lib/ws/handlers/session-models";
 import { registerSessionMCPStatusHandlers } from "@/lib/ws/handlers/session-mcp-status";
 import { registerSessionInfoHandlers } from "@/lib/ws/handlers/session-info";
+import { registerPromptSuggestionHandlers } from "@/lib/ws/handlers/prompt-suggestions";
 import { registerSessionPendingActionHandlers } from "@/lib/ws/handlers/session-pending-action";
 import { registerSessionWorkspaceRecoveryHandlers } from "@/lib/ws/handlers/session-workspace-recovery";
+import { registerSessionDeliveryStorageHandlers } from "@/lib/ws/handlers/session-delivery-storage";
 import { registerSessionTodosHandlers } from "@/lib/ws/handlers/session-todos";
 import { registerPromptUsageHandlers } from "@/lib/ws/handlers/prompt-usage";
 import { registerBackgroundWorkHandlers } from "@/lib/ws/handlers/background-work";
@@ -47,6 +49,7 @@ import { registerGitLabHandlers } from "@/lib/ws/handlers/gitlab";
 import { registerOfficeHandlers } from "@/lib/ws/handlers/office";
 import { registerRunHandlers } from "@/lib/ws/handlers/run";
 import { registerCanvasesHandlers } from "@/lib/ws/handlers/canvases";
+import { registerSidebarGroupingHandlers } from "@/lib/ws/handlers/sidebar-grouping";
 
 export function registerWsHandlers(store: StoreApi<AppState>) {
   const messages = createMessagesHandlerRegistration(store);
@@ -76,8 +79,10 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerSessionModelsHandlers(store),
     ...registerSessionMCPStatusHandlers(store),
     ...registerSessionInfoHandlers(store),
+    ...registerPromptSuggestionHandlers(store),
     ...registerSessionPendingActionHandlers(store),
     ...registerSessionWorkspaceRecoveryHandlers(store),
+    ...registerSessionDeliveryStorageHandlers(store),
     ...registerSessionTodosHandlers(store),
     ...registerPromptUsageHandlers(store),
     ...registerBackgroundWorkHandlers(store),
@@ -98,6 +103,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerOfficeHandlers(store),
     ...registerRunHandlers(),
     ...registerCanvasesHandlers(store),
+    ...registerSidebarGroupingHandlers(store),
   };
   return { handlers, dispose: messages.dispose };
 }

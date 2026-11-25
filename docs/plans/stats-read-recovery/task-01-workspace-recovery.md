@@ -135,3 +135,21 @@ hide existing tasks. The new route and store regressions are GREEN:
 The managed E2E runner required the standard disposable plugin package before
 the browser suite could start; `make e2e-plugin-package` produced it. No live
 instance or user data was changed.
+
+## CI fixture recovery boundary (2026-10-27)
+
+PR #4534 head `0bbebdcf6afa` exposed a mobile fixture that allowed automatic
+reads to recover before the Retry tap completed. It then held the successful
+response until that same tap returned. A controlled foreground refresh removes
+Retry under the old fixture. The shared `workspace-context-retry.ts` helper now
+records the actual Retry click on the stable drawer/menu owner before React
+handles it. Earlier automatic reads remain unavailable. The shared helper also
+serves the existing mobile navigation test. No product recovery policy changes.
+
+The controlled failure and corrected case pass their expected outcomes. Keep
+the original single tap, retained rows, successful HTTP response, touch target,
+and error-removal assertions. Retain first-failure traces. The original failed
+attempt has no trace, so its initial pointer-interception cause is unresolved.
+
+Both full mobile navigation/recovery specifications pass three repetitions:
+27 cases, retries disabled. Scoped ESLint and formatting checks pass.

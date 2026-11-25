@@ -158,6 +158,59 @@ async function fail(request: CommentRequest, kind: "HTTP" | "fetch") {
   expect(screen.getAllByText(ERROR_MESSAGE).length).toBeGreaterThan(0);
 }
 
+describe("TaskChat workspace links", () => {
+  it("uses the task workspace prefix when another workspace is active", () => {
+    const taskWorkspace = {
+      id: "ws-task",
+      name: "Task workspace",
+      owner_id: "owner",
+      task_prefix: "TASK",
+      created_at: "",
+      updated_at: "",
+    };
+    const activeWorkspace = {
+      ...taskWorkspace,
+      id: "ws-active",
+      name: "Active workspace",
+      task_prefix: "ACTIVE",
+    };
+    const { container } = render(
+      <StateProvider
+        initialState={{
+          workspaces: { items: [taskWorkspace, activeWorkspace], activeId: "ws-active" },
+        }}
+      >
+        <ToastProvider>
+          <TooltipProvider>
+            <ActiveSessionRefProvider>
+              <TaskChat
+                taskId={TASK_ID}
+                workspaceId="ws-task"
+                comments={[
+                  {
+                    id: "comment-1",
+                    taskId: TASK_ID,
+                    authorType: "user",
+                    authorId: "user-1",
+                    authorName: "You",
+                    content: "TASK-11",
+                    createdAt: "2026-10-08T14:00:00Z",
+                  },
+                ]}
+                sessions={[]}
+              />
+            </ActiveSessionRefProvider>
+          </TooltipProvider>
+        </ToastProvider>
+      </StateProvider>,
+    );
+
+    expect(
+      container.querySelector('a[href="/office/tasks/TASK-11?workspaceId=ws-task"]'),
+    ).not.toBeNull();
+  });
+});
+
 describe("TaskChat comment send draft preservation", () => {
   // @covers AC-TASKS-COMMENT-DRAFT-001.1, AC-TASKS-COMMENT-DRAFT-001.2, AC-TASKS-COMMENT-DRAFT-001.4, AC-TASKS-COMMENT-DRAFT-001.8
   it.each([

@@ -18,16 +18,17 @@ var errAttachedRepositoryStaging = errors.New("attached repository cannot be sta
 // the operator's workspace. Source roots can be real nested worktrees or
 // directory links to repositories outside the workspace.
 func (g *GitOperator) attachedRepositoryPaths() ([]string, error) {
-	if g.workspaceTracker == nil || g.workDir == "" {
+	tracker := g.currentWorkspaceTracker()
+	if tracker == nil || g.workDir == "" {
 		return nil, nil
 	}
 	workspaceRoot, err := filepath.Abs(filepath.Clean(g.workDir))
 	if err != nil {
 		return nil, fmt.Errorf("resolve staging workspace: %w", err)
 	}
-	g.workspaceTracker.mu.RLock()
-	sourceRoots := append([]string(nil), g.workspaceTracker.allowedSourceRoots...)
-	g.workspaceTracker.mu.RUnlock()
+	tracker.mu.RLock()
+	sourceRoots := append([]string(nil), tracker.allowedSourceRoots...)
+	tracker.mu.RUnlock()
 	paths := make(map[string]struct{}, len(sourceRoots))
 	add := func(candidate string) {
 		relative, relErr := filepath.Rel(workspaceRoot, candidate)

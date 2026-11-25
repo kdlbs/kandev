@@ -12,6 +12,7 @@ func TestHelpDescribesPublicCommands(t *testing.T) {
 		"kandev dev",
 		"kandev start",
 		"--dev",
+		"--json",
 		"--web-internal-port",
 	} {
 		if !strings.Contains(help, want) {

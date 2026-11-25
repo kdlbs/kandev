@@ -36,6 +36,8 @@ export const TRANSCRIPT_SENTINEL_ROOT_MARGIN = "200px 0px 0px 0px";
 // INT32_MAX: WebKit resolves Number.MAX_SAFE_INTEGER to 0 (not bottom).
 const NATIVE_BOTTOM_SCROLL_TOP = 2_147_483_647;
 const USER_SCROLL_INTENT_WINDOW_MS = 250;
+const PENDING_REFLOW_GEOMETRY_LIMIT = 4;
+const LATER_SCROLL_KEYS = new Set(["End", "PageDown", "ArrowDown"]);
 const SCROLL_KEYS = new Set([
   "ArrowDown",
   "ArrowLeft",
@@ -103,6 +105,19 @@ export function shouldPreserveFollowOnScroll(
   return (
     (contentDelta > 0 || (contentDelta < 0 && scrollTopDelta < 0)) &&
     Math.abs(scrollTopDelta) <= Math.abs(contentDelta) + 2
+  );
+}
+
+function shouldPreserveFollowOnReconciliation(params: {
+  enabled: boolean;
+  isNearBottom: boolean;
+  userReading: boolean;
+  candidates: Array<TranscriptScrollGeometry | null>;
+  current: TranscriptScrollGeometry;
+}): boolean {
+  if (!params.enabled || !params.isNearBottom || params.userReading) return false;
+  return params.candidates.some(
+    (candidate) => candidate !== null && shouldPreserveFollowOnScroll(candidate, params.current),
   );
 }
 
@@ -645,6 +660,85 @@ function useRecheckPaginationOnVisible(isVisible: boolean, recheck: () => void) 
  * off indefinitely. */
 const PROGRAMMATIC_SCROLL_GUARD_MS = 1000;
 
+type PendingUpwardScroll = { sessionId: string | null; scrollTop: number };
+
+function isPendingUpwardScrollAtEdge(
+  pending: PendingUpwardScroll | null,
+  sessionId: string | null,
+  scrollTop: number,
+  gap: number,
+): boolean {
+  return Boolean(
+    pending && pending.sessionId === sessionId && scrollTop >= pending.scrollTop && gap < 3,
+  );
+}
+
+function useUpwardScrollIntent({ scrollRef, sessionId, onUserScrollIntent }: AutoScrollParams) {
+  const pendingUpwardScrollRef = useRef<PendingUpwardScroll | null>(null);
+  const markUpwardScrollIntent = () => {
+    const element = scrollRef.current;
+    pendingUpwardScrollRef.current = element ? { sessionId, scrollTop: element.scrollTop } : null;
+    onUserScrollIntent?.();
+  };
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    let touchY: number | undefined;
+    const onTouchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const y = event.touches[0]?.clientY;
+      if (touchY !== undefined && y !== undefined && y < touchY) {
+        pendingUpwardScrollRef.current = null;
+      }
+      touchY = y;
+    };
+    element.addEventListener("touchstart", onTouchStart, { passive: true });
+    element.addEventListener("touchmove", onTouchMove, { passive: true });
+    return () => {
+      element.removeEventListener("touchstart", onTouchStart);
+      element.removeEventListener("touchmove", onTouchMove);
+    };
+  }, [scrollRef, sessionId]);
+  return { pendingUpwardScrollRef, markUpwardScrollIntent };
+}
+
+/**
+ * Retains bounded pre-reflow evidence while tracking the latest measured
+ * geometry. Native restoration can move the viewport after one or more resizes
+ * in either direction, so reconciliation needs the immediately prior state,
+ * the pre-reflow baseline, and recent peaks.
+ */
+function trackContentReflowEvidence(
+  element: HTMLElement,
+  lastScrollGeometryRef: React.MutableRefObject<TranscriptScrollGeometry | null>,
+  pendingReflowBaselineRef: React.MutableRefObject<TranscriptScrollGeometry | null>,
+  peakReflowGeometryRef: React.MutableRefObject<TranscriptScrollGeometry | null>,
+  recentReflowGeometriesRef: React.MutableRefObject<TranscriptScrollGeometry[]>,
+): void {
+  const next = readTranscriptScrollGeometry(element);
+  const previous = lastScrollGeometryRef.current;
+  if (previous && next.scrollHeight !== previous.scrollHeight) {
+    pendingReflowBaselineRef.current ??= previous;
+    const peak = peakReflowGeometryRef.current;
+    if (!peak || previous.scrollHeight > peak.scrollHeight) {
+      peakReflowGeometryRef.current = previous;
+    }
+    const currentPeak = peakReflowGeometryRef.current;
+    if (!currentPeak || next.scrollHeight > currentPeak.scrollHeight) {
+      peakReflowGeometryRef.current = next;
+    }
+    const recent = recentReflowGeometriesRef.current;
+    const lastCandidate = recent[recent.length - 1];
+    if (!lastCandidate || lastCandidate.scrollHeight !== previous.scrollHeight) {
+      recent.push(previous);
+      if (recent.length > PENDING_REFLOW_GEOMETRY_LIMIT) recent.shift();
+    }
+  }
+  lastScrollGeometryRef.current = next;
+}
+
 /**
  * Auto-scrolls to bottom when new messages arrive (if user is near bottom)
  * or when the agent starts working (isWorking transitions to true) — unless
@@ -665,23 +759,37 @@ function useFollowIntent({
   isVisibleRef,
   isAnimating,
   userReading,
+  pendingUpwardScrollRef,
+  sessionIdRef,
   isNearBottomRef,
+  wheelBottomRef,
   cancelMotion,
 }: {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   isVisibleRef: React.RefObject<boolean>;
   isAnimating: () => boolean;
   userReading: React.RefObject<boolean>;
+  pendingUpwardScrollRef: React.RefObject<PendingUpwardScroll | null>;
+  sessionIdRef: React.RefObject<string | null>;
   isNearBottomRef: React.RefObject<boolean>;
+  wheelBottomRef: React.RefObject<number | null>;
   cancelMotion: () => void;
 }) {
   const lastScrollGeometryRef = useRef<TranscriptScrollGeometry | null>(null);
+  const pendingReflowBaselineRef = useRef<TranscriptScrollGeometry | null>(null);
+  const peakReflowGeometryRef = useRef<TranscriptScrollGeometry | null>(null);
+  const recentReflowGeometriesRef = useRef<TranscriptScrollGeometry[]>([]);
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
-    const recordGeometry = () => {
-      lastScrollGeometryRef.current = readTranscriptScrollGeometry(element);
-    };
+    const recordGeometry = () =>
+      trackContentReflowEvidence(
+        element,
+        lastScrollGeometryRef,
+        pendingReflowBaselineRef,
+        peakReflowGeometryRef,
+        recentReflowGeometriesRef,
+      );
     recordGeometry();
     const observer = new ResizeObserver(recordGeometry);
     const content = element.querySelector("[data-chat-content]");
@@ -694,28 +802,57 @@ function useFollowIntent({
       if (!el || !isVisibleRef.current || isAnimating()) return;
       const currentGeometry = readTranscriptScrollGeometry(el);
       const previousGeometry = lastScrollGeometryRef.current;
+      const pendingBaseline = pendingReflowBaselineRef.current;
+      const peakReflow = peakReflowGeometryRef.current;
+      const recentReflowGeometries = recentReflowGeometriesRef.current;
       lastScrollGeometryRef.current = currentGeometry;
+      pendingReflowBaselineRef.current = null;
+      peakReflowGeometryRef.current = null;
+      recentReflowGeometriesRef.current = [];
       // Content reflow cannot revoke bottom-follow without reader input.
       // Explicit navigation releases still reconcile against the actual geometry.
       if (
-        preserveFollow &&
-        isNearBottomRef.current &&
-        !userReading.current &&
-        previousGeometry &&
-        shouldPreserveFollowOnScroll(previousGeometry, currentGeometry)
+        shouldPreserveFollowOnReconciliation({
+          enabled: preserveFollow,
+          isNearBottom: isNearBottomRef.current,
+          userReading: userReading.current,
+          candidates: [previousGeometry, pendingBaseline, peakReflow, ...recentReflowGeometries],
+          current: currentGeometry,
+        })
       ) {
         return;
       }
-      isNearBottomRef.current =
-        el.scrollHeight - el.scrollTop - el.clientHeight < (userReading.current ? 3 : 100);
+      const scrollTop = el.scrollTop;
+      const gap = el.scrollHeight - scrollTop - el.clientHeight;
+      const pending = pendingUpwardScrollRef.current;
+      // Keep fresh upward intent while a queued scroll still reports the old edge.
+      if (
+        userReading.current &&
+        !isNearBottomRef.current &&
+        isPendingUpwardScrollAtEdge(pending, sessionIdRef.current, scrollTop, gap)
+      ) {
+        isNearBottomRef.current = false;
+        return;
+      }
+      pendingUpwardScrollRef.current = null;
+      isNearBottomRef.current = gap < (userReading.current ? 3 : 100);
       if (isNearBottomRef.current) userReading.current = false;
     },
-    [scrollRef, isVisibleRef, isAnimating, userReading, isNearBottomRef],
+    [
+      scrollRef,
+      isVisibleRef,
+      isAnimating,
+      userReading,
+      isNearBottomRef,
+      pendingUpwardScrollRef,
+      sessionIdRef,
+    ],
   );
   const markNotNearBottom = useCallback(() => {
+    wheelBottomRef.current = null;
     cancelMotion();
     isNearBottomRef.current = false;
-  }, [cancelMotion]);
+  }, [cancelMotion, wheelBottomRef]);
   return { resyncIsNearBottom, markNotNearBottom };
 }
 
@@ -747,10 +884,11 @@ export function useAutoScroll(params: AutoScrollParams) {
     isProgrammaticScrollLocked,
     isVisible = true,
     initialPlacementPending = false,
-    onUserScrollIntent,
   } = params;
   const storeApi = useAppStoreApi();
   const isNearBottomRef = useRef(true);
+  const { pendingUpwardScrollRef, markUpwardScrollIntent } = useUpwardScrollIntent(params);
+  const wheelBottomRef = useRef<number | null>(null);
   const prevIsWorkingRef = useRef(isWorking);
   const isVisibleRef = useRef(isVisible);
   const enabledRef = useRef(enabled);
@@ -776,7 +914,7 @@ export function useAutoScroll(params: AutoScrollParams) {
     sessionId,
     isNearBottomRef,
     instant: scrollNativeToBottom,
-    onUserScrollIntent,
+    onUserScrollIntent: markUpwardScrollIntent,
     isBlocked: () =>
       motionBlocked ||
       initialPlacementPending ||
@@ -789,22 +927,24 @@ export function useAutoScroll(params: AutoScrollParams) {
     isVisibleRef,
     isAnimating,
     userReading,
+    pendingUpwardScrollRef,
+    sessionIdRef,
     isNearBottomRef,
+    wheelBottomRef,
     cancelMotion,
   });
 
   useTranscriptViewportResize({ ...params, isVisible, initialPlacementPending });
 
   const syncOwnedScrollTop = usePersistedTranscriptScroll({
-    scrollRef,
-    sessionId,
+    ...params,
     storeApi,
     resyncIsNearBottom,
-    enabled,
-    isWorking,
+    followBottom,
+    wheelBottomRef,
+    pendingUpwardScrollRef,
     isVisible,
     isVisibleRef,
-    messages,
     initialPlacementPending,
   });
 
@@ -843,6 +983,9 @@ function usePersistedTranscriptScroll({
   sessionId,
   storeApi,
   resyncIsNearBottom,
+  followBottom,
+  wheelBottomRef,
+  pendingUpwardScrollRef,
   enabled,
   isWorking,
   isVisible,
@@ -854,6 +997,9 @@ function usePersistedTranscriptScroll({
   sessionId: string | null;
   storeApi: ReturnType<typeof useAppStoreApi>;
   resyncIsNearBottom: (preserveFollow?: boolean) => void;
+  followBottom: () => void;
+  wheelBottomRef: React.RefObject<number | null>;
+  pendingUpwardScrollRef: React.RefObject<PendingUpwardScroll | null>;
   enabled: boolean;
   isWorking: boolean;
   isVisible: boolean;
@@ -887,13 +1033,40 @@ function usePersistedTranscriptScroll({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const markUserScrollIntent = () => {
+    wheelBottomRef.current = null;
+    const markUserScrollIntent = (event?: Event) => {
       userScrollIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_WINDOW_MS;
+      wheelBottomRef.current = null;
+      if (
+        enabled &&
+        isVisibleRef.current &&
+        latestSessionIdRef.current === sessionId &&
+        event instanceof WheelEvent &&
+        !event.ctrlKey &&
+        event.deltaMode === 0 &&
+        event.deltaY > 0
+      ) {
+        const bottom = el.scrollHeight - el.clientHeight;
+        if (event.deltaY >= bottom - el.scrollTop) wheelBottomRef.current = bottom;
+      }
     };
     const clearUserScrollIntent = () => {
       userScrollIntentUntilRef.current = 0;
+      wheelBottomRef.current = null;
     };
     const markScrollKeyIntent = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        event.defaultPrevented ||
+        (target instanceof Element &&
+          target !== el &&
+          target.closest(
+            'button, input, select, textarea, a[href], [role="button"], [contenteditable]:not([contenteditable="false"])',
+          ))
+      )
+        return;
+      if (LATER_SCROLL_KEYS.has(event.key) || (event.key === " " && !event.shiftKey))
+        pendingUpwardScrollRef.current = null;
       if (SCROLL_KEYS.has(event.key)) markUserScrollIntent();
     };
     /** Persists the container's current scrollTop for the session (used when
@@ -919,12 +1092,19 @@ function usePersistedTranscriptScroll({
      * coalesced persistence of the scroll position. */
     const onScroll = () => {
       if (!isVisibleRef.current || latestSessionIdRef.current !== sessionId) return;
-      resyncIsNearBottom(enabled);
+      const hasUserScrollIntent = userScrollIntentUntilRef.current >= Date.now();
+      const wheelBottom = wheelBottomRef.current;
+      // Resume only a recent wheel that reached its observed edge.
+      if (hasUserScrollIntent && wheelBottom !== null && wheelBottom - el.scrollTop < 3) {
+        wheelBottomRef.current = null;
+        followBottom();
+      } else {
+        resyncIsNearBottom(enabled);
+      }
       // A layout change can clamp a disabled transcript's scrollTop and emit a
       // native scroll event. Only adopt an offset when a recent user gesture
       // explains the movement; otherwise the layout effect must restore the
       // frozen offset on the next render.
-      const hasUserScrollIntent = userScrollIntentUntilRef.current >= Date.now();
       if (!enabled && hasUserScrollIntent) {
         frozenScrollTopRef.current = { sessionId, scrollTop: el.scrollTop };
       }
@@ -945,6 +1125,7 @@ function usePersistedTranscriptScroll({
     el.addEventListener("scrollend", clearUserScrollIntent);
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
+      wheelBottomRef.current = null;
       el.removeEventListener("wheel", markUserScrollIntent);
       el.removeEventListener("touchstart", markUserScrollIntent);
       el.removeEventListener("touchmove", markUserScrollIntent);
@@ -961,12 +1142,17 @@ function usePersistedTranscriptScroll({
       // and back), even if no scroll event fired right before it, and even
       // if a coalesced write above was still pending.
       if (!initialPlacementPending || latestSessionIdRef.current !== sessionId) coalescer.flush();
+      else coalescer.cancel();
     };
   }, [
     scrollRef,
     sessionId,
     storeApi,
     resyncIsNearBottom,
+    followBottom,
+    wheelBottomRef,
+    pendingUpwardScrollRef,
+    isVisible,
     enabled,
     rememberSessionScrollTop,
     frozenScrollTopRef,

@@ -6,9 +6,11 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/common/modelcatalog"
 )
 
 type AgentProfileDTO struct {
+	ExecutionGrade   string `json:"execution_grade"`
 	ID               string `json:"id"`
 	AgentID          string `json:"agent_id"`
 	Kind             string `json:"kind"`
@@ -51,6 +53,7 @@ type AgentProfileDTO struct {
 	CursorPluginsMCPEnabled bool     `json:"cursor_plugins_mcp_enabled"`
 	MCPSelectionMode        string   `json:"mcp_selection_mode"`
 	MCPSelectedServers      []string `json:"mcp_selected_servers"`
+	CopilotSelectedPlugins  []string `json:"copilot_selected_plugins"`
 	// ProviderSupported is computed at read time: true when the profile's
 	// agent advertises OpenAI-compatible provider support. Not persisted.
 	ProviderSupported bool `json:"provider_supported"`
@@ -209,13 +212,14 @@ type ListAgentsResponse struct {
 }
 
 type AgentDiscoveryDTO struct {
-	Name              string           `json:"name"`
-	SupportsMCP       bool             `json:"supports_mcp"`
-	MCPConfigPath     string           `json:"mcp_config_path,omitempty"`
-	InstallationPaths []string         `json:"installation_paths,omitempty"`
-	Available         bool             `json:"available"`
-	MatchedPath       string           `json:"matched_path,omitempty"`
-	LoginCommand      *LoginCommandDTO `json:"login_command,omitempty"`
+	Name                 string           `json:"name"`
+	SupportsMCP          bool             `json:"supports_mcp"`
+	SupportsLocalInstall bool             `json:"supports_local_install,omitempty"`
+	MCPConfigPath        string           `json:"mcp_config_path,omitempty"`
+	InstallationPaths    []string         `json:"installation_paths,omitempty"`
+	Available            bool             `json:"available"`
+	MatchedPath          string           `json:"matched_path,omitempty"`
+	LoginCommand         *LoginCommandDTO `json:"login_command,omitempty"`
 
 	// Vendor CLI state. Present only for agent types that declare a host CLI;
 	// every other agent omits both fields.
@@ -259,6 +263,7 @@ type ModelEntryDTO struct {
 
 type ModelConfigDTO struct {
 	DefaultModel          string            `json:"default_model"`
+	RuntimeVariant        string            `json:"runtime_variant,omitempty"`
 	AvailableModels       []ModelEntryDTO   `json:"available_models"`
 	CurrentModelID        string            `json:"current_model_id,omitempty"`
 	AvailableModes        []ModeEntryDTO    `json:"available_modes,omitempty"`
@@ -301,6 +306,7 @@ type ConfigOptionDTO struct {
 	CurrentValue string                  `json:"current_value"`
 	Category     string                  `json:"category,omitempty"`
 	Options      []ConfigOptionChoiceDTO `json:"options,omitempty"`
+	Catalog      *modelcatalog.Catalog   `json:"catalog,omitempty"`
 }
 
 type ConfigOptionChoiceDTO struct {
@@ -343,22 +349,23 @@ type ToolStatusDTO struct {
 }
 
 type AvailableAgentDTO struct {
-	Name               string                          `json:"name"`
-	DisplayName        string                          `json:"display_name"`
-	Description        string                          `json:"description,omitempty"`
-	InstallScript      string                          `json:"install_script,omitempty"`
-	SupportsMCP        bool                            `json:"supports_mcp"`
-	MCPConfigPath      string                          `json:"mcp_config_path,omitempty"`
-	InstallationPaths  []string                        `json:"installation_paths,omitempty"`
-	Available          bool                            `json:"available"`
-	MatchedPath        string                          `json:"matched_path,omitempty"`
-	Capabilities       AgentCapabilitiesDTO            `json:"capabilities"`
-	ModelConfig        ModelConfigDTO                  `json:"model_config"`
-	PermissionSettings map[string]PermissionSettingDTO `json:"permission_settings,omitempty"`
-	PassthroughConfig  *PassthroughConfigDTO           `json:"passthrough_config,omitempty"`
-	LoginCommand       *LoginCommandDTO                `json:"login_command,omitempty"`
-	RuntimeUpdate      *RuntimeUpdateDTO               `json:"runtime_update,omitempty"`
-	UpdatedAt          time.Time                       `json:"updated_at"`
+	Name                 string                          `json:"name"`
+	DisplayName          string                          `json:"display_name"`
+	Description          string                          `json:"description,omitempty"`
+	InstallScript        string                          `json:"install_script,omitempty"`
+	SupportsLocalInstall bool                            `json:"supports_local_install,omitempty"`
+	SupportsMCP          bool                            `json:"supports_mcp"`
+	MCPConfigPath        string                          `json:"mcp_config_path,omitempty"`
+	InstallationPaths    []string                        `json:"installation_paths,omitempty"`
+	Available            bool                            `json:"available"`
+	MatchedPath          string                          `json:"matched_path,omitempty"`
+	Capabilities         AgentCapabilitiesDTO            `json:"capabilities"`
+	ModelConfig          ModelConfigDTO                  `json:"model_config"`
+	PermissionSettings   map[string]PermissionSettingDTO `json:"permission_settings,omitempty"`
+	PassthroughConfig    *PassthroughConfigDTO           `json:"passthrough_config,omitempty"`
+	LoginCommand         *LoginCommandDTO                `json:"login_command,omitempty"`
+	RuntimeUpdate        *RuntimeUpdateDTO               `json:"runtime_update,omitempty"`
+	UpdatedAt            time.Time                       `json:"updated_at"`
 }
 
 // AgentUpdateMode selects the built-in runtime update contract.
@@ -382,9 +389,10 @@ type RuntimeUpdateDTO struct {
 	EffectiveVersion string          `json:"effective_version"`
 }
 
-// AgentUpdateCheckState describes the result of the cached npm latest-version
-// lookup. Unknown is intentionally distinct from up_to_date so the UI can
-// avoid suggesting that an unavailable registry check is current.
+// AgentUpdateCheckState describes the result of the cached latest-version
+// lookup or native update check. Unknown is intentionally distinct from
+// up_to_date so the UI can avoid suggesting that an unavailable check is
+// current.
 type AgentUpdateCheckState string
 
 const (
@@ -392,6 +400,15 @@ const (
 	AgentUpdateCheckStateUpToDate        AgentUpdateCheckState = "up_to_date"
 	AgentUpdateCheckStateUnknown         AgentUpdateCheckState = "unknown"
 )
+
+// AgentUpdateCheckSource names a non-default status source. Empty means the
+// registry or release lookup; native means the agent's own update check.
+type AgentUpdateCheckSource string
+
+const AgentUpdateCheckSourceNative AgentUpdateCheckSource = "native"
+
+// AgentUpdateCheckReason is a stable code explaining an unknown native check.
+type AgentUpdateCheckReason string
 
 // AgentUpdateStatusDTO is the read-only update hint for one available managed
 // runtime. ActiveVersion is the optional persisted operator selection; the
@@ -420,7 +437,11 @@ type AgentUpdateStatusDTO struct {
 	LatestVersion       string                        `json:"latest_version,omitempty"`
 	CheckedAt           *time.Time                    `json:"checked_at,omitempty"`
 	CheckState          AgentUpdateCheckState         `json:"check_state"`
+	CheckSource         AgentUpdateCheckSource        `json:"check_source,omitempty"`
+	UpdateChannel       string                        `json:"update_channel,omitempty"`
+	CheckReason         AgentUpdateCheckReason        `json:"check_reason,omitempty"`
 	Family              string                        `json:"family,omitempty"`
+	RuntimeSource       string                        `json:"runtime_source,omitempty"`
 	RuntimeRevision     uint64                        `json:"runtime_revision,omitempty"`
 	MigrationAvailable  bool                          `json:"migration_available,omitempty"`
 }
@@ -509,28 +530,60 @@ type AgentUpdateJobDTO struct {
 	FinishedAt       *time.Time           `json:"finished_at,omitempty"`
 }
 
+// AgentRuntimeReviewDTO is optional, server-issued evidence that a pinned
+// update was previewed against this exact trusted runtime identity. Bulk
+// admission echoes it so a concurrent source or selection change is rejected
+// before policy mutation or candidate activation.
+type AgentRuntimeReviewDTO struct {
+	RuntimeID        string `json:"runtime_id"`
+	Package          string `json:"package"`
+	CurrentVersion   string `json:"current_version,omitempty"`
+	EffectiveVersion string `json:"effective_version,omitempty"`
+	ActiveVersion    string `json:"active_version,omitempty"`
+	Family           string `json:"family,omitempty"`
+	Source           string `json:"source,omitempty"`
+	RuntimeRevision  uint64 `json:"runtime_revision,omitempty"`
+}
+
 // AgentUpdatePreviewDTO is a read-only representation of the next managed
 // runtime update. The command is derived from trusted built-in agent metadata.
 type AgentUpdatePreviewDTO struct {
-	UpdateMode          AgentUpdateMode         `json:"update_mode"`
-	ManagedFallback     bool                    `json:"managed_fallback,omitempty"`
-	AgentName           string                  `json:"agent_name"`
-	Package             string                  `json:"package"`
-	CurrentVersion      string                  `json:"current_version,omitempty"`
-	DefaultVersion      string                  `json:"default_version"`
-	ActiveVersion       string                  `json:"active_version,omitempty"`
-	EffectiveVersion    string                  `json:"effective_version"`
-	TargetVersion       string                  `json:"target_version"`
-	StableLatestVersion string                  `json:"stable_latest_version,omitempty"`
-	Operation           string                  `json:"operation"`
-	AvailableVersions   []AgentUpdateVersionDTO `json:"available_versions"`
-	Command             []string                `json:"command"`
-	CommandString       string                  `json:"command_string"`
-	Family              string                  `json:"family,omitempty"`
-	Source              string                  `json:"source,omitempty"`
-	TargetFamily        string                  `json:"target_family,omitempty"`
-	RuntimeRevision     uint64                  `json:"runtime_revision,omitempty"`
-	MigrationAvailable  bool                    `json:"migration_available,omitempty"`
+	UpdateMode                 AgentUpdateMode                `json:"update_mode"`
+	ManagedFallback            bool                           `json:"managed_fallback,omitempty"`
+	AgentName                  string                         `json:"agent_name"`
+	Package                    string                         `json:"package"`
+	CurrentVersion             string                         `json:"current_version,omitempty"`
+	DefaultVersion             string                         `json:"default_version"`
+	ActiveVersion              string                         `json:"active_version,omitempty"`
+	EffectiveVersion           string                         `json:"effective_version"`
+	TargetVersion              string                         `json:"target_version"`
+	StableLatestVersion        string                         `json:"stable_latest_version,omitempty"`
+	CheckSource                AgentUpdateCheckSource         `json:"check_source,omitempty"`
+	CheckState                 AgentUpdateCheckState          `json:"check_state,omitempty"`
+	LatestVersion              string                         `json:"latest_version,omitempty"`
+	UpdateChannel              string                         `json:"update_channel,omitempty"`
+	CheckReason                AgentUpdateCheckReason         `json:"check_reason,omitempty"`
+	Operation                  string                         `json:"operation"`
+	AvailableVersions          []AgentUpdateVersionDTO        `json:"available_versions"`
+	Command                    []string                       `json:"command"`
+	CommandString              string                         `json:"command_string"`
+	Family                     string                         `json:"family,omitempty"`
+	Source                     string                         `json:"source,omitempty"`
+	TargetFamily               string                         `json:"target_family,omitempty"`
+	RuntimeRevision            uint64                         `json:"runtime_revision,omitempty"`
+	MigrationAvailable         bool                           `json:"migration_available,omitempty"`
+	CopilotPluginCompatibility *CopilotPluginCompatibilityDTO `json:"copilot_plugin_compatibility,omitempty"`
+	ReviewedRuntime            *AgentRuntimeReviewDTO         `json:"reviewed_runtime,omitempty"`
+}
+
+// CopilotPluginCompatibilityDTO is the read-only plugin compatibility
+// projection for the built-in Copilot managed package. Agent-wide preview has
+// no concrete profile context and therefore normally remains unchecked.
+type CopilotPluginCompatibilityDTO struct {
+	RuntimeVersion       string `json:"runtime_version"`
+	State                string `json:"state"`
+	Reason               string `json:"reason,omitempty"`
+	SelectedProfileCount *int   `json:"selected_profile_count"`
 }
 
 // AgentUpdateVersionDTO is one stable, selectable package version.
@@ -543,10 +596,11 @@ type AgentUpdateVersionDTO struct {
 // managed-runtime update endpoint. Package identity and command arguments are
 // always resolved from trusted built-in agent metadata.
 type AgentUpdateRequest struct {
-	TargetVersion           string `json:"target_version"`
-	UseDefault              bool   `json:"use_default"`
-	TargetFamily            string `json:"target_family,omitempty"`
-	ExpectedRuntimeRevision uint64 `json:"expected_runtime_revision,omitempty"`
+	TargetVersion           string                 `json:"target_version"`
+	UseDefault              bool                   `json:"use_default"`
+	TargetFamily            string                 `json:"target_family,omitempty"`
+	ExpectedRuntimeRevision uint64                 `json:"expected_runtime_revision,omitempty"`
+	ReviewedRuntime         *AgentRuntimeReviewDTO `json:"reviewed_runtime,omitempty"`
 }
 
 type ListAgentUpdateJobsResponse struct {
@@ -563,10 +617,11 @@ type AgentProfileMcpConfigDTO struct {
 
 // CommandPreviewRequest is the request body for previewing the agent CLI command
 type CommandPreviewRequest struct {
-	Model              string          `json:"model"`
-	PermissionSettings map[string]bool `json:"permission_settings"`
-	CLIPassthrough     bool            `json:"cli_passthrough"`
-	CommandPrefix      string          `json:"command_prefix,omitempty"`
+	Model                  string          `json:"model"`
+	PermissionSettings     map[string]bool `json:"permission_settings"`
+	CLIPassthrough         bool            `json:"cli_passthrough"`
+	CommandPrefix          string          `json:"command_prefix,omitempty"`
+	CopilotSelectedPlugins []string        `json:"copilot_selected_plugins,omitempty"`
 }
 
 // Flag destinations reported by CommandPreviewResponse.
@@ -588,13 +643,24 @@ type CommandPreviewResponse struct {
 	// difference is the whole reason a flag can look enabled and change
 	// nothing. Values: "agent_cli" or "acp_bridge".
 	FlagDestination string `json:"flag_destination,omitempty"`
+	// DeferredPluginIDs lists stable Copilot plugin identities whose native
+	// directories resolve only at the next process start. Command never
+	// contains those directories.
+	DeferredPluginIDs []string `json:"deferred_plugin_ids,omitempty"`
+	// DeferredPluginCount mirrors the length for compact UI copy.
+	DeferredPluginCount int `json:"deferred_plugin_count,omitempty"`
+	// CommandIncomplete is true when the previewed command omits deferred
+	// plugin mounts.
+	CommandIncomplete bool `json:"command_incomplete,omitempty"`
 }
 
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.
 // Data now comes from the host utility capability cache populated by ACP probes.
 type DynamicModelsResponse struct {
 	AgentName       string              `json:"agent_name"`
+	RuntimeVariant  string              `json:"runtime_variant,omitempty"`
 	Status          string              `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
+	ReasonCode      string              `json:"reason_code,omitempty"`
 	Models          []ModelEntryDTO     `json:"models"`
 	CurrentModelID  string              `json:"current_model_id,omitempty"`
 	Modes           []ModeEntryDTO      `json:"modes,omitempty"`
@@ -612,6 +678,14 @@ type ProfileLaunchSettingsRequest struct {
 	EnvVars       *[]ProfileEnvVarDTO `json:"env_vars"`
 	CLIFlags      *[]CLIFlagDTO       `json:"cli_flags"`
 	CommandPrefix *string             `json:"command_prefix"`
+	// Mode is the draft ACP mode. A pointer distinguishes an explicit empty
+	// value from an omitted field on an older client. It is request-only and
+	// never persisted by discovery.
+	Mode *string `json:"mode,omitempty"`
+	// CopilotSelectedPlugins optionally replaces the saved selection for this
+	// request. Omission uses the saved profile value, or an empty set for a
+	// new draft.
+	CopilotSelectedPlugins OptionalStringList `json:"copilot_selected_plugins,omitempty"`
 }
 
 // ProfileCapabilityRequest asks the host utility to inspect a saved profile
@@ -640,6 +714,7 @@ type AgentModelConfigResponse struct {
 	AgentName       string            `json:"agent_name"`
 	Model           string            `json:"model"`
 	Status          string            `json:"status"`
+	ReasonCode      string            `json:"reason_code,omitempty"`
 	ConfigOptions   []ConfigOptionDTO `json:"config_options"`
 	Error           *string           `json:"error"`
 	ContextRevision string            `json:"context_revision,omitempty"`

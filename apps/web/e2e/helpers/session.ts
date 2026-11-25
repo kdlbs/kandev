@@ -6,6 +6,21 @@ import type { AppState } from "../../lib/state/store";
 import type { StoreApi } from "zustand";
 import { pollUntil } from "./poll-until";
 
+export async function firstSessionId(apiClient: ApiClient, taskId: string): Promise<string> {
+  let sessionId = "";
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(taskId);
+        sessionId = sessions[0]?.id ?? "";
+        return sessionId;
+      },
+      { message: "session row should be created", timeout: 30_000 },
+    )
+    .not.toBe("");
+  return sessionId;
+}
+
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const FAILED_STATES = ["FAILED", "CANCELLED"];
 

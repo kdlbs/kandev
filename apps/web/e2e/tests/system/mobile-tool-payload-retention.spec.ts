@@ -123,3 +123,50 @@ test.describe("Tool payload retention on phones", () => {
     });
   }
 });
+
+test.describe("History compaction categories on phones", () => {
+  test("keeps one control set and category details without horizontal overflow", async ({
+    testPage: page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const status = {
+      supported: true,
+      policy: { enabled: true, age: { value: 3, unit: "months" }, revision: 4 },
+      preparation: { state: "ready", choice: "skip" },
+      last_analysis: {
+        id: "mixed-analysis",
+        kind: "analysis",
+        state: "succeeded",
+        scanned: 4,
+        eligible_tasks: 2,
+        eligible_messages: 3,
+        removed_messages: 0,
+        payload_bytes: 2048,
+        history_tasks: 2,
+        history_snapshots: 5,
+        history_sql_bytes: 1024,
+        history_git_bytes: 4096,
+        expired_change_sets: 1,
+        deleted_archive_refs: 2,
+        archive_failures: 0,
+        skipped: {},
+        cutoff: "2026-01-01T00:00:00.000Z",
+        started_at: "2026-01-01T00:00:00.000Z",
+        finished_at: "2026-01-01T00:01:00.000Z",
+        age: { value: 3, unit: "months" },
+      },
+    };
+    await page.route("**/api/v1/system/database/tool-payload-retention", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(status) }),
+    );
+    await page.goto(RETENTION_ROUTE);
+    const card = page.getByTestId("tool-payload-retention-card");
+    await expect(card).toContainText("History compaction");
+    await expect(card).toContainText("Historical snapshots: 5 across 2 tasks");
+    await expect(page.getByTestId("tool-payload-enabled")).toHaveCount(1);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+});

@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 
 const taskChangesPanel = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
+  visible: true,
 }));
+
+vi.mock("@/hooks/use-panel-active", () => ({ usePanelActive: () => taskChangesPanel.visible }));
 
 vi.mock("./task-changes-panel", () => ({
   TaskChangesPanel: (props: Record<string, unknown>) => {
@@ -51,14 +54,28 @@ vi.mock("@/components/state-provider", () => ({
   }),
 }));
 
+const DIFF_PANEL_KIND = "diff-viewer";
+
 import { renderPanel } from "./dockview-panel-content";
 import { renderPanel as renderSharedPanel } from "./dockview-shared";
 
 describe("dockview diff panel content", () => {
+  it.each([
+    ["current", renderPanel],
+    ["shared", renderSharedPanel],
+  ] as const)("forwards visible detail demand in the %s renderer", (_, renderer) => {
+    taskChangesPanel.visible = true;
+    const view = render(<>{renderer("diff", DIFF_PANEL_KIND, { kind: "all" })}</>);
+    expect(taskChangesPanel.props?.detailActive).toBe(true);
+    taskChangesPanel.visible = false;
+    view.rerender(<>{renderer("diff", DIFF_PANEL_KIND, { kind: "all" })}</>);
+    expect(taskChangesPanel.props?.detailActive).toBe(false);
+  });
+
   it("passes repositoryName from panel params into the file-mode diff view", () => {
     render(
       <>
-        {renderPanel("preview:file-diff", "diff-viewer", {
+        {renderPanel("preview:file-diff", DIFF_PANEL_KIND, {
           kind: "file",
           path: "README.md",
           source: "uncommitted",
@@ -80,7 +97,7 @@ describe("dockview diff panel content", () => {
   it("preserves the PR source in the shared dockview renderer", () => {
     render(
       <>
-        {renderSharedPanel("preview:file-diff", "diff-viewer", {
+        {renderSharedPanel("preview:file-diff", DIFF_PANEL_KIND, {
           kind: "file",
           path: "README.md",
           source: "pr",

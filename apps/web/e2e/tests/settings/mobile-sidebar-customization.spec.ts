@@ -1,3 +1,4 @@
+import { watchWs } from "../../helpers/causal-waits";
 import { expect, test } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
@@ -369,4 +370,38 @@ test("saved canvas disclosure recovers a failed read and retains settings", asyn
   } finally {
     await release();
   }
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.12
+test("external definitions appear while the phone navigation drawer stays open", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const ws = watchWs(testPage);
+  await testPage.goto("/");
+  await testPage.getByTestId("app-nav-trigger").tap();
+  const section = testPage.getByTestId("mobile-automations-section");
+  await section.getByRole("button", { name: "Automations", exact: true }).tap();
+  await expect(section.getByRole("link", { name: "Open automations", exact: true })).toBeVisible();
+  const original = await section.elementHandle();
+  const timeOrigin = await testPage.evaluate(() => performance.timeOrigin);
+  const definitions = ws.waitForResponse("automation.list", {
+    where: (rows) =>
+      Array.isArray(rows) && rows.some((row) => row.name === "Phone external creation"),
+  });
+  const created = await apiClient.wsRequest<{ id: string }>("automation.create", {
+    workspace_id: seedData.workspaceId,
+    name: "Phone external creation",
+    enabled: false,
+    repository_mode: "none",
+  });
+  const row = section.locator(`a[href="/automations/${created.id}"]`);
+  await definitions;
+  await expect(row).toBeVisible();
+  await expect(row).toContainText("Phone external creation");
+  expect(await section.evaluate((element, previous) => element === previous, original)).toBe(true);
+  expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+  await expect(testPage.getByTestId("app-nav-sheet")).toBeVisible();
+  await original?.dispose();
 });

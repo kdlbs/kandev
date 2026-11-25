@@ -1,3 +1,4 @@
+import { setMoveInstructions } from "./workflow-move-instructions-test-helpers";
 import { MinimalWorkflowStepper } from "./workflow-step-disclosure";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -67,6 +68,10 @@ const STEPS: WorkflowStepperStep[] = [
   { id: "work", name: "Work", color: "#222", position: 1 },
   { id: "review", name: "Review", color: "#333", position: 2 },
 ];
+
+vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
+  useCustomPrompts: () => ({ prompts: [], loaded: true, loading: false }),
+}));
 
 afterEach(() => {
   cleanup();
@@ -161,7 +166,7 @@ it("submits inline step options from the instruction field", async () => {
   screen.getByTestId("workflow-step-Review").focus();
   fireEvent.click(await screen.findByTestId("workflow-step-move-options-trigger"));
   const input = screen.getByTestId("workflow-move-instructions");
-  fireEvent.change(input, { target: { value: "Review keyboard flow" } });
+  setMoveInstructions(input, "Review keyboard flow");
   fireEvent.keyDown(input, { key: "Enter", metaKey: true });
   await waitFor(() =>
     expect(moveTask).toHaveBeenCalledWith("task-1", {
@@ -190,7 +195,7 @@ it("submits compact disclosure options from the instruction field", async () => 
   fireEvent.click(screen.getByTestId("workflow-stepper-minimal"));
   fireEvent.click(await screen.findByTestId("workflow-step-disclosure-options-review"));
   const input = screen.getByTestId("workflow-move-instructions");
-  fireEvent.change(input, { target: { value: "Compact instructions" } });
+  setMoveInstructions(input, "Compact instructions");
   fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
   await waitFor(() =>
     expect(onMove).toHaveBeenCalledWith("review", {

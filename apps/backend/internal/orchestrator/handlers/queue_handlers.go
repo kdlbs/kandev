@@ -19,11 +19,13 @@ import (
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	builtinintent "github.com/kandev/kandev/internal/mcp/intent"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/planws"
 	"github.com/kandev/kandev/internal/task/previewfeedback"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/repository/previewfeedbacktx"
@@ -202,7 +204,7 @@ type QueueIdentityAutoRunController interface {
 
 // QueueAutoMergeController persists and resolves per-session automatic-merge policy.
 type QueueAutoMergeController interface {
-	SetSessionAutoMerge(context.Context, messagequeue.QueueSessionIdentity, bool) (messagequeue.AutoMergePolicy, error)
+	SetSessionAutoMerge(context.Context, messagequeue.QueueSessionIdentity, bool) (messagequeue.SessionPolicyResult, error)
 }
 
 // QueueEditLeaseController owns target-bound queued-message edit leases.
@@ -563,6 +565,7 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 }
 
 type wsQueueMessageRequest struct {
+	BuiltinIntent         builtinintent.Intent             `json:"builtin_intent,omitempty"`
 	SessionID             string                           `json:"session_id"`
 	TaskID                string                           `json:"task_id"`
 	SessionIncarnationID  string                           `json:"session_incarnation_id"`
@@ -577,6 +580,10 @@ type wsQueueMessageRequest struct {
 	PreviewFeedbackRefs   []models.TaskPreviewFeedbackRef  `json:"preview_feedback_refs,omitempty"`
 	RequirePrimarySession bool                             `json:"require_primary_session,omitempty"`
 	UserID                string                           `json:"user_id,omitempty"`
+	// ObservedTurnErrorStamp is the task turn-error stamp the client had
+	// rendered for this session before queueing. Only this new submission can
+	// acknowledge that exact attention; drain, retry, and Send now cannot.
+	ObservedTurnErrorStamp string `json:"observed_turn_error_stamp,omitempty"`
 }
 
 // wsQueueMessage handles ActionMessageQueueAdd, appending a new entry to the session queue.
@@ -585,7 +592,11 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	if err := req.BuiltinIntent.Validate(); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 	req.ClientQueueID = strings.TrimSpace(req.ClientQueueID)
+	req.ObservedTurnErrorStamp = strings.TrimSpace(req.ObservedTurnErrorStamp)
 
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
@@ -607,6 +618,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	if validationError := validatePlanCommentQueueRequest(req); validationError != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, validationError, nil)
+	}
+	if err := h.canonicalizeQueuedCommentFiles(ctx, req.TaskID, req.Content, req.Attachments); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid comment files", nil)
 	}
 	if invalid := firstInvalidDeliveryMode(req.Attachments); invalid >= 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
@@ -635,6 +649,10 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		req.EntityReferences = references
 	}
 
+	if err := builtinintent.ValidateRequest(ctx, h.queueDrainer, req.TaskID, req.SessionID, req.BuiltinIntent); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	// Default empty user_id to QueuedByUser so the entry has a non-empty owner;
 	// the UpdateMessage handler relies on this so its filter against agent
 	// entries (queued_by="agent") is always meaningful.
@@ -643,13 +661,17 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		queuedBy = messagequeue.QueuedByUser
 	}
 	metadata := orchestrator.NewUserMessageMeta().
+		WithBuiltinIntent(req.BuiltinIntent).
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences).
 		ToMap()
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	if req.ObservedTurnErrorStamp != "" {
+		metadata[messagequeue.MetadataObservedTurnErrorStamp] = req.ObservedTurnErrorStamp
+	}
 	if identifiedOrdinary {
-		if metadata == nil {
-			metadata = make(map[string]interface{})
-		}
 		metadata[messagequeue.MetadataQueueAdmissionIDs] = []string{req.ClientQueueID}
 	}
 	var snapshot *models.TaskPlanCommentSnapshot
@@ -723,11 +745,18 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		h.publishPlanCommentSnapshot(ctx, snapshot)
 		h.publishPreviewFeedbackSnapshot(ctx, previewSnapshot)
 	}
+	turnErrorAckFailed := false
+	if !replay {
+		turnErrorAckFailed = h.acknowledgeObservedTurnError(ctx, req)
+	}
 	h.publishStatusForIdentity(ctx, identity, queued)
 	if h.queueReadiness != nil {
 		h.queueReadiness.CheckQueueAdmissionReadiness(ctx, identity)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, queued)
+	return ws.NewResponse(msg.ID, msg.Action, queueMessageResponse{
+		QueuedMessage:                  queued,
+		TurnErrorAcknowledgementFailed: turnErrorAckFailed,
+	})
 }
 
 var (
@@ -907,6 +936,39 @@ func (h *QueueHandlers) admitIdentifiedQueuedMessage(
 	return queued, err
 }
 
+// acknowledgeObservedTurnError retires the exact task attention the client had
+// rendered when it queued this new prompt. Queue acceptance is the durable
+// boundary; a later drain keeps no new acknowledgement authority.
+func (h *QueueHandlers) acknowledgeObservedTurnError(ctx context.Context, req wsQueueMessageRequest) bool {
+	if req.ObservedTurnErrorStamp == "" {
+		return false
+	}
+	acknowledger, ok := h.accessAuthorizer.(interface {
+		AcknowledgeTaskTurnError(context.Context, string, string, string) error
+	})
+	if !ok {
+		return false
+	}
+	if err := acknowledger.AcknowledgeTaskTurnError(
+		ctx, req.TaskID, req.SessionID, req.ObservedTurnErrorStamp,
+	); err != nil {
+		h.logger.Warn("failed to acknowledge observed task turn error",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return true
+	}
+	return false
+}
+
+// queueMessageResponse carries the accepted queue row plus nonfatal
+// acknowledgement feedback. Embedding keeps the existing row shape intact for
+// clients that do not know the new field.
+type queueMessageResponse struct {
+	*messagequeue.QueuedMessage
+	TurnErrorAcknowledgementFailed bool `json:"turn_error_acknowledgement_failed,omitempty"`
+}
+
 func (h *QueueHandlers) lookupIdentifiedQueuedMessage(
 	ctx context.Context,
 	req *wsQueueMessageRequest,
@@ -1073,6 +1135,10 @@ func validatePlanCommentQueueRequest(req wsQueueMessageRequest) string {
 }
 
 func planCommentQueueError(msg *ws.Message, err error) *ws.Message {
+	if validation := planws.CommentAttachmentValidationMessage(err); validation != "" {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, validation, nil)
+		return response
+	}
 	if errors.Is(err, plancomments.ErrRenderedTooLarge) || errors.Is(err, previewfeedback.ErrPromptTooLarge) {
 		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Rendered message content is too long", nil)
 		return response
@@ -1360,6 +1426,9 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	}
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
+	}
+	if err := h.canonicalizeQueuedCommentFiles(ctx, req.TaskID, req.Content, req.Attachments); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid comment files", nil)
 	}
 	if invalid := firstInvalidDeliveryMode(req.Attachments); invalid >= 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
@@ -2445,38 +2514,6 @@ func attachmentPayloadBytes(attachment messagequeue.MessageAttachment) (int64, b
 	return int64(len(decoded)), true
 }
 
-// queueAttachmentsToV1 converts queue attachments to the API v1 representation.
-func queueAttachmentsToV1(attachments []messagequeue.MessageAttachment) []v1.MessageAttachment {
-	if len(attachments) == 0 {
-		return nil
-	}
-	converted := make([]v1.MessageAttachment, 0, len(attachments))
-	for _, attachment := range attachments {
-		converted = append(converted, v1.MessageAttachment{
-			AttachmentID: attachment.AttachmentID,
-			Type:         attachment.Type,
-			Data:         attachment.Data,
-			MimeType:     attachment.MimeType,
-			Name:         attachment.Name,
-			SizeBytes:    attachment.SizeBytes,
-			DeliveryMode: attachment.DeliveryMode,
-		})
-	}
-	return converted
-}
-
-func queueAttachmentsFromV1(attachments []v1.MessageAttachment) []messagequeue.MessageAttachment {
-	converted := make([]messagequeue.MessageAttachment, 0, len(attachments))
-	for _, attachment := range attachments {
-		converted = append(converted, messagequeue.MessageAttachment{
-			AttachmentID: attachment.AttachmentID, Type: attachment.Type, Data: attachment.Data,
-			MimeType: attachment.MimeType, Name: attachment.Name, SizeBytes: attachment.SizeBytes,
-			DeliveryMode: attachment.DeliveryMode,
-		})
-	}
-	return converted
-}
-
 type wsAppendToQueueRequest struct {
 	SessionID            string `json:"session_id"`
 	TaskID               string `json:"task_id"`
@@ -2601,13 +2638,17 @@ func reservedIdentityError(queuedBy string) string {
 
 // authorizeSession denies the request when the caller cannot access the session.
 func (h *QueueHandlers) authorizeSession(ctx context.Context, msg *ws.Message, sessionID string) *ws.Message {
+	if _, ok := h.accessAuthorizer.(queueActionAuthorizer); ok {
+		return h.authorizeQueueIdentity(ctx, msg, "", sessionID, "")
+	}
+
 	if h.accessAuthorizer == nil {
 		return queueAccessDeniedResponse(msg)
 	}
 	if err := h.accessAuthorizer.AuthorizeSessionAccess(ctx, sessionID); err != nil {
 		return queueAccessDeniedResponse(msg)
 	}
-	return nil
+	return h.authorizeQueueAction(ctx, msg, sessionID)
 }
 
 // authorizeTaskSession denies the request when the caller cannot access the task/session pair.
@@ -2616,13 +2657,17 @@ func (h *QueueHandlers) authorizeTaskSession(
 	msg *ws.Message,
 	taskID, sessionID string,
 ) *ws.Message {
+	if _, ok := h.accessAuthorizer.(queueActionAuthorizer); ok {
+		return h.authorizeQueueIdentity(ctx, msg, taskID, sessionID, "")
+	}
+
 	if h.accessAuthorizer == nil {
 		return queueAccessDeniedResponse(msg)
 	}
 	if err := h.accessAuthorizer.AuthorizeTaskSessionAccess(ctx, taskID, sessionID); err != nil {
 		return queueAccessDeniedResponse(msg)
 	}
-	return nil
+	return h.authorizeQueueAction(ctx, msg, sessionID)
 }
 func (h *QueueHandlers) requiresQueueIdentity() bool {
 	_, ok := h.accessAuthorizer.(QueueSessionIdentityAuthorizer)
@@ -2634,6 +2679,16 @@ func (h *QueueHandlers) authorizeQueueIdentity(
 	msg *ws.Message,
 	taskID, sessionID, incarnationID string,
 ) *ws.Message {
+	if authorizer, ok := h.accessAuthorizer.(queueActionAuthorizer); ok {
+		if denied := h.authorizeQueueAction(ctx, msg, sessionID); denied != nil {
+			return denied
+		}
+		if err := authorizer.AuthorizeQueueSessionIdentity(ctx, taskID, sessionID, incarnationID); err != nil {
+			return queueAccessDeniedResponse(msg)
+		}
+		return nil
+	}
+
 	if taskID == "" {
 		return h.authorizeSession(ctx, msg, sessionID)
 	}
@@ -2647,7 +2702,7 @@ func (h *QueueHandlers) authorizeQueueIdentity(
 	if err := authorizer.AuthorizeTaskSessionIncarnationAccess(ctx, taskID, sessionID, incarnationID); err != nil {
 		return queueAccessDeniedResponse(msg)
 	}
-	return nil
+	return h.authorizeQueueAction(ctx, msg, sessionID)
 }
 
 // queueAccessDeniedResponse builds the non-enumerating session-not-found error response.

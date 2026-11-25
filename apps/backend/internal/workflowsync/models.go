@@ -12,24 +12,22 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/authcircuit"
-	"github.com/kandev/kandev/internal/common/securityutil"
+	"github.com/kandev/kandev/internal/reposync"
 )
 
 // Defaults for optional config fields.
 const (
-	DefaultBranch          = "main"
+	DefaultBranch          = reposync.DefaultBranch
 	DefaultPath            = ".kandev/workflows"
-	DefaultIntervalSeconds = 300
-	MinIntervalSeconds     = 60
-	// MaxIntervalSeconds caps the poll interval at 30 days — far beyond any
-	// sensible cadence, and safely below time.Duration overflow territory.
-	MaxIntervalSeconds = 30 * 24 * 60 * 60
+	DefaultIntervalSeconds = reposync.DefaultIntervalSeconds
+	MinIntervalSeconds     = reposync.MinIntervalSeconds
+	MaxIntervalSeconds     = reposync.MaxIntervalSeconds
 )
 
 // Supported sync sources. A workspace has exactly one.
 const (
-	ProviderGitHub = "github"
-	ProviderGitLab = "gitlab"
+	ProviderGitHub = reposync.ProviderGitHub
+	ProviderGitLab = reposync.ProviderGitLab
 )
 
 // ErrInvalidConfig marks validation failures on SetConfigRequest so handlers
@@ -46,6 +44,7 @@ type Config struct {
 	WorkspaceID string `json:"workspace_id"`
 	// Provider selects the sync source: ProviderGitHub uses RepoOwner and
 	// RepoName, ProviderGitLab uses ProjectPath.
+	GitHubHost      string     `json:"github_host"`
 	Provider        string     `json:"provider"`
 	RepoOwner       string     `json:"repo_owner"`
 	RepoName        string     `json:"repo_name"`
@@ -70,6 +69,12 @@ type Config struct {
 	FailureClass        authcircuit.FailureClass `json:"failure_class,omitempty"`
 	ConsecutiveFailures int                      `json:"consecutive_failures,omitempty"`
 	NextRetryAt         *time.Time               `json:"next_retry_at,omitempty"`
+	// The rate-specific class and suspension reason complement the shared
+	// circuit state. NextAttemptAt mirrors NextRetryAt for sync clients.
+	NextAttemptAt        *time.Time `json:"next_attempt_at,omitempty"`
+	LastErrorClass       string     `json:"last_error_class,omitempty"`
+	PollSuspended        bool       `json:"poll_suspended"`
+	PollSuspensionReason string     `json:"poll_suspension_reason,omitempty"`
 	// ConfigFingerprint and CredentialFingerprint are internal-only circuit
 	// identity keys (never secrets — see authcircuit.State.Fingerprint) and
 	// are not surfaced over the API.
@@ -94,6 +99,7 @@ func (c *Config) applyCircuitState(state authcircuit.State) {
 	c.FailureClass = state.FailureClass
 	c.ConsecutiveFailures = state.ConsecutiveFailures
 	c.NextRetryAt = state.NextRetryAt
+	c.NextAttemptAt = state.NextRetryAt
 	c.CredentialFingerprint = state.Fingerprint
 }
 
@@ -108,7 +114,7 @@ func (c *Config) circuitOpen(now time.Time) bool {
 // SetConfig call) always resets the circuit — see Store.UpsertConfigForWorkspace.
 func (r *SetConfigRequest) fingerprint() string {
 	return strings.Join([]string{
-		r.Provider, r.RepoOwner, r.RepoName, r.ProjectPath, r.Branch, r.Path,
+		r.Provider, r.GitHubHost, r.RepoOwner, r.RepoName, r.ProjectPath, r.Branch, r.Path,
 		fmt.Sprintf("%d", r.IntervalSeconds),
 	}, "\x1f")
 }
@@ -119,6 +125,7 @@ func (r *SetConfigRequest) fingerprint() string {
 type SetConfigRequest struct {
 	// Provider is optional; an empty value means ProviderGitHub, which keeps
 	// pre-GitLab API clients working unchanged.
+	GitHubHost      string `json:"github_host"`
 	Provider        string `json:"provider"`
 	RepoOwner       string `json:"repo_owner"`
 	RepoName        string `json:"repo_name"`
@@ -131,102 +138,18 @@ type SetConfigRequest struct {
 	PollEnabled *bool `json:"poll_enabled"`
 }
 
-// normalizeTarget validates the repository coordinates for the selected
-// provider and clears the other provider's fields, so a switch cannot leave
-// stale values behind.
-func (r *SetConfigRequest) normalizeTarget() error {
-	r.Provider = strings.TrimSpace(r.Provider)
-	if r.Provider == "" {
-		r.Provider = ProviderGitHub
-	}
-	r.RepoOwner = strings.TrimSpace(r.RepoOwner)
-	r.RepoName = strings.TrimSpace(r.RepoName)
-	r.ProjectPath = strings.TrimSpace(r.ProjectPath)
-
-	switch r.Provider {
-	case ProviderGitHub:
-		return r.normalizeGitHubTarget()
-	case ProviderGitLab:
-		return r.normalizeGitLabTarget()
-	default:
-		return fmt.Errorf("%w: provider must be %q or %q", ErrInvalidConfig, ProviderGitHub, ProviderGitLab)
-	}
-}
-
-func (r *SetConfigRequest) normalizeGitHubTarget() error {
-	if r.ProjectPath != "" {
-		return fmt.Errorf("%w: project_path is only valid for the %q provider", ErrInvalidConfig, ProviderGitLab)
-	}
-	if r.RepoOwner == "" || strings.ContainsAny(r.RepoOwner, "/ ") {
-		return fmt.Errorf("%w: repo_owner is required and cannot contain slashes or spaces", ErrInvalidConfig)
-	}
-	if r.RepoName == "" || strings.ContainsAny(r.RepoName, "/ ") {
-		return fmt.Errorf("%w: repo_name is required and cannot contain slashes or spaces", ErrInvalidConfig)
-	}
-	return nil
-}
-
-// normalizeGitLabTarget requires a namespace path. GitLab projects live at
-// arbitrarily nested paths ("group/subgroup/project"), so the value is
-// validated as a whole rather than split into owner and name.
-func (r *SetConfigRequest) normalizeGitLabTarget() error {
-	if r.RepoOwner != "" || r.RepoName != "" {
-		return fmt.Errorf(
-			"%w: repo_owner and repo_name are only valid for the %q provider", ErrInvalidConfig, ProviderGitHub)
-	}
-	if r.ProjectPath == "" {
-		return fmt.Errorf("%w: project_path is required", ErrInvalidConfig)
-	}
-	if strings.Contains(r.ProjectPath, " ") {
-		return fmt.Errorf("%w: project_path cannot contain spaces", ErrInvalidConfig)
-	}
-	segments := strings.Split(r.ProjectPath, "/")
-	if len(segments) < 2 {
-		return fmt.Errorf(
-			"%w: project_path must include the namespace, e.g. \"group/project\"", ErrInvalidConfig)
-	}
-	for _, segment := range segments {
-		if segment == "" {
-			return fmt.Errorf(
-				"%w: project_path cannot have empty segments or leading/trailing slashes", ErrInvalidConfig)
-		}
-		if segment == "." || segment == ".." {
-			return fmt.Errorf("%w: project_path cannot contain \".\" or \"..\" segments", ErrInvalidConfig)
-		}
-	}
-	return nil
-}
-
 // Normalize validates the request and fills defaults. It returns a wrapped
 // ErrInvalidConfig on bad input.
 func (r *SetConfigRequest) Normalize() error {
-	r.Branch = strings.TrimSpace(r.Branch)
-	r.Path = strings.Trim(strings.TrimSpace(r.Path), "/")
-	if err := r.normalizeTarget(); err != nil {
+	target := reposync.Target{
+		GitHubHost: r.GitHubHost, Provider: r.Provider, RepoOwner: r.RepoOwner, RepoName: r.RepoName,
+		ProjectPath: r.ProjectPath, Branch: r.Branch, Path: r.Path, IntervalSeconds: r.IntervalSeconds,
+	}
+	err := target.Normalize(DefaultPath, ErrInvalidConfig)
+	r.GitHubHost, r.Provider, r.RepoOwner, r.RepoName = target.GitHubHost, target.Provider, target.RepoOwner, target.RepoName
+	r.ProjectPath, r.Branch, r.Path, r.IntervalSeconds = target.ProjectPath, target.Branch, target.Path, target.IntervalSeconds
+	if err != nil {
 		return err
-	}
-	if r.Branch == "" {
-		r.Branch = DefaultBranch
-	}
-	if !securityutil.IsValidBranchName(r.Branch) {
-		return fmt.Errorf("%w: branch is not a valid git branch name", ErrInvalidConfig)
-	}
-	if r.Path == "" {
-		r.Path = DefaultPath
-	}
-	for _, segment := range strings.Split(r.Path, "/") {
-		if segment == ".." {
-			return fmt.Errorf("%w: path cannot contain \"..\"", ErrInvalidConfig)
-		}
-	}
-	if r.IntervalSeconds == 0 {
-		r.IntervalSeconds = DefaultIntervalSeconds
-	}
-	if r.IntervalSeconds < MinIntervalSeconds {
-		return fmt.Errorf("%w: interval_seconds must be at least %d", ErrInvalidConfig, MinIntervalSeconds)
-	}
-	if r.IntervalSeconds > MaxIntervalSeconds {
-		return fmt.Errorf("%w: interval_seconds must be at most %d", ErrInvalidConfig, MaxIntervalSeconds)
 	}
 	if r.PollEnabled == nil {
 		enabled := true

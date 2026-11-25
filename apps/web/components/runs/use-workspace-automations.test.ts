@@ -135,3 +135,68 @@ describe("useWorkspaceAutomations", () => {
     expect(result.current.automations.map((a) => a.id)).toEqual(["b1"]);
   });
 });
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.11
+it.each(["success", "failure"])(
+  "ignores obsolete %s after a newer empty refresh",
+  async (outcome) => {
+    mockList.mockResolvedValue([mkAutomation("baseline")]);
+    const { result } = renderHook(() => useWorkspaceAutomations(WORKSPACE));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    let resolve!: (rows: Automation[]) => void;
+    let reject!: (error: Error) => void;
+    const old = new Promise<Automation[]>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    mockList.mockReturnValueOnce(old).mockResolvedValueOnce([]);
+    act(() => result.current.refresh());
+    act(() => result.current.refresh());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.automations).toEqual([]);
+    await act(async () => {
+      if (outcome === "success") resolve([mkAutomation("obsolete")]);
+      else reject(new Error("obsolete failure"));
+    });
+    expect(result.current.automations).toEqual([]);
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
+  },
+);
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.11
+it("masks every B render when returning to A before B settles", async () => {
+  const seen: Array<{ workspace: string; ids: string[] }> = [];
+  mockList.mockResolvedValue([mkAutomation("a")]);
+  const { result, rerender } = renderHook(
+    ({ workspace }) => {
+      const value = useWorkspaceAutomations(workspace);
+      seen.push({ workspace, ids: value.automations.map((item) => item.id) });
+      return value;
+    },
+    { initialProps: { workspace: WORKSPACE } },
+  );
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  let resolve!: (rows: Automation[]) => void;
+  const pending = new Promise<Automation[]>((yes) => {
+    resolve = yes;
+  });
+  mockList.mockReturnValueOnce(pending).mockResolvedValue([mkAutomation("a-current")]);
+  rerender({ workspace: OTHER_WORKSPACE });
+  rerender({ workspace: WORKSPACE });
+  await waitFor(() =>
+    expect(result.current.automations.map((item) => item.id)).toEqual(["a-current"]),
+  );
+  await act(async () => resolve([mkAutomation("b", OTHER_WORKSPACE)]));
+  expect(
+    seen
+      .filter((value) => value.workspace === WORKSPACE)
+      .every((value) => !value.ids.includes("b")),
+  ).toBe(true);
+  expect(
+    seen
+      .filter((value) => value.workspace === OTHER_WORKSPACE)
+      .every((value) => value.ids.length === 0),
+  ).toBe(true);
+  expect(result.current.automations.map((item) => item.id)).toEqual(["a-current"]);
+});

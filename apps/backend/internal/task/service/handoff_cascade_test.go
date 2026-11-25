@@ -1135,10 +1135,6 @@ func (r *fakeDeleteRepo) DeleteTaskWithVacatedStep(_ context.Context, id string)
 	return task.WorkflowStepID, nil
 }
 
-func (r *fakeDeleteRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
-	panic("DeleteExpiredQuickChatTask should not be used by delete cascade tests")
-}
-
 type deleteErrorCascadeRepo struct {
 	*fakeDeleteRepo
 	err error
@@ -1721,7 +1717,7 @@ func TestCleanupWorkspaceGroupsWaitsForActiveExecutions(t *testing.T) {
 	}
 	sessions.mu.Lock()
 	if sessions.checks < 2 {
-		t.Errorf("HasExecutorRunningRow called %d times, want >= 2", sessions.checks)
+		t.Errorf("HasActiveExecutorRunningRow called %d times, want >= 2", sessions.checks)
 	}
 	sessions.mu.Unlock()
 	if got := groups.cleanupStatuses["group-owned"]; got != orchmodels.WorkspaceCleanupStatusCleaned {
@@ -1817,7 +1813,7 @@ func (f *flippingActiveSessionReader) GetTask(context.Context, string) (*models.
 	return nil, nil
 }
 
-func (f *flippingActiveSessionReader) HasExecutorRunningRow(_ context.Context, sessionID string) (bool, error) {
+func (f *flippingActiveSessionReader) HasActiveExecutorRunningRow(_ context.Context, sessionID string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if sessionID != f.sessionID {

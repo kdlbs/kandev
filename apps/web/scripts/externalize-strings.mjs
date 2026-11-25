@@ -98,7 +98,7 @@ const DISPLAY_PROPS = new Set([
 
 /** Brand/proper nouns and acronyms that must stay untranslated. */
 const KEEP_LITERAL =
-  /^(Kandev|GitHub|GitLab|Jira|Linear|Slack|Sentry|Azure DevOps|Docker|SSH|ACP|MCP|PR|CI|AI|API|JSON|YAML|LSP|TLS|SQL|URL|ID|PostgreSQL|SQLite|Claude|Codex|OpenCode|Copilot|Amp)$/;
+  /^(Kandev|GitHub|GitLab|Jira|Linear|Slack|Sentry|Docker|SSH|ACP|MCP|PR|CI|AI|API|JSON|YAML|LSP|TLS|SQL|URL|ID|PostgreSQL|SQLite|Claude|Codex|OpenCode|Copilot|Amp)$/;
 
 /**
  * Path prefix -> catalog namespace. Ordered: the first matching prefix wins, so
@@ -128,15 +128,6 @@ const NAMESPACE_RULES = [
   [/^(app|components)\/jira\//, "jira"],
   [/^(app|components)\/linear\//, "linear"],
   [/^components\/sentry\//, "sentry"],
-  // `azuredevops`, not `azureDevops`: the shipped catalog is
-  // `src/locales/en/azuredevops.json` and every existing reference is
-  // `t("azuredevops:…")`. The camelCase form wrote a SECOND catalog file
-  // beside the real one — verified by running this on
-  // `azure-devops-work-item-detail.tsx`, which produced `azureDevops.json`
-  // alongside `azuredevops.json`. Nothing would have failed: the new keys
-  // resolve from the new namespace, so `i18n:check` stays green while the
-  // directory's copy is split across two files.
-  [/^(app|components)\/azure-devops\//, "azuredevops"],
   [/^components\/automations\//, "automations"],
   [/^components\/plugins\//, "plugins"],
   [/^components\/(integrations|vcs)\//, "integrations"],

@@ -54,7 +54,7 @@ import type {
   PassthroughConfig,
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
-import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
+import type { ProfileConflictReferences } from "@/components/settings/agent-profile-page-state";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
@@ -71,7 +71,7 @@ export {
 export { preserveNewerProfileDraft } from "@/components/settings/agent-profile-page-state";
 
 function toProfileFormData(
-  profile: AgentProfile,
+  profile: AgentProfile & { devinSandboxInherited?: boolean },
   permissionSettings: Record<string, PermissionSetting>,
 ): ProfileFormData {
   const pv = profilePermissionValues(profile, permissionSettings);
@@ -90,8 +90,10 @@ function toProfileFormData(
     cursor_plugins_mcp_enabled: profile.cursorPluginsMcpEnabled ?? true,
     mcp_selection_mode: profile.mcpSelectionMode ?? "inherit",
     mcp_selected_servers: profile.mcpSelectedServers ?? [],
+    copilot_selected_plugins: profile.copilotSelectedPlugins ?? [],
     cli_flags: profile.cliFlags ?? [],
     env_vars: profile.envVars ?? [],
+    devin_sandbox_inherited: profile.devinSandboxInherited,
     command_prefix: profile.commandPrefix ?? "",
     provider_kind: profile.providerKind ?? "",
   };
@@ -209,6 +211,7 @@ function ProfileSettingsCard({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={agent.name}
+          agentId={agent.id}
           capabilityProfileId={savedProfile?.id}
           cursorMcpAuthSupported={
             agent.name === "cursor-acp" || agent.tui_config?.mcp_strategy === "cursor"
@@ -304,6 +307,7 @@ function ProfileEditorBody({
         cliPassthrough={draft.cliPassthrough}
         cliFlags={draft.cliFlags ?? []}
         commandPrefix={draft.commandPrefix}
+        copilotSelectedPlugins={draft.copilotSelectedPlugins}
         envVars={draft.envVars}
         secrets={secrets}
         discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "command-preview")}
@@ -311,6 +315,7 @@ function ProfileEditorBody({
 
       <ProfileMcpConfigCard
         profileId={draft.id}
+        workspaceId={agent.workspace_id}
         supportsMcp={agent.supports_mcp}
         cliPassthrough={draft.cliPassthrough}
         mcpInjection={passthroughConfig?.mcp_injection}
@@ -356,7 +361,10 @@ function ProfileEditor({
     acceptProfileSaveResponse,
     discardProfileDraft,
   } = useProfileEditorState(profile, permissionSettings);
-  const [utilityConflict, setUtilityConflict] = useState<UtilityAgentReference[]>([]);
+  const [profileConflict, setProfileConflict] = useState<ProfileConflictReferences>({
+    utilityAgents: [],
+    dynamicProfiles: [],
+  });
   const updateDraft = useCallback(
     (patch: Partial<AgentProfile>) => {
       setDraft((current) => {
@@ -379,7 +387,7 @@ function ProfileEditor({
     markProfileSubmitted,
     acceptProfileSaveResponse,
     toast,
-    onUtilityConflict: setUtilityConflict,
+    onProfileConflict: setProfileConflict,
   });
   const providerInvalidKey = providerConfigInvalidReasonKey({
     providerKind: draft.providerKind,
@@ -490,10 +498,11 @@ function ProfileEditor({
         onConfirm={deleteState.handleDeleteProfile}
       />
       <AgentProfileDisableConflictDialog
-        agents={utilityConflict}
-        onCancel={() => setUtilityConflict([])}
+        agents={profileConflict.utilityAgents}
+        dynamicProfiles={profileConflict.dynamicProfiles}
+        onCancel={() => setProfileConflict({ utilityAgents: [], dynamicProfiles: [] })}
         onConfirm={async () => {
-          setUtilityConflict([]);
+          setProfileConflict({ utilityAgents: [], dynamicProfiles: [] });
           await handleSave(true);
         }}
       />

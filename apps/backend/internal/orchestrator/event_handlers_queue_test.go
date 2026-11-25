@@ -279,7 +279,7 @@ func TestExecuteQueuedMessage_LifecycleRequeueAfterArchiveIsDiscardedBeforeUnarc
 		repoForExecutionLookup: baseRepo,
 	}
 	svc := createTestServiceWithAgent(baseRepo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, baseRepo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, baseRepo, testLogger(), executor.ExecutorConfig{}))
 	svc.repo = &lifecycleClaimSequenceRepository{
 		repoStore:   baseRepo,
 		claimErrors: []error{errors.New("transient lifecycle claim error")},
@@ -401,7 +401,7 @@ func TestExecuteQueuedMessage_DiscardsReservedLifecycleMessageForRecreatedSessio
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, session.TaskID, session.ID)
 	if err != nil {
@@ -512,7 +512,7 @@ func TestExecuteQueuedMessage_LifecycleClaimErrorClearsInFlightTokenForRetryDrai
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: baseRepo}
 	svc := createTestServiceWithAgent(baseRepo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, baseRepo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, baseRepo, testLogger(), executor.ExecutorConfig{}))
 	svc.repo = &lifecycleClaimSequenceRepository{
 		repoStore:   baseRepo,
 		claimErrors: []error{errors.New("transient claim database error")},
@@ -555,7 +555,7 @@ func TestExecuteQueuedMessage_LifecycleDispatchFailureRestoresStateAndRetriesWit
 		repoForExecutionLookup: baseRepo,
 	}
 	svc := createTestServiceWithAgent(baseRepo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, baseRepo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, baseRepo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	queued := &messagequeue.QueuedMessage{
 		ID: "lifecycle-dispatch-failure", SessionID: "s1", TaskID: "t1", Content: "retry lifecycle prompt",
@@ -614,7 +614,7 @@ func TestExecuteQueuedMessage_LifecycleExecutorFailureRestoresPreClaimTaskState(
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 
 	svc.executeQueuedMessage("s1", &messagequeue.QueuedMessage{
@@ -673,7 +673,7 @@ func TestExecuteQueuedMessage_LifecycleExecutorFailurePreservesPreexistingTurn(t
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = turns
 	svc.messageCreator = &mockMessageCreator{}
 
@@ -722,7 +722,7 @@ func TestExecuteQueuedMessage_LifecycleExecutorFailureDoesNotClobberConcurrentTa
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 
 	svc.executeQueuedMessage("s1", &messagequeue.QueuedMessage{
@@ -782,7 +782,7 @@ func TestHandleAgentReady_PassthroughAcknowledgesLifecycleOnlyAfterPTYAcceptance
 			taskRepo := newMockTaskRepo()
 			seedMockTaskState(taskRepo, "t1", v1.TaskStateReview)
 			svc := createTestServiceWithAgent(repo, steps, taskRepo, agentMgr)
-			svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 			svc.messageCreator = &mockMessageCreator{}
 			if tt.lifecycle {
 				seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
@@ -834,7 +834,7 @@ func TestHandleAgentReady_PassthroughLifecyclePersistsVisibleMessageBeforePTYAcc
 	steps := newMockStepGetter()
 	steps.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1"}
 	svc := createTestServiceWithAgent(repo, steps, taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 	_, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
@@ -1070,7 +1070,7 @@ func TestExecuteQueuedMessage_LifecycleBusyClaimRequeuesInsteadOfDropping(t *tes
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: baseRepo}
 	svc := createTestServiceWithAgent(baseRepo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, baseRepo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, baseRepo, testLogger(), executor.ExecutorConfig{}))
 	claimRepo := &lifecycleClaimBarrierRepository{
 		repoStore: baseRepo, claimEntered: make(chan struct{}), allowClaim: make(chan struct{}),
 	}
@@ -1117,7 +1117,7 @@ func TestExecuteQueuedMessage_LifecycleResetAfterClaimRestoresStateAndRetryDrain
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.repo = &lifecycleClaimHookRepository{
 		repoStore: repo,
 		afterClaim: func() {
@@ -1178,7 +1178,7 @@ func TestExecuteQueuedMessage_LifecycleSupersededClaimBeforePromptDoesNotDispatc
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.repo = &lifecycleClaimHookRepository{
 		repoStore: repo,
 		afterClaim: func() {

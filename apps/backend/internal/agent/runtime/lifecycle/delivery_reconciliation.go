@@ -187,7 +187,7 @@ func captureDeliveryReconciliationIdentityWithClient(execution *AgentExecution, 
 		execution.DeliveryStreamID == "" || submissionID == "" {
 		return DeliveryReconciliationIdentity{}, fmt.Errorf("durable delivery reconciliation identity is incomplete")
 	}
-	originalRuntime := client.RuntimeProcessIdentity()
+	originalRuntime := boundAgentProcessGroup(execution, client.RuntimeProcessIdentity(), submissionID)
 	return DeliveryReconciliationIdentity{
 		OriginalRuntime: originalRuntime,
 		SessionID:       execution.SessionID, ExecutionID: execution.ID, Owner: execution.Owner,
@@ -347,6 +347,14 @@ func (sm *StreamManager) cancelDeliveryReconciliation(executionID string) {
 	sm.reconciliationMu.Unlock()
 }
 
+// restoreDeliveryReconciliation re-enables recovery when stop admission fails
+// and the execution remains attached to this stream manager.
+func (sm *StreamManager) restoreDeliveryReconciliation(executionID string) {
+	sm.reconciliationMu.Lock()
+	delete(sm.stoppedReconciliations, executionID)
+	sm.reconciliationMu.Unlock()
+}
+
 func (sm *StreamManager) runDeliveryReconciliation(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -375,6 +383,11 @@ func (sm *StreamManager) runDeliveryReconciliation(
 			}
 			if outcome == DeliveryReconciliationRunningAttached {
 				sm.notifyDeliveryReconciliationPhase(execution, identity, DeliveryReconciliationPhaseRecovered)
+			}
+			if outcome == DeliveryReconciliationBlocked {
+				// The existing recovery surface must become actionable instead
+				// of remaining on the reconnecting phase indefinitely.
+				sm.notifyDeliveryReconciliationPhase(execution, identity, DeliveryReconciliationPhaseUncertain)
 			}
 			return result
 		}

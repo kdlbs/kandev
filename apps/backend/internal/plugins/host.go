@@ -15,7 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/state"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // pluginHost implements pluginsdk.Host (the kandev.plugin.v1 Host RPCs, §3
@@ -39,13 +39,14 @@ type pluginHost struct {
 	// host_data.go; this embed only remains as defense-in-depth.
 	pluginsdk.UnimplementedHostData
 
-	service         *Service
-	pluginID        string
-	installationID  string
-	commandStore    *state.CommandStore
-	capabilities    manifest.Capabilities
-	exactSnapshotMu sync.Mutex
-	exactSnapshots  *exactReadSnapshotStore
+	service             *Service
+	pluginID            string
+	installationID      string
+	commandStore        *state.CommandStore
+	capabilities        manifest.Capabilities
+	hasSidebarGroupings bool
+	exactSnapshotMu     sync.Mutex
+	exactSnapshots      *exactReadSnapshotStore
 	// repositoryProviders is the manifest-declared set of provider IDs this
 	// plugin owns. Only these IDs may use the trusted remote-descriptor path
 	// when creating a task; a plugin cannot claim another provider merely by
@@ -122,6 +123,7 @@ type pluginHost struct {
 	agentConversations         func() AgentConversationService
 	managedConversations       func() ManagedAgentConversationService
 	managedAutomationSchedules func() ManagedConversationScheduleService
+	automationHistoryDataDep   func() AutomationHistoryDataSource
 
 	// log receives the dependency-derivation-failure diagnostic emitted by
 	// attachDependencies (see host_data_dependencies.go). nil on a bare test
@@ -190,14 +192,22 @@ func (h *pluginHost) SetState(ctx context.Context, scope, scopeID, key string, v
 	if err != nil {
 		return fmt.Errorf("plugins: marshal state value: %w", err)
 	}
-	return h.state.Set(ctx, h.pluginID, scope, scopeID, key, raw)
+	if err := h.state.Set(ctx, h.pluginID, scope, scopeID, key, raw); err != nil {
+		return err
+	}
+	h.notifySidebarGroupingState(ctx, scope, scopeID)
+	return nil
 }
 
 func (h *pluginHost) DeleteState(ctx context.Context, scope, scopeID, key string) error {
 	if !h.capabilities.State {
 		return permissionDenied("state")
 	}
-	return h.state.Delete(ctx, h.pluginID, scope, scopeID, key)
+	if err := h.state.Delete(ctx, h.pluginID, scope, scopeID, key); err != nil {
+		return err
+	}
+	h.notifySidebarGroupingState(ctx, scope, scopeID)
+	return nil
 }
 
 func (h *pluginHost) ListState(ctx context.Context, scope, scopeID string) ([]pluginsdk.StateEntry, error) {
@@ -353,6 +363,9 @@ func (h *pluginHost) EmitEvent(ctx context.Context, name string, payload map[str
 	}
 	subject := "plugin." + h.pluginID + "." + name
 	event := bus.NewEvent(subject, "plugin:"+h.pluginID, payload)
+	if h.HostCallContextEnabled() {
+		event.PluginOrigin = &bus.PluginEventOrigin{PluginID: h.pluginID, Reference: pluginsdk.HostCallReference(ctx)}
+	}
 	return h.bus.Publish(ctx, subject, event)
 }
 

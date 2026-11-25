@@ -9,6 +9,7 @@ import (
 
 // ListStepSignalWatchdogSessions returns observations for the periodic signal
 // scan. Recovery must re-read the full session under its existing guards.
+// Idle sessions retain pending-signal observations for report deduplication.
 func (r *Repository) ListStepSignalWatchdogSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	rows, err := r.ro.QueryContext(ctx, stepSignalWatchdogQuery(r.ro.DriverName()))
 	if err != nil {
@@ -34,6 +35,7 @@ func (r *Repository) ListStepSignalWatchdogSessions(ctx context.Context) ([]*mod
 func stepSignalWatchdogQuery(driver string) string {
 	metadata := "(CASE WHEN metadata IS NULL OR metadata = '' THEN '{}' ELSE metadata END)"
 	key := models.SessionMetaKeyPendingStepCompletion
+	idleSignal := dialect.JSONExtractIsNotNull(driver, metadata, key)
 	projection := "CASE WHEN json_type(" + metadata + ") = 'object' THEN json_object('" + key + "', json_extract(" + metadata + ", '$." + key + "')) ELSE " + metadata + " END"
 	if dialect.IsPostgres(driver) {
 		metadata += "::jsonb"
@@ -42,5 +44,6 @@ func stepSignalWatchdogQuery(driver string) string {
 	return `SELECT id, task_id, state, is_passthrough, ` + projection + `
 		FROM task_sessions
 		WHERE state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		   OR (state = 'IDLE' AND ` + idleSignal + `)
 		ORDER BY started_at DESC`
 }

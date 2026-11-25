@@ -19,18 +19,24 @@ const CAPABILITY_STATUS_KEYS: Record<string, string> = {
 function capabilityStatusMessage(
   t: TFunction,
   status: ModelConfig["status"] | ProfileDiscoveryStatus,
+  reasonCode?: string,
 ): string | null {
+  if (status === "failed" && reasonCode === "policy_unverified") {
+    return t("agents:copilotPluginPolicyProbeRecovery");
+  }
   const key = status ? CAPABILITY_STATUS_KEYS[status] : undefined;
   return key ? t(key) : null;
 }
 
 export function CapabilityStatusMessage({
   status,
+  reasonCode,
 }: {
   status: ModelConfig["status"] | ProfileDiscoveryStatus;
+  reasonCode?: string;
 }) {
   const { t } = useTranslation();
-  const msg = capabilityStatusMessage(t, status);
+  const msg = capabilityStatusMessage(t, status, reasonCode);
   if (!msg) return null;
   return (
     <p

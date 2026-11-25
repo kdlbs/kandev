@@ -7,12 +7,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/clarification/protocol"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcp "github.com/kandev/kandev/internal/mcp/server"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCodexUserInputBridgePreservesQuestionsAndAnswers(t *testing.T) {
@@ -151,6 +155,38 @@ func TestNormalizeClarificationResponseRejectsMissingAndUnofferedAnswers(t *test
 			}
 		})
 	}
+}
+
+func TestNativeUserInputBridgeKeepsIdentityOnRetryAndCancel(t *testing.T) {
+	backend := mcp.NewChannelBackendClient(logger.Default())
+	t.Cleanup(backend.Close)
+	handler := newCodexUserInputRequestHandler(&config.InstanceConfig{SessionID: "session"}, backend, logger.Default())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	request := &adapter.UserInputRequest{
+		ItemID: uuid.NewString(), ScopedCancellation: true,
+		Questions: []adapter.UserInputQuestion{{ID: "q", Prompt: "How should this continue?", IsOther: true}},
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := handler(ctx, request)
+		done <- err
+	}()
+	first := receiveBackendRequest(t, backend.GetRequestChannel())
+	require.Equal(t, ws.ActionMCPAskUserQuestion, first.Action)
+	require.True(t, mcporigin.MessageCarriesTrustedInternalCall(first))
+	backend.FailRequest(first.ID, mcp.ErrKandevCallOutcomeUnknown)
+	retried := receiveBackendRequest(t, backend.GetRequestChannel())
+	require.JSONEq(t, string(first.Payload), string(retried.Payload))
+	cancel()
+	stop := receiveBackendRequest(t, backend.GetRequestChannel())
+	require.Equal(t, ws.ActionMCPCancelNativeClarification, stop.Action)
+	require.True(t, mcporigin.MessageCarriesTrustedInternalCall(stop))
+	var scope protocol.NativeQuestionScope
+	require.NoError(t, json.Unmarshal(stop.Payload, &scope))
+	require.Equal(t, protocol.NativeQuestionScope{SessionID: "session", NativeRequestID: request.ItemID}, scope)
+	respondToBackendRequest(t, backend, stop, map[string]bool{"ok": true})
+	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func receiveBackendRequest(t *testing.T, requests <-chan *ws.Message) *ws.Message {

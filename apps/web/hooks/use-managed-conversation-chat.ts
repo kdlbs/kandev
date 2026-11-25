@@ -7,7 +7,7 @@ import type {
   PluginManagedConversationInputIntent,
   PluginManagedConversationClarificationAnswer,
   PluginManagedConversationSnapshot,
-} from "@kandev/plugin-sdk";
+} from "@kdlbs/plugin-sdk";
 import { issueHumanInteractionResponseReceipt } from "@/lib/plugins/human-interaction-receipts";
 import { orderManagedConversationInputs } from "@/lib/plugins/managed-conversation";
 import { generateUUID } from "@/lib/uuid";

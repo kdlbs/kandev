@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -217,4 +218,62 @@ func TestNativeMessageWithoutAnyGroupingIdentityUsesReplaySequence(t *testing.T)
 	second.DeliverySequence = 2
 	require.NotEqual(t, canonicalAgentMessageID(execution, first), canonicalAgentMessageID(execution, second))
 	require.Equal(t, canonicalAgentMessageID(execution, first), canonicalAgentMessageID(nil, first))
+}
+
+func TestCopilotInterruptionNoticeUsesDistinctCanonicalMessageID(t *testing.T) {
+	execution := &AgentExecution{SessionID: "session", DeliveryStreamID: "stream"}
+	status := agentctl.AgentEvent{
+		Type: streams.EventTypeMessageChunk, Text: "warning", PromptGeneration: 17, TurnID: "owned-turn",
+		Data: map[string]any{streams.AgentEventDataCopilotInterruptionNotice: streams.CopilotInterruptionTool},
+	}
+	reply := status
+	reply.Text = "assistant reply"
+	reply.Data = nil
+	require.NotEqual(t, canonicalAgentMessageID(execution, status), canonicalAgentMessageID(execution, reply),
+		"the warning and reply have no provider message ID but must persist as separate rows")
+
+	status.CanonicalMessageBaseID = "shared-provider-base"
+	status.CanonicalMessageID = "shared-provider-base"
+	reply.CanonicalMessageBaseID = "shared-provider-base"
+	reply.CanonicalMessageID = "shared-provider-base"
+	require.NotEqual(t, canonicalAgentMessageID(execution, status), canonicalAgentMessageID(execution, reply),
+		"classification must also separate an inherited canonical message identity")
+}
+
+func TestUnownedCopilotInterruptionDoesNotInheritPendingSuccessorTurn(t *testing.T) {
+	execution := &AgentExecution{
+		SessionID: "session", DeliveryStreamID: "stream", promptTurnID: "successor-turn",
+	}
+	execution.dispatchedPromptPending.Store(true)
+	event := agentctl.AgentEvent{
+		Type: streams.EventTypeMessageChunk,
+		Data: map[string]any{streams.AgentEventDataCopilotInterruptionNotice: streams.CopilotInterruptionTool},
+	}
+	durable := durableAgentEvent(execution, event)
+	var projected agentctl.AgentEvent
+	require.NoError(t, json.Unmarshal(durable.Payload, &projected))
+	require.Empty(t, projected.TurnID, "a warning without prompt generation must not acquire the pending turn")
+	require.Equal(t, "message", canonicalMessageType(projected), "unowned warnings remain ordinary text")
+}
+
+func TestCanonicalAgentMessageIDPreservesNativeAndReasoningIdentity(t *testing.T) {
+	execution := &AgentExecution{SessionID: "session", DeliveryStreamID: "stream"}
+	nativeFirst := agentctl.AgentEvent{
+		Type: "message_chunk", ProtocolMessageID: "native-message", DeliverySequence: 1,
+	}
+	nativeLater := nativeFirst
+	nativeLater.DeliverySequence = 17
+	require.Equal(t, canonicalAgentMessageID(execution, nativeFirst), canonicalAgentMessageID(execution, nativeLater),
+		"native protocol message identity is independent of delivery sequence")
+
+	reasoning := nativeFirst
+	reasoning.Type = "reasoning"
+	require.NotEqual(t, canonicalAgentMessageID(execution, nativeFirst), canonicalAgentMessageID(execution, reasoning),
+		"reasoning retains a separate canonical identity from assistant text")
+
+	replayed := nativeFirst
+	replayed.CanonicalMessageBaseID = "stable-base"
+	replayed.CanonicalMessageID = "agent-delivery-segment-already-resolved"
+	require.Equal(t, "stable-base", canonicalAgentMessageID(execution, replayed),
+		"retry and reconnect derive from the stable base instead of hashing a resolved ID")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
@@ -17,7 +18,7 @@ func (s *Service) settleContinuationFailureLocked(ctx context.Context, data watc
 	entry.mu.Lock()
 	started := entry.started
 	entry.mu.Unlock()
-	if started >= entry.policy.maxAttempts() && data.ContinuationSafety.SafeFor(data.PromptGeneration) {
+	if started >= entry.policy.maxAttempts() && continuationExhaustionEvidence(entry, data) {
 		data.RecoveryDisposition = recoveryDispositionExhausted
 	}
 	nextState := models.TaskSessionStateWaitingForInput
@@ -33,4 +34,25 @@ func (s *Service) settleContinuationFailureLocked(ctx context.Context, data watc
 	return func(workerCtx context.Context) {
 		s.cleanupAgentExecutionWithReason(workerCtx, data.AgentExecutionID, data.TaskID, data.SessionID, agentruntime.StopReasonRecoverableAgentFailure)
 	}
+}
+
+func continuationExhaustionEvidence(entry *transientRetryEntry, data watcher.AgentEventData) bool {
+	safety := data.ContinuationSafety
+	if safety == nil || !safety.SafeFor(data.PromptGeneration) {
+		return false
+	}
+	if !safety.Pending {
+		return true
+	}
+	if entry == nil || entry.mode != recoveryModeContinue ||
+		entry.continuationPolicy != continuationPolicyAgentManagedPendingLive ||
+		entry.continuation == nil || entry.retainedRuntime == nil ||
+		data.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime ||
+		!data.PromptFailureDisposition.Valid() {
+		return false
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	return entry.started > 0 && entry.acceptedExecution == data.AgentExecutionID &&
+		entry.acceptedGeneration == data.PromptGeneration
 }

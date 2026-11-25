@@ -16,6 +16,11 @@ import (
 )
 
 func createService(t *testing.T) (*Service, func()) {
+	svc, _, cleanup := createServiceWithDB(t)
+	return svc, cleanup
+}
+
+func createServiceWithDB(t *testing.T) (*Service, *sqlx.DB, func()) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
@@ -35,7 +40,7 @@ func createService(t *testing.T) (*Service, func()) {
 			t.Errorf("close repo: %v", err)
 		}
 	}
-	return NewService(repoImpl), cleanup
+	return NewService(repoImpl), sqlxDB, cleanup
 }
 
 func TestService_CreatePromptValidation(t *testing.T) {

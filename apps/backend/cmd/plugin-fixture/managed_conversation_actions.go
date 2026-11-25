@@ -9,7 +9,7 @@ import (
 	"io"
 
 	"github.com/google/uuid"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 const managedConversationUnsupportedReason = "managed_conversation_unsupported"

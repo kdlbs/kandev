@@ -11,12 +11,41 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func (r *Repository) restoreAuthenticatedNativePresentationTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence, completedAt time.Time) (bool, error) {
-	valid, err := r.restoreAuthenticatedNativeNoticeTx(ctx, tx, proof, completedAt)
+func (r *Repository) restoreAuthenticatedNativePresentationTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence, blocks []models.SessionRecoveryBlock, completedAt time.Time) (bool, error) {
+	valid, err := r.restoreAuthenticatedNativeNoticeTx(ctx, tx, proof, blocks, completedAt)
 	if err != nil || !valid {
 		return false, err
 	}
 	return true, r.clearAuthenticatedNativeErrorTx(ctx, tx, proof, completedAt)
+}
+
+func (r *Repository) markRecoveryNoticePendingTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	metadata map[string]json.RawMessage,
+	metadataRaw sql.NullString,
+	recovery models.AgentDeliveryRecovery,
+	completedAt time.Time,
+) error {
+	metadata[models.SessionMetaKeyRecoveryNoticePending], _ = json.Marshal(models.RecoveryNoticeSourceIdentity(recovery))
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_sessions SET metadata = ?, updated_at = ?
+		WHERE id = ? AND COALESCE(metadata, '') = ?`), string(encoded), completedAt,
+		recovery.SessionID, nullableMetadataValue(metadataRaw))
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return errors.New("native recovery notice metadata changed")
+	}
+	return nil
 }
 
 func (r *Repository) clearAuthenticatedNativeErrorTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence, completedAt time.Time) error {

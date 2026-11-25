@@ -24,6 +24,7 @@ type InlineTaskSearchOptions = {
   search: string;
   open: boolean;
   workspaceId: string | null;
+  workflowId?: string | null;
   steps: { id: string; position: number; show_in_command_panel?: boolean }[];
   setTaskResults: (tasks: Task[]) => void;
   setIsSearching: (searching: boolean) => void;
@@ -42,6 +43,7 @@ function useStepMaps(steps: InlineTaskSearchOptions["steps"]) {
 
 type ActiveTaskQuery = {
   workspaceId: string;
+  workflowId: string | null | undefined;
   signal: AbortSignal;
   visibleStepIds: Set<string> | null;
   stepPositionMap: Map<string, number>;
@@ -50,13 +52,15 @@ type ActiveTaskQuery = {
 
 /** Unarchived task preview for the idle palette, ordered by workflow step. */
 async function fetchActiveTasks(query: ActiveTaskQuery): Promise<Task[]> {
-  const { workspaceId, signal, visibleStepIds, stepPositionMap, resultLimit } = query;
-  // Deliberately over-fetched: the step and archived filters below run on the
-  // response, so requesting only `resultLimit` rows would show fewer active
-  // tasks than exist whenever the first page is mostly backlog or done.
+  const { workspaceId, workflowId, signal, visibleStepIds, stepPositionMap, resultLimit } = query;
+  const filterByStep = visibleStepIds !== null && Boolean(workflowId);
   const res = await listTasksByWorkspace(
     workspaceId,
-    { page: 1, pageSize: TASK_SCOPE_PAGE_SIZE },
+    {
+      page: 1,
+      pageSize: TASK_SCOPE_PAGE_SIZE,
+      ...(filterByStep ? { workflowId, commandPanelVisible: true } : {}),
+    },
     { init: { signal } },
   );
   const tasks = (res.tasks ?? []).filter(
@@ -100,7 +104,8 @@ async function fetchMatchingTasks(
 }
 
 export function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
-  const { mode, search, open, workspaceId, steps, setTaskResults, setIsSearching } = opts;
+  const { mode, search, open, workspaceId, workflowId, steps, setTaskResults, setIsSearching } =
+    opts;
   const { setConversationState } = opts;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -136,6 +141,7 @@ export function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
       abortRef.current = controller;
       fetchActiveTasks({
         workspaceId,
+        workflowId,
         signal: controller.signal,
         visibleStepIds,
         stepPositionMap,
@@ -184,6 +190,7 @@ export function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
     search,
     open,
     workspaceId,
+    workflowId,
     visibleStepIds,
     stepPositionMap,
     setTaskResults,

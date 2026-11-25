@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
@@ -176,6 +177,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
 
   const drawer = testPage.getByTestId("add-workspace-sources-drawer");
   await expect(drawer).toBeVisible();
+  await waitForFiniteAnimations(drawer);
   await expect(drawer.getByTestId("workspace-change-consequences")).toHaveCount(0);
   await expect(drawer.getByTestId("workspace-source-continuity")).toBeVisible();
   const [drawerBox, viewport] = await Promise.all([
@@ -349,7 +351,9 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   const viewer = testPage.getByTestId("mobile-file-viewer-panel");
   await expect(viewer).toBeVisible({ timeout: 15_000 });
   await expect(
-    viewer.locator(".cm-line").filter({ hasText: "active mobile worktree source" }),
+    viewer
+      .locator(".cm-line, .monaco-editor .view-line")
+      .filter({ hasText: "active mobile worktree source" }),
   ).toBeVisible();
   await expect(viewer.getByRole("button", { name: "Close" })).toBeVisible();
   await expect(

@@ -54,7 +54,7 @@ func TestResumeCallerReportsActivationFailureAndRecoversSameExecution(t *testing
 	seedMockTaskState(tasks, "task1", v1.TaskStateInProgress)
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), tasks, manager)
 	svc.SetProfileExecutionResolver(resolver)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	result, err := svc.resumeTaskSessionWithContinuation(ctx, "task1", "session1",
 		executor.ResumeOptions{RecoveryAction: recoveryActionResume}, nil)
 	if result != nil || !errors.Is(err, errInjectedRouteActivation) {

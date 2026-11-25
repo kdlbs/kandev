@@ -246,7 +246,7 @@ func (s *AttachmentService) Open(ctx context.Context, ownerID, id string) (*mode
 		if attachment.OwnerID != ownerID {
 			return nil, nil, ErrAttachmentForbidden
 		}
-	case models.AttachmentStateClaimed:
+	case models.AttachmentStateClaimed, models.AttachmentStatePlanComment:
 		if attachment.TaskID == "" || s.authorizeTask == nil {
 			return nil, nil, ErrAttachmentForbidden
 		}
@@ -413,10 +413,22 @@ func (s *AttachmentService) Delete(ctx context.Context, ownerID, id string) erro
 	if attachment.State != models.AttachmentStateStaged {
 		return ErrAttachmentClaimConflict
 	}
+	if err := s.repo.ExpireStagedMessageAttachment(ctx, id, ownerID); err != nil {
+		return err
+	}
 	if err := s.removeBytes(attachment); err != nil {
 		return err
 	}
 	return s.repo.DeleteMessageAttachment(ctx, id, ownerID)
+}
+
+// withClaimAdmission serializes a task-insert attachment claim with staged-row
+// deletion and expiry, the same fence Claim and Delete use. Callers must not
+// hold it across event publication or other external work.
+func (s *AttachmentService) withClaimAdmission(fn func() error) error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return fn()
 }
 
 func (s *AttachmentService) Claim(ctx context.Context, ownerID, workspaceID, taskID, sessionID string, ids []string) error {

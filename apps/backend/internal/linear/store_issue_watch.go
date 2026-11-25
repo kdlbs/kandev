@@ -218,7 +218,7 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 			repository_id = ?, base_branch = ?, filter_json = ?,
 			agent_profile_id = ?, executor_profile_id = ?, prompt = ?,
 			enabled = ?, poll_interval_seconds = ?, max_inflight_tasks = ?,
-			sort_by = ?, last_polled_at = ?, updated_at = ?
+			sort_by = ?, last_polled_at = ?, updated_at = ?, poll_revision = poll_revision + 1
 		WHERE id = ?`),
 		w.WorkflowID, w.WorkflowStepID,
 		w.RepositoryID, w.BaseBranch, filterJSON,
@@ -231,9 +231,17 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 // UpdateIssueWatchLastPolled stamps the last-polled timestamp without touching
 // the rest of the row.
 func (s *Store) UpdateIssueWatchLastPolled(ctx context.Context, id string, t time.Time) error {
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(
-		`UPDATE linear_issue_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`),
-		t, time.Now().UTC(), id)
+	return s.updateIssueWatchLastPolled(ctx, id, t, 0)
+}
+
+func (s *Store) updateIssueWatchLastPolled(ctx context.Context, id string, t time.Time, revision int64) error {
+	query := `UPDATE linear_issue_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`
+	args := []any{t, time.Now().UTC(), id}
+	if revision != 0 {
+		query += ` AND poll_revision = ?`
+		args = append(args, revision)
+	}
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(query), args...)
 	return err
 }
 
@@ -246,7 +254,7 @@ func (s *Store) DisableIssueWatchWithError(ctx context.Context, id, cause string
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(
 		`UPDATE linear_issue_watches
-		   SET enabled = FALSE, last_error = ?, last_error_at = ?, updated_at = ?
+		   SET enabled = FALSE, last_error = ?, last_error_at = ?, updated_at = ?, poll_revision = poll_revision + 1
 		 WHERE id = ?`),
 		cause, now, now, id)
 	return err
@@ -261,10 +269,14 @@ func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Lock the parent before child rows, as pending poll commits and resets do.
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM linear_issue_watches WHERE id = ?`), id); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM linear_issue_watch_tasks WHERE issue_watch_id = ?`), id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM linear_issue_watches WHERE id = ?`), id); err != nil {
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM linear_issue_watch_pending_issues WHERE issue_watch_id = ?`), id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -318,18 +330,20 @@ func (s *Store) ReleaseIssueWatchTask(ctx context.Context, watchID, identifier s
 	return err
 }
 
-// ListSeenIssueIdentifiers returns the set of issue identifiers already
-// reserved against a watch.
-func (s *Store) ListSeenIssueIdentifiers(ctx context.Context, watchID string) (map[string]struct{}, error) {
-	var keys []string
-	err := s.ro.SelectContext(ctx, &keys, s.ro.Rebind(
-		`SELECT issue_identifier FROM linear_issue_watch_tasks WHERE issue_watch_id = ?`), watchID)
+// listIssueWatchReservations maps every reserved identifier to whether its task ID is recorded.
+func (s *Store) listIssueWatchReservations(ctx context.Context, watchID string) (map[string]bool, error) {
+	var rows []struct {
+		Identifier string `db:"issue_identifier"`
+		TaskID     string `db:"task_id"`
+	}
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
+		`SELECT issue_identifier, task_id FROM linear_issue_watch_tasks WHERE issue_watch_id = ?`), watchID)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]struct{}, len(keys))
-	for _, k := range keys {
-		out[k] = struct{}{}
+	out := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		out[row.Identifier] = row.TaskID != ""
 	}
 	return out, nil
 }
@@ -355,13 +369,68 @@ func (s *Store) ResetIssueWatchState(ctx context.Context, watchID string) error 
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, s.db.Rebind(
+		`UPDATE linear_issue_watches
+		SET last_polled_at = NULL, updated_at = ?, poll_revision = poll_revision + 1
+		WHERE id = ?`), time.Now().UTC(), watchID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(
 		`DELETE FROM linear_issue_watch_tasks WHERE issue_watch_id = ?`), watchID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, s.db.Rebind(
-		`UPDATE linear_issue_watches SET last_polled_at = NULL, updated_at = ? WHERE id = ?`),
-		time.Now().UTC(), watchID); err != nil {
+		`DELETE FROM linear_issue_watch_pending_issues WHERE issue_watch_id = ?`), watchID); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// ListPendingIssueIDs returns the Linear issue IDs a blocker-aware watch has
+// matched but not yet started.
+func (s *Store) ListPendingIssueIDs(ctx context.Context, watchID string) ([]string, error) {
+	var ids []string
+	err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(
+		`SELECT issue_id FROM linear_issue_watch_pending_issues WHERE issue_watch_id = ? ORDER BY issue_id`), watchID)
+	return ids, err
+}
+
+func (s *Store) issueWatchPollRevision(ctx context.Context, watchID string) (int64, error) {
+	var revision int64
+	err := s.ro.GetContext(ctx, &revision, s.ro.Rebind(
+		`SELECT poll_revision FROM linear_issue_watches WHERE id = ?`), watchID)
+	return revision, err
+}
+
+// replacePendingIssueIDs commits a poll only if its watch revision is still current.
+func (s *Store) replacePendingIssueIDs(ctx context.Context, watchID string, revision int64, ids []string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, s.db.Rebind(`
+		UPDATE linear_issue_watches SET poll_revision = poll_revision + 1
+		WHERE id = ? AND poll_revision = ?`), watchID, revision)
+	if err != nil {
+		return false, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil || updated == 0 {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(
+		`DELETE FROM linear_issue_watch_pending_issues WHERE issue_watch_id = ?`), watchID); err != nil {
+		return false, err
+	}
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, s.db.Rebind(`
+			INSERT INTO linear_issue_watch_pending_issues (issue_watch_id, issue_id) VALUES (?, ?)
+			ON CONFLICT(issue_watch_id, issue_id) DO NOTHING`), watchID, id); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }

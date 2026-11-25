@@ -131,6 +131,14 @@ type dependencyMoveAgentManager struct {
 	started       chan struct{}
 }
 
+func (*dependencyMoveAgentManager) RequiresCloneURL(string) bool          { return false }
+func (*dependencyMoveAgentManager) ShouldApplyPreferredShell(string) bool { return false }
+func (*dependencyMoveAgentManager) ValidateExecutorRuntime(string) error  { return nil }
+
+func (*dependencyMoveAgentManager) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
+}
+
 func (m *dependencyMoveAgentManager) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	err := m.repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: req.SessionID, TaskID: req.TaskID, SessionID: req.SessionID, Status: "ready", AgentExecutionID: "exec-" + req.SessionID})
 	if err != nil {

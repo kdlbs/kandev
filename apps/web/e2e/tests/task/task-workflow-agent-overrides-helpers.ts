@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { getMockAgent } from "../../helpers/agent-fixtures";
@@ -95,30 +96,85 @@ export async function createOverrideTask(
   });
 }
 
-export async function waitForNewWorkflowProfileSession(
+type WorkflowProfileSessionWaitOptions = {
+  excludedSessionIds?: string[];
+  isReady: (session: { state: string }) => boolean;
+  expectation: string;
+  failOnFailure?: boolean;
+};
+
+async function waitForWorkflowProfileSession(
   apiClient: ApiClient,
   taskId: string,
   profileId: string,
-  excludedSessionIds: string[] = [],
+  options: WorkflowProfileSessionWaitOptions,
 ) {
+  const { excludedSessionIds = [], isReady, expectation, failOnFailure = false } = options;
   let sessionId = "";
   await expect
     .poll(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(taskId);
+        const matchesProfile = (candidate: (typeof sessions)[number]) =>
+          candidate.agent_profile_id === profileId && !excludedSessionIds.includes(candidate.id);
+        if (failOnFailure) {
+          const failedSession = sessions.find(
+            (candidate) =>
+              matchesProfile(candidate) &&
+              (candidate.state === "FAILED" || candidate.state === "CANCELLED"),
+          );
+          if (failedSession) {
+            throw new Error(
+              `profile ${profileId} created a ${failedSession.state} session${failedSession.error_message ? `: ${failedSession.error_message}` : ""}`,
+            );
+          }
+        }
         const session = sessions.find(
-          (candidate) =>
-            candidate.agent_profile_id === profileId &&
-            !excludedSessionIds.includes(candidate.id) &&
-            candidate.state === "WAITING_FOR_INPUT",
+          (candidate) => matchesProfile(candidate) && isReady(candidate),
         );
         sessionId = session?.id ?? "";
         return sessionId;
       },
-      { timeout: 45_000, message: `profile ${profileId} did not create a new answerable session` },
+      { timeout: 45_000, message: `profile ${profileId} ${expectation}` },
     )
     .not.toBe("");
   return sessionId;
+}
+
+export function waitForWorkflowProfileSessionCreated(
+  apiClient: ApiClient,
+  taskId: string,
+  profileId: string,
+  excludedSessionIds: string[] = [],
+) {
+  return waitForWorkflowProfileSession(apiClient, taskId, profileId, {
+    excludedSessionIds,
+    isReady: () => true,
+    expectation: "did not create a new session",
+  });
+}
+
+export function waitForNewWorkflowProfileSession(
+  apiClient: ApiClient,
+  taskId: string,
+  profileId: string,
+  excludedSessionIds: string[] = [],
+  options: { readiness?: "answerable" | "launched" } = {},
+) {
+  const readiness = options.readiness ?? "answerable";
+  return waitForWorkflowProfileSession(apiClient, taskId, profileId, {
+    excludedSessionIds,
+    isReady:
+      readiness === "answerable"
+        ? (session) => session.state === "WAITING_FOR_INPUT"
+        : (session) =>
+            ["STARTING", "RUNNING", "WAITING_FOR_INPUT", "COMPLETED"].includes(session.state),
+    expectation:
+      readiness === "answerable"
+        ? "did not create a new answerable session"
+        : "did not launch a new session",
+    failOnFailure: true,
+  });
 }
 
 export async function waitForWorkflowStep(apiClient: ApiClient, taskId: string, stepId: string) {
@@ -171,4 +227,122 @@ export async function previewWorkflowMove(
 
 export async function deleteFixtureTasks(apiClient: ApiClient, taskIds: string[]) {
   await Promise.all(taskIds.map((taskId) => apiClient.deleteTask(taskId).catch(() => undefined)));
+}
+
+export type ColdWorkflowMetadataScenario = {
+  fixture: WorkflowAgentOverrideFixture;
+  boardWorkflow: Awaited<ReturnType<ApiClient["createWorkflow"]>>;
+};
+
+type WorkflowMetadataRequest = {
+  workflowId: string;
+  kind: "snapshot" | "steps";
+};
+
+/** Board A owns the boot snapshot; workflow B is selectable only inside the dialog. */
+export async function seedColdWorkflowMetadataScenario(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  suffix: string,
+): Promise<ColdWorkflowMetadataScenario> {
+  const fixture = await seedWorkflowAgentOverrideFixture(apiClient, seedData, suffix);
+  await apiClient.updateWorkflowStep(fixture.prStep.id, {
+    prompt: "Ship {{task_prompt}}",
+  });
+  const boardWorkflow = await apiClient.createWorkflow(
+    seedData.workspaceId,
+    `${suffix} Loaded Board`,
+  );
+  await apiClient.createWorkflowStep(boardWorkflow.id, "Loaded board start", 0, {
+    is_start_step: true,
+  });
+  return { fixture, boardWorkflow };
+}
+
+export async function saveColdWorkflowMetadataSettings(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  scenario: ColdWorkflowMetadataScenario,
+  remembered: boolean,
+): Promise<void> {
+  await apiClient.saveUserSettings({
+    workspace_id: seedData.workspaceId,
+    workflow_filter_id: scenario.boardWorkflow.id,
+    task_create_last_used: {
+      repository_id: seedData.repositoryId,
+      branch: "main",
+      agent_profile_id: scenario.fixture.profileA.id,
+      workflow_ids_by_workspace: {
+        [seedData.workspaceId]: remembered
+          ? scenario.fixture.workflow.id
+          : scenario.boardWorkflow.id,
+      },
+    },
+  });
+}
+
+export async function cleanupColdWorkflowMetadataScenario(
+  apiClient: ApiClient,
+  scenario: ColdWorkflowMetadataScenario,
+  taskIds: string[],
+): Promise<void> {
+  await deleteFixtureTasks(apiClient, taskIds);
+  await apiClient.deleteWorkflow(scenario.fixture.workflow.id).catch(() => undefined);
+  await apiClient.deleteWorkflow(scenario.boardWorkflow.id).catch(() => undefined);
+}
+
+export function recordWorkflowMetadataRequests(page: Page): WorkflowMetadataRequest[] {
+  const requests: WorkflowMetadataRequest[] = [];
+  page.on("request", (request) => {
+    if (request.method() !== "GET") return;
+    const match = /^\/api\/v1\/workflows\/([^/]+)\/(snapshot|workflow\/steps)$/.exec(
+      new URL(request.url()).pathname,
+    );
+    if (!match) return;
+    requests.push({
+      workflowId: decodeURIComponent(match[1] ?? ""),
+      kind: match[2] === "snapshot" ? "snapshot" : "steps",
+    });
+  });
+  return requests;
+}
+
+export function workflowMetadataRequests(
+  requests: WorkflowMetadataRequest[],
+  workflowId: string,
+  kind: WorkflowMetadataRequest["kind"],
+): WorkflowMetadataRequest[] {
+  return requests.filter((request) => request.workflowId === workflowId && request.kind === kind);
+}
+
+export async function waitForLoadedBoardSnapshot(page: Page, workflowId: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate((id) => {
+          const store = (
+            window as Window & {
+              __KANDEV_E2E_STORE__?: {
+                getState: () => { kanbanMulti?: { snapshots?: Record<string, unknown> } };
+              };
+            }
+          ).__KANDEV_E2E_STORE__;
+          return Boolean(store?.getState().kanbanMulti?.snapshots?.[id]);
+        }, workflowId),
+      { message: `board ${workflowId} did not load its snapshot` },
+    )
+    .toBe(true);
+}
+
+export async function hasWorkflowSnapshot(page: Page, workflowId: string): Promise<boolean> {
+  return page.evaluate((id) => {
+    const store = (
+      window as Window & {
+        __KANDEV_E2E_STORE__?: {
+          getState: () => { kanbanMulti?: { snapshots?: Record<string, unknown> } };
+        };
+      }
+    ).__KANDEV_E2E_STORE__;
+    return Boolean(store?.getState().kanbanMulti?.snapshots?.[id]);
+  }, workflowId);
 }

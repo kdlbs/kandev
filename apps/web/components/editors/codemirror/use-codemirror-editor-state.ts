@@ -1,3 +1,4 @@
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { useCallback, useEffect, useMemo, useState, useRef, type RefObject } from "react";
 import type { ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { EditorView, gutter, GutterMarker, ViewPlugin, type ViewUpdate } from "@codemirror/view";
@@ -13,6 +14,9 @@ import { computeLineDiffStats } from "@/lib/diff";
 import { useToast } from "@/components/toast-provider";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useTranslation } from "react-i18next";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { readCodeMirrorSelection, selectionEndPoint } from "./codemirror-selection";
+import { useCodeMirrorTouchSelection } from "./use-codemirror-touch-selection";
 // Resolved inside `toDOM()`, which is a CodeMirror gutter callback with no hook scope.
 import { t as moduleT } from "@/lib/i18n";
 
@@ -193,6 +197,7 @@ type UseCodeMirrorEditorStateOpts = {
   isDirty: boolean;
   isSaving: boolean;
   sessionId?: string;
+  readOnly?: boolean;
   enableComments: boolean;
   onChange: (newContent: string) => void;
   onSave: () => void;
@@ -210,6 +215,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     isDirty,
     isSaving,
     sessionId,
+    readOnly = false,
     enableComments,
     onChange,
     onSave,
@@ -265,34 +271,42 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     return () => document.removeEventListener("mousemove", handleMouseMove);
   }, []);
 
-  // Show floating button after selection ends
+  const readCurrentSelection = useCallback(
+    (view: EditorView) => readCodeMirrorSelection(view.state),
+    [],
+  );
+  const { touchSelectionActiveRef } = useCodeMirrorTouchSelection({
+    enabled: enableComments && Boolean(sessionId),
+    wrapperRef,
+    editorRef,
+    readCurrentSelection,
+    setCurrentSelection,
+    setFloatingButtonPos,
+  });
+
+  // Show the desktop button after a mouse selection ends.
   const handleSelectionEnd = useCallback(() => {
-    if (!enableComments || !sessionId) return;
+    if (!enableComments || !sessionId || touchSelectionActiveRef.current) return;
     const view = editorRef.current?.view;
     if (!view) return;
-    const selection = view.state.selection.main;
-    if (selection.empty) {
-      setFloatingButtonPos(null);
-      setCurrentSelection(null);
-      return;
-    }
-    const selectedText = view.state.sliceDoc(selection.from, selection.to);
-    if (!selectedText.trim()) {
-      setFloatingButtonPos(null);
-      setCurrentSelection(null);
-      return;
-    }
-    const startLine = view.state.doc.lineAt(selection.from).number;
-    const endLine = view.state.doc.lineAt(selection.to).number;
-    setCurrentSelection({ text: selectedText, startLine, endLine });
-    setFloatingButtonPos({ x: mousePositionRef.current.x, y: mousePositionRef.current.y });
-  }, [enableComments, sessionId, editorRef]);
+    const selection = readCodeMirrorSelection(view.state);
+    setCurrentSelection(selection);
+    setFloatingButtonPos(
+      selection ? { x: mousePositionRef.current.x, y: mousePositionRef.current.y } : null,
+    );
+  }, [enableComments, sessionId, editorRef, touchSelectionActiveRef]);
+
+  // Touch selections (including native handle drags) arrive as selection
+  // transactions without a mouseup. Every selection transaction also refreshes
+  // the quote so keyboard extension cannot leave an older quote behind.
+  const touch = useTouchDrawer();
 
   // Mouse listeners for selection
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper || !enableComments || !sessionId) return;
     const handleMouseUp = (e: MouseEvent) => {
+      if (touchSelectionActiveRef.current) return;
       if ((e.target as HTMLElement).closest(".floating-comment-btn")) return;
       setTimeout(handleSelectionEnd, 10);
     };
@@ -311,20 +325,25 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   // Clear floating button when selection cleared via keyboard
   const selectionUpdateExtension = useMemo(() => {
     return EditorView.updateListener.of((update) => {
-      if (update.selectionSet) {
-        const selection = update.state.selection.main;
-        if (selection.empty) {
-          setFloatingButtonPos(null);
-          setCurrentSelection(null);
-        }
+      if (!update.selectionSet) return;
+      if (update.state.selection.main.empty) {
+        setFloatingButtonPos(null);
+        setCurrentSelection(null);
+        return;
+      }
+      if (!enableComments || !sessionId) return;
+      const selection = readCodeMirrorSelection(update.state);
+      setCurrentSelection(selection);
+      if (touch) {
+        setFloatingButtonPos(selection ? selectionEndPoint(update.view) : null);
       }
     });
-  }, []);
+  }, [enableComments, sessionId, touch]);
 
   // Extensions
   const extensions: Extension[] = useMemo(() => {
     const exts: Extension[] = [
-      EditorView.editable.of(true),
+      EditorView.editable.of(!readOnly),
       cmEditorTheme,
       commentGutter,
       commentPlugin,
@@ -333,7 +352,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     if (wrapEnabled) exts.push(EditorView.lineWrapping);
     if (langExt) exts.push(langExt);
     return exts;
-  }, [langExt, wrapEnabled, commentGutter, commentPlugin, selectionUpdateExtension]);
+  }, [langExt, readOnly, wrapEnabled, commentGutter, commentPlugin, selectionUpdateExtension]);
 
   // Diff stats
   const [diffStats, setDiffStats] = useState<{ additions: number; deletions: number } | null>(null);
@@ -427,9 +446,9 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   );
 
   const handleFloatingButtonClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
+    (e?: React.MouseEvent) => {
+      e?.preventDefault();
+      e?.stopPropagation();
       if (!currentSelection || !floatingButtonPos) return;
       setTextSelection({ ...currentSelection, position: floatingButtonPos });
       setFloatingButtonPos(null);
@@ -444,7 +463,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   });
 
   const createCommentFromSelection = useCallback(
-    (annotation: string): DiffComment | null => {
+    (annotation: string, attachments?: MessageAttachment[]): DiffComment | null => {
       if (!textSelection || !sessionId) return null;
       const comment: DiffComment = {
         id: `${path}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -457,6 +476,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
         side: "additions",
         codeContent: textSelection.text,
         text: annotation,
+        ...(attachments?.length && { attachments }),
         createdAt: new Date().toISOString(),
         status: "pending",
       };
@@ -472,8 +492,8 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   );
 
   const handleCommentSubmit = useCallback(
-    (annotation: string) => {
-      const comment = createCommentFromSelection(annotation);
+    (annotation: string, _selected?: string, attachments?: MessageAttachment[]) => {
+      const comment = createCommentFromSelection(annotation, attachments);
       if (comment) {
         toast({
           title: t("editors:commentAdded"),
@@ -485,8 +505,8 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   );
 
   const handleCommentSubmitAndRun = useCallback(
-    async (annotation: string) => {
-      const comment = createCommentFromSelection(annotation);
+    async (annotation: string, _selected?: string, attachments?: MessageAttachment[]) => {
+      const comment = createCommentFromSelection(annotation, attachments);
       if (comment) {
         try {
           const { queued } = await runComment(comment);
@@ -525,14 +545,15 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   );
 
   const handleUpdateComment = useCallback(
-    (commentId: string, text: string) => {
-      updateComment(commentId, { text });
+    (commentId: string, text: string, attachments?: MessageAttachment[]) => {
+      const updates = { text, ...(attachments && { attachments }) };
+      updateComment(commentId, updates);
       setCommentView((view) => {
         if (!view) return view;
         return {
           ...view,
           comments: view.comments.map((comment) =>
-            comment.id === commentId ? { ...comment, text } : comment,
+            comment.id === commentId ? { ...comment, ...updates } : comment,
           ),
         };
       });
@@ -546,6 +567,9 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   }, []);
 
   return {
+    attachmentTaskId: sessionId ? activeTaskId : null,
+    commentScope: JSON.stringify([activeTaskId, sessionId, repo, path]),
+    touch,
     wrapEnabled,
     setWrapEnabled,
     extensions,

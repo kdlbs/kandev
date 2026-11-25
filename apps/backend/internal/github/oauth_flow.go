@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,9 +19,11 @@ import (
 )
 
 const (
-	oauthRandomBytes        = 32
-	appInstallationStateTTL = 10 * time.Minute
-	personalOAuthStateTTL   = 10 * time.Minute
+	oauthRandomBytes          = 32
+	appInstallationStateTTL   = 10 * time.Minute
+	personalOAuthStateTTL     = 10 * time.Minute
+	userInstallationsPath     = "/user/installations"
+	userInstallationsPageSize = 100
 )
 
 var (
@@ -97,6 +101,9 @@ type oauthFlowStore interface {
 }
 
 type OAuthFlowRequest struct {
+	RedirectURI                        string
+	ExpectedAppCredentialGeneration    int64
+	GitHubHost                         string
 	WorkspaceID                        string
 	UserID                             string
 	AppRegistrationID                  string
@@ -133,6 +140,14 @@ func (m *OAuthFlowManager) Start(ctx context.Context, request OAuthFlowRequest) 
 	if request.WorkspaceID == "" || request.UserID == "" || request.AppRegistrationID == "" {
 		return OAuthFlowStart{}, errors.New("workspace, user, and App registration are required for GitHub OAuth")
 	}
+	host, err := connectionHost(request.GitHubHost)
+	if err != nil {
+		return OAuthFlowStart{}, err
+	}
+	policy := OAuthPolicyPKCES256
+	if host.Family() == githubhost.EnterpriseFamily {
+		policy = OAuthPolicyConfidentialCode
+	}
 	ttl, err := oauthFlowTTL(request.Kind)
 	if err != nil {
 		return OAuthFlowStart{}, err
@@ -143,7 +158,7 @@ func (m *OAuthFlowManager) Start(ctx context.Context, request OAuthFlowRequest) 
 	}
 
 	var verifier, challenge string
-	if request.Kind == AuthFlowKindPersonal {
+	if request.Kind == AuthFlowKindPersonal && policy == OAuthPolicyPKCES256 {
 		verifier, err = randomBase64URL(m.random)
 		if err != nil {
 			return OAuthFlowStart{}, fmt.Errorf("generate GitHub OAuth PKCE verifier: %w", err)
@@ -155,6 +170,8 @@ func (m *OAuthFlowManager) Start(ctx context.Context, request OAuthFlowRequest) 
 	now := m.now().UTC()
 	stateDigest := sha256.Sum256([]byte(state))
 	flow := &AuthFlow{
+		GitHubHost: host.String(), OAuthPolicy: policy,
+		RedirectURI: request.RedirectURI, ExpectedAppCredentialGeneration: request.ExpectedAppCredentialGeneration,
 		StateHash:                          stateDigestString(stateDigest),
 		WorkspaceID:                        request.WorkspaceID,
 		UserID:                             request.UserID,
@@ -254,10 +271,14 @@ type GitHubOAuthClient struct {
 }
 
 func NewGitHubOAuthClient(clientID, clientSecret string) *GitHubOAuthClient {
+	return NewGitHubOAuthClientForHost(clientID, clientSecret, githubhost.Public())
+}
+
+func NewGitHubOAuthClientForHost(clientID, clientSecret string, host githubhost.Host) *GitHubOAuthClient {
 	return &GitHubOAuthClient{
 		clientID: clientID, clientSecret: clientSecret,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		webBaseURL: "https://github.com", apiBaseURL: githubAPIBase, now: time.Now,
+		httpClient: newGitHubHTTPClient(30 * time.Second),
+		webBaseURL: host.WebURL(), apiBaseURL: host.RESTURL(), now: time.Now,
 	}
 }
 
@@ -294,7 +315,7 @@ func (c *GitHubOAuthClient) GetOAuthUser(ctx context.Context, accessToken string
 	if err != nil {
 		return GitHubOAuthUser{}, err
 	}
-	response, err := c.httpClient.Do(request)
+	response, err := doGitHubRequest(c.httpClient, request)
 	if err != nil {
 		return GitHubOAuthUser{}, fmt.Errorf("request GitHub OAuth user: %w", err)
 	}
@@ -309,28 +330,73 @@ func (c *GitHubOAuthClient) GetOAuthUser(ctx context.Context, accessToken string
 	return user, nil
 }
 
+// githubUserInstallationsPage is one page of the installations a user access
+// token can see. GitHub exposes no singular user-installation lookup.
+type githubUserInstallationsPage struct {
+	TotalCount    int `json:"total_count"`
+	Installations []struct {
+		ID int64 `json:"id"`
+	} `json:"installations"`
+}
+
+// UserCanAccessInstallation reports whether the authorizing user can access the
+// exact App installation. It pages the documented installation list endpoint so
+// an accessible installation on a later page still counts, while unrelated
+// installations never authorize the selected one.
 func (c *GitHubOAuthClient) UserCanAccessInstallation(
 	ctx context.Context,
 	accessToken string,
 	installationID int64,
 ) (bool, error) {
-	endpoint := fmt.Sprintf("/user/installations/%d", installationID)
-	request, err := c.apiRequest(ctx, http.MethodGet, endpoint, accessToken)
-	if err != nil {
-		return false, err
-	}
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return false, fmt.Errorf("request GitHub user installation: %w", err)
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode == http.StatusNotFound {
+	if installationID <= 0 {
 		return false, nil
 	}
-	if response.StatusCode >= http.StatusBadRequest {
-		return false, &GitHubAPIError{StatusCode: response.StatusCode, Endpoint: endpoint}
+	fetched := 0
+	for page := 1; ; page++ {
+		result, err := c.userInstallationsPage(ctx, accessToken, page)
+		if err != nil {
+			return false, err
+		}
+		for _, installation := range result.Installations {
+			if installation.ID == installationID {
+				return true, nil
+			}
+		}
+		fetched += len(result.Installations)
+		if len(result.Installations) == 0 || fetched >= result.TotalCount {
+			return false, nil
+		}
 	}
-	return true, nil
+}
+
+func (c *GitHubOAuthClient) userInstallationsPage(
+	ctx context.Context,
+	accessToken string,
+	page int,
+) (githubUserInstallationsPage, error) {
+	request, err := c.apiRequest(
+		ctx, http.MethodGet,
+		fmt.Sprintf("%s?per_page=%d&page=%d", userInstallationsPath, userInstallationsPageSize, page),
+		accessToken,
+	)
+	if err != nil {
+		return githubUserInstallationsPage{}, err
+	}
+	response, err := doGitHubRequest(c.httpClient, request)
+	if err != nil {
+		return githubUserInstallationsPage{}, fmt.Errorf("request GitHub user installations: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return githubUserInstallationsPage{}, &GitHubAPIError{
+			StatusCode: response.StatusCode, Endpoint: userInstallationsPath,
+		}
+	}
+	var result githubUserInstallationsPage
+	if err := json.NewDecoder(io.LimitReader(response.Body, maxGitHubAppResponseSize)).Decode(&result); err != nil {
+		return githubUserInstallationsPage{}, fmt.Errorf("decode GitHub user installations: %w", err)
+	}
+	return result, nil
 }
 
 func (c *GitHubOAuthClient) exchangeTokens(ctx context.Context, form url.Values) (GitHubOAuthTokens, error) {
@@ -348,7 +414,7 @@ func (c *GitHubOAuthClient) exchangeTokens(ctx context.Context, form url.Values)
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response, err := c.httpClient.Do(request)
+	response, err := doGitHubRequest(c.httpClient, request)
 	if err != nil {
 		return GitHubOAuthTokens{}, fmt.Errorf("exchange GitHub OAuth token: %w", err)
 	}
@@ -399,4 +465,20 @@ func (c *GitHubOAuthClient) apiRequest(
 	request.Header.Set("Authorization", "Bearer "+accessToken)
 	request.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
 	return request, nil
+}
+
+func validateAuthFlowRegistration(flow *AuthFlow, hostname string, generation int64, redirectURI string) error {
+	host, err := connectionHost(hostname)
+	if err != nil || flow == nil || defaultAuthFlowHost(flow.GitHubHost) != host.String() || flow.ExpectedAppCredentialGeneration != generation {
+		return ErrOAuthFlowStale
+	}
+	if flow.RedirectURI != "" && flow.RedirectURI != redirectURI {
+		return ErrOAuthFlowStale
+	}
+	switch defaultOAuthPolicy(flow.OAuthPolicy) {
+	case OAuthPolicyPKCES256, OAuthPolicyConfidentialCode:
+	default:
+		return ErrOAuthFlowStale
+	}
+	return nil
 }

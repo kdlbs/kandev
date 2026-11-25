@@ -7,6 +7,7 @@ requirements:
   - REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-001
   - REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001
 created: 2026-09-11
+updated: 2026-11-16
 owners:
   - kandev
 ---
@@ -39,6 +40,42 @@ Tests must inspect generated selections against a checked, minimal Repository
 field contract, in addition to exercising response conversion and persistence.
 Record the upstream schema reference in the fixture. A canned response that
 accepts any query cannot detect this defect.
+
+## Unreadable fork parent
+
+Discovery AC .6 belongs to the fork-network lookup in
+`internal/github/service_automation_auth.go`. After the fork query is a
+definitive negative, `findPRInForkParent` resolves the parent through
+`forkParentRepositoryForLookup` and calls `FindPRByHead` on it. The fork's
+repository details expose the parent's name even when the credential cannot
+read the parent, so a private parent outside a GitHub App installation answers
+the parent PR query with 404.
+
+`findPRInForkParent` treats a not-found answer from that parent query as "no
+visible PR in the parent" and returns no PR and no error. Not-found means a
+`GitHubAPIError` with status 404 from the REST client, or the existing
+`isNotFoundErr` shape or GraphQL "Could not resolve to a Repository" response
+from the GH CLI client. A typed non-404 error remains a failure even if its
+body contains missing-repository text. Other errors return unchanged,
+so `classifyPRDiscoveryError` keeps the rate-limit, invalid-query, and
+unavailable categories, and the authentication circuit still sees credential
+failures. A raw 404 is not a repository-not-resolvable signal, so the fork's
+own repository is never marked missing because its parent is unreadable.
+
+To avoid one failing parent request per searching watch per cycle, the
+not-found result replaces the scoped `forkParentCache` entry for the fork with
+a non-fork value. That entry expires with the cache's existing 10-minute
+lifetime. Expiry does not schedule work: the next attempt admitted by the
+existing polling schedule or an explicit refresh resolves and queries the
+parent again, so granting the credential access later restores parent
+discovery without a restart. The
+entry stays keyed by credential scope, so another credential is unaffected.
+
+Verification: a fork whose parent query returns 404 finishes discovery as a
+healthy empty search on both the per-watch and batched paths; a second cycle
+inside the cache lifetime issues no parent query; the first attempt after
+expiry finds a parent PR once the parent is readable; a parent 5xx or
+rate-limit error still records its existing category.
 
 ## Watch target reconciliation
 
@@ -138,6 +175,15 @@ Drawer. This is the closest shipped mobile exemplar and matches the mobile
 language's temporary-details surface. Keep one internal scroll owner for long
 drawer content, safe-area spacing, focus return, and 44px touch targets.
 The inline warning wraps within the settings column on both viewports.
+
+Health AC .8 belongs in the shared `GitHubPRDiscoveryHealthWarning` component.
+Parse `retry_at` with `parseStrictRfc3339Timestamp` and show the existing retry
+line only when the result is later than the current render time. Compare parser
+nanoseconds to the current millisecond clock after converting units. Omit the
+line for missing, malformed, partial, timezone-less, or expired values. Keep the
+failure category, count, and failure time independent of this condition. Use
+existing status updates and renders, without a new timer or localization key.
+Keep the optional wire field and backend retry aggregation unchanged.
 
 ## Validation and operational boundaries
 
@@ -265,10 +311,150 @@ fallback result to every watch in the selected target group.
 Retain existing failure schedules: discovery retry starts at 1 minute and caps
 at 15 minutes; auth/config circuits start at 2 minutes and cap at 6 hours with
 25 percent jitter. Provider reset deadlines and credential changes retain
-existing handling. This package adds no independent retry loop.
+existing handling. Admission continuation uses the existing PR monitor owner,
+as defined below. The five-minute issue/review loop retains its separate contract.
+
+## Independent PR status publication
+
+Polling ACs 001.6-001.8 and 002.5-002.7 map to this section and the next section.
+The [rate coordination design](github-rate-limit-coordination.md) retains
+principal-wide pacing, reserve, interactive priority, and provider retry rules.
+
+Before this repair, `fetchBatchedWatchStatuses` fetched numbered PRs before
+searching branches under one shared progress key. A deferred branch phase
+returned no statuses to the application stage, and search membership changes
+prevented reuse of completed numbered work.
+
+Separate numbered and searching fetch phases inside the existing batch service.
+Apply a complete numbered phase before a later branch phase can defer.
+Keep one shared fetch/application implementation for poller, workspace refresh,
+and task sync. Do not fork the provider decoding or association rules.
+
+Introduce an internal outcome containing applied `PRWatchSyncResult` entries,
+unfinished watch groups, an optional `AdmissionDeferredError`, and other errors.
+The name of this new outcome is an implementation detail. Existing exported
+service signatures can adapt it. HTTP and WebSocket response shapes stay unchanged.
+Callers must preserve successful entries before handling an error.
+Only unfinished groups can enter transport fallback.
+
+Use separate progress keys for numbered references and searching references.
+Retain credential cache scope, selected GitHub host, credential generation,
+explicit-refresh identity, and exact references in each key.
+Changes to searching references must not reset numbered progress.
+Existing ordered-reference validation still rejects unsafe continuation reuse.
+
+Only complete status evidence reaches `applyBatchedNumberedWatch` or
+`applyBatchedSearchingWatch`. Review-thread pagination must complete before
+publication of the affected status. Preserve unresolved-thread counts across
+deferral. This repair does not publish a partially decoded aggregate.
+Actions enrichment remains best effort under its existing cache and time budget.
+
+Retain `applyPRWatchStatusResult`, its transaction, and its lifecycle guard.
+Publish task-PR and feedback events only after their corresponding write succeeds.
+Complete each discovery attempt once. Release deferred attempts without
+recording provider failure, successful empty discovery, or a successful check.
+An applied phase must not publish again when another phase resumes.
+
+## Admission continuation in the PR monitor
+
+`Poller.prMonitorLoop` remains the only owner of periodic PR-monitor scheduling.
+Keep the one-minute inventory tick and adaptive searching intervals.
+Add a bounded pending inventory and one reusable timer to that loop.
+Do not add one goroutine per watch or wait for admission inside a workspace pass.
+
+A pending entry records workspace, unfinished phase, watch IDs and target
+identities, credential scope/generation, and the original retry boundary.
+When one workspace pass defers multiple targets, retain each target's boundary
+independently, including resource-specific retry times. Coalesce consumers of
+the same target only; one target's first error must not set sibling deadlines.
+Unfinished phases include the workflow-attention phase described in the
+[workflow attention design](github-workflow-attention.md#monitored-workflow-phase).
+A wake for workflow-only work resumes that phase alone.
+Coalesce equivalent pending targets. Keep entries proportional to active watches.
+Prune obsolete entries during each inventory reconciliation and before resumption.
+New inventory joins pending work without restarting completed phases.
+Fresh one-minute ticks do not create a second attempt for a pending target.
+
+For a deferred request, prefer its future `RetryAt`. Otherwise use its positive
+`Delay` from the observation time. For undated busy or interactive-priority
+deferrals, use a one-second retry floor. A timer wake always rechecks admission.
+An expired deadline cannot create a zero-delay retry loop.
+Provider deadlines remain lower bounds and are never reduced to that floor.
+
+On each wake, process due pending work in rotating workspace order.
+Retain later deadlines while other principals progress. A new deferral updates
+only the unfinished work. Never restart all completed requests for that wake.
+The normal tick still discovers new watches and prunes removed targets.
+Cancellation stops both paths. `Stop` drains the monitor and clears pending state.
+A restart reconstructs work from persisted watches through the normal initial pass.
+
+Check `errors.As` for `AdmissionDeferredError` before fallback classification in
+the poller, workspace refresh, and passive per-task sync paths.
+Local pacing, busy, reserve, and interactive-priority deferrals do not trigger
+REST fallback or authentication circuits. Keep the 5-target workspace and
+10-target cycle limits for genuine transport or unsupported-GraphQL fallback.
+Timer wakes do not replenish that cycle's fallback budget.
+
+This rule also applies after a successful branch batch, during fork-parent
+lookup in `applyBatchedSearchingWatch`. Preserve the typed deferral in the
+internal result before any watch timestamp write. Release the discovery attempt
+without a health success or failure, and report every affected consumer as pending.
+Pass the same error to joined attempts and the existing `prWatchSyncOutcome`.
+The PR monitor then uses its existing continuation timer and admission boundary.
+Keep completed sibling results and prior failure evidence intact.
+When a fork-parent result promotes the representative watch, fan it out to
+duplicate consumers under the immutable original batch target. Promotion mutates
+the representative watch's repository identity to the parent.
+
+Before a resumed provider read or retained-result application, resolve current
+authorization, host, credentials, active watch ID, repository, and target.
+Discard mismatched progress. Keep explicit-refresh attempt fencing so a delayed
+passive result cannot replace newer manual evidence.
+Preserve retired lifetimes, detached tombstones, terminal-state guards, shared
+target fan-out, and task-group association ownership.
+
+## Sidebar delivery and verification
+
+The backend remains the only writer of task PR status.
+Use the existing `github.task_pr.updated` publication and task summary projector.
+The resulting `task.status_summary.updated` event feeds inactive sidebar rows
+through `updateTaskStatusSummaryInBothKanbans` and `useWorkspaceSidebarTasks`.
+No per-row poller or task-selection refresh is added.
+
+Desktop keeps `TaskSessionSidebar`. Phone keeps the existing task picker and
+shared task-row icon. Shared state, icon semantics, navigation, and layout remain
+unchanged. The phone task picker is the nearest shipped mobile exemplar.
+New copy, controls, and responsive geometry are outside this repair.
+
+Service regressions use real `RateAdmission`, fake provider responses, and
+virtual time. Mix a known PR with searching targets that change each cycle.
+Assert persisted status, event identity, and provider request counts.
+Monitor regressions prove one-second continuation, long provider deadlines,
+cross-principal fairness, cancellation, and bounded fallback.
+Retirement, credential replacement, and explicit refresh invalidate held results.
+
+A backend integration test follows monitor output through the real summary
+projector to `task.status_summary.updated` for an inactive task.
+Desktop and mobile Playwright tests then prove existing row consumption without
+task selection, hover, tap, reload, or a target-task sync request.
+Mock publication in those browser tests proves delivery only.
+The service regression remains the RED test for pacing and batch coupling.
+
+Delivery: [sidebar freshness repair](../../../plans/github-sidebar-pr-freshness/plan.md).
+
+The [discovery deferral repair](../../../plans/github-pr-discovery-deferrals/plan.md)
+extends this path through fork-parent lookup and corrects expired retry text.
 
 ## Polling efficiency delivery
 
 See [the implementation plan](../../../plans/watch-task-cleanup/plan.md).
 Use deterministic clock tests for exact 2-hour and 24-hour boundaries,
 restart, mixed groups, passive reads, explicit refresh, and fallback fairness.
+
+## Explicit retirement admission
+
+[Watch retirement](github-pr-watch-retirement.md) precedes adaptive scheduling and provider admission.
+Only active members contribute to shared-target scheduling or receive provider results.
+Explicit refresh bypasses idle timing only. It does not reactivate a retired watch.
+The completed polling-efficiency package remains historical evidence.
+The [retirement package](../../../plans/github-pr-watch-retirement/plan.md) owns this additional admission boundary.

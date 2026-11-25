@@ -12,6 +12,7 @@ type CreatePlanCommentInput = {
   selectedText: string;
   anchorFrom: number;
   anchorTo: number;
+  attachmentIds?: string[];
 };
 
 type MutatePlanCommentInput = {
@@ -21,7 +22,7 @@ type MutatePlanCommentInput = {
   expectedVersion: number;
 };
 
-type UpdatePlanCommentInput = MutatePlanCommentInput & { body: string };
+type UpdatePlanCommentInput = MutatePlanCommentInput & { body: string; attachmentIds?: string[] };
 
 function requireClient() {
   const client = getWebSocketClient();
@@ -46,6 +47,7 @@ export async function createTaskPlanComment(
     selected_text: input.selectedText,
     anchor_from: input.anchorFrom,
     anchor_to: input.anchorTo,
+    ...(input.attachmentIds && { attachment_ids: input.attachmentIds }),
   })) as TaskPlanCommentSnapshot;
 }
 
@@ -57,6 +59,7 @@ export async function updateTaskPlanComment(
     plan_id: input.planId,
     id: input.id,
     body: input.body,
+    ...(input.attachmentIds && { attachment_ids: input.attachmentIds }),
     expected_version: input.expectedVersion,
   })) as TaskPlanCommentSnapshot;
 }

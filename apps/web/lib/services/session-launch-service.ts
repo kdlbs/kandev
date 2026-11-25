@@ -1,5 +1,6 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskPriority } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
 
 const DEFAULT_SESSION_LAUNCH_TIMEOUT_MS = 60_000;
 
@@ -21,6 +22,7 @@ export type MessageAttachment = {
   name?: string;
   size_bytes?: number;
   delivery_mode?: "prompt" | "path";
+  comment_id?: string;
 };
 
 export type LaunchSessionRequest = {
@@ -40,6 +42,7 @@ export type LaunchSessionRequest = {
   auto_start?: boolean;
   attachments?: MessageAttachment[];
   activation_source?: LaunchActivationSource;
+  mcp_server_ids?: string[];
 };
 
 export type LaunchSessionResponse = {
@@ -63,7 +66,21 @@ export async function launchSession(
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
   const effectiveTimeout = timeout ?? DEFAULT_SESSION_LAUNCH_TIMEOUT_MS;
-  return client.request<LaunchSessionResponse>("session.launch", request, effectiveTimeout);
+  const response = await client.request<LaunchSessionResponse>(
+    "session.launch",
+    request,
+    effectiveTimeout,
+  );
+  if (
+    request.intent === "restore_workspace" &&
+    response.success &&
+    response.activation_disposition !== "queued" &&
+    response.activation_disposition !== "suppressed" &&
+    !response.agent_execution_id?.trim()
+  ) {
+    throw new Error(t("task:failedToRestoreWorkspace"));
+  }
+  return response;
 }
 
 export type ForkConversationResponse = {
@@ -95,6 +112,7 @@ export type EnsureSessionResponse = {
     | "created_prepare"
     | "created_start"
     | "skipped_terminal_pr"
+    | "awaiting_manual_start"
     | "queued"
     | "existing_queued";
   newly_created: boolean;

@@ -84,6 +84,9 @@ alternatives.
 
 Create `docs/plans/<fix-slug>/plan.md` and sibling work orders through `/plan`.
 
+Use the [solution simplicity (KISS) rules](../plan/SKILL.md#solution-simplicity-kiss)
+to plan the smallest correction that resolves the confirmed root cause.
+
 The package must:
 
 - Reference the affected `REQ-*` and `AC-*` IDs.

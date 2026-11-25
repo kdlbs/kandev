@@ -242,3 +242,26 @@ describe("useWorkspaceRestoration concurrency guards", () => {
     expect(result.current.attempt?.taskId).toBe("task-2");
   });
 });
+
+describe("useWorkspaceRestoration session ownership", () => {
+  it("does not show a sibling session's attempt in a shared environment", async () => {
+    const siblingSessionId = "session-2";
+    state.environmentIdBySessionId = {
+      [sessionId]: environmentId,
+      [siblingSessionId]: environmentId,
+    };
+    mockRestoreSessionWorkspace.mockRejectedValueOnce(new Error("sibling failure"));
+    const owner = renderHook(() => useWorkspaceRestoration(taskId, sessionId, environmentId));
+    await act(async () => {
+      expect(await owner.result.current.restore()).toBe(false);
+    });
+    owner.rerender();
+    expect(owner.result.current.status).toBe("error");
+
+    const sibling = renderHook(() =>
+      useWorkspaceRestoration(taskId, siblingSessionId, environmentId),
+    );
+    expect(sibling.result.current.status).toBeNull();
+    expect(sibling.result.current.attempt).toBeNull();
+  });
+});

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -425,6 +426,7 @@ func TestSchedulerTick_AgentStoppedFinishesRun(t *testing.T) {
 
 func TestSchedulerTick_RecoversStaleClaimedRun(t *testing.T) {
 	svc := newTestService(t, service.ServiceOptions{})
+	svc.SetRunClaimSessionProbe(&runClaimSessionProbeStub{})
 	ctx := context.Background()
 
 	agent := &models.AgentInstance{
@@ -444,9 +446,9 @@ func TestSchedulerTick_RecoversStaleClaimedRun(t *testing.T) {
 			context_snapshot, retry_count, requested_at, claimed_at
 		) VALUES (
 			'run-stale-1', ?, 'task_assigned', '{"task_id":"task-stale-1"}',
-			'claimed', 1, '{}', 0, datetime('now', '-35 minutes'), datetime('now', '-35 minutes')
+			'claimed', 1, '{}', 0, ?, ?
 		)
-	`, agent.ID)
+	`, agent.ID, time.Now().UTC().Add(-35*time.Minute), time.Now().UTC().Add(-35*time.Minute))
 
 	service.RunSchedulerTick(svc, ctx)
 

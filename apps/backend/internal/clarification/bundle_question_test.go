@@ -69,8 +69,7 @@ func TestOrderBundleMessages_DoesNotMutateInput(t *testing.T) {
 }
 
 // TestBundleQuestions_ParsesFullQuestionIncludingOptions proves this parser
-// extracts options (unlike questionsFromMessages, which the resume-summary
-// path uses and which never needs option identifiers for N8/N3a).
+// restores option identifiers for validation and resume-answer summaries.
 func TestBundleQuestions_ParsesFullQuestionIncludingOptions(t *testing.T) {
 	msgs := []*taskmodels.Message{
 		{

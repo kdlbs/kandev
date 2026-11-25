@@ -37,6 +37,16 @@ func newPostgresSearchTestRepo(t *testing.T, db *sqlx.DB) *sqlite.Repository {
 		t.Fatalf("create workspaces table: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS workflows (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			workflow_template_id TEXT DEFAULT '',
+			is_system INTEGER NOT NULL DEFAULT 0
+		)
+	`); err != nil {
+		t.Fatalf("create workflows table: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS tasks (
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
@@ -282,8 +292,8 @@ func TestPostgresListStuckParents_ReadmitsAfterChildReopenedAndRecompleted(t *te
 	seedPostgresWakeAgentProfile(t, repo, ctx, parentID+"-agent", "idle")
 	seedPostgresRunnerForSearchRepo(t, repo, ctx, parentID)
 
-	if err := repo.UpdateTaskState(ctx, childID, "COMPLETED"); err != nil {
-		t.Fatalf("complete child: %v", err)
+	if _, err := repo.ExecRaw(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, "COMPLETED", childID); err != nil {
+		t.Fatalf("complete child fixture: %v", err)
 	}
 
 	preDelivery, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
@@ -322,11 +332,11 @@ func TestPostgresListStuckParents_ReadmitsAfterChildReopenedAndRecompleted(t *te
 		t.Fatalf("after delivery: candidates = %#v, want none (receipt already covers this child set)", afterDelivery)
 	}
 
-	if err := repo.UpdateTaskState(ctx, childID, "IN_PROGRESS"); err != nil {
-		t.Fatalf("reopen child: %v", err)
+	if _, err := repo.ExecRaw(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, "IN_PROGRESS", childID); err != nil {
+		t.Fatalf("reopen child fixture: %v", err)
 	}
-	if err := repo.UpdateTaskState(ctx, childID, "COMPLETED"); err != nil {
-		t.Fatalf("recomplete child: %v", err)
+	if _, err := repo.ExecRaw(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, "COMPLETED", childID); err != nil {
+		t.Fatalf("recomplete child fixture: %v", err)
 	}
 
 	after, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
@@ -367,6 +377,27 @@ func TestPostgresListStuckParents(t *testing.T) {
 	}
 	if rows[0].ChildSetKey != wantKey {
 		t.Errorf("ChildSetKey = %q, want %q", rows[0].ChildSetKey, wantKey)
+	}
+}
+
+// TestPostgresListStuckParents_CancelledWaveMembersDoNotConsumeLimit ensures
+// blocked parents cannot starve a successful wave from the bounded query.
+func TestPostgresListStuckParents_CancelledWaveMembersDoNotConsumeLimit(t *testing.T) {
+	repo, ctx := newPostgresWakeRepo(t)
+
+	for _, parentID := range []string{"pg-parent-1", "pg-parent-2", "pg-parent-3", "pg-parent-4", "pg-parent-5"} {
+		seedPostgresStuckParent(t, ctx, repo, parentID, "pg-ws-starvation")
+		execPostgres(t, ctx, repo,
+			`UPDATE tasks SET state = 'CANCELLED' WHERE parent_id = ?`, parentID)
+	}
+	seedPostgresStuckParent(t, ctx, repo, "pg-parent-healthy", "pg-ws-starvation")
+
+	candidates, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ParentTaskID != "pg-parent-healthy" {
+		t.Fatalf("candidates = %#v, want only [pg-parent-healthy]", candidates)
 	}
 }
 

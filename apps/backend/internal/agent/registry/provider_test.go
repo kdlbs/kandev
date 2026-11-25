@@ -426,3 +426,89 @@ func TestProvide_DevModeDoesNotMockCanonicalsByDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestProvide_E2ECopilotIdentitySortsAfterDefaultAgent(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT", "only")
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	t.Setenv("KANDEV_E2E_MOCK_COPILOT", "true")
+
+	reg, cleanup, err := Provide(newTestLogger())
+	if err != nil {
+		t.Fatalf("Provide() error: %v", err)
+	}
+	defer cleanup() //nolint:errcheck
+
+	copilot, ok := reg.Get(agents.CopilotACPAgentID)
+	if !ok {
+		t.Fatal("expected the disposable Copilot identity")
+	}
+	if _, ok := copilot.(*agents.MockAgent); !ok {
+		t.Fatalf("Copilot E2E identity = %T, want the mock ACP peer", copilot)
+	}
+	mock, ok := reg.Get("mock-agent")
+	if !ok {
+		t.Fatal("mock-agent missing")
+	}
+	if copilot.DisplayOrder() <= mock.DisplayOrder() {
+		t.Fatalf("Copilot display order %d must sort after mock-agent %d so the E2E seed keeps the default profile",
+			copilot.DisplayOrder(), mock.DisplayOrder())
+	}
+}
+
+func TestProvide_E2ECopilotIdentityRequiresBothFlags(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT", "only")
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	t.Setenv("KANDEV_E2E_MOCK_COPILOT", "")
+
+	reg, cleanup, err := Provide(newTestLogger())
+	if err != nil {
+		t.Fatalf("Provide() error: %v", err)
+	}
+	defer cleanup() //nolint:errcheck
+	if _, ok := reg.Get(agents.CopilotACPAgentID); ok {
+		t.Fatal("Copilot identity must require the explicit E2E flag")
+	}
+}
+
+func TestProvide_E2EDevinIdentitySortsAfterDefaultAgent(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT", "only")
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	t.Setenv("KANDEV_E2E_MOCK_DEVIN", "true")
+
+	reg, cleanup, err := Provide(newTestLogger())
+	if err != nil {
+		t.Fatalf("Provide() error: %v", err)
+	}
+	defer cleanup() //nolint:errcheck
+
+	devin, ok := reg.Get(agents.DevinACPAgentID)
+	if !ok {
+		t.Fatal("expected the disposable Devin identity")
+	}
+	if _, ok := devin.(*agents.MockAgent); !ok {
+		t.Fatalf("Devin E2E identity = %T, want the mock ACP peer", devin)
+	}
+	mock, ok := reg.Get("mock-agent")
+	if !ok {
+		t.Fatal("mock-agent missing")
+	}
+	if devin.DisplayOrder() <= mock.DisplayOrder() {
+		t.Fatalf("Devin display order %d must sort after mock-agent %d so the E2E seed keeps the default profile",
+			devin.DisplayOrder(), mock.DisplayOrder())
+	}
+}
+
+func TestProvide_E2EDevinIdentityRequiresBothFlags(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT", "only")
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	t.Setenv("KANDEV_E2E_MOCK_DEVIN", "")
+
+	reg, cleanup, err := Provide(newTestLogger())
+	if err != nil {
+		t.Fatalf("Provide() error: %v", err)
+	}
+	defer cleanup() //nolint:errcheck
+	if _, ok := reg.Get(agents.DevinACPAgentID); ok {
+		t.Fatal("Devin identity must require the explicit E2E flag")
+	}
+}

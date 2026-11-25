@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiError } from "@/lib/api/client";
 import { markGoalMet, putGoal, setGoalCriterionDone } from "@/lib/api/domains/coordinator-api";
@@ -47,7 +47,7 @@ function useAdoptedGoalForm(
   const savedRef = useRef(saved);
   savedRef.current = saved;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!data) return;
     const id = active?.id ?? null;
     const changedGoal = adoptedRef.current !== id;

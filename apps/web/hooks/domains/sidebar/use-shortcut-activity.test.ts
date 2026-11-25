@@ -1,6 +1,6 @@
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Automation, AutomationSummary } from "@/lib/types/automation";
+import type { Automation, AutomationRun, AutomationSummary } from "@/lib/types/automation";
 
 const WORKSPACE_ID = "workspace-1";
 
@@ -51,6 +51,22 @@ function automation(id: string, enabled = true): Automation {
 
 function summary(id: string, openRuns: number): AutomationSummary {
   return { automation_id: id, open_runs: openRuns, last_run: undefined };
+}
+
+function mkRun(overrides: Partial<AutomationRun> = {}): AutomationRun {
+  return {
+    id: "failed-run",
+    automation_id: "a",
+    trigger_id: "",
+    trigger_type: "manual",
+    task_id: "",
+    status: "failed",
+    dedup_key: "",
+    trigger_data: {},
+    error_message: "",
+    created_at: "2026-11-05T10:00:00Z",
+    ...overrides,
+  };
 }
 
 describe("useShortcutActivity", () => {
@@ -127,3 +143,51 @@ describe("useShortcutActivity", () => {
     expect(result.current.getActivity("workspace-1-automation").state).toBe("unknown");
   });
 });
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.20 AC-OFFICE-AUTOMATION-RUNS-001.22
+it("failure survives the active phone projection without becoming running", () => {
+  const lastRun = mkRun();
+  summaryState.value = {
+    ...summaryState.value,
+    loading: false,
+    error: null,
+    summaries: [{ automation_id: "a", open_runs: 0, last_run: lastRun }],
+  };
+  const { result } = renderHook(() =>
+    useShortcutActivity({
+      workspaceId: WORKSPACE_ID,
+      automations: [automation("a")],
+      automationIds: ["a"],
+    }),
+  );
+  expect(result.current.getActivity("a")).toMatchObject({ state: "idle", lastRun });
+  expect(result.current.hasRunningActivity(["a"])).toBe(false);
+});
+
+it.each(["loading", "error", "definitions", "missing"])(
+  "unavailable %s activity does not expose an outcome",
+  (unavailable) => {
+    summaryState.value = {
+      ...summaryState.value,
+      loading: unavailable === "loading",
+      error: unavailable === "error" ? "offline" : null,
+      summaries: [
+        {
+          automation_id: "a",
+          open_runs: 0,
+          last_run: mkRun({ id: "stale" }),
+        },
+      ],
+    };
+    const { result } = renderHook(() =>
+      useShortcutActivity({
+        workspaceId: WORKSPACE_ID,
+        automations: unavailable === "missing" ? [] : [automation("a")],
+        automationIds: ["a"],
+        definitionsLoading: unavailable === "definitions",
+      }),
+    );
+    expect(result.current.getActivity("a")).toMatchObject({ state: "unknown" });
+    expect(result.current.getActivity("a")).not.toHaveProperty("lastRun");
+  },
+);

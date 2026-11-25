@@ -1,3 +1,4 @@
+import { attachCommentFile } from "../../helpers/comment-attachment";
 import { expect, type Page, type Locator } from "@playwright/test";
 import { DIFF_FILE } from "./review-fix-comments-popover-flow";
 
@@ -49,7 +50,7 @@ export async function exerciseFileComment(page: Page, dialog: Locator, mobile: b
   );
   await header.getByRole("button", { name: `Collapse ${DIFF_FILE}`, exact: true }).click();
   let region = await openFileComment(page, dialog, mobile);
-  await expect(region.getByRole("button", { name: /Add/ })).toBeDisabled();
+  await expect(region.getByRole("button", { name: "Add", exact: true })).toBeDisabled();
   await region.getByRole("textbox").fill("Cancel this draft");
   await region.getByRole("textbox").press("Escape");
   await expect(dialog).toBeVisible();
@@ -57,7 +58,8 @@ export async function exerciseFileComment(page: Page, dialog: Locator, mobile: b
   await expect(header.locator("[data-review-comment-opener]")).toBeFocused();
   region = await openFileComment(page, dialog, mobile);
   await region.getByRole("textbox").fill("Whole-file feedback for the agent");
-  const add = region.getByRole("button", { name: /Add/ });
+  const attachmentId = await attachCommentFile(page, region, "review-note.txt");
+  const add = region.getByRole("button", { name: "Add", exact: true });
   if (mobile) {
     await expect
       .poll(async () => Math.round((await add.boundingBox())?.height ?? 0))
@@ -75,4 +77,5 @@ export async function exerciseFileComment(page: Page, dialog: Locator, mobile: b
     "scrollWidth",
     await page.locator("html").evaluate((el) => el.clientWidth),
   );
+  return attachmentId;
 }

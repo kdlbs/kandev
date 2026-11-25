@@ -154,6 +154,7 @@ func (m *MockDockerClient) ListContainers(ctx context.Context, labels map[string
 
 // MockEventBus implements bus.EventBus for testing
 type MockEventBus struct {
+	mu              sync.Mutex
 	PublishedEvents []*bus.Event
 	// Notify, when non-nil, receives a value after each Publish call appends
 	// its event — lets a test synchronize with an async publish (e.g.
@@ -175,7 +176,9 @@ func (m *MockEventBus) Publish(ctx context.Context, subject string, event *bus.E
 	if m.OnPublish != nil {
 		m.OnPublish(subject, event)
 	}
+	m.mu.Lock()
 	m.PublishedEvents = append(m.PublishedEvents, event)
+	m.mu.Unlock()
 	if m.Notify != nil {
 		m.Notify <- struct{}{}
 	}

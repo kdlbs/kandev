@@ -16,6 +16,10 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { isProfileDirty } from "@/components/settings/agent-profile-dirty";
 import type { useToast } from "@/components/toast-provider";
 import type { AgentProfileDeleteConflict } from "@/components/settings/agent-profile-delete-dialog";
+import type {
+  DynamicProfileReference,
+  UtilityAgentReference,
+} from "@/lib/types/agent-profile-errors";
 import { t as translate } from "@/lib/i18n";
 import {
   mergeOptionsByNewest,
@@ -83,6 +87,22 @@ function changedCursorPluginsMcpPreference(
 ): boolean | undefined {
   const draftValue = draft.cursorPluginsMcpEnabled ?? true;
   return draftValue === (savedProfile.cursorPluginsMcpEnabled ?? true) ? undefined : draftValue;
+}
+
+function sameStringSet(left: string[] = [], right: string[] = []): boolean {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((value, index) => value === sortedRight[index]);
+}
+
+function changedCopilotPlugins(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): string[] | undefined {
+  const draftValue = draft.copilotSelectedPlugins ?? [];
+  if (sameStringSet(draftValue, savedProfile.copilotSelectedPlugins)) return undefined;
+  return [...draftValue].sort();
 }
 
 export function useProfileEditorState(
@@ -185,8 +205,35 @@ type ProfileEditorActionsOptions = {
   markProfileSubmitted: (profile: AgentProfile | null) => void;
   acceptProfileSaveResponse: (response: AgentProfile, submitted: AgentProfile) => boolean;
   toast: ReturnType<typeof useToast>["toast"];
-  onUtilityConflict?: (agents: Array<{ id: string; name: string }>) => void;
+  onProfileConflict?: (conflict: ProfileConflictReferences) => void;
 };
+
+// The 409 body names the references in snake_case; the delete server action
+// exposes the same lists in camelCase. Reading both keeps this parser working
+// for either shape and for older backends that omit one of them.
+export type ProfileConflictReferences = {
+  utilityAgents: UtilityAgentReference[];
+  dynamicProfiles: DynamicProfileReference[];
+};
+
+function asReferences<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+export function profileConflictReferences(source: unknown): ProfileConflictReferences {
+  const body = (source ?? {}) as {
+    utility_agents?: unknown;
+    dynamic_profiles?: unknown;
+    utilityAgents?: unknown;
+    dynamicProfiles?: unknown;
+  };
+  return {
+    utilityAgents: asReferences<UtilityAgentReference>(body.utility_agents ?? body.utilityAgents),
+    dynamicProfiles: asReferences<DynamicProfileReference>(
+      body.dynamic_profiles ?? body.dynamicProfiles,
+    ),
+  };
+}
 
 function providerUpdateFields(draft: AgentProfile) {
   const isOpenAI = (draft.providerKind ?? "") === "openai_compatible";
@@ -224,6 +271,7 @@ function buildProfileUpdatePatch(
     cursor_plugins_mcp_enabled: changedCursorPluginsMcpPreference(draft, savedProfile),
     mcp_selection_mode: draft.mcpSelectionMode,
     mcp_selected_servers: draft.mcpSelectedServers,
+    copilot_selected_plugins: changedCopilotPlugins(draft, savedProfile),
     // Omit an unchanged enabled value so a profile editor save cannot
     // resurrect a concurrent list-toggle response from its stale draft.
     enabled: changedEnabledPreference(draft, savedProfile),
@@ -242,7 +290,7 @@ export function useProfileSave({
   markProfileSubmitted,
   acceptProfileSaveResponse,
   toast,
-  onUtilityConflict,
+  onProfileConflict,
 }: ProfileEditorActionsOptions) {
   const storeApi = useAppStoreApi();
   // eslint-disable-next-line complexity
@@ -280,17 +328,16 @@ export function useProfileSave({
       setSaveStatus("success");
     } catch (error) {
       markProfileSubmitted(null);
-      if (
-        error instanceof ApiError &&
-        error.status === 409 &&
-        Array.isArray((error.body as { utility_agents?: unknown[] } | null)?.utility_agents)
-      ) {
-        onUtilityConflict?.(
-          (error.body as { utility_agents: Array<{ id: string; name: string }> }).utility_agents,
-        );
+      let conflictOpened = false;
+      if (error instanceof ApiError && error.status === 409) {
+        const references = profileConflictReferences(error.body);
+        if (references.utilityAgents.length > 0 || references.dynamicProfiles.length > 0) {
+          onProfileConflict?.(references);
+          conflictOpened = true;
+        }
       }
       setSaveStatus("error");
-      if (!isHandledApiError(error)) {
+      if (!conflictOpened && !isHandledApiError(error)) {
         toast({
           title: translate("agents:failedToSaveProfile"),
           description: errorMessage(error),
@@ -364,12 +411,14 @@ export function useProfileDelete(
     if (result.status === "ok") {
       removeProfileFromStore();
     } else if (result.status === "conflict") {
+      const references = profileConflictReferences(result);
       setConflict({
         activeSessions: result.activeSessions,
         watchers: result.watchers,
         routingTiers: result.routingTiers,
         automations: result.automations,
-        utilityAgents: result.utilityAgents,
+        utilityAgents: references.utilityAgents,
+        dynamicProfiles: references.dynamicProfiles,
       });
     } else if (!result.handled) {
       toast({
@@ -386,12 +435,14 @@ export function useProfileDelete(
     if (result.status === "ok") {
       removeProfileFromStore();
     } else if (result.status === "conflict") {
+      const references = profileConflictReferences(result);
       setConflict({
         activeSessions: result.activeSessions,
         watchers: result.watchers,
         routingTiers: result.routingTiers,
         automations: result.automations,
-        utilityAgents: result.utilityAgents,
+        utilityAgents: references.utilityAgents,
+        dynamicProfiles: references.dynamicProfiles,
       });
     } else if (result.status === "error" && !result.handled) {
       toast({
