@@ -18,6 +18,7 @@ function headerProps(activeView: SidebarView | undefined = NEW_VIEW) {
   return {
     activeView,
     hasDraft: false,
+    draftOwner: null,
     canDelete: true,
     onSaveOverwrite: vi.fn(),
     onSaveAs: vi.fn(),

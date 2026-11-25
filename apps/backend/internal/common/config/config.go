@@ -619,6 +619,9 @@ type FeaturesConfig struct {
 	// every shipped profile; launches otherwise follow only the session ceiling.
 	SessionMemoryGuard bool `mapstructure:"session_memory_guard" json:"sessionMemoryGuard"`
 
+	// ACPV2 opts qualified local structured sessions into ACP v2.
+	ACPV2 bool `mapstructure:"acp_v2" json:"acpV2"`
+
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.
 	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`

@@ -441,7 +441,6 @@ func TestConvertToolCallResultUpdate_MonitorRegistrationRequiresCommand(t *testi
 		}
 	}
 
-	a.sweepMonitorsOnPromptEnd("s1")
 	if events := drainEvents(a); len(events) != 0 {
 		t.Fatalf("malformed Monitor registration emitted %d terminal monitor events", len(events))
 	}
@@ -529,28 +528,7 @@ func TestConvertToolCallResultUpdate_MonitorRegistrationRequiresCompletedStatus(
 	}
 }
 
-// --- sweepMonitorsOnPromptEnd ---
-
-func TestSweepMonitorsOnPromptEnd_EmitsCompleteAndClears(t *testing.T) {
-	a := newTestAdapter()
-	seedMonitor(t, a, "s1", "t1", "tc-1")
-	seedMonitor(t, a, "s1", "t2", "tc-2")
-
-	a.sweepMonitorsOnPromptEnd("s1")
-
-	events := drainEvents(a)
-	if len(events) != 2 {
-		t.Fatalf("got %d events, want 2", len(events))
-	}
-	for _, ev := range events {
-		if ev.ToolStatus != "complete" {
-			t.Errorf("ToolStatus = %q, want complete", ev.ToolStatus)
-		}
-	}
-	if _, ok := a.lookupMonitorByTaskID("s1", "t1"); ok {
-		t.Error("activeMonitors not cleared after sweep")
-	}
-}
+// --- Monitor prompt-end persistence ---
 
 // TestConvertToolCallResultUpdate_AgentEmittedMonitorEndPreservesView is a
 // regression guard for an E2E failure on the first PR push: when the agent
@@ -560,7 +538,8 @@ func TestSweepMonitorsOnPromptEnd_EmitsCompleteAndClears(t *testing.T) {
 // MonitorMessage matcher (which checks for `output.monitor`) would no
 // longer fire. Frontend would fall back to the generic tool_call card.
 func TestConvertToolCallResultUpdate_AgentEmittedMonitorEndPreservesView(t *testing.T) {
-	a := newTestAdapter()
+	a := newTestAdapterForAgent(claudeAgentID)
+	t.Cleanup(func() { _ = a.Close() })
 
 	// Initial pending tool_call so activeToolCalls has a Generic payload.
 	tc := &acp.SessionUpdateToolCall{
@@ -613,23 +592,15 @@ func TestConvertToolCallResultUpdate_AgentEmittedMonitorEndPreservesView(t *test
 	if monitor["ended"] != true {
 		t.Errorf("monitor.ended = %v, want true (terminal update should mark ended)", monitor["ended"])
 	}
-	// The tracked entry should be dropped so the prompt-end sweep does not
-	// re-emit a terminal event for the same toolCallID.
+	// The tracked entry should be dropped after provider terminal evidence.
 	if a.isTrackedMonitor("s1", "tc-monitor") {
 		t.Error("Monitor still tracked after agent-emitted end — sweep would double-emit")
 	}
 }
 
-// TestSweepMonitorsOnPromptEnd_NotDoubleCancelledByActiveToolCalls is a
-// regression guard for a real wire-bug discovered in CI: when the parent
-// prompt naturally ends, `cancelActiveToolCalls` would blanket-cancel every
-// entry in `activeToolCalls` (including the Monitor's tool call) before
-// `sweepMonitorsOnPromptEnd` ran, leaving the frontend with two
-// conflicting terminal events for the same Monitor. Monitor entries must
-// be skipped in the cancel loop so the sweep emits the single
-// authoritative "Monitor exited" event.
-func TestSweepMonitorsOnPromptEnd_NotDoubleCancelledByActiveToolCalls(t *testing.T) {
-	a := newTestAdapter()
+func TestPromptEndCleanupPreservesLiveMonitor(t *testing.T) {
+	a := newTestAdapterForAgent(claudeAgentID)
+	t.Cleanup(func() { _ = a.Close() })
 
 	// Land an initial Monitor tool_call so it sits in activeToolCalls.
 	tc := &acp.SessionUpdateToolCall{
@@ -642,24 +613,29 @@ func TestSweepMonitorsOnPromptEnd_NotDoubleCancelledByActiveToolCalls(t *testing
 	if ev := a.convertToolCallUpdate("s1", tc); ev == nil {
 		t.Fatalf("seed tool_call returned nil")
 	}
-	a.trackMonitor("s1", "task-X", "tc-monitor")
+	completed := acp.ToolCallStatus("completed")
+	registration := &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-monitor",
+		Status:     &completed,
+		Meta:       monitorMeta(),
+		RawOutput:  "Monitor started (task task-X, timeout 60000ms).",
+	}
+	if ev := a.convertToolCallResultUpdate("s1", registration); ev == nil || ev.ToolStatus != toolStatusInProgress {
+		t.Fatalf("Monitor registration event = %+v, want in-progress registration", ev)
+	}
 	drainEvents(a) // ignore the initial events
 
-	a.cancelActiveToolCalls("s1")
-	a.sweepMonitorsOnPromptEnd("s1")
+	a.cancelPromptEndToolCalls("s1")
 
 	events := drainEvents(a)
-	if len(events) != 1 {
-		t.Fatalf("got %d events, want 1 (the Monitor sweep's terminal event only)", len(events))
+	if len(events) != 0 {
+		t.Fatalf("prompt cleanup emitted terminal Monitor events without provider evidence: %+v", events)
 	}
-	if events[0].ToolCallID != "tc-monitor" {
-		t.Errorf("event ToolCallID = %q, want tc-monitor", events[0].ToolCallID)
+	if !a.isTrackedMonitor("s1", "tc-monitor") {
+		t.Fatal("live Monitor binding was removed by prompt cleanup")
 	}
-	if events[0].ToolStatus != "complete" {
-		t.Errorf("event ToolStatus = %q, want complete (cancelActiveToolCalls must skip Monitors)", events[0].ToolStatus)
-	}
-	if events[0].NormalizedPayload == nil {
-		t.Errorf("event NormalizedPayload is nil — sweep lost payload (activeToolCalls drained too early)")
+	if payload := a.activeToolCalls["tc-monitor"]; payload == nil || !payload.IsActiveMonitor() {
+		t.Fatalf("active Monitor payload = %+v, want live payload", payload)
 	}
 }
 

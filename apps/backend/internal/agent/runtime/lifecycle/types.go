@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
@@ -19,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/ctxmutex"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/opencode"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -107,6 +109,9 @@ type AgentExecution struct {
 	// launches, where AgentProfileID owns both identity and execution config.
 	OfficeAgentProfileID string
 	AgentID              string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	// LocalRuntimeSelection pins host-local command provenance across later promotion.
+	LocalRuntimeSelection *agents.LocalRuntimeSelection
+	LocalRuntimeEnv       map[string]string
 	// CopilotNativeSessionEvents reports whether this launch requested the
 	// Copilot native event stream from a capable agentctl peer.
 	CopilotNativeSessionEvents bool
@@ -142,9 +147,11 @@ type AgentExecution struct {
 	// adoption. It is used to reconcile the descriptor's bounded high-water
 	// mark before a live stream is attached.
 	DeliveryReplayCursor uint64
-	AgentCommand         string               // Command to start the agent subprocess
-	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
-	LaunchWrapper        launchwrapper.Spec   `json:"-"`
+	AgentCommand         string             // Command to start the agent subprocess
+	ContinueCommand      string             // Command for follow-up prompts (one-shot agents)
+	LaunchWrapper        launchwrapper.Spec `json:"-"`
+	OpenCodeRuntime      opencode.Runtime
+	preferACPV2          bool
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
@@ -265,10 +272,10 @@ type AgentExecution struct {
 	agentctlSourceMu          sync.RWMutex
 	remoteInstanceLifecycleMu ctxmutex.Mutex
 	// contextResetMu owns the reset attempt boundary. While a session reset is
-	// in flight, fresh-session setup events are retained until the lifecycle
-	// manager has committed the new ACP session. A timed-out attempt discards
-	// those events and fences all later provider use until an explicit restart
-	// succeeds.
+	// in flight, bounded setup events and all retired-watch projections are
+	// retained until the lifecycle manager commits the new ACP session. A
+	// timed-out attempt discards those events and fences later provider use until
+	// an explicit restart succeeds.
 	// contextResetAdmissionMu is the shared operation lease: ordinary provider
 	// operations hold a read lease, while a reset holds the write lease through
 	// session replacement, configuration restoration, and ready publication.
@@ -279,6 +286,7 @@ type AgentExecution struct {
 	contextResetFenceReason      string
 	contextResetRecoveryInFlight bool
 	contextResetEvents           []agentctl.AgentEvent
+	contextResetSetupEventCount  int
 	// agentctlReady records the successful health check independently of the
 	// agent process and workspace stream lifecycles. Prepared sessions have a
 	// healthy agentctl before either of those is started or attached.
@@ -397,6 +405,7 @@ type AgentExecution struct {
 	providerDefaultModelState    *CachedModelState
 	authoritativeConfigResponses map[string]*CachedModelState
 	pendingConfigSettlement      *configSettlement
+	sessionConfigurationMu       sync.Mutex
 	modelStateMu                 sync.RWMutex
 
 	// Cached auth methods from agent_capabilities (for error recovery metadata)
@@ -1787,6 +1796,12 @@ type LaunchRequest struct {
 	// AuthPolicy is the internal child-process authentication contract for
 	// eligible host-local providers. Nil preserves existing behavior.
 	AuthPolicy *acpcompat.AuthPolicy
+	// RuntimeAdapterVersion pins a resumed native conversation to its recorded
+	// local provider runtime. Empty legacy Antigravity values select standalone.
+	RuntimeAdapterVersion string
+	// LocalRuntimeSelection pins one qualified host-local command across command
+	// construction, instance creation, and promotion for this launch.
+	LocalRuntimeSelection *agents.LocalRuntimeSelection `json:"-"`
 	// LocalRuntimeEnv pins a validated host-local helper after environment merge.
 	LocalRuntimeEnv map[string]string
 	WorkspaceLayout string
@@ -1951,6 +1966,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 
 // MessageAttachment represents an image or file attachment for agent prompts.
 type MessageAttachment struct {
+	CommentID    string
 	AttachmentID string // file-backed descriptor ID; Data is empty for staged files
 	Type         string // "image", "audio", or "resource"
 	Data         string // base64-encoded data

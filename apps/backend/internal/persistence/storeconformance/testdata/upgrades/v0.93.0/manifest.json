@@ -449,6 +449,7 @@
     "plugin-state",
     "plugin-instance-state",
     "plugin-user-state",
+    "plugin-command-receipts",
     "canvas",
     "github",
     "gitlab",
@@ -457,6 +458,7 @@
     "notification",
     "sentry",
     "workflow-sync",
+    "prompt-sync",
     "office-config-sync",
     "automation",
     "coordinator"

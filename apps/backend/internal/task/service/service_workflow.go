@@ -55,6 +55,13 @@ type primarySessionTaskStateRepository interface {
 // It reads the step's on_turn_complete actions to determine where to transition.
 // If no transition actions are configured, it falls back to the next step by position.
 func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*ApproveSessionResult, error) {
+	return s.approveSession(ctx, sessionID, "")
+}
+
+// approveSession is ApproveSession with an optional expectedStepID. When set,
+// the approval applies only while the task still occupies that step, checked
+// again inside the move's write transaction.
+func (s *Service) approveSession(ctx context.Context, sessionID, expectedStepID string) (*ApproveSessionResult, error) {
 	result := &ApproveSessionResult{}
 
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
@@ -73,6 +80,11 @@ func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*Approv
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
 
+	if expectedStepID != "" && task.WorkflowStepID != expectedStepID {
+		return nil, fmt.Errorf("%w: expected step %q, task is now in %q",
+			ErrStepApprovalChanged, expectedStepID, task.WorkflowStepID)
+	}
+
 	// Get the current workflow step to check for transition targets
 	if task.WorkflowStepID != "" && s.workflowStepGetter != nil {
 		step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
@@ -80,12 +92,15 @@ func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*Approv
 			s.logger.Warn("failed to get workflow step for approval transition",
 				zap.String("workflow_step_id", task.WorkflowStepID),
 				zap.Error(err))
-		} else if err := s.applyApprovalStepTransition(ctx, sessionID, step, result); err != nil {
+		} else if err := s.applyApprovalStepTransition(ctx, sessionID, step, expectedStepID, result); err != nil {
 			return nil, err
 		}
 	}
 
 	if err := s.sessions.UpdateSessionReviewStatus(ctx, sessionID, "approved"); err != nil {
+		if result.Task != nil {
+			return result, fmt.Errorf("%w: %w", ErrReviewStatusNotRecorded, err)
+		}
 		return nil, fmt.Errorf("failed to update review status: %w", err)
 	}
 	if session, err := s.sessions.GetTaskSession(ctx, sessionID); err == nil {
@@ -96,7 +111,7 @@ func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*Approv
 }
 
 // applyApprovalStepTransition resolves the next workflow step and updates session/task accordingly.
-func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID string, step *wfmodels.WorkflowStep, result *ApproveSessionResult) error {
+func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID string, step *wfmodels.WorkflowStep, expectedStepID string, result *ApproveSessionResult) error {
 	newStepID := s.resolveApprovalNextStep(ctx, step)
 
 	if newStepID == "" {
@@ -112,6 +127,7 @@ func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID str
 			StepHistoryTrigger:   wfmodels.StepTransitionTriggerApproval,
 			StepHistorySessionID: sessionID,
 			StepHistoryActor:     wfmodels.StepTransitionActorHuman,
+			ExpectedStepID:       expectedStepID,
 		})
 	if err != nil {
 		return fmt.Errorf("failed to move task to next step after approval: %w", err)
@@ -499,6 +515,10 @@ type MoveTaskOptions struct {
 	// performs and fails with ErrWorkflowResolutionConflict on a mismatch,
 	// instead of silently reverting whatever the concurrent move just did.
 	ExpectedWorkflowID *string
+	// ExpectedStepID makes a cross-step move conditional on the task still
+	// occupying this step at write time. A lost race fails with
+	// ErrStepApprovalChanged and leaves the task untouched.
+	ExpectedStepID string
 	// EntryOptions are one-shot values applied when the orchestrator enters the
 	// target workflow step. They are persisted privately on a transient task
 	// marker and are never included in task.moved event payloads.
@@ -596,6 +616,16 @@ type workflowMoveAdmissionWithCompletionAdmissionRepository interface {
 	) (bool, error)
 }
 
+// workflowMoveAtStepRepository commits a cross-step move only while the task
+// still occupies the expected step, checked inside the write transaction.
+type workflowMoveAtStepRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+		ctx context.Context, task *models.Task, targetStepID string, limit int,
+		admittedState *v1.TaskState, queueExitPending bool, expectedStepID, expectedWorkflowID string,
+		admission *completion.Admission,
+	) (admitted bool, applied bool, err error)
+}
+
 // metadataKeyRemoverRepository clears a single task metadata key in its own
 // statement, without rewriting the concurrent fields a full UpdateTask would
 // carry. Used to strip a stranded workflow_move_pending marker that a committed
@@ -665,6 +695,10 @@ func (s *Service) MoveTaskWithOptions(
 		// lookups below when the mismatch is already visible from a plain read.
 		return nil, fmt.Errorf("%w: resolved %q, task is now in %q",
 			ErrWorkflowResolutionConflict, *opts.ExpectedWorkflowID, task.WorkflowID)
+	}
+	if opts.ExpectedStepID != "" && task.WorkflowStepID != opts.ExpectedStepID {
+		return nil, fmt.Errorf("%w: expected step %q, task is now in %q",
+			ErrStepApprovalChanged, opts.ExpectedStepID, task.WorkflowStepID)
 	}
 	if opts.WorkflowChange != nil {
 		if err := validateWorkflowChangeSource(task, workflowID, workflowStepID, opts.WorkflowChange); err != nil {
@@ -1534,6 +1568,38 @@ func (s *Service) updateMovedTaskAdmittedSameStep(ctx context.Context, task *mod
 // updateMovedTask: it runs the target step's WIP admission decision (queuing
 // the task instead of moving it when the step is at capacity) and persists
 // the result.
+// updateMovedTaskAtStep writes a cross-step move through the step
+// compare-and-swap so a task that left opts.ExpectedStepID concurrently is not
+// advanced from a step the caller never observed.
+func (s *Service) updateMovedTaskAtStep(
+	ctx context.Context,
+	task *models.Task,
+	targetStep *wfmodels.WorkflowStep,
+	admittedState *v1.TaskState,
+	opts MoveTaskOptions,
+	completionAdmission *completion.Admission,
+) (bool, error) {
+	repo, ok := s.tasks.(workflowMoveAtStepRepository)
+	if !ok {
+		return false, fmt.Errorf("step-guarded move repository unavailable for task %s", task.ID)
+	}
+	expectedWorkflowID := ""
+	if opts.ExpectedWorkflowID != nil {
+		expectedWorkflowID = *opts.ExpectedWorkflowID
+	}
+	admitted, applied, err := repo.UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+		ctx, task, targetStep.ID, targetStep.WIPLimit, admittedState, true,
+		opts.ExpectedStepID, expectedWorkflowID, completionAdmission,
+	)
+	if err != nil {
+		return false, err
+	}
+	if !applied {
+		return false, ErrStepApprovalChanged
+	}
+	return admitted, nil
+}
+
 func (s *Service) updateMovedTaskCrossStep(
 	ctx context.Context,
 	task *models.Task,
@@ -1576,6 +1642,9 @@ func (s *Service) updateMovedTaskCrossStep(
 			ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit,
 			admittedState, true, workflowChangeGuard(opts.WorkflowChange), completionAdmission,
 		)
+	}
+	if opts.ExpectedStepID != "" {
+		return s.updateMovedTaskAtStep(ctx, task, targetStep, admittedState, opts, completionAdmission)
 	}
 	admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository)
 	if !ok {

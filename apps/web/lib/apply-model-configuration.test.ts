@@ -4,6 +4,19 @@ const HIGH = "high";
 const FAST = "fast";
 const PAIR_A = "pair-a";
 
+function confirmed(configId: string, value: string, effective = value) {
+  return {
+    configuration_result: {
+      status: "applied",
+      config_id: configId,
+      requested: value,
+      effective,
+      confirmed: true,
+      execution_id: "execution-1",
+    },
+  };
+}
+
 import {
   applyModelConfiguration,
   pendingConfigurationOptions,
@@ -16,8 +29,8 @@ function request(
   return {
     model: PAIR_A,
     configOptions: { thinking: HIGH, speed: FAST },
-    applyModel: vi.fn().mockResolvedValue(undefined),
-    applyOption: vi.fn().mockResolvedValue(undefined),
+    applyModel: vi.fn(async (model: string) => confirmed("model", model)),
+    applyOption: vi.fn(async (optionId: string, value: string) => confirmed(optionId, value)),
     ...overrides,
   };
 }
@@ -29,9 +42,11 @@ describe("applyModelConfiguration", () => {
       request({
         applyModel: async (model) => {
           calls.push(`model:${model}`);
+          return confirmed("model", model);
         },
         applyOption: async (optionId, value) => {
           calls.push(`${optionId}:${value}`);
+          return confirmed(optionId, value);
         },
       }),
     );
@@ -55,7 +70,7 @@ describe("applyModelConfiguration", () => {
   it("reports only the options the provider confirmed before a later failure", async () => {
     const applyOption = vi
       .fn()
-      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(confirmed("speed", FAST))
       .mockRejectedValueOnce(new Error("option rejected"));
     const result = await applyModelConfiguration(request({ applyOption }));
     expect(result).toEqual({
@@ -106,7 +121,7 @@ describe("applyModelConfiguration confirmation and retry", () => {
       request({
         applyOption: vi
           .fn()
-          .mockResolvedValueOnce(undefined)
+          .mockResolvedValueOnce(confirmed("speed", FAST))
           .mockRejectedValueOnce(new Error("option rejected")),
       }),
     );
@@ -144,5 +159,104 @@ describe("applyModelConfiguration confirmation and retry", () => {
     );
     expect(result.status).toBe("superseded");
     expect(onModelConfirmed).not.toHaveBeenCalled();
+  });
+});
+
+describe("applyModelConfiguration effective values", () => {
+  it("does not apply dependent options when the agent reports a different base value", async () => {
+    const applyOption = vi.fn();
+    const onModelConfirmed = vi.fn();
+    const result = await applyModelConfiguration(
+      request({
+        model: "pair-b",
+        applyModel: async () => confirmed("model", "pair-b", PAIR_A),
+        applyOption,
+        onModelConfirmed,
+      }),
+    );
+
+    expect(result.status).toBe("model_clamped");
+    expect(result).toMatchObject({ requested: "pair-b", effective: PAIR_A });
+    expect(applyOption).not.toHaveBeenCalled();
+    expect(onModelConfirmed).toHaveBeenCalledWith(PAIR_A);
+  });
+
+  it("does not treat a fulfilled setter without correlated evidence as applied", async () => {
+    const applyOption = vi.fn();
+    const onModelConfirmed = vi.fn();
+    const result = await applyModelConfiguration(
+      request({
+        model: "pair-b",
+        applyModel: async () => ({
+          configuration_result: {
+            status: "unconfirmed",
+            requested: "pair-b",
+            confirmed: false,
+          },
+        }),
+        applyOption,
+        onModelConfirmed,
+      }),
+    );
+
+    expect(result.status).toBe("model_unconfirmed");
+    expect(applyOption).not.toHaveBeenCalled();
+    expect(onModelConfirmed).not.toHaveBeenCalled();
+  });
+
+  it("commits a clamped option's effective value", async () => {
+    const confirmedOptions: Array<[string, string]> = [];
+    const result = await applyModelConfiguration(
+      request({
+        configOptions: { thinking: HIGH },
+        applyOption: async () => confirmed("thinking", HIGH, "medium"),
+        onOptionConfirmed: (optionId, value) => confirmedOptions.push([optionId, value]),
+      }),
+    );
+
+    expect(result).toMatchObject({ status: "applied", appliedOptions: { thinking: "medium" } });
+    expect(confirmedOptions).toEqual([["thinking", "medium"]]);
+  });
+
+  it("keeps saved and unconfirmed option outcomes distinct", async () => {
+    const saved = await applyModelConfiguration(
+      request({
+        configOptions: { thinking: HIGH },
+        applyOption: async () => ({
+          configuration_result: { status: "saved_for_launch", requested: HIGH },
+        }),
+      }),
+    );
+    const unconfirmed = await applyModelConfiguration(
+      request({
+        configOptions: { thinking: HIGH },
+        applyOption: async () => ({
+          configuration_result: { status: "unconfirmed", requested: HIGH, confirmed: false },
+        }),
+      }),
+    );
+
+    expect(saved).toMatchObject({
+      status: "applied",
+      savedOptions: ["thinking"],
+      appliedOptions: {},
+    });
+    expect(pendingConfigurationOptions(saved, { thinking: HIGH })).toEqual({});
+    expect(unconfirmed).toMatchObject({ status: "applied", unconfirmedOptions: ["thinking"] });
+  });
+
+  it("stops dependent writes when the base is saved for the next launch", async () => {
+    const applyOption = vi.fn();
+    const result = await applyModelConfiguration(
+      request({
+        applyModel: async () => ({
+          configuration_result: { status: "saved_for_launch", requested: PAIR_A },
+        }),
+        applyOption,
+      }),
+    );
+
+    expect(result.status).toBe("model_saved");
+    expect(applyOption).not.toHaveBeenCalled();
   });
 });

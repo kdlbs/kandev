@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import type { Locator } from "@playwright/test";
 
 const APPEARANCE_PATH = "/settings/preferences/appearance";
 const TERMINAL_PATH = "/settings/preferences/terminal-editors";
@@ -9,6 +10,18 @@ const NOTIFICATIONS_PATH = "/settings/preferences/notifications";
 const TERMINAL_ROW = "Terminal & Editors";
 const CLARIFICATION_REQUESTED = "session.clarification_requested";
 const PROVIDER_NAME = "E2E semantic notifications";
+
+async function switchTrackRight(switchControl: Locator) {
+  return switchControl.evaluate((element) => {
+    const track = getComputedStyle(element, "::before");
+    return (
+      element.getBoundingClientRect().left +
+      element.clientLeft +
+      Number.parseFloat(track.left) +
+      Number.parseFloat(track.width)
+    );
+  });
+}
 
 type SeededProvider = {
   id: string;
@@ -29,6 +42,7 @@ async function seedNotificationProvider(
 
 test.describe("Settings manual save", () => {
   test("persists rich-output chart motion on this device only after Save", async ({ testPage }) => {
+    await testPage.setViewportSize({ width: 1440, height: 900 });
     await testPage.addInitScript(() => {
       if (window.localStorage.getItem("kandev.settings.richOutputAnimations") === null) {
         window.localStorage.setItem("kandev.settings.richOutputAnimations", "true");
@@ -47,9 +61,29 @@ test.describe("Settings manual save", () => {
 
     const toggle = testPage.getByRole("switch", { name: "Animate rich-output charts" });
     await expect(toggle).toBeChecked();
-    const toggleBox = await toggle.boundingBox();
-    expect(toggleBox?.width).toBeGreaterThanOrEqual(44);
-    expect(toggleBox?.height).toBeGreaterThanOrEqual(44);
+    const chat = testPage.getByRole("switch", { name: "Chat animations" });
+    const imagePreviews = testPage.getByRole("switch", { name: "Show image previews by default" });
+    // @covers AC-UI-SETTINGS-COMPOSITION-001.1
+    const appearanceSwitches = [toggle, chat, imagePreviews];
+    for (const [width, height] of [
+      [1440, "28px"],
+      [768, "28px"],
+      [767, "44px"],
+    ] as const) {
+      await testPage.setViewportSize({ width, height: 900 });
+      const [chartRight, chatRight, imageRight] = await Promise.all(
+        appearanceSwitches.map(switchTrackRight),
+      );
+      expect(chartRight).toBeCloseTo(chatRight, 1);
+      expect(chartRight).toBeCloseTo(imageRight, 1);
+      await Promise.all(
+        appearanceSwitches.map((control) => expect(control).toHaveCSS("height", height)),
+      );
+    }
+
+    await expect(toggle).toHaveCSS("width", "44px");
+    await expect(toggle).toBeChecked();
+    await testPage.setViewportSize({ width: 1440, height: 900 });
 
     await toggle.click();
     await expect(toggle).not.toBeChecked();

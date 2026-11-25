@@ -101,7 +101,9 @@ describe("useAutomationActivity", () => {
     const { result } = renderHook(() => useAutomationActivity(AUTO_1));
     await waitFor(() => expect(result.current.error).toBe("boom"));
 
-    act(() => result.current.refresh());
+    await act(async () => {
+      await result.current.refresh();
+    });
 
     await waitFor(() => expect(result.current.runs.map((run) => run.id)).toEqual(["r9"]));
     expect(result.current.error).toBeNull();

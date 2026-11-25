@@ -643,7 +643,8 @@ func (r *sqliteRepository) initSchema() error {
 		instance_key TEXT NOT NULL DEFAULT '',
 		generation BIGINT NOT NULL DEFAULT 0
 	);
-	CREATE INDEX IF NOT EXISTS idx_queued_messages_session_position ON queued_messages(session_id, position);
+	DROP INDEX IF EXISTS idx_queued_messages_session_position;
+	CREATE INDEX IF NOT EXISTS idx_queued_messages_session_order ON queued_messages(session_id, position, id);
 	CREATE INDEX IF NOT EXISTS idx_queued_messages_task_activity ON queued_messages(task_id, queued_by, queued_at);
 
 	CREATE TABLE IF NOT EXISTS lifecycle_queue_generations (
@@ -829,7 +830,7 @@ func (r *sqliteRepository) InsertForSessionWithPolicy(
 	msg *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) error {
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
@@ -844,7 +845,7 @@ func (r *sqliteRepository) InsertForSessionWithWorkflowEntry(
 	msg *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) error {
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
@@ -858,7 +859,7 @@ func (r *sqliteRepository) insert(
 	msg *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 	workflowEntry *WorkflowEntryIdentity,
 ) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -935,7 +936,7 @@ func (r *sqliteRepository) validateAutoMergePolicyTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	identity *QueueSessionIdentity,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) error {
 	if identity == nil || policy == nil {
 		return nil
@@ -948,7 +949,7 @@ func (r *sqliteRepository) validateAutoMergePolicyTx(
 		WHERE session_id = ? AND session_incarnation_id = ?
 	`), identity.SessionID, identity.SessionIncarnationID).Scan(&enabled, &revision)
 	if errors.Is(err, sql.ErrNoRows) {
-		if policy.Source == AutoMergeSourceGlobal {
+		if policy.AutoMerge.Source == AutoMergeSourceGlobal {
 			return nil
 		}
 		return ErrAutoMergePolicyChanged
@@ -956,13 +957,13 @@ func (r *sqliteRepository) validateAutoMergePolicyTx(
 	if err != nil {
 		return fmt.Errorf("validate queue Auto-merge policy: %w", err)
 	}
-	switch policy.Source {
+	switch policy.AutoMerge.Source {
 	case AutoMergeSourceGlobal:
 		if enabled.Valid {
 			return ErrAutoMergePolicyChanged
 		}
 	case AutoMergeSourceSession:
-		if !enabled.Valid || enabled.Int64 != int64(boolToInt(policy.Enabled)) || revision != policy.Revision {
+		if !enabled.Valid || enabled.Int64 != int64(boolToInt(policy.AutoMerge.Enabled)) || revision != policy.AutoMerge.Revision {
 			return ErrAutoMergePolicyChanged
 		}
 	default:
@@ -2375,7 +2376,7 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list queued: %w", err)
@@ -2444,12 +2445,7 @@ func (r *sqliteRepository) Snapshot(
 	`), identity.SessionID, identity.SessionIncarnationID).Scan(&enabled, &revision)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		snapshot.AutoMergeError = fmt.Errorf("get queue snapshot Auto-merge override: %w", err)
-		if commitErr := tx.Commit(); commitErr != nil {
-			return RepositorySnapshot{}, commitErr
-		}
-		return snapshot, nil
-	}
-	if err == nil && enabled.Valid {
+	} else if err == nil && enabled.Valid {
 		snapshot.AutoMergeOverride = &AutoMergeOverride{
 			Enabled: enabled.Int64 != 0, Revision: revision,
 		}
@@ -2548,7 +2544,7 @@ func (r *sqliteRepository) listBySessionTx(
 		       attachments_json, metadata_json, queued_at, queued_by
 		  FROM queued_messages
 		 WHERE session_id = ?
-		 ORDER BY position ASC
+		 ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list queued snapshot: %w", err)
@@ -2573,7 +2569,7 @@ func (r *sqliteRepository) ListDurableLifecycleEntries(ctx context.Context) ([]Q
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		ORDER BY session_id ASC, position ASC
+		ORDER BY session_id ASC, position ASC, id ASC
 	`))
 	if err != nil {
 		return nil, fmt.Errorf("list durable lifecycle queued: %w", err)
@@ -2620,7 +2616,7 @@ func (r *sqliteRepository) ListDurableDeliveryEntries(ctx context.Context) ([]Qu
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		ORDER BY session_id ASC, position ASC
+		ORDER BY session_id ASC, position ASC, id ASC
 	`))
 	if err != nil {
 		return nil, fmt.Errorf("list durable delivery queued: %w", err)
@@ -2768,7 +2764,7 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 		LIMIT 1
 		`), sessionID)
 		msg, err = scanQueuedRow(row)
@@ -2922,58 +2918,6 @@ func (r *sqliteRepository) GetAutoMergeOverride(
 		return nil, nil
 	}
 	return &AutoMergeOverride{Enabled: enabled.Int64 != 0, Revision: revision}, nil
-}
-
-func (r *sqliteRepository) SetAutoMergeOverride(
-	ctx context.Context,
-	identity QueueSessionIdentity,
-	enabled bool,
-) (AutoMergeOverride, error) {
-	unlock := r.withSessionLock(identity.SessionID)
-	defer unlock()
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return AutoMergeOverride{}, fmt.Errorf("begin set Auto-merge override: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := r.guardActiveTaskTx(ctx, tx, identity.TaskID); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	if err := r.lockSessionTx(ctx, tx, identity.SessionID); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO queue_session_state (
-			session_id, session_incarnation_id, auto_merge_override, auto_merge_revision
-		) VALUES (?, ?, ?, 1)
-		ON CONFLICT(session_id) DO UPDATE SET
-			session_incarnation_id = excluded.session_incarnation_id,
-			auto_merge_override = excluded.auto_merge_override,
-			auto_merge_revision = queue_session_state.auto_merge_revision + 1
-		WHERE queue_session_state.session_incarnation_id = ''
-		   OR queue_session_state.session_incarnation_id = excluded.session_incarnation_id
-	`), identity.SessionID, identity.SessionIncarnationID, boolToInt(enabled)); err != nil {
-		return AutoMergeOverride{}, fmt.Errorf("set queue Auto-merge override: %w", err)
-	}
-	var result AutoMergeOverride
-	var storedEnabled int
-	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT auto_merge_override, auto_merge_revision
-		  FROM queue_session_state
-		 WHERE session_id = ? AND session_incarnation_id = ?
-	`), identity.SessionID, identity.SessionIncarnationID).Scan(&storedEnabled, &result.Revision); errors.Is(err, sql.ErrNoRows) {
-		return AutoMergeOverride{}, ErrSessionIdentityMismatch
-	} else if err != nil {
-		return AutoMergeOverride{}, fmt.Errorf("read written queue Auto-merge override: %w", err)
-	}
-	result.Enabled = storedEnabled != 0
-	if err := tx.Commit(); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	return result, nil
 }
 
 // PauseAutoRunIfPending persists OFF only when a visible pending row exists.
@@ -3252,7 +3196,7 @@ func (r *sqliteRepository) reserveHeadTx(
 			       attachments_json, metadata_json, queued_at, queued_by
 			FROM queued_messages
 			WHERE session_id = ?
-			ORDER BY position ASC
+			ORDER BY position ASC, id ASC
 			LIMIT 1
 		`), sessionID)
 		msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
@@ -4385,7 +4329,7 @@ func (r *sqliteRepository) listOrderedStoredSessionEntries(ctx context.Context, 
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list stored send-now entries: %w", err)
@@ -4934,7 +4878,7 @@ func (r *sqliteRepository) mergeIntoAbove(ctx context.Context, identity *QueueSe
 		return nil, err
 	}
 
-	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position)
+	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position, source.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -4989,7 +4933,7 @@ func (r *sqliteRepository) AutoMergeIntoAboveForSessionWithPolicy(
 	ctx context.Context,
 	identity QueueSessionIdentity,
 	sourceID string,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	return r.autoMergeIntoAbove(ctx, &identity, identity.SessionID, sourceID, &policy)
 }
@@ -4998,7 +4942,7 @@ func (r *sqliteRepository) autoMergeIntoAbove(
 	ctx context.Context,
 	identity *QueueSessionIdentity,
 	sessionID, sourceID string,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
@@ -5028,25 +4972,19 @@ func (r *sqliteRepository) autoMergeIntoAbove(
 	if err != nil {
 		return nil, false, err
 	}
-	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position)
-	if errors.Is(err, ErrNoMergeTarget) {
-		return source, false, nil
-	}
+	target, values, err := r.readAutoFoldTargetTx(ctx, tx, source, policy)
 	if err != nil {
 		return nil, false, err
 	}
-	values, compatible := buildAutoMergedEntry(target, source)
-	if !compatible {
+	if values == nil {
 		return source, false, nil
 	}
-	for _, entryID := range []string{source.ID, target.ID} {
-		blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, entryID)
-		if err != nil {
-			return nil, false, err
-		}
-		if blocked {
-			return nil, false, ErrEditConflict
-		}
+	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, source.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if blocked {
+		return nil, false, ErrEditConflict
 	}
 	if err := applyMergeWrites(ctx, r, tx, target, source, values.content, values.attachments, values.metadata, sessionID); err != nil {
 		if errors.Is(err, ErrEntryNotFound) {
@@ -5095,7 +5033,7 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
 	identity QueueSessionIdentity,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
@@ -5109,7 +5047,7 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithWorkflowEntr
 	entry WorkflowEntryIdentity,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
@@ -5123,7 +5061,7 @@ func (r *sqliteRepository) autoMergeCandidateIntoAbove(
 	identity *QueueSessionIdentity,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 	workflowEntry *WorkflowEntryIdentity,
 ) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(candidate.SessionID)
@@ -5158,30 +5096,15 @@ func (r *sqliteRepository) autoMergeCandidateIntoAbove(
 		return nil, false, err
 	}
 
-	target, storedContent, storedAttachmentsJSON, storedMetadataJSON, err := r.scanTailWithRawJSON(ctx, tx, candidate.SessionID)
+	fold, err := r.readCandidateFoldTx(ctx, tx, candidate, policy)
 	if err != nil {
 		return nil, false, err
 	}
-	if target == nil {
+	if fold == nil {
 		return nil, false, nil
 	}
-	// The tail scan already captured the exact stored bytes for the
-	// compare-and-swap below. The CAS compares raw storage bytes, not
-	// re-marshalled structs: metadata values round-trip through JSON as maps
-	// whose key order differs from the struct field order used at write time,
-	// so re-marshalling would never match. Comparing the raw strings keeps the
-	// guard exact.
-	values, compatible := buildAutoMergedEntry(target, candidate)
-	if !compatible {
-		return nil, false, nil
-	}
-	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, candidate.SessionID, target.ID)
-	if err != nil {
-		return nil, false, err
-	}
-	if blocked {
-		return nil, false, ErrEditConflict
-	}
+	target, values := fold.target, fold.values
+	storedContent, storedAttachmentsJSON, storedMetadataJSON := fold.rawContent, fold.rawAttachments, fold.rawMetadata
 	if err := claimOptionalMessageAttachmentsTx(
 		ctx, tx, identity, claim, candidate.TaskID, candidate.SessionID,
 	); err != nil {
@@ -5250,7 +5173,7 @@ func (r *sqliteRepository) readReorderEntriesTx(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("read reorder rows: %w", err)
@@ -5393,15 +5316,17 @@ func readMergeSource(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sess
 
 // readMergeTarget loads the entry with the greatest position strictly below
 // the source, mapping a missing row to ErrNoMergeTarget.
-func readMergeTarget(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sessionID string, sourcePosition int64) (*QueuedMessage, error) {
+// readMergeTarget reads the row directly above (sourcePosition, sourceID) in
+// the queue's total (position, id) order; positions alone can tie.
+func readMergeTarget(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sessionID string, sourcePosition int64, sourceID string) (*QueuedMessage, error) {
 	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		WHERE session_id = ? AND position < ?
-		ORDER BY position DESC
+		WHERE session_id = ? AND (position, id) < (?, ?)
+		ORDER BY position DESC, id DESC
 		LIMIT 1
-	`), sessionID, sourcePosition)
+	`), sessionID, sourcePosition, sourceID)
 	target, err := scanQueuedRow(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -5569,7 +5494,7 @@ func listQueuedMessagesBySessionTx(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list retained queue entries: %w", err)
@@ -5760,7 +5685,7 @@ func cancellationCandidates(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list queued cancellation candidates: %w", err)
@@ -6702,7 +6627,7 @@ func (r *sqliteRepository) scanTail(ctx context.Context, tx *sqlx.Tx, sessionID 
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position DESC
+		ORDER BY position DESC, id DESC
 		LIMIT 1
 	`), sessionID)
 	msg, err := scanQueuedRow(row)
@@ -6727,7 +6652,7 @@ func (r *sqliteRepository) scanTailWithRawJSON(ctx context.Context, tx *sqlx.Tx,
 		       content, attachments_json, metadata_json
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position DESC
+		ORDER BY position DESC, id DESC
 		LIMIT 1
 	`), sessionID)
 	msg, rawContent, rawAttachments, rawMetadata, err := scanQueuedRowWithRawJSON(row)
@@ -6766,7 +6691,7 @@ func (r *sqliteRepository) findCoalesced(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ? AND queued_by = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID, queuedBy)
 	if err != nil {
 		return nil, false, fmt.Errorf("scan coalesced queued: %w", err)

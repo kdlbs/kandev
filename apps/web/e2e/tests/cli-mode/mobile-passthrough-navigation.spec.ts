@@ -60,11 +60,13 @@ async function openPassthrough(page: Page, api: ApiClient, seed: SeedData, title
 }
 
 // @covers AC-CLI-MOBILE-PASSTHROUGH-NAV-001.1, AC-CLI-MOBILE-PASSTHROUGH-NAV-001.2
+// @covers AC-CLI-MOBILE-PASSTHROUGH-NAV-001.9, AC-CLI-MOBILE-PASSTHROUGH-NAV-001.10, AC-CLI-MOBILE-PASSTHROUGH-NAV-001.11
 test("phone passthrough keys deliver once to the agent without a task-shell request", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
+  await testPage.setViewportSize({ width: 375, height: 812 });
   const capture = observeInput(testPage);
   const { task, session, keybar } = await openPassthrough(
     testPage,
@@ -74,13 +76,108 @@ test("phone passthrough keys deliver once to the agent without a task-shell requ
   );
   await expect(keybar.root).toHaveCount(1);
   await expect(keybar.root).toBeVisible();
+  const keyStrip = keybar.root.getByTestId("mobile-terminal-keybar-scroller");
+  const stripBox = await keyStrip.boundingBox();
+  expect(stripBox).not.toBeNull();
+  const barBox = await keybar.root.boundingBox();
+  expect(barBox?.height).toBe(58);
+  const stripPadding = await keyStrip.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      left: Number.parseFloat(style.paddingLeft),
+      right: Number.parseFloat(style.paddingRight),
+      top: Number.parseFloat(style.paddingTop),
+      bottom: Number.parseFloat(style.paddingBottom),
+    };
+  });
+  for (const padding of Object.values(stripPadding)) {
+    expect(padding).toBeGreaterThanOrEqual(2);
+  }
+  expect(await keyStrip.evaluate((element) => element.scrollLeft)).toBe(0);
+  const initialKeys = await Promise.all(
+    ["esc", "up", "down", "left", "right", "enter", "tab"].map(async (id) => {
+      const key = keybar.root.getByTestId(`keybar-key-${id}`);
+      const exists = (await key.count()) === 1;
+      const box = exists ? await key.boundingBox() : null;
+      return {
+        id,
+        exists,
+        contained:
+          box !== null &&
+          box.x >= stripBox!.x &&
+          box.x + box.width <= stripBox!.x + stripBox!.width &&
+          box.y >= stripBox!.y &&
+          box.y + box.height <= stripBox!.y + stripBox!.height,
+        width: box?.width ?? 0,
+        height: box?.height ?? 0,
+        position: box && {
+          x: box.x,
+          y: box.y,
+          right: box.x + box.width,
+          bottom: box.y + box.height,
+        },
+      };
+    }),
+  );
+  expect.soft(initialKeys).toMatchObject(
+    ["esc", "up", "down", "left", "right", "enter", "tab"].map((id) => ({
+      id,
+      exists: true,
+      contained: true,
+    })),
+  );
+  for (const key of initialKeys) {
+    if (key.exists) {
+      expect.soft(key.width).toBeGreaterThanOrEqual(44);
+      expect.soft(key.height).toBeGreaterThanOrEqual(44);
+    }
+  }
+  expect.soft(initialKeys[0].position!.x - stripBox.x).toBeGreaterThanOrEqual(2);
+  expect
+    .soft(stripBox.x + stripBox.width - initialKeys.at(-1)!.position!.right)
+    .toBeGreaterThanOrEqual(2);
+  const scrollCue = keybar.root.getByTestId("keybar-scroll-cue");
+  const scrollCueCount = await scrollCue.count();
+  expect.soft(scrollCueCount).toBe(1);
+  if (
+    initialKeys.some((key) => !key.exists || !key.contained || key.width < 44 || key.height < 44) ||
+    scrollCueCount === 0
+  )
+    return;
+  await expect(scrollCue).toBeVisible();
+  expect(await keyStrip.evaluate((element) => element.scrollWidth)).toBeGreaterThan(
+    await keyStrip.evaluate((element) => element.clientWidth),
+  );
   const before = await apiClient.listSessionMessages(task.session_id!);
 
   // A raw keyboard prompt proves the same native PTY remains interactive.
   await session.passthroughTerminal.tap();
   await testPage.keyboard.type("raw navigation response");
-  await testPage.keyboard.press("Enter");
+  capture.frames.length = 0;
+  await keybar.tap("enter");
+  await expect.poll(() => capture.frames.filter((frame) => frame.data === "\r").length).toBe(1);
+  const enterFrame = capture.frames.find((frame) => frame.data === "\r")!;
+  const enterUrl = new URL(enterFrame.url);
+  expect(enterUrl.pathname).toBe(`/terminal/session/${task.session_id}`);
+  expect(enterUrl.searchParams.get("mode")).toBe("agent");
   await session.expectPassthroughHasText("Processed: raw navigation response");
+
+  const trailingKey = keybar.root.getByTestId("keybar-key-underscore");
+  await trailingKey.scrollIntoViewIfNeeded();
+  expect(await keyStrip.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  const [trailingBox, scrolledStripBox] = await Promise.all([
+    trailingKey.boundingBox(),
+    keyStrip.boundingBox(),
+  ]);
+  expect(trailingBox).not.toBeNull();
+  expect(trailingBox!.x).toBeGreaterThanOrEqual(scrolledStripBox!.x);
+  expect(trailingBox!.x + trailingBox!.width).toBeLessThanOrEqual(
+    scrolledStripBox!.x + scrolledStripBox!.width,
+  );
+  expect(trailingBox!.x - scrolledStripBox!.x).toBeGreaterThanOrEqual(2);
+  expect(
+    scrolledStripBox!.x + scrolledStripBox!.width - trailingBox!.x - trailingBox!.width,
+  ).toBeGreaterThanOrEqual(2);
 
   for (const [key, data] of [
     ["up", "\x1b[A"],
@@ -186,7 +283,7 @@ async function expectPhoneGeometry(page: Page, keyboardOffset: number) {
     .toBeLessThanOrEqual(page.viewportSize()!.height - keyboardOffset + 1);
   const [barBox, outputBox] = await Promise.all([bar.boundingBox(), output.boundingBox()]);
   expect(outputBox!.y + outputBox!.height).toBeLessThanOrEqual(barBox!.y + 1);
-  for (const id of ["ctrl", "shift", "esc", "tab", "up", "down", "left", "right"]) {
+  for (const id of ["ctrl", "shift", "esc", "tab", "up", "down", "left", "right", "enter"]) {
     const key = bar.getByTestId(`keybar-key-${id}`);
     await key.scrollIntoViewIfNeeded();
     const box = await key.boundingBox();

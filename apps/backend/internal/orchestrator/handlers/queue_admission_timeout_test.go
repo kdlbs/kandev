@@ -98,8 +98,8 @@ func (*timeoutMutationQueue) ReorderEntriesForSession(context.Context, messagequ
 	return messagequeue.ErrSessionAdmissionTimeout
 }
 
-func (*timeoutMutationQueue) SetSessionAutoMerge(context.Context, messagequeue.QueueSessionIdentity, bool) (messagequeue.AutoMergePolicy, error) {
-	return messagequeue.AutoMergePolicy{}, messagequeue.ErrSessionAdmissionTimeout
+func (*timeoutMutationQueue) SetSessionAutoMerge(context.Context, messagequeue.QueueSessionIdentity, bool) (messagequeue.SessionPolicyResult, error) {
+	return messagequeue.SessionPolicyResult{}, messagequeue.ErrSessionAdmissionTimeout
 }
 
 func (*timeoutMutationQueue) RemoveEntryWithEntry(context.Context, string, string) (*messagequeue.QueuedMessage, error) {

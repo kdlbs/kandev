@@ -6,6 +6,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
+import { expectInboxToOpenQuickChat } from "./inbox-quick-chat-helpers";
 
 test.describe("Needs-you Inbox answer flow", () => {
   test("answering a row removes it and resumes the task without navigation (AC .30)", async ({
@@ -168,4 +169,10 @@ test.describe("Needs-you Inbox answer attachments", () => {
       30_000,
     );
   });
+});
+
+// @covers AC-UI-INBOX-OPEN-TASK-001.1
+test("opens the target Quick Chat from Inbox", async ({ testPage }) => {
+  test.setTimeout(90_000);
+  await expectInboxToOpenQuickChat(testPage);
 });

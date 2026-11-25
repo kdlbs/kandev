@@ -571,6 +571,7 @@ type LaunchAgentRequest struct {
 	// ResumePassthrough selects conversation resume independently of runtime ownership.
 	ResumePassthrough            bool
 	RequiredNativeConversationID string
+	RuntimeAdapterVersion        string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
 	InterruptedHarnessGeneration uint64

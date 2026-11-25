@@ -1416,23 +1416,17 @@ func (r *Repository) updateTaskTx(
 	if err != nil {
 		return "", 0, err
 	}
-	var currentState v1.TaskState
-	var storedExecutionGrade string
-	stateQuery := `SELECT state, execution_grade FROM tasks WHERE id = ?`
-	if dialect.IsPostgres(r.db.DriverName()) {
-		stateQuery += forUpdateClause
-	}
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState, &storedExecutionGrade); err != nil {
+	current, err := r.readTaskCompletionMoveSourceTx(ctx, tx, task.ID, fromWorkflowID, fromStepID)
+	if err != nil {
 		return "", 0, err
 	}
 	if err := r.admitCompletionTx(ctx, tx, admission, task); err != nil {
 		return "", 0, err
 	}
 	if supplied, _ := ctx.Value(taskFieldExecutionGradeSuppliedKey{}).(bool); !supplied {
-		task.ExecutionGrade = storedExecutionGrade
+		task.ExecutionGrade = current.ExecutionGrade
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, task.ID, currentState, task.State,
-		fromWorkflowID, fromStepID, task.WorkflowID, task.WorkflowStepID); err != nil {
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, &current, task); err != nil {
 		return "", 0, err
 	}
 	metadata, err := r.preserveTaskHierarchySnapshot(ctx, tx, task)
@@ -1644,6 +1638,31 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateWithCompletionAd
 		"", expectedWorkflowID, nil, nil, nil, false, admission,
 	)
 	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep is the compare-and-swap
+// form of a cross-step move: the transition commits only while the task's
+// persisted workflow_step_id still equals expectedStepID inside the write
+// transaction. applied=false means the task left that step first and the task
+// row is untouched. The optional admission carries a trusted human completion.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+	ctx context.Context,
+	task *models.Task,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedStepID string,
+	expectedWorkflowID string,
+	admission *completion.Admission,
+) (admitted bool, applied bool, err error) {
+	// The caller-built task carries this move's own lifecycle fields, so the
+	// strict source check must not rebase it from the stored row the way the
+	// expectedStepID transition path does.
+	return r.updateTaskWithWorkflowStepAdmissionExactInner(
+		ctx, task, expectedStepID, targetStepID, limit, admittedState, queueExitPending,
+		"", expectedWorkflowID, nil, nil, nil, nil, nil, false, admission, true,
+	)
 }
 
 // UpdateTaskWithWorkflowStepAdmissionExact couples exact operation identity,
@@ -2047,7 +2066,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	admission *completion.Admission,
 ) (admitted bool, applied bool, err error) {
 	return r.updateTaskWithWorkflowStepAdmissionExactInner(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending,
-		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect, guardBusinessState, admission)
+		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect, guardBusinessState, admission, false)
 }
 
 type exactTaskMoveOperation struct {
@@ -2075,6 +2094,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 	effect *models.AgentDeliveryEffect,
 	guardBusinessState bool,
 	admission *completion.Admission,
+	strictSource bool,
 ) (admitted bool, applied bool, err error) {
 	currentSourceStepID := sourceStepID
 	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
@@ -2106,7 +2126,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 		if workflowChangeSource != nil {
 			return false, false, repoerrors.ErrWorkflowChangeConflict
 		}
-		if expectedStepID != "" {
+		if expectedStepID != "" || strictSource {
 			// CAS callers preserve their existing applied=false contract when
 			// the task has left the expected step. They must not retry against
 			// the new step and turn a stale transition into a new one.
@@ -2374,6 +2394,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		task.QueuedAt = nil
 		if admittedState != nil {
 			task.State = *admittedState
+		} else if guardBusinessState && (actualWorkflowID != task.WorkflowID || actualSourceStepID != targetStepID) {
+			if err := r.completeAutomaticStepEntryTx(ctx, tx, task); err != nil {
+				return false, false, err
+			}
 		}
 	} else {
 		task.WIPAdmitted = false
@@ -3493,9 +3517,15 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT execution_grade FROM tasks WHERE id = ?`), task.ID).Scan(&task.ExecutionGrade); err != nil {
+	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
 		return err
 	}
+	current, err := r.readTaskCompletionMoveSourceTx(ctx, tx, task.ID, fromWorkflowID, fromStepID)
+	if err != nil {
+		return err
+	}
+	task.ExecutionGrade = current.ExecutionGrade
 
 	// Always an arrival into targetStepID (the fallback promotion path used
 	// when the atomic PromoteQueuedTaskIfWorkflowStepHasCapacity is
@@ -3519,8 +3549,7 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		return wfmodels.NewWIPLimitError(targetStepID, limit, occupants)
 	}
 
-	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
-	if err != nil {
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, &current, task); err != nil {
 		return err
 	}
 	metadata, err := r.preserveTaskHierarchySnapshot(ctx, tx, task)
@@ -3671,16 +3700,12 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	if err != nil {
 		return false, err
 	}
-	var currentState v1.TaskState
-	stateQuery := `SELECT state, execution_grade FROM tasks WHERE id = ?`
-	if dialect.IsPostgres(r.db.DriverName()) {
-		stateQuery += forUpdateClause
-	}
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState, &task.ExecutionGrade); err != nil {
+	current, err := r.readTaskCompletionMoveSourceTx(ctx, tx, task.ID, fromWorkflowID, fromStepID)
+	if err != nil {
 		return false, err
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, task.ID, currentState, task.State,
-		fromWorkflowID, fromStepID, task.WorkflowID, destinationStepID); err != nil {
+	task.ExecutionGrade = current.ExecutionGrade
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, &current, task); err != nil {
 		return false, err
 	}
 	// See updateTaskTx's comment: stamped after the transactional lock, not
@@ -5781,7 +5806,7 @@ func (r *Repository) updateTaskState(ctx context.Context, id string, state v1.Ta
 		}
 		return err
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, id, currentState, state, workflowID, stepID, workflowID, stepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, id, currentState, state, workflowID, stepID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`), state, r.nowUTC(), id); err != nil {
@@ -5832,8 +5857,7 @@ func (r *Repository) updateTaskStateIfWorkflowStep(
 	if stepID != expectedStepID || (expectedState != nil && currentState != *expectedState) {
 		return false, nil
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, currentState, state,
-		workflowID, stepID, workflowID, stepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, taskID, currentState, state, workflowID, stepID); err != nil {
 		return false, err
 	}
 	updateQuery := `UPDATE tasks SET state = ?, updated_at = ?
@@ -5952,7 +5976,7 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 		(requirePrimary && !currentSessionIsPrimary) {
 		return oldState, false, false, nil
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, oldState, state, workflowID, stepID, workflowID, stepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, taskID, oldState, state, workflowID, stepID); err != nil {
 		return oldState, false, false, err
 	}
 	requirePrimaryValue := 0
@@ -6113,7 +6137,7 @@ func (r *Repository) UpdateTaskStateIfCurrentIn(
 	if !taskStateInSet(currentState, allowed) {
 		return currentState, false, nil
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, id, currentState, state, workflowID, stepID, workflowID, stepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, id, currentState, state, workflowID, stepID); err != nil {
 		return currentState, false, err
 	}
 
@@ -6218,7 +6242,7 @@ func (r *Repository) tryUpdateTaskStateIfNotArchived(
 	if archivedAt.Valid {
 		return currentState, false, false, nil
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, id, currentState, state, workflowID, stepID, workflowID, stepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, id, currentState, state, workflowID, stepID); err != nil {
 		return currentState, false, false, err
 	}
 

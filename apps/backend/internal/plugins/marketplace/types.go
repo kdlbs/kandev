@@ -58,12 +58,13 @@ type PermissionSummary struct {
 // (plugin-registry/build-index.mjs); additional/corporate sources must serve
 // the same shape. Missing/`null` optional fields decode to their zero value.
 type IndexEntry struct {
-	ID          string   `json:"id"`
-	Kind        string   `json:"kind,omitempty"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Author      string   `json:"author"`
-	Categories  []string `json:"categories"`
+	FileExtensions []string `json:"file_extensions,omitempty"`
+	ID             string   `json:"id"`
+	Kind           string   `json:"kind,omitempty"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	Author         string   `json:"author"`
+	Categories     []string `json:"categories"`
 	// IconURL is an absolute URL to the plugin's icon, resolved by the
 	// registry index-build from the plugin manifest's `icon` path. Empty
 	// when the plugin ships no icon; the UI falls back to a letter tile.
@@ -143,8 +144,9 @@ type SourceRecord struct {
 
 // Query is the filter/sort applied to a merged catalog by the HTTP handler.
 type Query struct {
-	Text     string
-	Category string
-	Sort     string // "stars" (default) | "name" | "recent"
-	Kind     string // "plugin" (default) | "canvas"
+	Extension string
+	Text      string
+	Category  string
+	Sort      string // "stars" (default) | "name" | "recent"
+	Kind      string // "plugin" (default) | "canvas"
 }

@@ -1,5 +1,6 @@
 // Filename starts with "mobile-" so this runs on the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import type { Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
@@ -307,6 +308,7 @@ for (const width of [320, 767]) {
     const { session } = await seedPorts(testPage, apiClient, seedData, `Phone geometry ${width}`);
     await session.mobilePanels.scrollIntoViewIfNeeded();
     await session.mobilePanels.tap();
+    await waitForFiniteAnimations(testPage.getByRole("dialog", { name: "Panels", exact: true }));
     const rowBox = await session.mobilePortForwardingOpen.boundingBox();
     expect(rowBox!.height).toBeGreaterThanOrEqual(44);
     await session.mobilePortForwardingOpen.tap();

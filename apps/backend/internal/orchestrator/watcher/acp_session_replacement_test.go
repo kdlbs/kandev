@@ -14,6 +14,7 @@ func TestACPSessionEventDataDecodesNativeConversationReplacement(t *testing.T) {
 		SessionID:                          "session",
 		ACPSessionID:                       "replacement-native",
 		DeliveryHarnessGeneration:          2,
+		AdapterVersion:                     "antigravity-cli/1.5.15",
 		DeliveryReplacesNativeConversation: true,
 	}, &data)
 	if err != nil {
@@ -21,5 +22,8 @@ func TestACPSessionEventDataDecodesNativeConversationReplacement(t *testing.T) {
 	}
 	if !data.DeliveryReplacesNativeConversation || data.DeliveryHarnessGeneration != 2 {
 		t.Fatalf("decoded = %+v, want replacement generation 2", data)
+	}
+	if data.AdapterVersion != "antigravity-cli/1.5.15" {
+		t.Fatalf("adapter version = %q, want CLI runtime identity", data.AdapterVersion)
 	}
 }

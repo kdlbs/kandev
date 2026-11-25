@@ -47,6 +47,7 @@ vi.mock("@/hooks/domains/comments/use-run-comment", () => ({
 }));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: () => null,
+  useOptionalAppStore: () => null,
 }));
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),

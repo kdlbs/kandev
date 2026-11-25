@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
@@ -64,6 +65,7 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
+	acpV2Enabled             bool
 	executorAdmission        func(context.Context, string, string, string) (context.Context, error)
 	logger                   *logger.Logger
 	eventPublisher           *EventPublisher
@@ -408,6 +410,7 @@ func (sm *SessionManager) restoreExistingSession(
 	result, err := (&RestoreCoordinator{}).Restore(ctx, RestoreCoordinatorRequest{
 		Identity:        identity,
 		AgentType:       agentConfig.ID(),
+		AdapterVersion:  identity.AdapterVersion,
 		Action:          RestoreActionNativeResume,
 		TargetWorkspace: workspacePath,
 		Capabilities:    capabilities,
@@ -675,6 +678,19 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	// and the original-config snapshot could disagree with reality).
 	profileModel = effectiveModel.model
 	runtimeModel = ""
+	thinkingConfigID := ""
+	var thinkingModelState *CachedModelState
+	if agentConfig.ID() == acpcompat.PiAgentID {
+		if profileMode != "" || runtimeMode != "" || len(profileConfigOptions) > 0 || len(runtimeConfigOptions) > 0 {
+			thinkingModelState = piStartupModelState(ctx, execution, effectiveModel.decision.EffectiveModel)
+		}
+		thinkingConfigID = piThinkingConfigID(thinkingModelState)
+		profileMode, profileConfigOptions = profileconfig.PiThinkingIntent(profileMode, profileConfigOptions, thinkingConfigID)
+		runtimeMode, runtimeConfigOptions = profileconfig.PiThinkingIntent(runtimeMode, runtimeConfigOptions, thinkingConfigID)
+		if execution.sessionSettingsStartupPolicy() == SessionSettingsPolicyProviderRestored {
+			profileMode, runtimeMode = "", ""
+		}
+	}
 	finalConfigID, profileModelApplied, profileConfigOptionsApplied := sm.applyProfileSessionLayers(
 		ctx, execution, result.SessionID, profileModel, profileConfigOptions,
 		effectiveModel.handled, effectiveModel.appliedModel,
@@ -683,6 +699,12 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	// Capture the effective profile state before runtime overrides or workflow
 	// launch settings are applied. This event is intentionally separate from
 	// ConfigBaselineCandidate, which remains provider-default comparison data.
+	if thinkingConfigID != "" && profileMode != "" {
+		if profileConfigOptionsApplied == nil {
+			profileConfigOptionsApplied = make(map[string]string)
+		}
+		profileConfigOptionsApplied[thinkingConfigID] = profileMode
+	}
 	sm.publishOriginalConfigOptionsWithProfile(execution, result.SessionID, profileModelApplied, profileConfigOptionsApplied)
 
 	finalConfigID, runtimeFailures := sm.applyRuntimeSessionLayers(
@@ -693,11 +715,11 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	if requestedMode == "" {
 		requestedMode = profileMode
 	}
-	if err := sm.applyExplicitSessionMode(ctx, execution, result.SessionID, requestedMode); err != nil {
+	if err := sm.applyStartupSessionMode(ctx, execution, result.SessionID, requestedMode, thinkingConfigID, thinkingModelState, runtimeMode != ""); err != nil {
 		return err
 	}
-	execution.setSessionInitialized(true)
 	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
+	execution.setSessionInitialized(true)
 	sm.publishWorkflowSessionConfigFailures(execution, result.SessionID, runtimeFailures)
 
 	// Send the task prompt if provided, or mark the execution as ready.
@@ -837,6 +859,7 @@ func (sm *SessionManager) initializeACPConnection(
 		RestoreIdentity{
 			SessionID:            execution.SessionID,
 			NativeSessionID:      execution.ACPSessionID,
+			AdapterVersion:       adapterVersionForExecution(execution),
 			OriginalWorkspace:    execution.OriginalWorkspacePath,
 			TargetWorkspace:      execution.WorkspacePath,
 			NativeStateReference: execution.ACPSessionID,
@@ -1104,13 +1127,17 @@ func (sm *SessionManager) applyExplicitSessionMode(ctx context.Context, executio
 	if mode == "" {
 		return nil
 	}
+	label := "permission mode"
+	if execution.AgentID == acpcompat.PiAgentID {
+		label = "thinking level"
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
 		return permissionModeBootstrapFailure(
 			execution, mode, "", models.AgentErrorCauseCodePermissionModeFailed,
 			models.AgentErrorCauseReasonClientUnavailable,
-			fmt.Errorf("requested permission mode %q cannot be applied: agentctl client is unavailable", mode),
+			fmt.Errorf("requested %s %q cannot be applied: agentctl client is unavailable", label, mode),
 		)
 	}
 	result, err := client.SetMode(ctx, sessionID, mode)
@@ -1121,21 +1148,21 @@ func (sm *SessionManager) applyExplicitSessionMode(ctx context.Context, executio
 		return permissionModeBootstrapFailure(
 			execution, mode, "", models.AgentErrorCauseCodePermissionModeFailed,
 			models.AgentErrorCauseReasonApplicationFailed,
-			fmt.Errorf("apply requested permission mode %q before the first prompt: %w", mode, err),
+			fmt.Errorf("apply requested %s %q before the first prompt: %w", label, mode, err),
 		)
 	}
 	if !result.Confirmed || result.Effective == "" {
 		return permissionModeBootstrapFailure(
 			execution, mode, result.Effective, models.AgentErrorCauseCodePermissionModeUnconfirmed,
 			models.AgentErrorCauseReasonConfirmationMissing,
-			fmt.Errorf("requested permission mode %q was not confirmed by the agent; the first prompt was not sent", mode),
+			fmt.Errorf("requested %s %q was not confirmed by the agent; the first prompt was not sent", label, mode),
 		)
 	}
 	if result.Effective != mode {
 		return permissionModeBootstrapFailure(
 			execution, mode, result.Effective, models.AgentErrorCauseCodePermissionModeMismatch,
 			models.AgentErrorCauseReasonEffectiveMismatch,
-			fmt.Errorf("requested permission mode %q was not applied; agent reported %q and the first prompt was not sent", mode, result.Effective),
+			fmt.Errorf("requested %s %q was not applied; agent reported %q and the first prompt was not sent", label, mode, result.Effective),
 		)
 	}
 	sm.logger.Info("session mode confirmed before first prompt",
@@ -1150,7 +1177,7 @@ func permissionModeBootstrapFailure(
 	cause error,
 ) *BootstrapFailure {
 	promptNotSent := true
-	return &BootstrapFailure{
+	failure := &BootstrapFailure{
 		Operation:     bootstrapOperation(execution),
 		Code:          code,
 		Reason:        reason,
@@ -1160,6 +1187,11 @@ func permissionModeBootstrapFailure(
 		PromptNotSent: &promptNotSent,
 		Cause:         cause,
 	}
+
+	if execution.AgentID == acpcompat.PiAgentID {
+		classifyThinkingFailure(failure)
+	}
+	return failure
 }
 
 func sortedConfigOptionKeys(options map[string]string) []string {
@@ -1361,7 +1393,7 @@ func convertAttachments(attachments []MessageAttachment) []v1.MessageAttachment 
 	result := make([]v1.MessageAttachment, 0, len(attachments))
 	for _, att := range attachments {
 		result = append(result, v1.MessageAttachment{
-			AttachmentID: att.AttachmentID,
+			CommentID: att.CommentID, AttachmentID: att.AttachmentID,
 			Type:         att.Type,
 			Data:         att.Data,
 			MimeType:     att.MimeType,
@@ -1589,35 +1621,47 @@ func (sm *SessionManager) waitForPromptDone(
 			return nil, ctx.Err()
 
 		case <-stallTicker.C:
-			snapshot, owned := sm.capturePromptStall(execution, promptGeneration)
-			if !owned {
-				continue
-			}
-			lastActivity, agentEventSeen, activityEpoch := snapshot.lastActivity, snapshot.outputObserved, snapshot.activityEpoch
-			elapsed := time.Since(lastActivity)
-			neverStarted := !agentEventSeen
-
-			if elapsed >= stallThreshold && !stallReported {
-				snapshot.diagnostic.StreamStages = captureStreamStages(execution)
-				snapshot.diagnostic.ElapsedMillis = elapsed.Milliseconds()
-				sm.logger.Warn("agent stall detected: no events received",
-					zap.Any("stall", snapshot.diagnostic))
-				if sm.eventPublisher != nil {
-					sm.eventPublisher.PublishAgentStalled(
-						ctx,
-						execution,
-						promptGeneration,
-						lastActivity,
-						elapsed,
-						activityEpoch,
-						neverStarted,
-						snapshot.accepted,
-					)
-				}
-				stallReported = true
+			if !stallReported {
+				_, stallReported = sm.reportPromptStall(ctx, execution, promptGeneration, stallThreshold)
 			}
 		}
 	}
+}
+
+// reportPromptStall publishes the generation's single stall notice once its
+// silence reaches threshold. owned is false once the generation has settled
+// or been superseded.
+func (sm *SessionManager) reportPromptStall(
+	ctx context.Context,
+	execution *AgentExecution,
+	promptGeneration uint64,
+	threshold time.Duration,
+) (owned, reported bool) {
+	snapshot, owned := sm.capturePromptStall(ctx, execution, promptGeneration)
+	if !owned {
+		return false, false
+	}
+	elapsed := time.Since(snapshot.lastActivity)
+	if elapsed < threshold {
+		return true, false
+	}
+	snapshot.diagnostic.StreamStages = captureStreamStages(execution)
+	snapshot.diagnostic.ElapsedMillis = elapsed.Milliseconds()
+	sm.logger.Warn("agent stall detected: no events received",
+		zap.Any("stall", snapshot.diagnostic))
+	if sm.eventPublisher != nil {
+		sm.eventPublisher.PublishAgentStalled(
+			ctx,
+			execution,
+			promptGeneration,
+			snapshot.lastActivity,
+			elapsed,
+			snapshot.activityEpoch,
+			!snapshot.outputObserved,
+			snapshot.accepted,
+		)
+	}
+	return true, true
 }
 
 func isCancelReleaseError(msg string) bool {
@@ -1998,6 +2042,9 @@ func (sm *SessionManager) sendPrompt(
 		}
 	}()
 	var admissionErr error
+	if err := sm.acpPromptAdmission(execution); err != nil {
+		return nil, err
+	}
 	ctx, admissionErr = sm.admitExecutorPrompt(ctx, execution)
 	if admissionErr != nil {
 		return nil, admissionErr
@@ -2158,6 +2205,15 @@ func (sm *SessionManager) materializeAttachments(
 	execution *AgentExecution,
 	attachments []v1.MessageAttachment,
 ) ([]v1.MessageAttachment, error) {
+	return sm.materializeAttachmentsForSession(ctx, execution, execution.ACPSessionID, attachments)
+}
+
+func (sm *SessionManager) materializeAttachmentsForSession(
+	ctx context.Context,
+	execution *AgentExecution,
+	materializationSessionID string,
+	attachments []v1.MessageAttachment,
+) ([]v1.MessageAttachment, error) {
 	if len(attachments) == 0 {
 		return attachments, nil
 	}
@@ -2169,7 +2225,7 @@ func (sm *SessionManager) materializeAttachments(
 		if sm.attachmentReader == nil {
 			return nil, fmt.Errorf("attachment %q cannot be delivered: attachment storage is unavailable", attachment.AttachmentID)
 		}
-		if execution.ACPSessionID == "" {
+		if materializationSessionID == "" {
 			return nil, fmt.Errorf("attachment %q cannot be delivered: ACP session is not ready", attachment.AttachmentID)
 		}
 		reader, name, mimeType, sizeBytes, err := sm.attachmentReader.OpenClaimed(
@@ -2185,7 +2241,7 @@ func (sm *SessionManager) materializeAttachments(
 		}
 		materialized, materializeErr := client.MaterializeAttachment(
 			ctx,
-			execution.ACPSessionID,
+			materializationSessionID,
 			attachment.AttachmentID,
 			name,
 			mimeType,
@@ -2204,6 +2260,9 @@ func (sm *SessionManager) materializeAttachments(
 			return nil, fmt.Errorf("materialize attachment %q: agentctl returned no filename", attachment.AttachmentID)
 		}
 		result[i].Name = materialized.Name
+		if attachment.CommentID != "" {
+			result[i].Name = name
+		}
 		result[i].MimeType = mimeType
 		result[i].SizeBytes = sizeBytes
 		result[i].Path = materialized.Path
@@ -2409,12 +2468,18 @@ func (sm *SessionManager) callAgentctlPrompt(
 	steer bool,
 	submissionID string,
 ) error {
+	prompt, attachments, err := v1.RenderCommentFiles(prompt, attachments)
+	if err != nil {
+		return &agentctl.RequestNotSentError{Err: err}
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
 		return &agentctl.RequestNotSentError{Err: fmt.Errorf("execution %q has no agentctl client", execution.ID)}
 	}
-	var err error
+	if err := sm.acpClientPromptAdmission(client); err != nil {
+		return &agentctl.RequestNotSentError{Err: err}
+	}
 	if steer {
 		if submissionID != "" {
 			err = client.PromptSteerWithSubmissionID(ctx, prompt, attachments, promptGeneration, submissionID)

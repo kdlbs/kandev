@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-04
-updated: 2026-08-28
+updated: 2026-11-24
 owners:
   - kandev
 ---
@@ -59,13 +59,16 @@ surface without removing the current page from view.
   user opens Quick Chat from an existing mobile entry point, **THEN** the
   full-screen dialog shall remain usable, the explicit close control shall
   remain reachable, and the document shall have no horizontal overflow.
+- **AC-UI-QUICK-CHAT-ELEVATION-001.8:** When the dialog is open in WebKit on
+  tablet or desktop, tab labels and the active chat or terminal text shall
+  render as sharply as comparable text elsewhere in the app. This applies
+  after opening, switching tabs, and resizing the panel.
 
 ## Out of scope
 
 - Changing Quick Chat size, position, responsive composition, content, tabs,
   sessions, or persistence.
-- Adding a new backdrop component, user setting, animation, or navigation
-  behavior.
+- Adding a backdrop component, user setting, or navigation path.
 - Changing the separate new-Quick-Chat picker dialog or configuration-chat
   popover.
 - Changing the shared `Dialog` or `DialogOverlay` defaults for other dialogs.

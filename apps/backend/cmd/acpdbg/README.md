@@ -44,8 +44,9 @@ Or invoke the binary directly: `apps/backend/bin/acpdbg <subcommand> [flags]`.
 - `--workdir PATH` — child cwd (default: fresh `/tmp/kandev-acpdbg-<pid>-*`)
 - `--verbose` — mirror frames to stderr as they're sent/received
 - `--stderr` — capture child stderr into the JSONL (useful when an agent crashes before the handshake completes)
-- `--client-capabilities JSON` — merge a JSON object into `initialize.clientCapabilities`; nested values merge with the debugger defaults
-- `--air-capabilities LIST` — advertise comma-separated AIR capabilities in `_meta.jetbrains.air`; this metadata merges with `--client-capabilities`
+- `--protocol-version 1|2` requests an ACP wire version. The default is 1.
+- `--client-capabilities JSON` supplies capabilities in the format for the requested version. In v1, nested values merge with the debugger defaults.
+- `--air-capabilities LIST` advertises comma-separated AIR capabilities in `_meta.jetbrains.air` for v1.
 
 For example, advertise the ACP 1.28 notice and compaction capabilities:
 
@@ -56,6 +57,21 @@ apps/backend/bin/acpdbg probe --client-capabilities '{"session":{"notices":{},"c
 `prompt --model` uses a `model` category config option when the session advertises one. It falls
 back to the legacy `session/set_model` request when that option is absent or the agent does not
 implement `session/set_config_option`.
+
+### Probe ACP v2
+
+```bash
+apps/backend/bin/acpdbg probe --protocol-version 2 --timeout 45s claude-acp
+```
+
+The capture records the requested version, the selected version, and the
+session setup result. A v2 probe stops before session setup if the agent
+selects v1 or returns a legacy initialization response.
+
+In v2, `prompt` waits for the prompt acknowledgement and the terminal
+foreground state. Model and mode changes use the session's config options.
+`session-load` requests replay from the start with `session/resume` and waits
+for `replay_complete`. `mcp-probe` requires the agent to advertise HTTP MCP.
 
 ### Verify resume under a different working directory
 

@@ -21,3 +21,29 @@ describe("useEffectiveSidebarView", () => {
     expect(result.current).toEqual(DEFAULT_VIEW);
   });
 });
+
+it("starts a different draft grouping expanded without changing the saved disclosure", () => {
+  const source = {
+    ...DEFAULT_VIEW,
+    id: "saved",
+    group: "plugin:tags:tags" as const,
+    collapsedGroups: ["retained"],
+  };
+  mocks.state.sidebarViewsByWorkspace = {
+    ws: {
+      views: [source],
+      activeViewId: source.id,
+      syncError: null,
+      draft: {
+        baseViewId: source.id,
+        filters: source.filters,
+        sort: source.sort,
+        group: "plugin:tags:multi-tags",
+        groupIndent: true,
+      },
+    },
+  };
+  const { result } = renderHook(() => useEffectiveSidebarView("ws"));
+  expect(result.current.collapsedGroups).toEqual([]);
+  expect(source.collapsedGroups).toEqual(["retained"]);
+});

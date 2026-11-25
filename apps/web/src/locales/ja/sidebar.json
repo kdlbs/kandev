@@ -1,4 +1,11 @@
 {
+  "pluginGroupingSection": "プラグインのグループ化",
+  "pluginGroupingUnavailable": "このプラグインのグループ化は利用できないか、不完全です。再試行するか、プラグインを有効にするか、別のビューを選択してください。",
+  "pluginGroupingUnavailableLabel": "{{name}}（利用不可）",
+  "pluginGroupUntagged": "タグなし",
+  "pluginGroupDescription": "タスクビュー全体をグループ化してからページ分割します。",
+  "pluginPageStatus_one": "重複を除いて {{count}} 件のタスク。{{total}} ページ中 {{page}} ページ（表示回数で分割）。",
+  "pluginPageStatus_other": "重複を除いて {{count}} 件のタスク。{{total}} ページ中 {{page}} ページ（表示回数で分割）。",
   "taskViews": "タスクビュー",
   "archivedLoadFailed": "アーカイブ済みのタスクを読み込めませんでした",
   "collapseAllBranches": "すべて折りたたむ",

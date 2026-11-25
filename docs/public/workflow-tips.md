@@ -9,6 +9,8 @@ A workflow is an ordered set of steps for tasks in one workspace. A workflow can
 
 Configure Kanban workflows in **Settings → Workspaces → select a workspace → Workflows**. You need a workspace first; steps which start agents also need a healthy agent profile and a usable executor profile. Use a template when its prompts fit your process. Use **Custom** when you only need columns or want to build the automation yourself.
 
+The page opens in the **Compact** view, which shows each workflow as one row with its steps, step count, and agent profile. Select a row to open its editor, which holds **Export**, **Duplicate**, and **Delete Workflow**. Collapsing a row keeps unsaved changes for **Save changes**. Choose **Detailed** above the list to show every editor at once. The browser remembers the view you choose.
+
 Workflow prompts run with the selected executor's filesystem, credentials, and network access. Do not place tokens in prompt text, and give the agent only the access that workflow needs. Workflow settings use Kandev's current local backend trust boundary; protect any network-exposed installation as described in [Run as a Service](run-as-a-service.md).
 
 > Workflow definitions can be copied between workspaces with [Workflow Import / Export](workflow-import-export.md), or reconciled from a repository with [Workflow Sync](workflow-sync.md).
@@ -23,6 +25,8 @@ Workflow prompts run with the selected executor's filesystem, credentials, and n
 ## One-time move options
 
 The workflow stepper and next-step controls keep a fast **Move here** path for ordinary transitions. Choose **Move with options** when one hand-off needs fresh context, extra one-time instructions, or should skip the destination step's saved prompt. These options are consumed by that transition only; the destination step's saved prompt and reset policy remain unchanged for later entries.
+
+To reuse a saved prompt, type `@` in **One-time instructions** and choose a match. You can do this from the next-step button above the composer or from the task's **Move** menu. The editor highlights the reference. Select **Move** to send it with the instructions for that transition.
 
 Instructions are appended after the normal destination prompt, or replace it when you skip the step prompt. A move from an active agent is deferred until the current turn settles, so the reset, skip-prompt, and instructions stay together. On touch devices, the options form opens in a bottom Drawer. Pull-request draft/readiness remains a PR automation concern rather than a generic workflow move option.
 

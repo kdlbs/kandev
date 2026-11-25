@@ -272,12 +272,14 @@ export async function expectStoredCodeComment({
   fileName,
   repositoryName,
   commentText,
+  attachmentId,
 }: {
   page: Page;
   sessionId: string;
   fileName: string;
   repositoryName: string;
   commentText: string;
+  attachmentId?: string;
 }) {
   const readComments = async () =>
     page.evaluate((id) => {
@@ -296,6 +298,9 @@ export async function expectStoredCodeComment({
             comment.repositoryName === repositoryName &&
             comment.codeContent === CODE_SELECTION_QUOTE &&
             comment.text === commentText &&
+            (!attachmentId ||
+              (Array.isArray(comment.attachments) &&
+                comment.attachments.some((file) => file.attachment_id === attachmentId))) &&
             comment.startLine === CODE_SELECTION_LINE &&
             comment.endLine === CODE_SELECTION_LINE,
         );

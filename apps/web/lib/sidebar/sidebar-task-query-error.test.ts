@@ -47,3 +47,15 @@ it("separates initial failure, refresh failure and denied access", () => {
       canRetry: false,
     });
 });
+
+it("keeps provider failure recoverable and separate from workspace denial or a successful empty group", () => {
+  const error = new ApiError(privateDetail, 503, {
+    error_code: "sidebar_grouping_unavailable",
+    details: privateDetail,
+  });
+  expect(sidebarTaskQueryError(error, false, t)).toEqual({
+    message: t("sidebar:pluginGroupingUnavailable"),
+    canRetry: true,
+  });
+  expect(sidebarTaskQueryError(error, true, t).message).not.toContain(privateDetail);
+});

@@ -3636,7 +3636,36 @@ func (r *Repository) SetSessionMetadataKeyIfJSONValue(
 	if err != nil {
 		return false, fmt.Errorf("failed to serialize session metadata value: %w", err)
 	}
-	now := r.nowUTC()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
+		return false, err
+	}
+	updated, err := r.setSessionMetadataKeyIfJSONValueTx(
+		ctx, tx, sessionID, key, expectedJSON, valueJSON, r.nowUTC(),
+	)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return updated, nil
+}
+
+func (r *Repository) setSessionMetadataKeyIfJSONValueTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, key string,
+	expectedJSON, valueJSON []byte,
+	updatedAt time.Time,
+) (bool, error) {
 	var query string
 	var args []interface{}
 	if dialect.IsPostgres(r.db.DriverName()) {
@@ -3649,7 +3678,7 @@ func (r *Repository) SetSessionMetadataKeyIfJSONValue(
 			WHERE id = ?
 			  AND (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END -> ?) = ?::jsonb
 		`
-		args = []interface{}{key, string(valueJSON), now, sessionID, key, string(expectedJSON)}
+		args = []interface{}{key, string(valueJSON), updatedAt, sessionID, key, string(expectedJSON)}
 	} else {
 		path := jsonPath(key)
 		query = `
@@ -3674,33 +3703,16 @@ func (r *Repository) SetSessionMetadataKeyIfJSONValue(
 			  )
 		`
 		args = []interface{}{
-			path, string(valueJSON), now, sessionID,
+			path, string(valueJSON), updatedAt, sessionID,
 			path, string(expectedJSON), path, string(expectedJSON), string(expectedJSON), path,
 		}
-	}
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
-		return false, err
-	}
-	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
-		return false, err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
 	rows, err := result.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return rows > 0, nil
+	return rows > 0, err
 }
 
 // ClearSessionMetadataKeyIfStringValue removes a string-valued metadata key
