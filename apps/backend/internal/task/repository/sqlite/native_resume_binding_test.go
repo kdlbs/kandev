@@ -182,6 +182,19 @@ func testNativeResumeAuthenticatedMissingBinding(t *testing.T, open func(*testin
 					require.Empty(t, block.DeliveryStreamID)
 				}
 			}
+			if scenario == "ambiguous generic incident" {
+				current, err := repo.GetTaskSession(ctx, proof.SessionID)
+				require.NoError(t, err)
+				require.NotContains(t, current.Metadata, models.SessionMetaKeyRecoveryNoticePending)
+				block.DeliverySubmissionID = submission.ID
+				require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, block))
+				changed, err = resolver.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof, time.Now().UTC())
+				require.NoError(t, err)
+				require.True(t, changed)
+				verified, err := repo.VerifyCommittedRecoveryNoticeSource(ctx, fixture.recovery)
+				require.NoError(t, err)
+				require.True(t, verified)
+			}
 			if scenario == "legacy error" || scenario == "independent error" {
 				current, err := repo.GetTaskSession(ctx, proof.SessionID)
 				require.NoError(t, err)

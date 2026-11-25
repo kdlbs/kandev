@@ -1,6 +1,6 @@
 ---
 created: 2026-11-25
-status: implemented
+status: in_progress
 requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
 system_design:

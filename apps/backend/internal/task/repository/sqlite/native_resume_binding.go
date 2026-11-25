@@ -509,7 +509,8 @@ func validNativeResumeProof(proof *models.NativeResumeDeliveryEvidence) bool {
 }
 
 // A sole generic fence can attest to a notice only when the authenticated
-// inventory identifies one interrupted submission in its generation.
+// inventory identifies one interrupted submission in its generation. Resolution
+// writes this binding and the pending notice in the same transaction.
 func bindGenericNativeIncident(blocks []models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence) bool {
 	if len(blocks) != 1 || blocks[0].DeliverySubmissionID != "" {
 		return true

@@ -1,7 +1,7 @@
 ---
 id: "01-bind-incident"
 title: Bind the authenticated notice source at resolution
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: plan.md
@@ -20,7 +20,7 @@ system_design:
 3. Verify that one interrupted submission produces a publishable marker, that independent or ambiguous evidence cannot authorize a submission-specific notice, and that a failed transaction leaves no partial binding. Run from apps/backend against a disposable PostgreSQL DSN in KANDEV_TEST_POSTGRES_DSN. Confirm both shared test entry points execute.
 
 ```sh
-systemd-run --user --scope -p MemoryMax=8G go test -v ./internal/task/repository/sqlite -run 'Test(Postgres)?NativeResume' -count=1
+systemd-run --user --scope -p MemoryMax=8G go test -trimpath -v ./internal/task/repository/sqlite -run 'Test(Postgres)?NativeResume' -count=1
 ```
 
 Use the v0.103.1 interrupted-session lifecycle scenario to check the PR candidate on PostgreSQL 16.16 and SQLite. The production Release upgrade regression workflow and scripts/upgrade/run.sh enforce main-only execution. Use a PR-compatible integration test entry point for premerge evidence. Record the candidate SHA, baseline, engine version, resume response and observed notice. Distinguish repository-level checks from full release rehearsals.
@@ -28,3 +28,5 @@ Use the v0.103.1 interrupted-session lifecycle scenario to check the PR candidat
 ## Results
 
 The new regression cases failed on both engines before the change. After the change, the full native-resume repository suite passed on SQLite and disposable PostgreSQL 17.11 (264 seconds under MemoryMax=8G). It exercised pending notice verification, ambiguous incidents, rollback and existing native recovery cases. Full release rehearsal evidence remains pending under the main-only workflow rule.
+
+Review checks passed on SQLite and PostgreSQL 17.11 for a sole generic block after an earlier terminal incident and for retry after a previously ambiguous block acquires an exact submission binding. The ambiguous attempt leaves the notice marker absent. The exact binding permits verification after retry.
