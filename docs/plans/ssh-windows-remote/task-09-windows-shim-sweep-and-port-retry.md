@@ -71,8 +71,8 @@ Run the Windows binary on the test host with `-test.run 'GitHubCLIShim'`.
 
 Completed on 2026-11-23.
 
-| Command | Result |
-| --- | --- |
-| `go test ./cmd/agentctl -run GitHubCLIShim` (macOS and the test host) | Passed, including `TestSSHWindowsGitHubCLIShimSweepKeepsLiveOwner` on the test host |
-| `go test ./internal/agent/runtime/lifecycle -run '^TestSSHWindows'` | Passed. The bind-failure test failed before the change |
-| Product run on the test host | 13 shim directories that forced stops left were removed at the next launch. The live owner's directory and a lockless fixture remained |
+The shim tests passed on macOS and on the test host, including
+`TestSSHWindowsGitHubCLIShimSweepKeepsLiveOwner`. The bind-failure test failed
+before the change. In a product run on the test host, the next launch removed
+13 shim directories that forced stops had left, and kept the live owner's
+directory and a lockless fixture.

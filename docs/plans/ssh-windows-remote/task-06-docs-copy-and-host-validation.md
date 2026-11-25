@@ -127,66 +127,31 @@ For each host scenario, record:
 
 Completed on 2026-11-23.
 
-Docs and copy:
+Docs and copy: `docs/public/executors.md` has the Windows host requirements, a
+"Windows hosts" subsection, and passthrough and reclamation notes.
+`feature-status.md` and `release-process.md` match it. Three `executors.json`
+keys are updated in all eight locales; `zh-hk`, `zh-tw`, and `pseudo` come
+from the generators, minus three unrelated regressions they introduced.
 
-- `docs/public/executors.md` now has Windows host requirements, a "Windows
-  hosts" subsection (including the unsupported uses and the Defender note), and
-  passthrough and reclamation notes.
-- `feature-status.md` and `release-process.md` are updated to match.
-- Three `executors.json` keys are updated in all eight locales. `zh-hk` and
-  `zh-tw` were generated with `pnpm run i18n:zh-hant`, and `pseudo` with
-  `pnpm run i18n:pseudo`. The generators also rewrote three unrelated entries;
-  those were reverted, because the `zh-hant` converter regressed a
-  hand-corrected phrase.
-
-Real-host matrix: an isolated backend (the `dev-isolated` environment launched
-with `nohup`, because macOS lacks `setsid`) drove the product API against the
-test host. The host ran Windows 11 x64 with the built-in OpenSSH Server and
-PowerShell 5.1 and 7. The agent was Kandev's mock agent
-(`/e2e:simple-message`). For the run, `mock-agent.exe` was placed in
-`%USERPROFILE%\.local\bin`.
+Real-host matrix: an isolated backend drove the product API against the test
+host with Kandev's mock agent.
 
 | # | Result |
 | --- | --- |
-| H1 | Passed. Connection test: `windows/amd64`, with every step OK |
-| H2 | Passed. The default prepare cloned `octocat/Hello-World`, the WMI-launched controller became ready, and the mock agent answered (`WAITING_FOR_INPUT`) |
-| H3 | Passed. After 120 seconds idle, the same controller (port 41001) answered |
-| H4 | Passed. Across a backend stop and restart, the remote PID 53004 was unchanged. The session reattached with a new local forward, and the next prompt was answered in the same session |
-| H5 | Passed. Archive stopped PID 53004 and removed the session dir. The task dir and checkout were kept |
-| H6 | Passed. A rebuilt helper (new hash) launched task 2. The running PID 53004 kept `agentctl.exe.old-*` |
-| H7 | Passed. With `DefaultShell` set to PowerShell (user-approved), launch and restart/resume both worked in the same session. `DefaultShell` was then removed, and `echo %OS%` expanded through `cmd.exe` again |
-| H8 | Passed. A `pwsh` connection profile launched and answered |
+| H1 | Passed. The connection test reported `windows/amd64` |
+| H2 | Passed. The default prepare cloned the repository, and the WMI-launched controller answered a prompt |
+| H3 | Passed. After 120 seconds idle, the same controller answered |
+| H4 | Passed. After a backend restart, the same remote PID reattached and answered in the same session |
+| H5 | Passed. Archive stopped the controller and removed the session dir; the task dir stayed |
+| H6 | Passed. A rebuilt helper launched a second task while the running controller kept `agentctl.exe.old-*` |
+| H7 | Passed. With `DefaultShell` set to PowerShell, launch and resume worked; the value was then removed |
+| H8 | Passed. A `pwsh` profile launched and answered |
 
-Cleanup on the test host: all validation tasks were archived, and no
-`agentctl.exe` was left running. `%USERPROFILE%\.kandev` held only validation
-artifacts and was removed. `mock-agent.exe` and every `%TEMP%\kandev-*` entry
-were deleted, and `DefaultShell` is absent.
+The run left no `agentctl.exe` running and no validation files, and
+`DefaultShell` is absent. Its three findings became tasks 07 through 09: no PTY
+for the task terminal, a first-turn checkpoint timeout, and leftover `gh` shim
+directories.
 
-Findings recorded as known limitations, or as exclusions where noted. Tasks 07
-through 09 later resolved all three:
-
-- agentctl's interactive shell cannot start a PTY on Windows
-  (`failed to start PTY: unsupported`). The task terminal panel is therefore
-  excluded.
-- The first-turn turn-change checkpoint timed out once per new session (3
-  times). Later turns captured normally.
-- Forced stops leave `%TEMP%\kandev-github-cli-*` shim directories.
-
-| Command | Result |
-| --- | --- |
-| `pnpm run i18n:check`, `i18n:ratchet`, `lint`, `typecheck` | Passed |
-| `node scripts/validate-public-docs.mjs`, `node --test scripts/validate-public-docs.test.mjs` | Passed: 56 pages, 63 tests |
-| `python3 scripts/list-docs.py validate`, `lint-spec-files.py --all` | Passed |
-
-Specs promoted: the requirement is `active`, the Windows design is `current`,
-and `ssh-executor.md` gained Windows in the support matrix and lost its Windows
-out-of-scope bullet. The Windows `native` CI job is still pending until PR B
-runs. If it fails, fix the cause in PR B before review.
-
-Lifecycle evidence:
-
-| Scenario | Criterion | Evidence | Result |
-| --- | --- | --- | --- |
-| Channel close | `001.11` | H3 | Passed |
-| Restart and recovery | `001.12` | H4, H7 | Passed |
-| Concurrent work | `001.6` | H6 | Passed |
+The web i18n, lint, and type checks, the public-docs validators, and the
+spec validators passed. The requirement is `active`, the design is `current`,
+and `ssh-executor.md` lists Windows in its support matrix.

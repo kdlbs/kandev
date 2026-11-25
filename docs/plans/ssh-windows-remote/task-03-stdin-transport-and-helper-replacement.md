@@ -98,40 +98,20 @@ cd ../.. && bash scripts/lint-go-changed $(git diff --name-only origin/main -- '
 
 Completed on 2026-11-22.
 
-Implementation:
-
-- `executor_ssh_powershell.go` holds the loader, `powerShellEnvelope`,
-  `newPowerShellCommand`, and the three run helpers. `WrapPowerShell`,
-  `buildPowerShellEnvInitScript`, and the production
-  `decodePowerShellEncodedCommand` are removed.
-- The loader semantics were proven on the real test host before coding (see
-  below). Two behaviors required loader changes. A dot-sourced script hides a
-  failing last statement, so the loader appends `$__kLastOk = $?`. PowerShell
+- `executor_ssh_powershell.go` holds the loader, `powerShellEnvelope`, and the
+  run helpers. The fork's `WrapPowerShell` and command-line environment builder
+  are removed, and `WrapLoginShell` is POSIX-only again.
+- Real-host probes shaped the loader. A dot-sourced script hides a failing
+  last statement, so the loader appends `$__kLastOk = $?`. Windows PowerShell
   5.1 writes redirected errors as `#< CLIXML`, so the loader catches errors and
   writes plain messages.
-- `WrapLoginShell` returns to its upstream POSIX-only form. The stop,
-  remove-directory, and orphan-inventory builders return scripts.
-  `removeRemoteDir` dispatches the one shared caller.
 - `sftpReplaceWindowsFile` installs the helper and its sidecar by renaming the
-  existing file aside. `sftpUploadBytes` returns to its upstream form, so the
-  fork's `renameSFTPUpload` is removed.
-- Found during the port: the catalog's remote-auth setup scripts are POSIX
-  shell, and the fork ran them under PowerShell. They are now skipped on Windows
-  with a warning (`AC-EXECUTORS-SSH-WINDOWS-001.19`,
-  `TestSSHWindowsSkipsPOSIXAuthSetupScripts`).
-- The fake SFTP filesystem now refuses `rmdir` on a file. pkg/sftp retries a
-  failed file removal as a directory removal, and the old fake deleted an
-  in-use file through that path.
+  existing file aside.
+- The catalog's remote-auth setup scripts are POSIX shell, so they are skipped
+  on Windows with a warning (`AC-EXECUTORS-SSH-WINDOWS-001.19`).
 
-| Command | Result |
-| --- | --- |
-| `go test -race -run '^TestSSHWindows'` on `lifecycle` and `ssh` | Passed. Red first: build failures for the new transport, and the running-helper upload failed with `SSH_FX_FAILURE` |
-| SSH, SFTP, reclaim, orphan, and Remote Docker tests across `lifecycle`, `ssh`, and `runtime` | 5 failures, all in the baseline set |
-| `lint-go-changed` on every changed Go file | 0 issues |
-| Production loader on the test host through stock `cmd.exe` (Windows PowerShell 5.1) | Command line 4,183 characters. Login `PATH` finds Git. Env with quotes, `$`, backtick, and CJK round-trips. `input` is delivered. `exit 7` returns 7, a failing last native command returns 5, and a 64 KiB script runs |
-
-Lifecycle evidence:
-
-| Scenario | Criterion | Test | Result |
-| --- | --- | --- | --- |
-| Concurrent work | `001.6` | `TestSSHWindowsReplacesRunningHelperByRenamingAside`, `TestSSHWindowsHelperReplacementRestoresPreviousOnFailure` | Passed |
+The targeted tests failed first and then passed, and lint reported 0 issues.
+On the test host, the production loader ran through stock `cmd.exe` with a
+4,183-character command line. Environment values with quotes, `$`, backticks,
+and CJK text round-tripped, exit codes matched `-Command`, and a 64 KiB script
+ran.

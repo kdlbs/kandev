@@ -145,46 +145,16 @@ Record each of these tests with its command and result:
 
 Completed on 2026-11-22.
 
-Port method:
-
-- New files were checked out from `0191092a3`.
-- Modified files received the fork diff through `git apply -3`.
-  `executor_backend.go` and `executor_ssh_operations.go` had changed upstream
-  since the fork base, so copying whole files would have reverted upstream
-  work. Only the platform-gate hunk conflicted. It was resolved into the
-  three-gate split.
-
-Additional changes:
-
-- The Remote Docker files are unchanged. The fork's
-  `SSHRequireSupportedRemoteDockerPlatform` is not ported.
-- `SSHRequireSupportedExecutorPlatform` is the exported SSH gate, which the
-  `internal/ssh` connection test uses.
+- New files came from the fork commit. Modified files took the fork diff
+  through `git apply -3`, so upstream changes since the fork base survived.
+- Remote Docker keeps its Linux and macOS gate.
+  `SSHRequireSupportedExecutorPlatform` is the exported SSH gate that the
+  connection test uses.
 - `validateSSHWindowsLaunch` rejects passthrough launches and non-PowerShell
-  shells in `prepareRemoteHost`, before any helper upload or preparation.
-- `SSHTaskDirReclaimer.Reclaim` skips Windows task directories with
-  `unsupported_platform` (`AC-EXECUTORS-SSH-WINDOWS-001.18`). Without this
-  check, an enabled profile failed path validation and the job retried.
-- Personal names in the fork's test fixtures were replaced with `Kandev User`
-  and `example/demo`.
-- `apps/backend/AGENTS.md` now documents the Windows default shell and the three
-  platform gates.
+  shells before any upload or preparation. `SSHTaskDirReclaimer.Reclaim` skips
+  Windows task directories (`AC-EXECUTORS-SSH-WINDOWS-001.18`).
+- Personal names in the fork's test fixtures became `Kandev User` and
+  `example/demo`.
 
-| Command | Result |
-| --- | --- |
-| `go test -race -run '^TestSSHWindows\|...'` on `lifecycle` and `ssh` | Passed. New guard tests failed first, with build failures and a probe list of 4 |
-| `go test ./internal/agent/runtime/lifecycle/ ./internal/launcher/ ./internal/backendapp/ ./internal/ssh/ ./internal/agent/runtime/` | 63 failing names, all in the 64-name baseline set from this macOS environment. No new failures |
-| `lint-go-changed`, using bash word splitting over every changed file | 0 issues |
-
-Lifecycle evidence:
-
-| Scenario | Test | Result |
-| --- | --- | --- |
-| Restart and recovery | `TestSSHWindowsBackendShutdownPreservesAgentctlAndResumeReconnects`, `TestSSHWindowsRecoverInstancesDetailedReattachesAndDiscoversControlPort` | Passed |
-| Confirmed absence | `TestSSHWindowsResumeClearsMetadataWhenRemoteProcessExited` | Passed |
-| PID reuse | `TestSSHWindowsPersistedStopVerifiesIdentityAndGuardsSessionDir` | Passed |
-| Orphan ownership | `TestSSHWindowsOrphanSweepInventoriesAndStopsOrphanedAgentctl` | Passed |
-| Entry paths | `TestSSHWindowsDetectRemoteInfoFallsBackToPowerShell`, `TestSSHWindowsShellProbeOffersOnlyPowerShell` | Passed |
-
-These tests use the fake SSH server. Task 05 proves the PowerShell semantics,
-and task 06 proves real-host behavior.
+The targeted lifecycle and `ssh` tests passed, the changed packages showed no
+failure outside the macOS baseline, and lint reported 0 issues.

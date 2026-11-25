@@ -71,9 +71,8 @@ isolated backend and check `turn_change_sets.availability` for each first turn.
 
 Completed on 2026-11-23.
 
-| Command | Result |
-| --- | --- |
-| `winproc` test binary on the test host | Both resume tests passed |
-| `subproc` test binary on the test host, with and without this change | The same five tests fail in both runs, so the failures come from the host and not from this change |
-| Managed Git timing on the test host | 73 ms before, 23.5 ms after; an unmanaged start takes 25 ms |
-| First turns through an isolated backend | Before: 9 of 9 change sets `unavailable` (`capture_failed`). After: 3 of 3 `ready`, with no warning |
+On the test host, both resume tests passed, and the same five `subproc` tests
+failed with and without this change, so those failures come from the host. A
+managed Git command took 73 ms before and 23.5 ms after; an unmanaged start
+takes 25 ms. Through an isolated backend, 9 of 9 first-turn change sets were
+`unavailable` before the change, and 3 of 3 were `ready` after it.

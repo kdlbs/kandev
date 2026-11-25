@@ -55,7 +55,7 @@ GOOS=windows GOARCH=amd64 go test -c -o /tmp/shell.test.exe ./internal/agentctl/
 ```
 
 Run the Windows test binary on the test host with
-`-test.run '^TestSSHWindowsShellSessionRunsUnderConPTY$|^TestConfigureShellProcessLeavesCreationToConPTY$'`.
+`-test.run '^TestSSHWindowsShellSessionRunsUnderConPTY$'`.
 
 ## Likely files and risks
 
@@ -69,8 +69,6 @@ Run the Windows test binary on the test host with
 
 Completed on 2026-11-23.
 
-| Command | Result |
-| --- | --- |
-| `go test -race ./internal/agentctl/server/shell ./internal/common/ptyexec` (macOS) | Passed |
-| Windows shell test binary on the test host | `TestSSHWindowsShellSessionRunsUnderConPTY` and `TestConfigureShellProcessLeavesCreationToConPTY` passed |
-| Product terminal WebSocket against the test host | PowerShell 7 prompt in the task directory; the marker command echoed |
+The shell and `ptyexec` tests passed on macOS. On the test host,
+`TestSSHWindowsShellSessionRunsUnderConPTY` passed, and the product terminal
+WebSocket opened a PowerShell 7 prompt in the task directory.

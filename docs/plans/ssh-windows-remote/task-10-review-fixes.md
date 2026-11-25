@@ -112,47 +112,63 @@ test, as in task 06.
 
 ## Results
 
-Completed on 2026-11-23.
+Completed on 2026-11-23. Each defect has a test that failed before its fix.
 
 | Finding | Tests | Real host |
 | --- | --- | --- |
-| Quote characters | `TestSSHWindowsPowerShellQuoteDoublesEveryQuoteCharacter` failed for the four Unicode quotes before the fix | A value with all five quotes and an injection attempt round-trips as data |
-| Contribution branch | `TestSSHWindowsRemoteContributionScriptNeverResetsABranch` failed before the fix. Three native tests cover reuse, diverged branches, and push conflicts | Under `powershell` and `pwsh`: a local commit survives a re-prepare; diverged branches stay put while checkout moves to `-kandev-<suffix>-1`; a foreign push URL fails |
-| Selected checkout | `TestSSHWindowsPrepareMaterializesSelectedPullRequest` and `...SelectedBranchStrictly` failed before the fix. `TestSSHWindowsExecPreparesSelectedPullRequest` runs natively | Under both shells, in a task path containing `’`: the PR head is checked out before repository setup runs, and a missing PR ref fails preparation |
-| Stop identity | `TestSSHWindowsStopGatesKillOnTaskIdentityInOneScript`, `TestSSHWindowsOrphanStopGuardsSessionDir`, and the updated persisted-stop and orphan-sweep tests. `TestSSHWindowsExecStopLeavesReusedPidRunning` runs natively | A tracked stop and an orphan stop both left an unrelated process holding the PID running. The orphan stop kept a session directory whose pidfile names another PID. A real `agentctl.exe` launched for the task was stopped |
-| Release verifier | 4 of 16 `existing-release.test.mjs` tests failed before the fix; 24 of 24 pass with `remote-helper-assets.test.mjs` | n/a |
-| Smaller fixes | `TestSSHPOSIXLaunchRejectsPowerShellShell`, `TestSSHWindowsTaskDirRejectsNonWindowsWorkdirRoot`, `TestSSHSFTPChmodFailureIsToleratedOnlyForWindowsPaths`, `TestSSHWindowsMaterializeSkillManifestUNCTaskDir`, `TestReadinessShellForRequest`, and `TestSSHWindowsLoaderResetsStrictModeAfterProfile` each failed first | Skills land under a drive task directory. A dot-sourced strict-mode script stops throwing after `Set-StrictMode -Off` |
+| Quote characters | `TestSSHWindowsPowerShellQuoteDoublesEveryQuoteCharacter` | A value with all five quotes and an injection attempt round-trips as data |
+| Contribution branch | `TestSSHWindowsRemoteContributionScriptNeverResetsABranch` and three native tests | Under both shells, a local commit survives a re-prepare and a foreign push URL fails |
+| Selected checkout | `TestSSHWindowsPrepareMaterializesSelectedPullRequest`, `...SelectedBranchStrictly`, `TestSSHWindowsExecPreparesSelectedPullRequest` | Under both shells, in a path containing `’`, the pull request head is checked out |
+| Stop identity | `TestSSHWindowsStopGatesKillOnTaskIdentityInOneScript`, `TestSSHWindowsOrphanStopGuardsSessionDir`, `TestSSHWindowsExecStopLeavesReusedPidRunning` | A stop of a PID reused by another process leaves it running |
+| Release verifier | `existing-release.test.mjs` | n/a |
 
-Commands:
+The full lifecycle package showed only the 28 macOS baseline failures, the
+Windows cross-builds passed, and lint reported 0 issues.
 
-| Command | Result |
-| --- | --- |
-| `go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run 'Windows\|PowerShell\|SelectedCheckout\|SSHCredential\|SSHSkill\|SSHRemoteContribution\|SSHPOSIX\|SSHSFTP\|Orphan'` | Passed |
-| `go test -trimpath -race ./internal/ssh` | Passed |
-| `go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle` | 28 failures, all also failing at HEAD on macOS (`/var` symlink and Kubernetes fixtures). None is new |
-| `CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./internal/agent/runtime/lifecycle ./internal/ssh` | Passed |
-| `node --test scripts/release/existing-release.test.mjs scripts/release/remote-helper-assets.test.mjs` | 24 passed |
-| `python3 .github/scripts/release-workflow-contract_test.py -k test_agentctl_dependency_guard` | Passed |
-| `bash scripts/lint-go-changed <changed Go files>` | 0 issues |
+Product testing on the test host then found two more defects, both fixed with
+tests that failed first:
 
-The `TestSSHWindowsExec*` tests skip on macOS. They run in the Windows `native`
-CI job, whose filter `^TestSSHWindows` already selects them.
+- A selected pull request failed preparation when the repository had no setup
+  script. The credential scrub was then the last statement and left `$?`
+  false, so the loader exited 1. The scrub now clears the variables with one
+  `Set-Item ... -Value $null`, which keeps `$?` true
+  (`TestSSHWindowsPullRequestScrubSucceedsForAbsentVariables`). On the test
+  host, a pull request with no setup script then prepared at its head under
+  both shells.
+- The Windows `repository.branch` placeholder stripped only `refs/heads/`. It
+  now uses `scriptengine.RepositoryBranchName`, as the POSIX provider does
+  (`TestSSHWindowsRepositoryProviderNormalizesOriginBranch`).
 
-## Test findings (2026-11-23)
+## Simplification (2026-11-25)
 
-Found while testing the product flow on the test host, then fixed.
+A size review before the PRs removed about 400 production and 400 test lines
+without changing behavior:
 
-| Finding | Fix | Tests | Real host |
-| --- | --- | --- | --- |
-| A selected pull request failed preparation when the repository had no setup script. The credential scrub (`Remove-Item ... -ErrorAction SilentlyContinue`) was then the last statement, and for absent variables it left `$?` false, so the loader exited 1 with no message | The scrub clears the variables with one `Set-Item -LiteralPath ... -Value $null`, which leaves `$?` true. `[Environment]::SetEnvironmentVariable(name, $null, 'Process')` was rejected: under `pwsh` 7 the name stays listed in `Env:` | `TestSSHWindowsPullRequestScrubSucceedsForAbsentVariables` failed before the fix. `TestSSHWindowsExecPreparesSelectedPullRequest` gains a case with an empty setup script | Before the fix, the scrub alone exited 1. After it, under `powershell` and `pwsh`: the scrub exits 0 with every variable absent, removes present credentials from the process and its children, and a PR with no setup script prepares at the PR head |
-| The Windows `repository.branch` placeholder stripped only `refs/heads/` | `windowsRepositoryProvider` calls `scriptengine.RepositoryBranchName`, exported from the POSIX provider's helper | `TestSSHWindowsRepositoryProviderNormalizesOriginBranch` failed for the `origin/` and `refs/remotes/origin/` cases before the fix | Before the fix, a base branch of `origin/main` failed preparation. After it, `origin/main` and `refs/remotes/origin/main` clone `main` under both shells |
+- Windows and POSIX share the identity, pidfile, orphan-inventory, checkout
+  verification, script invocation, and placeholder resolution flows. Only the
+  host-specific commands differ.
+- The Windows identity check matches the quoted `--workdir "<path>"` that the
+  launch writes, as the stop script does, and the process queries match only
+  `agentctl.exe`. This replaces a Win32 command-line tokenizer.
+- The helper upload creates its directory over SFTP and confirms the installed
+  file there. Unused wrappers, guards, and the no-op `configureShellProcess`
+  hook are gone.
+- The tests share one fake Windows SFTP filesystem and one launch harness. The
+  launch guard, launch failure, persisted stop, skill path, and resume tests
+  are tables. The persisted-stop table now fails when a kill script runs
+  against a mismatched identity, and the thread-snapshot resume fallback has
+  its own case.
 
-Commands:
+The targeted lifecycle, `ssh`, script engine, and shell tests passed under
+`-race`, the Windows cross-builds passed, and lint reported 0 issues.
 
-| Command | Result |
-| --- | --- |
-| `go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run 'Windows\|PowerShell\|SelectedCheckout\|SSHCredential\|SSHSkill\|SSHRemoteContribution\|SSHPOSIX\|SSHSFTP\|Orphan\|RepositoryBranch\|SSHPrepare\|SSHScript'` | Passed |
-| `go test -trimpath -race ./internal/ssh ./internal/scriptengine` | Passed |
-| `go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle` | The same 28 macOS failures as the earlier HEAD baseline; none is new |
-| `CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./internal/agent/runtime/lifecycle ./internal/ssh ./internal/scriptengine` | Passed |
-| `bash scripts/lint-go-changed <changed Go files>` | 0 issues |
+On the test host, a throwaway harness drove the production executor under
+`powershell` and `pwsh` with an `agentctl.exe` built from this change. Each run
+created an instance with the default prepare, confirmed the live controller's
+identity and rejected another task directory, and found exactly that
+controller, not its `cmd.exe` wrapper, in the orphan inventory. It then
+reattached the same PID after a backend shutdown, replaced the helper while
+the controller ran, left a WMI-started process with a reused PID running,
+stopped the controller as an orphan, and archived a relaunch. The `winproc`
+resume cases and `TestSSHWindowsShellSessionRunsUnderConPTY` passed there too.
+The harness was not committed, and the host was cleaned afterward.

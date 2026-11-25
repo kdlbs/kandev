@@ -48,7 +48,7 @@ Windows hosts.
 
 `detectRemoteInfo` in `executor_ssh_operations.go` keeps the `uname -m` and
 `uname -s` probe. When either command fails, `detectWindowsRemoteInfo` runs a
-fixed PowerShell probe through `powershell`, then `pwsh`. The probe prints one
+fixed PowerShell probe through `powershell`. The probe prints one
 `KANDEV_WIN_INFO` line with `Windows_NT`, the native processor architecture
 (`PROCESSOR_ARCHITEW6432` before `PROCESSOR_ARCHITECTURE`), and the OS version.
 
@@ -159,8 +159,8 @@ inside `Invoke-KandevNative`. `TestSSHWindowsScriptsWrapRedirectedNativeCommands
 scans the script sources and enforces this rule on every platform.
 
 `newPowerShellCommand` validates environment keys with `posixSSHEnvIdentifier`
-and JSON-encodes the envelope. `runPowerShell`, `runPowerShellEnvelope`, and
-`runPowerShellEnvelopeBounded` send the envelope through `runSSHCommandStdin` or
+and JSON-encodes the envelope. `runPowerShell` and `runPowerShellEnvelope` send
+it through `runSSHCommandStdin`, and the reconcile call uses
 `runSSHCommandStdinBounded`. Environment values never enter a command line. The
 loader command line has a fixed length of about 4,200 characters, and
 `TestSSHWindowsCommandLineStaysBelowCmdLimit` bounds it below 8,191. The fake
@@ -198,10 +198,11 @@ resolve `.` and `..` without crossing the volume or UNC share root.
 
 OpenSSH `sftp-server` on Windows addresses `C:\x` as `/C:/x`. Every SFTP call
 uses `toSFTPPath`. A Windows server can return `SSH_FX_OP_UNSUPPORTED` for
-`chmod`, and `isSFTPOpUnsupported` ignores that error.
+`chmod`, and `sftpChmodFailureTolerated` ignores that error for Windows paths.
 
 `ensureWindowsAgentctlOnHost` compares the sidecar hash with the local helper
-hash, then uploads to a temporary name. Windows rename does not overwrite an
+hash. `sftpReplaceWindowsFile` creates the helper directory over SFTP and
+uploads to a temporary name. Windows rename does not overwrite an
 existing file, and Windows does not delete the image of a running process.
 Windows does allow a running image to be renamed. The upload therefore renames
 any existing `agentctl.exe` to `agentctl.exe.old-<random>`, renames the
@@ -209,12 +210,14 @@ temporary file into place, and then writes the sidecar. If the final rename
 fails, it renames the previous helper back. After a successful replacement, it
 deletes stale `agentctl.exe.old-*` files on a best-effort basis. It keeps any
 file that is still in use for a later attempt. Running sessions keep their
-original image.
+original image. Antivirus software can quarantine a new executable as soon
+as it lands, so the upload confirms that the installed file is present and not
+empty.
 
 `ensureWindowsRemoteTaskDir` and `ensureWindowsRemoteSessionDir` create the
 layout from `AC-EXECUTORS-SSH-WINDOWS-001.7`.
 `buildSSHCreateInstanceRequest` builds the durable journal path with
-`joinRemotePath` and the platform, which keeps `\` separators on Windows.
+`joinRemotePath`, which keeps the path syntax of the task directory.
 
 ## Preparation, cleanup, and credentials
 
@@ -237,10 +240,11 @@ POSIX provider (`scriptengine.RepositoryBranchName`).
 `ensureWindowsRemoteTaskDir` rejects a workdir root that does not expand to a
 drive or UNC path.
 
-`verifyWindowsPrimaryCheckout`, `buildSSHCleanupInvocation`, and
-`sshWindowsRemoteContributionScript` provide the PowerShell paths for checkout
-verification, cleanup, and contribution setup. All of them use the envelope
-transport and `redactSSHScriptOutput`. The contribution script follows the POSIX
+Checkout verification, cleanup, and contribution setup share their flow with
+POSIX hosts. `newSSHCheckoutProbe` supplies the PowerShell checkout probes,
+`sshScriptCommand` builds the envelope invocation, and
+`sshWindowsRemoteContributionScript` is the PowerShell contribution script. All
+of them use `redactSSHScriptOutput`. The contribution script follows the POSIX
 branch selection: it keeps a current branch that tracks the contribution branch
 and contains the head, checks out an existing branch without resetting it, and
 otherwise picks a non-colliding `-kandev-<suffix>[-N]` branch. Push identity
@@ -278,7 +282,7 @@ service instead, which creates processes outside the channel:
    line:
    `cmd.exe /d /s /c ""<agentctl.exe>" --workdir "<task dir>" > "<log>" 2>&1"`.
    `agentctl` has no log-file option, so the `cmd.exe` wrapper owns the
-   redirection. `quoteWindowsArgAlways` quotes every argument, which keeps
+   redirection. `quoteWindowsArg` quotes every argument, which keeps
    `cmd.exe` metacharacters such as `&` literal. `cmd.exe` still expands
    `%NAME%` inside quotes, so a path containing such a sequence is unsupported.
 4. Poll `Win32_Process` with a bound of 10 seconds for the `agentctl.exe` child
@@ -296,7 +300,7 @@ through the log tail. `startRemoteWindowsAgentctlOnPort` maps that stderr to
 `errSSHAgentctlPortInUse`, as the readiness loop maps the same log line, so
 both paths select another port.
 
-`awaitRemoteAgentctlReadyForPlatform` reads the log with a shared-read file
+`awaitRemoteAgentctlReady` reads the log with a shared-read file
 stream. It checks liveness with `Get-Process`. The control handshake and launch
 receipt validation are unchanged.
 
@@ -317,16 +321,20 @@ the process running. An owned controller is terminated with
 `<task dir>\.kandev\sessions\<id>` and refuses a PID it cannot verify. A
 tracked stop then removes the session directory with bounded retries.
 Before a persisted-record stop, `verifyRemoteWindowsAgentctlIdentity` reads the
-PID's `Win32_Process.CommandLine`. `remoteWindowsAgentctlCommandLineMatches`
-then requires the recorded `--workdir` value under Win32 argument parsing and
-case-insensitive path comparison. The session `agentctl.pid` must name the same
-PID. When the command line does not match, the stop signals nothing.
+`Win32_Process.CommandLine` of the PID, matching only `agentctl.exe`. The
+`cmd.exe` launch wrapper carries the same `--workdir` text, so this filter keeps
+it out. `remoteWindowsAgentctlCommandLineMatches` reads the quoted
+`--workdir "<path>"` that the launch writes, since a Windows path cannot contain
+a double quote, and compares it with the task directory case-insensitively. The
+session `agentctl.pid` must name the same PID; this pidfile check and its
+abandoned-directory rule are shared with POSIX hosts. When the command line
+does not match, the stop signals nothing.
 
-`sshWindowsOrphanInventoryCommand` lists `agentctl.exe` processes with
+`sshWindowsOrphanInventoryScript` lists `agentctl.exe` processes with
 `Get-CimInstance Win32_Process` and reads pidfiles below the tasks root.
-`parseSSHWindowsOrphanInventory` produces the shared `sshOrphanInventory`, so
-classification uses the POSIX rules. `stopSSHWindowsOrphanProcess` uses the
-same in-script identity check. It removes the session directory only when no
+`parseSSHOrphanInventory` parses either host family into `sshOrphanInventory`,
+so classification uses the POSIX rules. On Windows, `stopSSHOrphanProcess` runs
+the same in-script identity check. It removes the session directory only when no
 live `agentctl.exe` serves the task and the pidfile is absent or still names
 the stopped PID.
 
@@ -342,9 +350,8 @@ does for every remote executor. `shell.Session` starts its shell through the
 shared `ptyexec` package: `creack/pty` on Unix and ConPTY on Windows. On a
 Windows host the default shell resolves to PowerShell in the task directory.
 
-ConPTY creates the process itself and ignores `exec.Cmd` process attributes.
-`configureShellProcess` is therefore a no-op on Windows, and
-`installShellProcessLifecycle` attaches the kill-on-close job to the running
+ConPTY creates the process itself and ignores `exec.Cmd` process attributes,
+so `installShellProcessLifecycle` attaches the kill-on-close job to the running
 process with `winproc.InstallKillOnCloseJobForCommand`. A process that the
 shell starts before that assignment is outside the job. An interactive shell
 starts none before it reads input. `exec.Cmd.Wait` fails
@@ -437,8 +444,7 @@ Unit tests use the fake SSH server in `ssh_fake_server_test.go`. It decodes the
 loader and envelope, then returns canned outputs. These tests prove the command
 order, parameters, and parsing. They do not prove PowerShell semantics.
 
-The Windows `native` suite in `backend-tests.yml` runs `^TestSSHWindows`,
-`^TestConfigureShellProcessLeavesCreationToConPTY$`, and
+The Windows `native` suite in `backend-tests.yml` runs `^TestSSHWindows` and
 `^TestResumeSuspendedProcess` over the lifecycle, SSH, shell, `cmd/agentctl`,
 and `winproc` packages. `make test-windows` runs the same filter. The `TestSSHWindowsExec*` tests in
 `executor_ssh_windows_exec_test.go` skip on other platforms. On Windows, a fake
