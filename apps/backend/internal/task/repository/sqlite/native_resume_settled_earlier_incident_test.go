@@ -40,12 +40,21 @@ func TestResolveNativeEvidenceAcceptsSettledEarlierIncident(t *testing.T) {
 }
 
 func TestResolveNativeEvidenceRejectsUnsettledEarlierIncident(t *testing.T) {
-	repo, _, current, _, _, proof := newSettledEarlierIncidentFixture(t, false)
-	proof.Submissions = proof.Submissions[1:]
-
-	changed, err := repo.ResolveSessionRecoveryBlockWithNativeEvidence(t.Context(), current.Block.ID, proof, time.Now().UTC())
-	require.NoError(t, err)
-	require.False(t, changed)
+	for _, kind := range []string{"bound", "generic"} {
+		t.Run(kind, func(t *testing.T) {
+			repo, _, current, _, _, proof := newSettledEarlierIncidentFixture(t, false)
+			if kind == "generic" {
+				_, err := repo.DB().ExecContext(t.Context(), repo.db.Rebind(`UPDATE session_recovery_blocks
+                    SET reason = 'unresolved_durable_work', delivery_submission_id = '', delivery_stream_id = ''
+                    WHERE id = ?`), current.Block.ID)
+				require.NoError(t, err)
+			}
+			proof.Submissions = proof.Submissions[1:]
+			changed, err := repo.ResolveSessionRecoveryBlockWithNativeEvidence(t.Context(), current.Block.ID, proof, time.Now().UTC())
+			require.NoError(t, err)
+			require.False(t, changed)
+		})
+	}
 }
 
 func TestResolveNativeEvidenceRejectsEarlierIncidentMissingTerminalEffect(t *testing.T) {

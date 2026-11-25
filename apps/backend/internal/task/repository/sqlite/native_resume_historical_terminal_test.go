@@ -27,6 +27,7 @@ func testHistoricalTerminalRecovery(t *testing.T, open func(*testing.T) *Reposit
 	t.Helper()
 	cases := []struct {
 		name                string
+		genericBlock        bool
 		staleNotice         bool
 		staleAttempt        bool
 		completeTerminal    bool
@@ -41,6 +42,7 @@ func testHistoricalTerminalRecovery(t *testing.T, open func(*testing.T) *Reposit
 		{name: "clean control", want: true},
 		{name: "stale terminal notice", staleNotice: true, completeTerminal: true, want: true},
 		{name: "stale prepared attempt", staleAttempt: true, completeTerminal: true, want: true},
+		{name: "generic block after settled notice", genericBlock: true, staleNotice: true, staleAttempt: true, completeTerminal: true, want: true},
 		{name: "stale notice and attempt", staleNotice: true, staleAttempt: true, completeTerminal: true, want: true},
 		{name: "terminal completion races resume", staleNotice: true, completeTerminal: false, want: true},
 		{name: "missing terminal effect", staleNotice: true, completeTerminal: true, omitTerminalEffect: true},
@@ -67,6 +69,12 @@ func testHistoricalTerminalRecovery(t *testing.T, open func(*testing.T) *Reposit
 			var attempt *models.RestoreAttempt
 			terminal := settleHistoricalTerminalSource(t, repo, fixture, test.completeTerminal)
 			current := createHistoricalCurrentSubmission(t, repo, fixture, "current-"+test.name)
+			if test.genericBlock {
+				_, err := repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE session_recovery_blocks
+                    SET reason = 'unresolved_durable_work', delivery_submission_id = '', delivery_stream_id = ''
+                    WHERE id = ?`), current.Block.ID)
+				require.NoError(t, err)
+			}
 			if test.staleAttempt && !test.allocatedAttempt {
 				attempt = fixture.attempt("attempt-historical-" + test.name)
 				attempt.Authorized = true
