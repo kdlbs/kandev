@@ -70,6 +70,19 @@ func (r *Repository) DeleteClarificationInboxSidecar(ctx context.Context, userID
 	return err
 }
 
+// CountVisibleClarificationBundles counts the blocking bundles this operator
+// can currently answer under the same filters as the page read.
+func (r *Repository) CountVisibleClarificationBundles(
+	ctx context.Context,
+	opts models.ListClarificationBundlesOptions,
+) (int, error) {
+	summary, err := r.CountHiddenClarificationBundles(ctx, opts)
+	if err != nil {
+		return 0, err
+	}
+	return summary.HiddenCount, nil
+}
+
 // CountHiddenClarificationBundles answers the workspace-wide hidden_count and
 // next_snooze_expiry the main read and the hidden-bundles read both need
 // (needs-you-inbox design, "Data and contracts"). opts.Sidecar must carry

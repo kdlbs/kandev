@@ -4,9 +4,12 @@ import { useCallback, useRef, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { TabsContent } from "@kandev/ui/tabs";
 import { PageShell } from "@/components/page-shell";
+import Link from "@/components/routing/app-link";
+import { linkToTask } from "@/lib/links";
 import { useAppStore } from "@/components/state-provider";
 import { usePathname, useRouter, useSearchParams } from "@/lib/routing/client-router";
 import {
+  selectNeedsYouInboxAsyncQuestions,
   selectNeedsYouInboxBundles,
   selectNeedsYouInboxCount,
   selectNeedsYouInboxHasMore,
@@ -21,8 +24,14 @@ import {
   selectFailedInboxTruncated,
 } from "@/lib/state/slices/failed-inbox/selectors";
 import type { NeedsYouInboxReadStatus } from "@/lib/state/slices/needs-you-inbox/types";
-import type { ClarificationInboxBundle } from "@/lib/types/clarification-inbox";
+import type {
+  ClarificationInboxAsyncQuestion,
+  ClarificationInboxBundle,
+} from "@/lib/types/clarification-inbox";
 import { NeedsYouInboxRow } from "@/components/needs-you-inbox/needs-you-inbox-row";
+import { AsyncQuestionRow } from "@/components/needs-you-inbox/async-question-row";
+import { AsyncQuestionHistory } from "@/components/needs-you-inbox/async-question-history";
+import { groupAsyncQuestionsByTask } from "@/lib/needs-you-inbox/async-question-groups";
 import { NeedsYouInboxEmptyState } from "@/components/needs-you-inbox/needs-you-inbox-empty-state";
 import { NeedsYouInboxErrorState } from "@/components/needs-you-inbox/needs-you-inbox-error-state";
 import { NeedsYouInboxHiddenPanel } from "@/components/needs-you-inbox/needs-you-inbox-hidden-panel";
@@ -44,6 +53,7 @@ import { InboxHistoryList } from "@/components/inbox-history/inbox-history-list"
 import { InboxHistoryEmptyState } from "@/components/inbox-history/inbox-history-empty-state";
 import { InboxHistoryErrorState } from "@/components/inbox-history/inbox-history-error-state";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 
 type ViewMode = "error" | "loading" | "empty" | "list";
 
@@ -74,29 +84,59 @@ function resolveViewMode(
 
 function NeedsYouInboxList({
   bundles,
+  asyncQuestions,
   hasMore,
   hiddenCount,
   listRevision,
   allocationRef,
 }: {
   bundles: readonly ClarificationInboxBundle[];
+  asyncQuestions: readonly ClarificationInboxAsyncQuestion[];
   hasMore: boolean;
   hiddenCount: number;
   listRevision: number;
   allocationRef: RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation();
+  const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
+  const asyncGroups = groupAsyncQuestionsByTask(asyncQuestions);
   return (
     <>
-      <div className="overflow-hidden rounded-lg border border-border divide-y divide-border">
-        {bundles.map((bundle) => (
-          <NeedsYouInboxRowWithLateAnswer
-            key={bundle.pending_id}
-            bundle={bundle}
-            allocationRef={allocationRef}
-          />
-        ))}
-      </div>
+      {bundles.length > 0 && (
+        <div className="overflow-hidden rounded-lg border border-border divide-y divide-border">
+          {bundles.map((bundle) => (
+            <NeedsYouInboxRowWithLateAnswer
+              key={bundle.pending_id}
+              bundle={bundle}
+              allocationRef={allocationRef}
+            />
+          ))}
+        </div>
+      )}
+      {asyncGroups.map((group) => (
+        <section key={group.taskId} className="space-y-2" data-testid="async-question-group">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="truncate text-sm font-semibold" data-testid="async-question-group-title">
+              {group.taskTitle}
+            </h3>
+            <Link
+              href={linkToTask(group.taskId)}
+              className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:underline"
+            >
+              {t("needsYouInbox:openTask")}
+            </Link>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-border divide-y divide-border">
+            {group.questions.map((question) => (
+              <AsyncQuestionRow
+                key={question.question_id}
+                question={question}
+                onSettled={bumpRefreshTick}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
       {hasMore && (
         <p className="text-xs text-muted-foreground" data-testid="needs-you-inbox-truncated">
           {t("needsYouInbox:truncatedNotice")}
@@ -132,13 +172,17 @@ function NeedsYouInboxRowWithLateAnswer({
 function NeedsYouInboxTabContent({
   retry,
   allocationRef,
+  asyncQuestionsEnabled,
 }: {
   retry: () => void;
   allocationRef: RefObject<HTMLDivElement | null>;
+  asyncQuestionsEnabled: boolean;
 }) {
   const { t } = useTranslation();
   const status = useAppStore(selectNeedsYouInboxStatus);
   const bundles = useAppStore(selectNeedsYouInboxBundles);
+  const storedAsyncQuestions = useAppStore(selectNeedsYouInboxAsyncQuestions) ?? [];
+  const asyncQuestions = asyncQuestionsEnabled ? storedAsyncQuestions : [];
   const hiddenCount = useAppStore(selectNeedsYouInboxHiddenCount);
   const listRevision = useAppStore(selectNeedsYouInboxRevision);
   const hasMore = useAppStore(selectNeedsYouInboxHasMore);
@@ -149,7 +193,7 @@ function NeedsYouInboxTabContent({
 
   const viewMode = resolveViewMode(
     status,
-    bundles.length,
+    bundles.length + asyncQuestions.length,
     hasMore,
     lastAppliedOk,
     hasActiveWorkspace,
@@ -174,6 +218,7 @@ function NeedsYouInboxTabContent({
       {viewMode === "list" && (
         <NeedsYouInboxList
           bundles={bundles}
+          asyncQuestions={asyncQuestions}
           hasMore={hasMore}
           hiddenCount={hiddenCount}
           listRevision={listRevision}
@@ -198,7 +243,13 @@ function resolveHistoryViewMode(status: string, bundleCount: number, hasMore: bo
 // never the Needs-you slice or its refresh trigger. The controller stays in
 // the parent so its lifecycle is mounted exactly once per page, not once per
 // tab activation.
-function InboxHistoryTabContent({ controller }: { controller: InboxHistoryController }) {
+function InboxHistoryTabContent({
+  controller,
+  asyncQuestionsEnabled,
+}: {
+  controller: InboxHistoryController;
+  asyncQuestionsEnabled: boolean;
+}) {
   const { t } = useTranslation();
   const status = useAppStore(selectInboxHistoryStatus);
   const bundles = useAppStore(selectInboxHistoryBundles);
@@ -206,6 +257,7 @@ function InboxHistoryTabContent({ controller }: { controller: InboxHistoryContro
   const isLoadingMore = useAppStore(selectInboxHistoryIsLoadingMore);
   const loadMoreError = useAppStore(selectInboxHistoryLoadMoreError);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const listRevision = useAppStore(selectNeedsYouInboxRevision);
   const { refresh, loadMore } = controller;
   const retry = useCallback(() => {
     if (workspaceId) void refresh(workspaceId);
@@ -234,6 +286,9 @@ function InboxHistoryTabContent({ controller }: { controller: InboxHistoryContro
           onLoadMore={loadNextPage}
         />
       )}
+      {asyncQuestionsEnabled && (
+        <AsyncQuestionHistory workspaceId={workspaceId} refreshTick={listRevision} />
+      )}
     </>
   );
 }
@@ -245,6 +300,7 @@ function InboxHistoryTabContent({ controller }: { controller: InboxHistoryContro
 // carries the phone nav trigger (design-03#D4).
 export function NeedsYouInboxPageClient() {
   const { t } = useTranslation();
+  const asyncQuestionsEnabled = useFeature("asyncQuestions");
   const contentRef = useRef<HTMLDivElement>(null);
   const requestRetry = useAppStore((s) => s.requestNeedsYouInboxRetry);
   const needsYouCount = useAppStore(selectNeedsYouInboxCount);
@@ -287,13 +343,20 @@ export function NeedsYouInboxPageClient() {
         historyCount={historyCount}
       >
         <TabsContent value="needs-you">
-          <NeedsYouInboxTabContent retry={retry} allocationRef={contentRef} />
+          <NeedsYouInboxTabContent
+            retry={retry}
+            allocationRef={contentRef}
+            asyncQuestionsEnabled={asyncQuestionsEnabled}
+          />
         </TabsContent>
         <TabsContent value="failed">
           <FailedInboxTabPanel />
         </TabsContent>
         <TabsContent value="history">
-          <InboxHistoryTabContent controller={historyController} />
+          <InboxHistoryTabContent
+            controller={historyController}
+            asyncQuestionsEnabled={asyncQuestionsEnabled}
+          />
         </TabsContent>
       </InboxTabStrip>
     </PageShell>

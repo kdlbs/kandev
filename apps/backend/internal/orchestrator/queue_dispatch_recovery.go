@@ -102,6 +102,21 @@ func (s *Service) restoreOneQueueDispatchForRecovery(
 		}
 		return nil
 	}
+	retirement, retired, err := s.asyncQuestionDispatchRetirement(ctx, &claim.Message)
+	if err != nil {
+		return fmt.Errorf("check async question retirement for dispatch %s: %w", claim.Message.ID, err)
+	}
+	if retired {
+		if _, err := s.messageQueue.RetireAsyncQuestionQueueAdmission(
+			ctx, retirement.AdmissionID, retirement.QuestionID,
+		); err != nil {
+			return fmt.Errorf("remove retired async question dispatch %s: %w", claim.Message.ID, err)
+		}
+		if err := s.messageQueue.DeletePendingQueueDispatch(ctx, &claim.Message); err != nil {
+			return fmt.Errorf("acknowledge retired async question dispatch %s: %w", claim.Message.ID, err)
+		}
+		return nil
+	}
 	_, findErr := s.messageQueue.FindEntryByID(ctx, claim.Message.ID)
 	if findErr == nil {
 		if err := s.messageQueue.DeletePendingQueueDispatch(ctx, &claim.Message); err != nil {

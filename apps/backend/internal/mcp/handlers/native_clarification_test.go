@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/clarification/protocol"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -45,4 +46,24 @@ func TestNativeClarificationCancellationChecksScope(t *testing.T) {
 	require.Equal(t, ws.MessageTypeResponse, response.Type)
 	require.Equal(t, scope.SessionID, canceller.sessionID)
 	require.Equal(t, scope.PendingID(), canceller.pendingID)
+}
+
+func TestAskUserQuestionRejectsMixedNativeAndAsyncIdentity(t *testing.T) {
+	fixture := newAsyncQuestionFixture(t)
+	task, session := fixture.seedTask(t, t.Context(), "session-mixed-question", false, "")
+	ctx := streams.WithMCPExecutionContext(t.Context(), streams.MCPExecutionContext{
+		TaskID: task.ID, SessionID: session.ID,
+	})
+	ctx = mcporigin.WithTrustedInternalCall(ctx)
+	payload := askPayload(session.ID, task.ID, true, "mixed-async-request")
+	payload["native_request_id"] = uuid.NewString()
+
+	response, err := fixture.handlers.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, payload))
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeValidation)
+
+	page, err := fixture.repo.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{AuthorSessionID: session.ID})
+	require.NoError(t, err)
+	require.Empty(t, page.Questions)
+	require.Empty(t, fixture.store.ListPending())
 }

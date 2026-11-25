@@ -16,6 +16,10 @@ function backendFeatureKeys(source: string): string[] {
 }
 
 describe("feature flag repository contract", () => {
+  it("keeps async agent questions disabled until the backend value hydrates", () => {
+    expect(defaultFeatureFlags).toHaveProperty("asyncQuestions", false);
+  });
+
   it("omits the graduated interrupted-conversation continuation flag", () => {
     expect(defaultFeatureFlags).not.toHaveProperty("providerInterruptionContinuation");
   });

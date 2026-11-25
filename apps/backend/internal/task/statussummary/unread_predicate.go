@@ -13,20 +13,21 @@ import (
 // apps/packages/types/src/unread-message-visible-types.json, which the web
 // transcript filter reads; the contract test enforces exact equality.
 var unreadVisibleMessageTypes = map[models.MessageType]struct{}{
-	models.MessageTypeMessage:         {},
-	models.MessageTypeContent:         {},
-	models.MessageTypeToolCall:        {},
-	models.MessageTypeToolRead:        {},
-	models.MessageTypeToolEdit:        {},
-	models.MessageTypeToolExecute:     {},
-	models.MessageTypeToolSearch:      {},
-	models.MessageTypeProgress:        {},
-	models.MessageTypeStatus:          {},
-	models.MessageTypeError:           {},
-	models.MessageTypeThinking:        {},
-	models.MessageTypeTodo:            {},
-	models.MessageTypeScriptExecution: {},
-	models.MessageTypeAgentPlan:       {},
+	models.MessageTypeMessage:              {},
+	models.MessageTypeContent:              {},
+	models.MessageTypeToolCall:             {},
+	models.MessageTypeToolRead:             {},
+	models.MessageTypeToolEdit:             {},
+	models.MessageTypeToolExecute:          {},
+	models.MessageTypeToolSearch:           {},
+	models.MessageTypeProgress:             {},
+	models.MessageTypeStatus:               {},
+	models.MessageTypeError:                {},
+	models.MessageTypeThinking:             {},
+	models.MessageTypeTodo:                 {},
+	models.MessageTypeScriptExecution:      {},
+	models.MessageTypeAgentPlan:            {},
+	models.MessageTypeAgentQuestionRequest: {},
 }
 
 const (
@@ -53,8 +54,8 @@ func UnreadCandidateMessageTypes() []string {
 // IsUnreadQualifyingMessage reports whether a stored or published message can
 // make its session unread: a transcript-visible row, not written by the user,
 // that the read cursor can reach. Setup output, subagent children, session
-// start/resume notices, recovery cards, footer-action rows, and prompt
-// requests never qualify.
+// start/resume notices, recovery cards, footer-action rows, permission
+// requests, and clarification requests never qualify.
 func IsUnreadQualifyingMessage(authorType, messageType, content string, metadata map[string]interface{}) bool {
 	if authorType == messageTypeUser {
 		return false

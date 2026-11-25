@@ -50,6 +50,8 @@ const (
 	typeKey              = "type"
 	stringType           = "string"
 	retryKeyArg          = "retry_key"
+	asyncArg             = "async"
+	requestIDArg         = "request_id"
 	agentProfileIDArg    = "agent_profile_id"
 )
 
@@ -810,6 +812,13 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 		if errResult != nil {
 			return errResult, nil
 		}
+		async, requestID, modeErr := readAsyncMode(req)
+		if modeErr != nil {
+			return modeErr, nil
+		}
+		if async && !s.asyncQuestionsSupported() {
+			return mcp.NewToolResultError("async questions are not available on this surface"), nil
+		}
 
 		questionCtx := readQuestionContext(req)
 		payload := map[string]interface{}{
@@ -821,6 +830,15 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 		// an interrupted call reconciles to the bundle it already created.
 		if retryKey := clarificationRetryKey(ctx, req); retryKey != "" {
 			payload[retryKeyArg] = retryKey
+		}
+		if async {
+			payload[asyncArg] = true
+			payload[requestIDArg] = requestID
+			var receipt map[string]interface{}
+			if err := s.backend.RequestPayload(ctx, ws.ActionMCPAskUserQuestion, payload, &receipt); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return questionReceiptResult(receipt), nil
 		}
 
 		// Use the MCP request context from the agent. This ensures that if the agent's
@@ -846,6 +864,13 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 		if errResult != nil {
 			return errResult, nil
 		}
+		async, requestID, modeErr := readAsyncMode(req)
+		if modeErr != nil {
+			return modeErr, nil
+		}
+		if async && !s.asyncQuestionsSupported() {
+			return mcp.NewToolResultError("async questions are not available on this surface"), nil
+		}
 		for _, q := range questions {
 			if _, ok := q["images"]; ok {
 				return mcp.NewToolResultError("parent questions do not support images"), nil
@@ -862,9 +887,16 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 			questionsArg: questions,
 			"context":    readQuestionContext(req),
 		}
+		if async {
+			payload[asyncArg] = true
+			payload[requestIDArg] = requestID
+		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAskParentQuestion, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if async {
+			return questionReceiptResult(result), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil

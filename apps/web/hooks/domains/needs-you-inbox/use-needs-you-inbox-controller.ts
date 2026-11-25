@@ -55,13 +55,21 @@ function useNeedsYouInboxBootSeed(
 // session.state_changed) and edge-detected WS (re)connect. Both live in one
 // effect keyed on connectionStatus so a client created after this hook mounts
 // is picked up the moment status first changes.
-function useNeedsYouInboxWsRefresh(
-  enabled: boolean,
-  workspaceId: string | null,
-  refresh: (targetWorkspaceId: string) => Promise<void>,
-  storeApi: ReturnType<typeof useAppStoreApi>,
-  scope: { connectionStatus: string; key: string },
-) {
+function useNeedsYouInboxWsRefresh({
+  enabled,
+  asyncQuestionsEnabled,
+  workspaceId,
+  refresh,
+  storeApi,
+  scope,
+}: {
+  enabled: boolean;
+  asyncQuestionsEnabled: boolean;
+  workspaceId: string | null;
+  refresh: (targetWorkspaceId: string) => Promise<void>;
+  storeApi: ReturnType<typeof useAppStoreApi>;
+  scope: { connectionStatus: string; key: string };
+}) {
   const wasConnectedRef = useRef(false);
   // session.state_changed is broadcast workspace-wide, so a burst of
   // unrelated session transitions must not cause a burst of reads: coalesce
@@ -115,11 +123,15 @@ function useNeedsYouInboxWsRefresh(
     };
     const offPending = client.on("session.pending_action_changed", bump);
     const offStateChanged = client.on("session.state_changed", bump);
+    const offQuestionChanged = asyncQuestionsEnabled
+      ? client.on("task.question.changed", bump)
+      : () => {};
     return () => {
       offPending();
       offStateChanged();
+      offQuestionChanged();
     };
-  }, [enabled, scope.connectionStatus, workspaceId, refresh, storeApi]);
+  }, [enabled, asyncQuestionsEnabled, scope.connectionStatus, workspaceId, refresh, storeApi]);
 
   useEffect(() => {
     lastWsBumpAtRef.current = -Infinity;
@@ -164,6 +176,7 @@ function useNeedsYouInboxTickRefresh(
  */
 export function useNeedsYouInboxController() {
   const enabled = useFeature("needsYouInbox");
+  const asyncQuestionsEnabled = useFeature("asyncQuestions");
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const authUserId = useAppStore((s) => s.auth.user?.id ?? null);
   const authenticated = useAppStore((s) => s.auth.authenticated);
@@ -196,6 +209,7 @@ export function useNeedsYouInboxController() {
         if (signal.aborted || coordinatorRef.current !== coordinator) return;
         setNeedsYouInboxPage(workspaceId, generation, {
           bundles: page.bundles,
+          asyncQuestions: page.async_questions ?? [],
           count: page.count,
           hiddenCount: page.hidden_count,
           nextSnoozeExpiry: page.next_snooze_expiry,
@@ -232,9 +246,13 @@ export function useNeedsYouInboxController() {
     void refresh(workspaceId);
   }, [enabled, workspaceId, refresh]);
 
-  useNeedsYouInboxWsRefresh(enabled, workspaceId, refresh, storeApi, {
-    connectionStatus,
-    key: scopeKey,
+  useNeedsYouInboxWsRefresh({
+    enabled,
+    asyncQuestionsEnabled,
+    workspaceId,
+    refresh,
+    storeApi,
+    scope: { connectionStatus, key: scopeKey },
   });
 
   // Applies WS-triggered and explicit retry ticks bumped above.

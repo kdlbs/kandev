@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { defaultFeatureFlags } from "@/lib/state/slices/features/types";
 
 vi.mock("@/lib/api/domains/clarification-inbox-api", () => ({
   listHiddenClarificationInbox: vi.fn().mockResolvedValue({ bundles: [], count: 0, total: 0 }),
@@ -12,6 +13,7 @@ vi.mock("@/components/state-provider", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useAppStore: (selector: (s: any) => unknown) =>
     selector({
+      features: { ...defaultFeatureFlags },
       workspaces: { activeId: "w1", items: workspaceItems },
       bumpNeedsYouInboxRefreshTick: vi.fn(),
     }),

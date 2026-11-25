@@ -125,6 +125,7 @@ func provideGateway(
 	dataDir string,
 	registerCleanup func(func() error),
 	lspContinuityEnabled bool,
+	asyncQuestionsEnabled bool,
 	acquireSessionFence func(string) func(),
 	webhookPrivateNetworksAllowed bool,
 	lspMaxConnections ...int,
@@ -489,6 +490,23 @@ func provideGateway(
 			log.Error("Failed to subscribe to clarification notifications", zap.Error(err))
 		}
 
+		handleAsyncQuestionNotification := func(ctx context.Context, event *bus.Event) error {
+			data, ok := event.Data.(map[string]interface{})
+			if !ok {
+				return nil
+			}
+			taskID, sessionID, questionID, eligible := asyncQuestionOperatorNotification(data)
+			if eligible {
+				notificationSvc.HandleClarificationRequested(ctx, taskID, sessionID, questionID)
+			}
+			return nil
+		}
+		for _, subject := range asyncQuestionNotificationSubjects(asyncQuestionsEnabled) {
+			if _, err = eventBus.Subscribe(subject, handleAsyncQuestionNotification); err != nil {
+				log.Error("Failed to subscribe to async question notifications", zap.String("subject", subject), zap.Error(err))
+			}
+		}
+
 		_, err = eventBus.Subscribe(events.OfficeInboxItem, func(ctx context.Context, event *bus.Event) error {
 			data, ok := event.Data.(map[string]interface{})
 			if !ok {
@@ -514,6 +532,31 @@ func provideGateway(
 	}
 
 	return gateway, notificationSvc, notificationCtrl, terminalSvc, nil
+}
+
+func asyncQuestionNotificationSubjects(enabled bool) []string {
+	if !enabled {
+		return nil
+	}
+	return []string{"task.question.created", "task.question.forwarded"}
+}
+
+func asyncQuestionOperatorNotification(data map[string]interface{}) (taskID, sessionID, questionID string, eligible bool) {
+	kind, _ := data["kind"].(string)
+	recipient, _ := data["recipient"].(string)
+	switch kind {
+	case "created":
+		eligible = recipient == string(models.AsyncQuestionRecipientUser)
+	case "forwarded":
+		eligible = recipient == string(models.AsyncQuestionRecipientParent)
+	}
+	if !eligible {
+		return "", "", "", false
+	}
+	taskID, _ = data["task_id"].(string)
+	sessionID, _ = data["session_id"].(string)
+	questionID, _ = data["question_id"].(string)
+	return taskID, sessionID, questionID, taskID != "" && sessionID != "" && questionID != ""
 }
 
 type taskStatusActivityProvider interface {

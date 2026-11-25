@@ -1197,6 +1197,7 @@ func startGatewayAndServe(
 		cfg.ResolvedHomeDir(),
 		func(fn func() error) { addCleanup(fn) },
 		cfg.Features.LSPBrowserContinuity,
+		cfg.Features.AsyncQuestions,
 		orchestratorSvc.AcquireSessionLifecycleFence,
 		cfg.Notifications.WebhookAllowPrivateNetworks,
 		cfg.Limits.LSPMaxConnections,
@@ -1471,7 +1472,9 @@ func startGatewayAndServe(
 		closeBoundListeners(server, listeners, log)
 		return false
 	}
-	if err := orchestratorSvc.PrepareStartup(ctx); err != nil {
+	if err := prepareStartupAndStartAsyncQuestions(
+		ctx, orchestratorSvc.PrepareStartup, configuredAsyncQuestionWorker(services.AsyncQuestions),
+	); err != nil {
 		log.Error("Failed to prepare startup housekeeping", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
 		return false

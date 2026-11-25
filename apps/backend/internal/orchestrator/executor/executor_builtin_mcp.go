@@ -20,7 +20,7 @@ func (e *Executor) SetBuiltinPolicyReader(reader BuiltinPolicyReader) { e.builti
 func (e *Executor) PrepareTaskSessionMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, title bool) (p.Context, error) {
 	if session != nil {
 		if prepared := preparedMCPLaunchProfile(ctx, taskID, session.ID); prepared != nil {
-			return *prepared, nil
+			return e.withTaskCapabilities(*prepared), nil
 		}
 	}
 	profile, err := e.resolveTaskSessionMCPProfile(ctx, taskID, session, title)

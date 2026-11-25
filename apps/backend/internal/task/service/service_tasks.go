@@ -2723,6 +2723,17 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	// silently strand.
 	s.markOrphanedInheritParentChildren(finalizeCtx, task)
 	s.pullNextTaskOnVacate(finalizeCtx, task.WorkflowStepID, task.ID)
+	if s.asyncQuestions != nil {
+		for _, session := range sessions {
+			if session == nil {
+				continue
+			}
+			if _, err := s.asyncQuestions.MarkSessionStale(context.WithoutCancel(finalizeCtx), session.ID, "task_archived"); err != nil {
+				s.logger.Warn("failed to stale async questions on archive",
+					zap.String("task_id", id), zap.String("session_id", session.ID), zap.Error(err))
+			}
+		}
+	}
 	s.logger.Info("task archived",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))

@@ -195,6 +195,21 @@ func TestHandleMessageTask_AnswersParentQuestionIdempotently(t *testing.T) {
 	require.Equal(t, "already_answered", answerAgainPayload["status"])
 }
 
+func TestHandleMessageTask_AsyncQuestionIDCannotBypassBlockingReplyValidation(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, _, _ := seedParentQuestionScenario(t, svc, repo)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	payload := senderPayload(child.ID, "stale async answer", parent.ID)
+	payload["reply_to_question_id"] = "retained-async-question-id"
+
+	response, err := h.handleMessageTask(context.Background(), makeWSMessage(t, ws.ActionMCPMessageTask, payload))
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeValidation)
+	require.Empty(t, orch.promptCalls)
+	require.Empty(t, orch.startCreatedCalls)
+	require.Empty(t, orch.launchCalls)
+}
+
 func TestHandleAskParentQuestion_RejectsRootTask(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parent, _, _, _ := seedParentQuestionScenario(t, svc, repo)

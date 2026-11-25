@@ -59,6 +59,73 @@ func TestOptionsFromConfigParsesUppercaseTruthyEnv(t *testing.T) {
 	}
 }
 
+func TestAsyncQuestionsFlagPrecedenceAndRestart(t *testing.T) {
+	const (
+		key    = "features.asyncQuestions"
+		envVar = "KANDEV_FEATURES_ASYNC_QUESTIONS"
+	)
+
+	definition, ok := DefinitionByKey(key)
+	if !ok {
+		t.Fatalf("runtime flag definition %q is missing", key)
+	}
+	if definition.EnvVar != envVar || definition.Kind != KindFeature ||
+		definition.Stability != StabilityExperimental || definition.RiskLevel != RiskMedium ||
+		!definition.Mutable || !definition.RestartRequired {
+		t.Fatalf("async questions metadata is incomplete: %+v", definition)
+	}
+
+	defaults, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("FeatureFlagDefaults: %v", err)
+	}
+	if got := defaults["async_questions"]; got != "false" {
+		t.Fatalf("profile default = %q, want false", got)
+	}
+
+	preserveEnv(t, envVar)
+	t.Setenv(envVar, "TRUE")
+	if !OptionsFromConfig(&config.Config{}).EnvValues[envVar] {
+		t.Fatalf("%s TRUE parsed false, want true", envVar)
+	}
+
+	store := &memoryStore{values: map[string]bool{key: true}}
+	service := NewService(store, Options{
+		DefaultValues: map[string]bool{key: false},
+		RuntimeValues: map[string]bool{key: false},
+		IsExplicitEnv: func(string) bool { return false },
+	})
+	states, err := service.ListStates(t.Context())
+	if err != nil {
+		t.Fatalf("ListStates with override: %v", err)
+	}
+	state := stateByKey(t, states, key)
+	if !state.EffectiveValue || state.Source != SourceOverride || !state.RequiresRestartToApply {
+		t.Fatalf("override state = %+v, want enabled override awaiting restart", state)
+	}
+
+	envService := NewService(store, Options{
+		DefaultValues: map[string]bool{key: false},
+		RuntimeValues: map[string]bool{key: false},
+		EnvValues:     map[string]bool{envVar: false},
+		IsExplicitEnv: func(name string) bool { return name == envVar },
+	})
+	states, err = envService.ListStates(t.Context())
+	if err != nil {
+		t.Fatalf("ListStates with environment override: %v", err)
+	}
+	state = stateByKey(t, states, key)
+	if state.EffectiveValue || state.Source != SourceEnv || !state.EnvLocked {
+		t.Fatalf("environment state = %+v, want locked false environment value", state)
+	}
+
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{Key: key, EffectiveValue: true}})
+	if !ValuesFromConfig(cfg)[key] {
+		t.Fatalf("ApplyStatesToConfig did not apply %s", key)
+	}
+}
+
 func TestOptionsFromConfigIgnoresRetiredAppStatusBarEnv(t *testing.T) {
 	preserveEnv(t, retiredAppStatusBarEnvVar)
 	t.Setenv(retiredAppStatusBarEnvVar, "TRUE")

@@ -26,6 +26,7 @@ import { ThinkingMessage } from "@/components/task/chat/messages/thinking-messag
 import { TodoMessage } from "@/components/task/chat/messages/todo-message";
 import { ScriptExecutionMessage } from "@/components/task/chat/messages/script-execution-message";
 import { ClarificationRequestMessage } from "@/components/task/chat/messages/clarification-request-message";
+import { AgentQuestionMessage } from "@/components/task/chat/messages/agent-question-message";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subagent-message";
 import { MonitorMessage } from "@/components/task/chat/messages/monitor-message";
@@ -40,6 +41,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { isDismissedGitPushErrorMessage } from "@/lib/utils/git-push-error-message";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 
 type AdapterContext = {
   isTaskDescription: boolean;
@@ -53,6 +55,11 @@ type AdapterContext = {
   isTurnActive?: boolean;
   isContainingTurnActive?: boolean;
 };
+
+function AgentQuestionMessageAdapter({ comment }: { comment: Message }) {
+  const enabled = useFeature("asyncQuestions");
+  return enabled ? <AgentQuestionMessage comment={comment} /> : null;
+}
 
 /**
  * Decides whether the task-description message renders the Start agent
@@ -460,6 +467,10 @@ const adapters: MessageAdapter[] = [
         isCurrentTurn={Boolean(ctx.isContainingTurnActive)}
       />
     ),
+  },
+  {
+    matches: (comment) => comment.type === "agent_question_request",
+    render: (comment) => <AgentQuestionMessageAdapter comment={comment} />,
   },
   {
     matches: (comment) => comment.type === "agent_plan",

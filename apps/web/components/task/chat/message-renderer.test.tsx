@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MessageRenderer } from "./message-renderer";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
@@ -6,6 +6,7 @@ import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/li
 const REMOVED_PAYLOAD = "removed secret";
 
 const fallbackOpenFile = vi.hoisted(() => vi.fn());
+const mocks = vi.hoisted(() => ({ asyncQuestionsEnabled: true }));
 const useOpenFileAtLine = vi.hoisted(() =>
   vi.fn((onOpenFile: ((path: string) => void) | undefined) => (path: string) => onOpenFile?.(path)),
 );
@@ -28,6 +29,14 @@ vi.mock("@/components/task/chat/messages/status-message", () => ({
   StatusMessage: ({ comment }: { comment: { content: string } }) => (
     <div data-testid="status-message-renderer">{comment.content}</div>
   ),
+}));
+
+vi.mock("@/components/task/chat/messages/agent-question-message", () => ({
+  AgentQuestionMessage: () => <div data-testid="agent-question-message" />,
+}));
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => mocks.asyncQuestionsEnabled,
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -129,6 +138,44 @@ describe("MessageRenderer markdown file links", () => {
 
     expect(onOpenFile).toHaveBeenCalledWith("apps/web/AGENTS.md");
     expect(fallbackOpenFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("MessageRenderer async question entries", () => {
+  afterEach(() => {
+    cleanup();
+    mocks.asyncQuestionsEnabled = true;
+  });
+
+  it("does not show a retained async request as a generic transcript card while off", () => {
+    mocks.asyncQuestionsEnabled = false;
+    render(
+      <MessageRenderer
+        comment={message({
+          type: "agent_question_request",
+          content: "Retained async request",
+          metadata: { async_question_id: "question-1" },
+        })}
+        isTaskDescription={false}
+      />,
+    );
+
+    expect(screen.queryByTestId("agent-question-message")).toBeNull();
+    expect(screen.queryByText("Retained async request")).toBeNull();
+  });
+
+  it("keeps the async request adapter when enabled", () => {
+    render(
+      <MessageRenderer
+        comment={message({
+          type: "agent_question_request",
+          metadata: { async_question_id: "question-1" },
+        })}
+        isTaskDescription={false}
+      />,
+    );
+
+    expect(screen.getByTestId("agent-question-message")).toBeTruthy();
   });
 });
 

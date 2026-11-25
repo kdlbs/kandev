@@ -35,6 +35,7 @@ type Capability string
 const (
 	CapabilityUserQuestion   Capability = "user-question"
 	CapabilityParentQuestion Capability = "parent-question"
+	CapabilityAsyncQuestions Capability = "async-questions"
 	CapabilityTaskTitle      Capability = "task-title"
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"

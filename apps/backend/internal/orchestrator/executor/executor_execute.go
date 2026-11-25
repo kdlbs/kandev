@@ -218,7 +218,8 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		// state). Keep the legacy kanban profile in that narrow case; production
 		// task launches resolve the persisted task above and therefore still get
 		// the exact office/autopilot capability set.
-		return e.withTaskCapabilities(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil)), nil
+		return e.withTaskCapabilities(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil).
+			WithoutCapability(mcpprofile.CapabilityAsyncQuestions)), nil
 	}
 	if task.Origin == models.TaskOriginAutomationRun {
 		return e.withTaskCapabilities(mcpprofile.NewAutomation()), nil
@@ -227,7 +228,10 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if task.IsFromOffice {
 		surface = mcpprofile.SurfaceOfficeTask
 	}
-	capabilities := make([]mcpprofile.Capability, 0, 2)
+	capabilities := make([]mcpprofile.Capability, 0, 3)
+	if e.asyncQuestionsEnabled && surface == mcpprofile.SurfaceKanbanTask && !task.IsEphemeral && !session.IsPassthrough {
+		capabilities = append(capabilities, mcpprofile.CapabilityAsyncQuestions)
+	}
 	if task.Autopilot {
 		if task.ParentID != "" && !session.IsPassthrough {
 			capabilities = append(capabilities, mcpprofile.CapabilityParentQuestion)
@@ -257,6 +261,9 @@ func (e *Executor) ResolveTaskSessionMCPProfile(
 func (e *Executor) withTaskCapabilities(profile mcpprofile.Context) mcpprofile.Context {
 	if e == nil {
 		return profile
+	}
+	if !e.asyncQuestionsEnabled {
+		profile = profile.WithoutCapability(mcpprofile.CapabilityAsyncQuestions)
 	}
 	if e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
 		profile = profile.WithCapability(mcpprofile.CapabilityCanvas)

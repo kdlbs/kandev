@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"encoding/json"
 	"testing"
 	"unicode/utf8"
 
@@ -127,12 +126,10 @@ func TestAskUserQuestionPublishesAndReturnsStructuredOutput(t *testing.T) {
 	tool, ok := s.mcpServer.ListTools()["ask_user_question_kandev"]
 	require.True(t, ok)
 	require.NotEmpty(t, tool.Tool.RawOutputSchema)
-	var schema map[string]interface{}
-	require.NoError(t, json.Unmarshal(tool.Tool.RawOutputSchema, &schema))
-	assert.Equal(t, "object", schema["type"])
-	assert.Contains(t, schema["properties"], "rejected")
-	assert.Contains(t, schema["properties"], "reject_reason")
-	assert.NotNil(t, schema["additionalProperties"])
+	blocking := blockingQuestionOutputSchema(t, tool.Tool.RawOutputSchema)
+	assert.Contains(t, blocking["properties"], "rejected")
+	assert.Contains(t, blocking["properties"], "reject_reason")
+	assert.NotNil(t, blocking["additionalProperties"])
 
 	result := callTool(t, s, "ask_user_question_kandev", map[string]interface{}{
 		"questions": []map[string]interface{}{{

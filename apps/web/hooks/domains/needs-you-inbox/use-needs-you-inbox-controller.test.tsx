@@ -59,14 +59,18 @@ function page(overrides: Partial<Awaited<ReturnType<typeof listClarificationInbo
   };
 }
 
-function initialState(enabled: boolean): HydrationState {
+function initialState(enabled: boolean, asyncQuestionsEnabled: boolean): HydrationState {
   return {
-    features: { ...defaultFeatureFlags, needsYouInbox: enabled },
+    features: {
+      ...defaultFeatureFlags,
+      needsYouInbox: enabled,
+      asyncQuestions: asyncQuestionsEnabled,
+    },
     workspaces: { activeId: WORKSPACE_ID, byId: {}, allIds: [] },
   } as unknown as HydrationState;
 }
 
-function renderController(enabled = true) {
+function renderController(enabled = true, asyncQuestionsEnabled = true) {
   return renderHook(
     () => {
       useNeedsYouInboxController();
@@ -74,7 +78,9 @@ function renderController(enabled = true) {
     },
     {
       wrapper: ({ children }) => (
-        <StateProvider initialState={initialState(enabled)}>{children}</StateProvider>
+        <StateProvider initialState={initialState(enabled, asyncQuestionsEnabled)}>
+          {children}
+        </StateProvider>
       ),
     },
   );
@@ -109,6 +115,15 @@ describe("useNeedsYouInboxController", () => {
       await Promise.resolve();
     });
     expect(listClarificationInboxMock).not.toHaveBeenCalled();
+  });
+
+  it("does not subscribe to async question changes while that feature is off", async () => {
+    renderController(true, false);
+
+    await waitFor(() => expect(listClarificationInboxMock).toHaveBeenCalledTimes(1));
+
+    expect(wsMocks.handlers.has("task.question.changed")).toBe(false);
+    expect(wsMocks.handlers.has(SESSION_STATE_CHANGED)).toBe(true);
   });
 
   it("applies a successful read into the count slice", async () => {
@@ -158,6 +173,7 @@ describe("useNeedsYouInboxController", () => {
     act(() => {
       emitWsEvent(SESSION_STATE_CHANGED);
       emitWsEvent("session.pending_action_changed");
+      emitWsEvent("task.question.changed");
       result.current.getState().bumpNeedsYouInboxRefreshTick();
       window.dispatchEvent(new Event("focus"));
       window.dispatchEvent(new Event("online"));
@@ -514,6 +530,7 @@ describe("useNeedsYouInboxController WS event coalescing", () => {
     act(() => {
       emitWsEvent(SESSION_STATE_CHANGED);
       emitWsEvent("session.pending_action_changed");
+      emitWsEvent("task.question.changed");
       emitWsEvent(SESSION_STATE_CHANGED);
     });
     await act(async () => {

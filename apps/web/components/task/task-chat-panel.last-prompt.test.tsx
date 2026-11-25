@@ -5,6 +5,7 @@ import type { Message } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import type { MessageListHandle } from "./chat/message-list-shared";
 import type { LoadMessageWindowResult } from "@/hooks/domains/session/load-message-window";
+import { defaultFeatureFlags } from "@/lib/state/slices/features/types";
 
 const { aroundRequest, scrollToMessage } = vi.hoisted(() => ({
   aroundRequest: vi.fn(),
@@ -49,8 +50,10 @@ const panelState = {
 };
 const state = {
   connection: { status: "disconnected" },
+  features: { ...defaultFeatureFlags },
   kanbanMulti: { snapshots: {} },
   kanban: { workflowId: null, tasks: [], steps: [] },
+  sidebarArchivedTasks: { itemsByWorkspaceId: {} },
   workflows: { items: [] },
   taskSessions: { items: { [SESSION]: { name: null, agent_profile_id: null } } },
   agentProfiles: { items: [] },

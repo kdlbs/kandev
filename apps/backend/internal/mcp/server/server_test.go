@@ -1075,8 +1075,9 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle
 	// + 2 task-dependency (add/remove) + 3 neutral task change-request tools +
 	// 1 neutral outcome tool + 1 rich-output + 1 executor discovery + 1
-	// send-operation readback. The exact count below guards the complete
-	// task-mode catalog.
+	// send-operation readback. The four async-question companions are only
+	// registered when the async-questions capability is enabled. The exact
+	// count below guards the default-off task-mode catalog.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")

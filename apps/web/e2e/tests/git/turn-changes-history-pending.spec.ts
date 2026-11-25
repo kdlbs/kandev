@@ -15,7 +15,7 @@ import {
 test.describe("paused turn content preservation", () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test("shows the existing loading state, then opens saved content without another agent turn", async ({
+  test("shows the pending state, then opens saved content without another agent turn", async ({
     testPage,
     apiClient,
     seedData,
@@ -38,6 +38,19 @@ test.describe("paused turn content preservation", () => {
         `${backend.tmpDir}/kandev.db`,
         changeSetId!,
         "untracked_test.txt",
+      );
+      const repositoryId = history.change_sets?.[0]?.repositories?.[0]?.id;
+      expect(repositoryId).toBeTruthy();
+      const filesResponse = await apiClient.rawRequest(
+        "GET",
+        `/api/v1/task-sessions/${sessionId}/turn-changes/${changeSetId}/repositories/${repositoryId}/files?offset=0&limit=100`,
+      );
+      expect(filesResponse.ok).toBe(true);
+      const files = (await filesResponse.json()) as {
+        files?: Array<{ id: string; content_availability: string }>;
+      };
+      expect(files.files?.find((file) => file.id === paused.fileID)?.content_availability).toBe(
+        "pending",
       );
 
       const pausedContent = await apiClient.rawRequest(

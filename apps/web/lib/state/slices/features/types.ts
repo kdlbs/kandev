@@ -19,6 +19,7 @@ export const defaultFeatureFlags = {
   claudeBackgroundPromptHandoff: false,
   claudeMidTurnSteering: false,
   needsYouInbox: false,
+  asyncQuestions: false,
   agentSurvival: false,
   coordinator: false,
   coordinatorPhase2: false,
