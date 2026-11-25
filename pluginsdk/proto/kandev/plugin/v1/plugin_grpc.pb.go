@@ -19,23 +19,25 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Plugin_DeliverEvent_FullMethodName                 = "/kandev.plugin.v1.Plugin/DeliverEvent"
-	Plugin_HandleWebhook_FullMethodName                = "/kandev.plugin.v1.Plugin/HandleWebhook"
-	Plugin_DescribeAutomationCondition_FullMethodName  = "/kandev.plugin.v1.Plugin/DescribeAutomationCondition"
-	Plugin_VerifyAutomationWebhook_FullMethodName      = "/kandev.plugin.v1.Plugin/VerifyAutomationWebhook"
-	Plugin_HandleAction_FullMethodName                 = "/kandev.plugin.v1.Plugin/HandleAction"
-	Plugin_SearchEntityReferences_FullMethodName       = "/kandev.plugin.v1.Plugin/SearchEntityReferences"
-	Plugin_AuthorizeEntityReference_FullMethodName     = "/kandev.plugin.v1.Plugin/AuthorizeEntityReference"
-	Plugin_ResolveGitCredential_FullMethodName         = "/kandev.plugin.v1.Plugin/ResolveGitCredential"
-	Plugin_GetGitCredentialBinding_FullMethodName      = "/kandev.plugin.v1.Plugin/GetGitCredentialBinding"
-	Plugin_InvokeAgentTool_FullMethodName              = "/kandev.plugin.v1.Plugin/InvokeAgentTool"
-	Plugin_ValidateExecutorProfile_FullMethodName      = "/kandev.plugin.v1.Plugin/ValidateExecutorProfile"
-	Plugin_ProvisionExecutorEnvironment_FullMethodName = "/kandev.plugin.v1.Plugin/ProvisionExecutorEnvironment"
-	Plugin_RecoverExecutorOperation_FullMethodName     = "/kandev.plugin.v1.Plugin/RecoverExecutorOperation"
-	Plugin_AttachExecutorEnvironment_FullMethodName    = "/kandev.plugin.v1.Plugin/AttachExecutorEnvironment"
-	Plugin_InspectExecutorEnvironment_FullMethodName   = "/kandev.plugin.v1.Plugin/InspectExecutorEnvironment"
-	Plugin_ResolveExecutorConnection_FullMethodName    = "/kandev.plugin.v1.Plugin/ResolveExecutorConnection"
-	Plugin_DestroyExecutorEnvironment_FullMethodName   = "/kandev.plugin.v1.Plugin/DestroyExecutorEnvironment"
+	Plugin_FormatNotification_FullMethodName               = "/kandev.plugin.v1.Plugin/FormatNotification"
+	Plugin_InspectNotificationConfiguration_FullMethodName = "/kandev.plugin.v1.Plugin/InspectNotificationConfiguration"
+	Plugin_DeliverEvent_FullMethodName                     = "/kandev.plugin.v1.Plugin/DeliverEvent"
+	Plugin_HandleWebhook_FullMethodName                    = "/kandev.plugin.v1.Plugin/HandleWebhook"
+	Plugin_DescribeAutomationCondition_FullMethodName      = "/kandev.plugin.v1.Plugin/DescribeAutomationCondition"
+	Plugin_VerifyAutomationWebhook_FullMethodName          = "/kandev.plugin.v1.Plugin/VerifyAutomationWebhook"
+	Plugin_HandleAction_FullMethodName                     = "/kandev.plugin.v1.Plugin/HandleAction"
+	Plugin_SearchEntityReferences_FullMethodName           = "/kandev.plugin.v1.Plugin/SearchEntityReferences"
+	Plugin_AuthorizeEntityReference_FullMethodName         = "/kandev.plugin.v1.Plugin/AuthorizeEntityReference"
+	Plugin_ResolveGitCredential_FullMethodName             = "/kandev.plugin.v1.Plugin/ResolveGitCredential"
+	Plugin_GetGitCredentialBinding_FullMethodName          = "/kandev.plugin.v1.Plugin/GetGitCredentialBinding"
+	Plugin_InvokeAgentTool_FullMethodName                  = "/kandev.plugin.v1.Plugin/InvokeAgentTool"
+	Plugin_ValidateExecutorProfile_FullMethodName          = "/kandev.plugin.v1.Plugin/ValidateExecutorProfile"
+	Plugin_ProvisionExecutorEnvironment_FullMethodName     = "/kandev.plugin.v1.Plugin/ProvisionExecutorEnvironment"
+	Plugin_RecoverExecutorOperation_FullMethodName         = "/kandev.plugin.v1.Plugin/RecoverExecutorOperation"
+	Plugin_AttachExecutorEnvironment_FullMethodName        = "/kandev.plugin.v1.Plugin/AttachExecutorEnvironment"
+	Plugin_InspectExecutorEnvironment_FullMethodName       = "/kandev.plugin.v1.Plugin/InspectExecutorEnvironment"
+	Plugin_ResolveExecutorConnection_FullMethodName        = "/kandev.plugin.v1.Plugin/ResolveExecutorConnection"
+	Plugin_DestroyExecutorEnvironment_FullMethodName       = "/kandev.plugin.v1.Plugin/DestroyExecutorEnvironment"
 )
 
 // PluginClient is the client API for Plugin service.
@@ -44,6 +46,10 @@ const (
 //
 // Implemented by the PLUGIN. kandev is the client.
 type PluginClient interface {
+	// Optional, side-effect-free notification content extension. The host owns
+	// delivery admission, credentials, and transport; configuration is immutable.
+	FormatNotification(ctx context.Context, in *NotificationFormatRequest, opts ...grpc.CallOption) (*NotificationFormatResponse, error)
+	InspectNotificationConfiguration(ctx context.Context, in *NotificationConfigurationRequest, opts ...grpc.CallOption) (*NotificationConfigurationResponse, error)
 	DeliverEvent(ctx context.Context, in *Event, opts ...grpc.CallOption) (*EventAck, error)
 	HandleWebhook(ctx context.Context, in *WebhookRequest, opts ...grpc.CallOption) (*WebhookResponse, error)
 	// Optional automation adapter extension. Old plugins return Unimplemented.
@@ -83,6 +89,26 @@ type pluginClient struct {
 
 func NewPluginClient(cc grpc.ClientConnInterface) PluginClient {
 	return &pluginClient{cc}
+}
+
+func (c *pluginClient) FormatNotification(ctx context.Context, in *NotificationFormatRequest, opts ...grpc.CallOption) (*NotificationFormatResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NotificationFormatResponse)
+	err := c.cc.Invoke(ctx, Plugin_FormatNotification_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) InspectNotificationConfiguration(ctx context.Context, in *NotificationConfigurationRequest, opts ...grpc.CallOption) (*NotificationConfigurationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NotificationConfigurationResponse)
+	err := c.cc.Invoke(ctx, Plugin_InspectNotificationConfiguration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *pluginClient) DeliverEvent(ctx context.Context, in *Event, opts ...grpc.CallOption) (*EventAck, error) {
@@ -261,6 +287,10 @@ func (c *pluginClient) DestroyExecutorEnvironment(ctx context.Context, in *Destr
 //
 // Implemented by the PLUGIN. kandev is the client.
 type PluginServer interface {
+	// Optional, side-effect-free notification content extension. The host owns
+	// delivery admission, credentials, and transport; configuration is immutable.
+	FormatNotification(context.Context, *NotificationFormatRequest) (*NotificationFormatResponse, error)
+	InspectNotificationConfiguration(context.Context, *NotificationConfigurationRequest) (*NotificationConfigurationResponse, error)
 	DeliverEvent(context.Context, *Event) (*EventAck, error)
 	HandleWebhook(context.Context, *WebhookRequest) (*WebhookResponse, error)
 	// Optional automation adapter extension. Old plugins return Unimplemented.
@@ -302,6 +332,12 @@ type PluginServer interface {
 // pointer dereference when methods are called.
 type UnimplementedPluginServer struct{}
 
+func (UnimplementedPluginServer) FormatNotification(context.Context, *NotificationFormatRequest) (*NotificationFormatResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FormatNotification not implemented")
+}
+func (UnimplementedPluginServer) InspectNotificationConfiguration(context.Context, *NotificationConfigurationRequest) (*NotificationConfigurationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InspectNotificationConfiguration not implemented")
+}
 func (UnimplementedPluginServer) DeliverEvent(context.Context, *Event) (*EventAck, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeliverEvent not implemented")
 }
@@ -372,6 +408,42 @@ func RegisterPluginServer(s grpc.ServiceRegistrar, srv PluginServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&Plugin_ServiceDesc, srv)
+}
+
+func _Plugin_FormatNotification_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NotificationFormatRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).FormatNotification(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_FormatNotification_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).FormatNotification(ctx, req.(*NotificationFormatRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_InspectNotificationConfiguration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NotificationConfigurationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).InspectNotificationConfiguration(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_InspectNotificationConfiguration_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).InspectNotificationConfiguration(ctx, req.(*NotificationConfigurationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Plugin_DeliverEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -688,6 +760,14 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*PluginServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "FormatNotification",
+			Handler:    _Plugin_FormatNotification_Handler,
+		},
+		{
+			MethodName: "InspectNotificationConfiguration",
+			Handler:    _Plugin_InspectNotificationConfiguration_Handler,
+		},
+		{
 			MethodName: "DeliverEvent",
 			Handler:    _Plugin_DeliverEvent_Handler,
 		},
@@ -799,12 +879,17 @@ const (
 	Host_DeleteManagedConversationScheduleExact_FullMethodName     = "/kandev.plugin.v1.Host/DeleteManagedConversationScheduleExact"
 	Host_EnsureTaskRunExact_FullMethodName                         = "/kandev.plugin.v1.Host/EnsureTaskRunExact"
 	Host_StopTaskRunExact_FullMethodName                           = "/kandev.plugin.v1.Host/StopTaskRunExact"
+	Host_CancelTurnExact_FullMethodName                            = "/kandev.plugin.v1.Host/CancelTurnExact"
 	Host_RecoverSessionExact_FullMethodName                        = "/kandev.plugin.v1.Host/RecoverSessionExact"
 	Host_CancelPendingTaskTransitionExact_FullMethodName           = "/kandev.plugin.v1.Host/CancelPendingTaskTransitionExact"
 	Host_GetSessionModeContextExact_FullMethodName                 = "/kandev.plugin.v1.Host/GetSessionModeContextExact"
 	Host_SetSessionModeExact_FullMethodName                        = "/kandev.plugin.v1.Host/SetSessionModeExact"
+	Host_GetStepApprovalExact_FullMethodName                       = "/kandev.plugin.v1.Host/GetStepApprovalExact"
+	Host_ApproveStepExact_FullMethodName                           = "/kandev.plugin.v1.Host/ApproveStepExact"
 	Host_RespondPermissionExact_FullMethodName                     = "/kandev.plugin.v1.Host/RespondPermissionExact"
 	Host_AnswerClarificationExact_FullMethodName                   = "/kandev.plugin.v1.Host/AnswerClarificationExact"
+	Host_LinkExternalIdentity_FullMethodName                       = "/kandev.plugin.v1.Host/LinkExternalIdentity"
+	Host_RequestHumanResponseReceipt_FullMethodName                = "/kandev.plugin.v1.Host/RequestHumanResponseReceipt"
 	Host_ListWorkspacesExact_FullMethodName                        = "/kandev.plugin.v1.Host/ListWorkspacesExact"
 	Host_ListWorkflowsExact_FullMethodName                         = "/kandev.plugin.v1.Host/ListWorkflowsExact"
 	Host_ListWorkflowStepsExact_FullMethodName                     = "/kandev.plugin.v1.Host/ListWorkflowStepsExact"
@@ -939,15 +1024,30 @@ type HostClient interface {
 	// approval and resource-version/execution-generation fences.
 	EnsureTaskRunExact(ctx context.Context, in *EnsureTaskRunExactRequest, opts ...grpc.CallOption) (*EnsureTaskRunExactResponse, error)
 	StopTaskRunExact(ctx context.Context, in *StopTaskRunExactRequest, opts ...grpc.CallOption) (*StopTaskRunExactResponse, error)
+	// CancelTurnExact interrupts the observed execution's current turn without
+	// stopping the session; the session stays promptable.
+	CancelTurnExact(ctx context.Context, in *CancelTurnExactRequest, opts ...grpc.CallOption) (*CancelTurnExactResponse, error)
 	RecoverSessionExact(ctx context.Context, in *RecoverSessionExactRequest, opts ...grpc.CallOption) (*RecoverSessionExactResponse, error)
 	CancelPendingTaskTransitionExact(ctx context.Context, in *CancelPendingTaskTransitionExactRequest, opts ...grpc.CallOption) (*CancelPendingTaskTransitionExactResponse, error)
 	GetSessionModeContextExact(ctx context.Context, in *GetSessionModeContextExactRequest, opts ...grpc.CallOption) (*GetSessionModeContextExactResponse, error)
 	SetSessionModeExact(ctx context.Context, in *SetSessionModeExactRequest, opts ...grpc.CallOption) (*SetSessionModeExactResponse, error)
+	// GetStepApprovalExact reads whether a session's workflow step awaits the
+	// native Approve action (host.v2.read:sessions). ApproveStepExact approves
+	// it through the same path with a step_approval human response receipt
+	// (host.v2.write:execution). Office approval stages are Unimplemented.
+	GetStepApprovalExact(ctx context.Context, in *GetStepApprovalExactRequest, opts ...grpc.CallOption) (*GetStepApprovalExactResponse, error)
+	ApproveStepExact(ctx context.Context, in *ApproveStepExactRequest, opts ...grpc.CallOption) (*ApproveStepExactResponse, error)
 	// Human interaction responses require a Host-issued single-use receipt from
-	// the authenticated native UI, bound to the exact interaction revision and
-	// response payload.
+	// the authenticated native UI or minted for a linked Kandev user, bound to
+	// the exact interaction revision and response payload.
 	RespondPermissionExact(ctx context.Context, in *RespondPermissionExactRequest, opts ...grpc.CallOption) (*RespondPermissionExactResponse, error)
 	AnswerClarificationExact(ctx context.Context, in *AnswerClarificationExactRequest, opts ...grpc.CallOption) (*AnswerClarificationExactResponse, error)
+	// LinkExternalIdentity redeems a Kandev-issued link code for the calling
+	// installation (api_write: human_responses). RequestHumanResponseReceipt
+	// mints a receipt for the Kandev user linked to an external account
+	// (host.v2.write:human_responses).
+	LinkExternalIdentity(ctx context.Context, in *LinkExternalIdentityRequest, opts ...grpc.CallOption) (*LinkExternalIdentityResponse, error)
+	RequestHumanResponseReceipt(ctx context.Context, in *RequestHumanResponseReceiptRequest, opts ...grpc.CallOption) (*RequestHumanResponseReceiptResponse, error)
 	ListWorkspacesExact(ctx context.Context, in *ListWorkspacesExactRequest, opts ...grpc.CallOption) (*ListWorkspacesExactResponse, error)
 	ListWorkflowsExact(ctx context.Context, in *ListWorkflowsExactRequest, opts ...grpc.CallOption) (*ListWorkflowsExactResponse, error)
 	ListWorkflowStepsExact(ctx context.Context, in *ListWorkflowStepsExactRequest, opts ...grpc.CallOption) (*ListWorkflowStepsExactResponse, error)
@@ -1467,6 +1567,16 @@ func (c *hostClient) StopTaskRunExact(ctx context.Context, in *StopTaskRunExactR
 	return out, nil
 }
 
+func (c *hostClient) CancelTurnExact(ctx context.Context, in *CancelTurnExactRequest, opts ...grpc.CallOption) (*CancelTurnExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelTurnExactResponse)
+	err := c.cc.Invoke(ctx, Host_CancelTurnExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) RecoverSessionExact(ctx context.Context, in *RecoverSessionExactRequest, opts ...grpc.CallOption) (*RecoverSessionExactResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RecoverSessionExactResponse)
@@ -1507,6 +1617,26 @@ func (c *hostClient) SetSessionModeExact(ctx context.Context, in *SetSessionMode
 	return out, nil
 }
 
+func (c *hostClient) GetStepApprovalExact(ctx context.Context, in *GetStepApprovalExactRequest, opts ...grpc.CallOption) (*GetStepApprovalExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetStepApprovalExactResponse)
+	err := c.cc.Invoke(ctx, Host_GetStepApprovalExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ApproveStepExact(ctx context.Context, in *ApproveStepExactRequest, opts ...grpc.CallOption) (*ApproveStepExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ApproveStepExactResponse)
+	err := c.cc.Invoke(ctx, Host_ApproveStepExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) RespondPermissionExact(ctx context.Context, in *RespondPermissionExactRequest, opts ...grpc.CallOption) (*RespondPermissionExactResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RespondPermissionExactResponse)
@@ -1521,6 +1651,26 @@ func (c *hostClient) AnswerClarificationExact(ctx context.Context, in *AnswerCla
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AnswerClarificationExactResponse)
 	err := c.cc.Invoke(ctx, Host_AnswerClarificationExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) LinkExternalIdentity(ctx context.Context, in *LinkExternalIdentityRequest, opts ...grpc.CallOption) (*LinkExternalIdentityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LinkExternalIdentityResponse)
+	err := c.cc.Invoke(ctx, Host_LinkExternalIdentity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) RequestHumanResponseReceipt(ctx context.Context, in *RequestHumanResponseReceiptRequest, opts ...grpc.CallOption) (*RequestHumanResponseReceiptResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestHumanResponseReceiptResponse)
+	err := c.cc.Invoke(ctx, Host_RequestHumanResponseReceipt_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2226,15 +2376,30 @@ type HostServer interface {
 	// approval and resource-version/execution-generation fences.
 	EnsureTaskRunExact(context.Context, *EnsureTaskRunExactRequest) (*EnsureTaskRunExactResponse, error)
 	StopTaskRunExact(context.Context, *StopTaskRunExactRequest) (*StopTaskRunExactResponse, error)
+	// CancelTurnExact interrupts the observed execution's current turn without
+	// stopping the session; the session stays promptable.
+	CancelTurnExact(context.Context, *CancelTurnExactRequest) (*CancelTurnExactResponse, error)
 	RecoverSessionExact(context.Context, *RecoverSessionExactRequest) (*RecoverSessionExactResponse, error)
 	CancelPendingTaskTransitionExact(context.Context, *CancelPendingTaskTransitionExactRequest) (*CancelPendingTaskTransitionExactResponse, error)
 	GetSessionModeContextExact(context.Context, *GetSessionModeContextExactRequest) (*GetSessionModeContextExactResponse, error)
 	SetSessionModeExact(context.Context, *SetSessionModeExactRequest) (*SetSessionModeExactResponse, error)
+	// GetStepApprovalExact reads whether a session's workflow step awaits the
+	// native Approve action (host.v2.read:sessions). ApproveStepExact approves
+	// it through the same path with a step_approval human response receipt
+	// (host.v2.write:execution). Office approval stages are Unimplemented.
+	GetStepApprovalExact(context.Context, *GetStepApprovalExactRequest) (*GetStepApprovalExactResponse, error)
+	ApproveStepExact(context.Context, *ApproveStepExactRequest) (*ApproveStepExactResponse, error)
 	// Human interaction responses require a Host-issued single-use receipt from
-	// the authenticated native UI, bound to the exact interaction revision and
-	// response payload.
+	// the authenticated native UI or minted for a linked Kandev user, bound to
+	// the exact interaction revision and response payload.
 	RespondPermissionExact(context.Context, *RespondPermissionExactRequest) (*RespondPermissionExactResponse, error)
 	AnswerClarificationExact(context.Context, *AnswerClarificationExactRequest) (*AnswerClarificationExactResponse, error)
+	// LinkExternalIdentity redeems a Kandev-issued link code for the calling
+	// installation (api_write: human_responses). RequestHumanResponseReceipt
+	// mints a receipt for the Kandev user linked to an external account
+	// (host.v2.write:human_responses).
+	LinkExternalIdentity(context.Context, *LinkExternalIdentityRequest) (*LinkExternalIdentityResponse, error)
+	RequestHumanResponseReceipt(context.Context, *RequestHumanResponseReceiptRequest) (*RequestHumanResponseReceiptResponse, error)
 	ListWorkspacesExact(context.Context, *ListWorkspacesExactRequest) (*ListWorkspacesExactResponse, error)
 	ListWorkflowsExact(context.Context, *ListWorkflowsExactRequest) (*ListWorkflowsExactResponse, error)
 	ListWorkflowStepsExact(context.Context, *ListWorkflowStepsExactRequest) (*ListWorkflowStepsExactResponse, error)
@@ -2488,6 +2653,9 @@ func (UnimplementedHostServer) EnsureTaskRunExact(context.Context, *EnsureTaskRu
 func (UnimplementedHostServer) StopTaskRunExact(context.Context, *StopTaskRunExactRequest) (*StopTaskRunExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StopTaskRunExact not implemented")
 }
+func (UnimplementedHostServer) CancelTurnExact(context.Context, *CancelTurnExactRequest) (*CancelTurnExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelTurnExact not implemented")
+}
 func (UnimplementedHostServer) RecoverSessionExact(context.Context, *RecoverSessionExactRequest) (*RecoverSessionExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RecoverSessionExact not implemented")
 }
@@ -2500,11 +2668,23 @@ func (UnimplementedHostServer) GetSessionModeContextExact(context.Context, *GetS
 func (UnimplementedHostServer) SetSessionModeExact(context.Context, *SetSessionModeExactRequest) (*SetSessionModeExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetSessionModeExact not implemented")
 }
+func (UnimplementedHostServer) GetStepApprovalExact(context.Context, *GetStepApprovalExactRequest) (*GetStepApprovalExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetStepApprovalExact not implemented")
+}
+func (UnimplementedHostServer) ApproveStepExact(context.Context, *ApproveStepExactRequest) (*ApproveStepExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ApproveStepExact not implemented")
+}
 func (UnimplementedHostServer) RespondPermissionExact(context.Context, *RespondPermissionExactRequest) (*RespondPermissionExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RespondPermissionExact not implemented")
 }
 func (UnimplementedHostServer) AnswerClarificationExact(context.Context, *AnswerClarificationExactRequest) (*AnswerClarificationExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AnswerClarificationExact not implemented")
+}
+func (UnimplementedHostServer) LinkExternalIdentity(context.Context, *LinkExternalIdentityRequest) (*LinkExternalIdentityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LinkExternalIdentity not implemented")
+}
+func (UnimplementedHostServer) RequestHumanResponseReceipt(context.Context, *RequestHumanResponseReceiptRequest) (*RequestHumanResponseReceiptResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestHumanResponseReceipt not implemented")
 }
 func (UnimplementedHostServer) ListWorkspacesExact(context.Context, *ListWorkspacesExactRequest) (*ListWorkspacesExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkspacesExact not implemented")
@@ -3397,6 +3577,24 @@ func _Host_StopTaskRunExact_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_CancelTurnExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelTurnExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CancelTurnExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CancelTurnExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CancelTurnExact(ctx, req.(*CancelTurnExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_RecoverSessionExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RecoverSessionExactRequest)
 	if err := dec(in); err != nil {
@@ -3469,6 +3667,42 @@ func _Host_SetSessionModeExact_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_GetStepApprovalExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetStepApprovalExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetStepApprovalExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetStepApprovalExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetStepApprovalExact(ctx, req.(*GetStepApprovalExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ApproveStepExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ApproveStepExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ApproveStepExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ApproveStepExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ApproveStepExact(ctx, req.(*ApproveStepExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_RespondPermissionExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RespondPermissionExactRequest)
 	if err := dec(in); err != nil {
@@ -3501,6 +3735,42 @@ func _Host_AnswerClarificationExact_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).AnswerClarificationExact(ctx, req.(*AnswerClarificationExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_LinkExternalIdentity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LinkExternalIdentityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).LinkExternalIdentity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_LinkExternalIdentity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).LinkExternalIdentity(ctx, req.(*LinkExternalIdentityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_RequestHumanResponseReceipt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestHumanResponseReceiptRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).RequestHumanResponseReceipt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_RequestHumanResponseReceipt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).RequestHumanResponseReceipt(ctx, req.(*RequestHumanResponseReceiptRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -4774,6 +5044,10 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_StopTaskRunExact_Handler,
 		},
 		{
+			MethodName: "CancelTurnExact",
+			Handler:    _Host_CancelTurnExact_Handler,
+		},
+		{
 			MethodName: "RecoverSessionExact",
 			Handler:    _Host_RecoverSessionExact_Handler,
 		},
@@ -4790,12 +5064,28 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_SetSessionModeExact_Handler,
 		},
 		{
+			MethodName: "GetStepApprovalExact",
+			Handler:    _Host_GetStepApprovalExact_Handler,
+		},
+		{
+			MethodName: "ApproveStepExact",
+			Handler:    _Host_ApproveStepExact_Handler,
+		},
+		{
 			MethodName: "RespondPermissionExact",
 			Handler:    _Host_RespondPermissionExact_Handler,
 		},
 		{
 			MethodName: "AnswerClarificationExact",
 			Handler:    _Host_AnswerClarificationExact_Handler,
+		},
+		{
+			MethodName: "LinkExternalIdentity",
+			Handler:    _Host_LinkExternalIdentity_Handler,
+		},
+		{
+			MethodName: "RequestHumanResponseReceipt",
+			Handler:    _Host_RequestHumanResponseReceipt_Handler,
 		},
 		{
 			MethodName: "ListWorkspacesExact",

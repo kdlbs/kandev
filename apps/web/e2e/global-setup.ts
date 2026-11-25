@@ -47,6 +47,10 @@ export function runGlobalSetup(options: GlobalSetupOptions = {}): void {
           BACKEND_DIR,
           "internal/agent/runtime/lifecycle/e2e_delivery_record_fixture_test.go",
         ),
+        path.join(
+          BACKEND_DIR,
+          "internal/agent/runtime/lifecycle/e2e_repeated_native_resume_fixture_test.go",
+        ),
       ],
     },
     {
@@ -355,7 +359,8 @@ function assertPluginFixtureIdentity(identityPath: string): void {
     identity.pluginVersion !== "1.0.0" ||
     identity.bundlePath !== "ui/bundle.js" ||
     identity.manifestCapability !== "messages" ||
-    identity.minKandevVersion !== "0.91.1" ||
+    typeof identity.minKandevVersion !== "string" ||
+    !identity.minKandevVersion ||
     identity.panelKey !== "prompt-history-plugin"
   ) {
     throw new Error(`Unsupported E2E plugin identity schema in ${identityPath}`);

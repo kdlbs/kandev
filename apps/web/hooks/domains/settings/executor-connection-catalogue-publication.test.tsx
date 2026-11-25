@@ -67,7 +67,7 @@ async function editAndTest(view: ReturnType<typeof render>, remote = false) {
     );
     fireEvent.change(name, { target: { value: form.name } });
     fireEvent.change(picker, { target: { value: replacementConnection } });
-    const test = view.getByRole("button", { name: "Test executor", exact: true });
+    const test = view.getByRole("button", { name: "Test executor" });
     await waitFor(() => expect(test.hasAttribute("disabled")).toBe(false));
     fireEvent.click(test);
     await waitFor(() =>

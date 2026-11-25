@@ -19,6 +19,7 @@ import {
   remarkPlugins,
 } from "@/components/shared/markdown-components";
 import type { TaskWalkthrough, WalkthroughStep } from "@/lib/types/http";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import type { WalkthroughComment } from "@/lib/state/slices/comments";
 import { WalkthroughCommentList, WalkthroughStepFeedback } from "./walkthrough-step-feedback";
 import { WalkthroughStepPicker } from "./walkthrough-step-picker";
@@ -210,22 +211,24 @@ function useWalkthroughStepFeedback(params: {
   const showMissingSessionError = () => {
     toast({ title: t("diff:noActiveSessionForWalkthroughNote"), variant: "error" });
   };
-  const addWalkthroughFeedback = (text: string) => {
+  const addWalkthroughFeedback = (text: string, attachments?: MessageAttachment[]) => {
     const comment = buildComment(text);
     if (!comment) {
       showMissingSessionError();
       return false;
     }
+    if (attachments?.length) comment.attachments = attachments;
     addComment(comment);
     toast({ title: t("diff:walkthroughNoteAdded"), variant: "success" });
     return true;
   };
-  const runWalkthroughFeedback = (text: string) => {
+  const runWalkthroughFeedback = (text: string, attachments?: MessageAttachment[]) => {
     const comment = buildComment(text);
     if (!comment) {
       showMissingSessionError();
       return false;
     }
+    if (attachments?.length) comment.attachments = attachments;
     addComment(comment);
     void runComment(comment)
       .then(({ queued }) => {
@@ -334,6 +337,7 @@ export function WalkthroughStepInner({
         onOpenFile={() => revealFileAtLine(openFile, step.file, step.line, step.repo)}
       />
       <WalkthroughStepFeedback
+        taskId={activeTaskId}
         key={`${activeTaskId}:${sessionId}:${walkthrough.id}:${walkthrough.updated_at}`}
         walkthrough={walkthrough}
         sessionId={sessionId ?? null}

@@ -11,9 +11,9 @@ owners:
 ## Overview
 
 Automatic message merging reduces avoidable agent turns by folding compatible
-consecutive prompts from one source. Install administrators set the default,
-while each task session can retain an explicit override from the expanded queue
-panel.
+adjacent prompts and agent messages into their sender task's latest pending
+entry. Install administrators set the default; task sessions can retain an
+explicit override from the expanded queue panel.
 
 This requirement supersedes
 `REQ-UI-MESSAGE-QUEUE-AUTO-MERGE-001` when activated. It preserves the existing
@@ -42,11 +42,11 @@ default.
 
 #### Acceptance criteria
 
-- **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.1:** \*\*Settings > Task Behavior
-  > Message Queue** shall expose an **Automatically merge consecutive
-  > messages\*\* switch whose install-wide default is ON. Its localized description
-  > shall explain that sessions inherit this value until changed in the session's
-  > queue panel.
+- **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.1:** **Settings > Task Behavior >
+  Message Queue** shall expose an **Automatically merge queued messages** switch
+  whose install-wide default is ON. Its localized description shall explain
+  adjacent and same-sender agent folding and inheritance until changed in the
+  session's queue panel.
 - **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.2:** A session without an
   explicit override shall use the current global value. When the global value
   changes, existing sessions that have never changed Auto-merge shall use the
@@ -57,18 +57,24 @@ default.
 - **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.4:** The expanded queue header
   shall expose the effective value through the labeled Auto-merge switch pill
   defined by `REQ-UI-MESSAGE-QUEUE-AUTOMATION-CONTROLS-001`.
-- **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.5:** The effective value shall
-  apply only to messages admitted after it is resolved. Changing it shall not
-  compact or split entries already pending.
+- **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.5:** Global changes shall affect
+  later admissions only and never compact pending entries. A session change
+  from effective Auto-merge OFF to ON shall atomically compact pending entries
+  as defined by `AC-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001.10`. ON-to-ON and OFF
+  writes shall not compact; disabling shall never split merged content.
 - **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.6:** When effective Auto-merge
-  is ON, a newly admitted message shall fold into the pending tail only when the
-  entries are consecutive and compatible under
-  `REQ-UI-MESSAGE-QUEUE-AUTO-MERGE-001`.
+  is ON, newly admitted compatible messages shall fold into the entry directly
+  above them. Agent messages with a sender task shall first try their latest
+  same-sender target under `REQ-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001`, without
+  changing the compatibility predicate. User and sender-less sources shall
+  never move across intervening entries.
 - **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.7:** At or above a positive
   persisted-row limit, a compatible admission that does not require a staged
-  attachment claim shall fold directly into the tail without increasing the
-  row count. An incompatible admission or an admission with effective
-  Auto-merge OFF shall fail with `queue_full` and leave the queue unchanged.
+  attachment claim shall fold directly without increasing the row count.
+  Agent sources shall try their eligible latest same-sender target first;
+  ordinary adjacent folding shall remain the fallback for every eligible source.
+  An admission with no compatible target or effective Auto-merge OFF shall
+  fail with `queue_full` and leave the queue unchanged.
 - **AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.8:** At or above a positive
   persisted-row limit, a staged-attachment admission shall fail with
   `queue_full` before claiming the attachment or changing the prior tail. It
@@ -181,8 +187,13 @@ default.
 - No workspace-level, task-level, or user-level override.
 - No Follow global or reset-to-global control.
 - No inherited-versus-explicit badge in the queue header.
-- No retroactive compaction or reconstruction of pending messages.
+- No retroactive compaction except the session effective-rise pass defined by
+  `REQ-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001`; no reconstruction of pending messages.
 - No transfer of an override from one task session to another.
+
+## Related requirements
+
+- [Message Queue Auto-sort-merge](message-queue-auto-sort-merge.md)
 
 ## Related decision
 

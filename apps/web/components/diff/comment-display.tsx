@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentLinks } from "@/components/shared/attachment-links";
 import { Button } from "@kandev/ui/button";
 import { IconTrash, IconEdit, IconMessage, IconPlayerPlay } from "@tabler/icons-react";
 import type { DiffComment } from "@/lib/diff/types";
@@ -110,6 +111,7 @@ export function CommentDisplay({
           <span className="text-muted-foreground">{lineRange}</span>
           <span className="mx-1 text-muted-foreground">·</span>
           <span className="break-words">{comment.text}</span>
+          <AttachmentLinks attachments={comment.attachments} />
         </div>
         <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100">
           <CommentActionButtons
@@ -144,6 +146,7 @@ export function CommentDisplay({
         </pre>
       )}
       <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{comment.text}</p>
+      <AttachmentLinks attachments={comment.attachments} />
     </div>
   );
 }

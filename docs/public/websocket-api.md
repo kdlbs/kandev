@@ -266,6 +266,8 @@ The agent tool has additional rules:
 
 If `intent` is omitted, the backend infers it from those fields. That inference exists for first-party compatibility; an external client should send an explicit intent so a later field change does not select a different path.
 
+For an ordinary `start` on an existing task, `workflow_step_id` is optional. If it is omitted, Kandev uses the task's current workflow step to build the first prompt. A supplied ID selects the step for that start. This fallback does not move the task or run the step's entry actions again.
+
 For `intent: "start_created"`, Kandev trims leading and trailing whitespace from `prompt`. A prompt that is empty after trimming uses the normal empty-prompt fallback. A non-empty trimmed prompt is an explicit launch instruction. Kandev preserves it in the first stored and agent-bound message even when the destination step prompt has no `{{task_prompt}}` placeholder. A step prompt with the placeholder inserts the instruction there; a replacing step prompt runs before the retained instruction. When `skip_message_record` is true, no history message is created, so the caller must store the prompt itself if needed. Task creation and other internal callers can transport the task description in the same field. That input keeps the step template's normal replacement behavior, and the backend never infers its origin from text equality. Legacy queued `start_created` payloads created before this behavior was introduced may still replace an explicit brief with a destination step template; review pending launches before relying on the guarantee. Sending an instruction does not grant read-only or other provider permissions.
 
 ```json
@@ -361,6 +363,79 @@ When a view is not covered by current workspace data, the web sidebar reads one 
 
 The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
 
+Complete plugin groupings also return their `grouping_revision`,
+`grouping_generation` and complete `grouping_keys`. With empty inline collapse
+keys, `disclosure_view_id` resolves disclosure from that authenticated user's
+saved view in the requested workspace. The server intersects it with the full
+provider snapshot, not the current page. This supports recovery of retired
+disclosure without increasing the request cap. The web client reconciles those
+keys through its saved-view journal before admitting a bounded successor page.
+
+Saved-view edits use scoped `sidebar_view_state` on
+`PATCH /api/v1/user/settings`. `views_create` inserts absent IDs only.
+`views_update` carries sparse changed fields for existing IDs and never
+recreates a deleted view. Its optional `disclosure` has a `group` owner and
+`add`/`remove` key arrays; `replace` is reserved for an explicit grouping change.
+An insert-only creation and a later sparse update may share an ID in one request.
+`views_upsert` intentionally creates/replaces whole views for explicit imports.
+`view_ids_delete` removes IDs. Survivors retain order and new IDs append; send
+complete `view_order` only for explicit reorder. These mutate one `workspace_id`
+under the normal settings CAS. Do not mix view deltas with `views` replacement.
+The 50-view and 2 MiB request limits remain.
+
+`draft_update` carries sparse presentation fields under `base_view_id` and
+`expected_group`; `clear: true` discards only that matching draft.
+Do not mix it with full `draft` replacement. `select_plugin_grouping` supplies a
+generated-default view candidate: the CAS reuses a latest unchanged matching
+view or creates it with a unique name, protecting custom views, drafts and the
+view limit. Use the returned active ID, not the candidate ID, as authoritative.
+
+For a draft whose grouping differs from its base view, optional draft
+`collapsed_groups` stores that preview's disclosure independently. Omitting it
+starts the different grouping expanded; a same-group draft uses its base view.
+Saved-disclosure recovery also resolves the matching draft. The client checks
+the captured workspace, provider identity, owner and expected disclosure again
+when queued compaction is admitted. Draft edits merge only changed fields and
+disclosure intent onto the latest acknowledged state. A failed cleanup write
+retains saved preferences and offers manual Retry; the metadata-read deadline
+does not retry an admitted settings write. The probe page is never task data.
+Compaction also disables automatic network retries. Skipped compaction does not
+acknowledge failed predecessor edits that still have an ordinary successor.
+
+
+Complete plugin groupings use `group: "plugin:<plugin-id>:<grouping-id>"`.
+These always use the server query, even when the browser has complete resident
+task coverage. The server authorizes before saved-preference lookup and provider
+execution, then renews workspace authorization after the RPC before reading
+tasks. Missing personal preferences cannot mask a workspace-access denial.
+Classification is joined to filtered roots before pagination and never grants
+access to another workspace's tasks.
+
+Successful plugin pages add `grouping_revision` and `grouping_generation`;
+clients can send their previous values on a later-page request. A changed source
+resets that request to page one. `query_key` includes both source identities.
+Entries can add `group_color`. `total_tasks` counts unique matching tasks;
+`total_visible_tasks` and page bounds count visible occurrences, including roots
+and descendants repeated across groups.
+
+A missing, disabled, failed, timed-out, malformed, oversized, or incomplete
+provider returns HTTP 503 with `error_code: "sidebar_grouping_unavailable"`.
+This is not a successful empty snapshot. Workspace authorization failures remain
+separate and clear previously retained results.
+The complete-snapshot wire format rejects duplicate recognized fields and
+case-folded aliases before interpreting classification or raw array limits.
+Such ambiguous replies cannot become successful **Untagged** pages.
+
+`GET /api/plugins/sidebar-groupings` returns active compatible provider metadata,
+also supplied as boot `sidebarGroupings`. The
+`plugin.sidebar-grouping.updated` WebSocket notification carries either
+`{plugin_id, workspace_id}`, install-wide `{plugin_id}`, or
+`{catalog: true, plugin_id?}`. Workspace notifications use workspace authorization;
+global notifications contain identity only, never classification/state values.
+Catalog events with a plugin identity fence only that provider before metadata
+refresh. A catalog refresh preserves unchanged provider generations and pages;
+store/account/workspace changes and reconnect retain their broader fences.
+
 A query accepts up to 20 filter clauses. Each `in` or `not_in` membership filter
 accepts up to 1,000 values, including an empty list. Each decoded string is
 limited to 256 UTF-8 bytes; JSON escaping does not consume that decoded limit.
@@ -408,9 +483,17 @@ success.
 
 Every browser queue read or mutation requires the exact `task_id`, `session_id`, and `session_incarnation_id` triplet. This applies to `message.queue.get`, `message.queue.add`, `message.queue.append`, `message.queue.cancel`, `message.queue.drain`, `message.queue.update`, `message.queue.remove`, `message.queue.merge`, `message.queue.reorder`, `message.queue.send_now`, `message.queue.auto_run.set`, and `message.queue.auto_merge.set`. The gateway authorizes the task/session pair and the queue layer compares the supplied incarnation before acting. A deleted or replaced session returns the same non-enumerating not-found response as an inaccessible session; the request is not redirected to a new session with the same textual ID and clients must not retry it against a freshly looked-up identity.
 
-Ordinary `message.queue.add` admissions use one effective automatic-merge policy snapshot. An untouched session inherits the current install-wide value and its global revision. `message.queue.auto_merge.set` accepts required `enabled` and creates a persistent explicit session override; later global changes no longer affect that session. The newly admitted row folds only into its immediate pending predecessor when both rows have the same strict source and compatible task, model, plan mode, metadata, attachments, context files, and entity references; the merged context-file union is capped at 200 descriptors. An eligible direct fold can succeed at or above capacity because it adds no row. A staged-attachment admission at or above capacity is rejected before a fold or attachment claim. Otherwise, capacity or incompatibility leaves the admission rejected or separate as applicable. A successful fold returns the surviving earlier row's `entry_id`, while a separate admission returns the new row's ID. Automatic merging applies only to later ordinary admissions, not existing rows, explicit append/coalesce/restore/retry/send-now operations, or the independent manual merge action.
+Ordinary `message.queue.add` admissions capture Auto-merge from one global value/revision snapshot and resolve its session override. An untouched session inherits the current install-wide value, ON by default. `message.queue.auto_merge.set` accepts required `enabled` and creates a persistent explicit override; later global changes no longer affect that session. Auto-merge includes both adjacent folding and sorted same-sender agent folding. There is no separate sorting action or policy tuple.
 
-`message.queue.get`, the Auto-merge mutation response, and `message.queue.status_changed` expose `task_id`, `session_id`, `session_incarnation_id`, `status_epoch`, `status_generation`, `auto_merge_available`, `auto_merge_enabled`, `auto_merge_source`, and `auto_merge_revision` with the queue entries and existing Auto-run/manual-merge fields. `status_epoch` is the session incarnation. Within an epoch, clients apply only increasing status generations. `auto_merge_available:false` means the backend could not establish authoritative policy and the control must remain disabled; it is not an OFF value. A `session` source is an explicit override; a `global` source remains inherited. Session and global revisions are monotonic within their own source. Internal task-only recount events have explicit task scope and are not session status.
+With effective Auto-merge ON, an agent row with a non-empty sender task first tries the latest pending row from that sender across ordinary intervening rows. An incompatible or leased latest target does not permit searching older targets; protected lifecycle, workflow, server, and move-task rows bound the search. Every eligible source retains immediate-predecessor folding as the fallback, and user messages never move. Both paths use unchanged strict-source compatibility checks for task, model, plan mode, metadata, attachments, context files, and entity references; the context-file union is capped at 200 descriptors. A direct fold can succeed at or above capacity because it adds no row. Staged attachments at capacity are rejected before folding or claiming. A fold returns the surviving target's `entry_id`; a separate admission returns the new row's ID. OFF disables both paths.
+
+The Auto-merge mutation returns its policy tuple plus `compacted_count` (source rows removed) and publishes authoritative queue status. A session write changing effective Auto-merge from OFF to ON atomically compacts pending rows with the policy write, using sorted agent folds and compatible adjacent folds. Global changes, ON-to-ON writes, and OFF writes never compact; OFF never splits content. Compaction preserves Auto-run and does not dispatch. Explicit append/coalesce/restore/retry/send-now operations and manual merging retain their contracts.
+
+`message.queue.get` and `message.queue.status_changed` expose `task_id`, `session_id`, `session_incarnation_id`, `status_epoch`, `status_generation`, and the Auto-merge policy tuple with queue entries and the existing Auto-run/manual-merge fields:
+
+- `auto_merge_available`, `auto_merge_enabled`, `auto_merge_source`, `auto_merge_revision`
+
+`status_epoch` identifies the backend process lifetime, while `session_incarnation_id` identifies the immutable session row. Within an epoch and incarnation, clients apply only increasing status generations. Unavailable Auto-merge reports `auto_merge_available: false` and omits its enabled/source/revision tuple; preserve the last authoritative tuple and disable the control rather than treating this as OFF. A `session` source is an explicit override; a `global` source remains inherited. Revisions are monotonic within their source, and a session tuple cannot regress to global. Mutation responses are not ordered status: refetch authoritative status rather than applying their tuples directly. Internal task-only recount events have explicit task scope and are not session status.
 
 `message.queue.merge` folds a queued entry into the entry directly above it. In addition to the required identity triplet, its payload requires `entry_id` (the source entry being merged away); `user_id` is optional and defaults to `user`. On success the response carries the surviving merged entry's `entry_id` (the target's ID) and the server broadcasts an updated `message.queue.status_changed`. The request is rejected with `entry_not_found` when the entry was already drained or is not owned by the caller, with a validation error when no mergeable entry exists above it, and with `merge_reference_overflow` when the combined entity-reference lists would exceed the per-message cap. The overflow rejection is atomic; neither row changes.
 
@@ -905,6 +988,9 @@ configuration and refetch their permitted catalogue, including when access was
 revoked. Failed eligibility resolution does not broadcast private executor
 configuration.
 
+Office task status updates and tree cancellation or restoration publish
+`task.state_changed` after the state commit. Unchanged states and rejected
+writes do not publish a transition.
 
 The following catalog lists actions with current non-test emission paths. It intentionally excludes constants for which no active emitter was found, including the old `acp.*` compatibility constants, `permission.requested`, `input.requested`, `agent.updated`, and `office.activity.created`. Permission and clarification state currently arrives through session message records instead.
 
@@ -1087,6 +1173,8 @@ Routing is an efficiency mechanism, not the access-control boundary. With authen
 - **Responses arrive in the wrong order:** this is normal concurrent dispatch. Match by unique `id`, never arrival order.
 
 Dedicated `/terminal/*target` and `/lsp/:sessionId` WebSockets, plus `/vscode/:sessionId/*path` and `/port-proxy/:sessionId/:port/*path` proxies, are separate protocols. They do not use this JSON envelope and should not be sent `/ws` actions.
+
+Browser terminal streams at `/terminal/*target` and `/api/v1/agent-login/sessions/:sessionId/stream` use WebSocket control pings to stay active through idle proxies. Kandev sends a ping every 54 seconds and closes a connection if it receives no pong for 60 seconds. Configure proxy idle timeouts to at least 60 seconds. The socket continues reading pongs while it forwards terminal input and buffers up to 256 pending messages with a combined payload of 1 MiB. A single larger message can use an otherwise empty buffer. If the pending queue fills, Kandev closes the stream and the existing reconnect behavior applies. These control frames do not contain terminal data and do not change the `/ws` JSON envelope or its 32 MiB message limit.
 
 The browser language-server socket at `/lsp/:sessionId?language=...` carries raw LSP JSON-RPC plus private Kandev control frames. Browser continuity is on by default in shipped profiles. The restart-required `features.lspBrowserContinuity` flag remains as a kill switch; an explicit false value restores browser-owned cleanup. With continuity enabled, a browser close or temporary network loss detaches the window while its task-host lease keeps running for up to one hour. Reopening the task within that hour can reattach to that lease without another `initialize`; each window and duplicated tab has its own lease. **Stop**, two minutes with no open editor, one hour detached, task-runtime shutdown, backend shutdown, or capacity eviction releases a lease. Reattachment cancels the detached deadline; an attached lease does not expire. `KANDEV_LSP_MAX_CONNECTIONS` counts attached and detached leases; at capacity, Kandev evicts the least-recently detached lease, or rejects a new request when all leases are attached. When continuity is disabled, closing the browser socket stops its process as before.
 

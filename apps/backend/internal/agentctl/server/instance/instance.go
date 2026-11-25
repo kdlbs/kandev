@@ -5,6 +5,7 @@ package instance
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,6 +39,9 @@ type processManager interface {
 type Instance struct {
 	// ID is the unique identifier for this instance
 	ID string
+
+	// ScopedMCPRoutes records the effective native MCP route mode.
+	ScopedMCPRoutes bool
 
 	// Port is the HTTP port this instance is listening on
 	Port int
@@ -152,6 +156,9 @@ type CreateRequest struct {
 	// ID is an optional identifier for the instance. If empty, one will be generated.
 	ID string `json:"id,omitempty"`
 
+	// ScopedMCPRoutes opts this helper into instance-scoped built-in MCP routes.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes,omitempty"`
+
 	// WorkspacePath is the required absolute path to the workspace directory.
 	WorkspacePath string `json:"workspace_path"`
 
@@ -221,6 +228,14 @@ type CreateRequest struct {
 	// clients that append the injected server name to every tool.
 	NamespacesMCPToolsByServer bool `json:"namespaces_mcp_tools_by_server,omitempty"`
 
+	// OfflineBudgetMinutes is the raw JSON offline budget. Absent or null
+	// means the default; the control server validates it and stores the result
+	// in OfflineBudget so a malformed value is never silently replaced.
+	OfflineBudgetMinutes json.RawMessage `json:"offline_budget_minutes,omitempty"`
+
+	// OfflineBudget is the validated budget; zero means no budget clock.
+	OfflineBudget time.Duration `json:"-"`
+
 	// RequiresProcessKill forces the agent's process group to be killed on
 	// shutdown instead of relying on stdin close. Required for agents whose
 	// runtime keeps child processes alive when stdin closes (notably
@@ -249,6 +264,8 @@ type CreateRequest struct {
 	RemoteContributions       map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
 	ContributionDestinations  map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
 	WorkspaceSourceRoots      []string                                  `json:"workspace_source_roots,omitempty"`
+	WorkspaceExcludedRoots    []string                                  `json:"workspace_excluded_roots,omitempty"`
+	TaskWorkspaceRoot         string                                    `json:"task_workspace_root,omitempty"`
 	DurableJournalPath        string                                    `json:"durable_journal_path,omitempty"`
 	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
@@ -270,13 +287,20 @@ type CreateResponse struct {
 
 	// Port is the HTTP port the instance is listening on
 	Port int `json:"port"`
+
+	// ScopedMCPRoutes is the effective mode accepted by this helper.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes"`
 }
 
 // InstanceInfo contains serializable information about an instance for API responses.
 // It mirrors the exported fields from Instance and is safe for JSON serialization.
 type InstanceInfo struct {
+	ACPProtocolVersion uint16 `json:"acp_protocol_version,omitempty"`
 	// ID is the unique identifier for this instance
 	ID string `json:"id"`
+
+	// ScopedMCPRoutes is the retained helper's effective route mode.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes"`
 
 	// Port is the HTTP port this instance is listening on
 	Port int `json:"port"`
@@ -307,6 +331,8 @@ type InstanceInfo struct {
 
 	// TaskID is the task ID this instance was created for, if any.
 	TaskID string `json:"task_id,omitempty"`
+
+	WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
 
 	// WorkspaceSourceRoots is the live, current source-root allowlist this
 	// instance is enforcing right now -- a rescan or rebind can change it
@@ -346,14 +372,19 @@ func (i *Instance) Info() *InstanceInfo {
 	var sourceRoots []string
 	var providerSessionID string
 	var copilotNativeSessionEvents bool
+	var acpProtocolVersion uint16
 	if i.manager != nil {
 		sourceRoots = i.manager.WorkspaceSourceRoots()
 		providerSessionID = i.manager.GetSessionID()
 		copilotNativeSessionEvents = i.manager.CopilotNativeSessionEventsActive()
+		if reporter, ok := i.manager.(interface{ ACPProtocolVersion() uint16 }); ok {
+			acpProtocolVersion = reporter.ACPProtocolVersion()
+		}
 	}
 
 	return &InstanceInfo{
 		ID:                         i.ID,
+		ScopedMCPRoutes:            i.ScopedMCPRoutes,
 		Port:                       i.Port,
 		LeaseGeneration:            i.lease.Generation,
 		ListenerActive:             i.listenerActive.Load(),
@@ -367,6 +398,7 @@ func (i *Instance) Info() *InstanceInfo {
 		WorkspaceSourceRoots:       sourceRoots,
 		ProviderSessionID:          providerSessionID,
 		CopilotNativeSessionEvents: copilotNativeSessionEvents,
+		ACPProtocolVersion:         acpProtocolVersion,
 	}
 }
 

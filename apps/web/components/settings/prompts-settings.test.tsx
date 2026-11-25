@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CustomPrompt } from "@/lib/types/http";
 import { SettingsSaveProvider } from "./settings-save-provider";
-import { getPromptDraftMeta, PromptsSettings } from "./prompts-settings";
+import { PromptsSettings } from "./prompts-settings";
 
 const mocks = vi.hoisted(() => ({
   createPrompt: vi.fn(),
@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
   isMobile: false,
   promptEditor: vi.fn(),
 }));
+
+// Prompt Sync has its own tests; this file covers the prompt list.
+vi.mock("@/components/settings/prompt-sync-section", () => ({ PromptSyncSection: () => null }));
 
 vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
   useCustomPrompts: () => ({ loaded: true }),
@@ -60,6 +63,7 @@ const promptId = "prompt-1";
 const promptName = "Review";
 const promptContent = "Review this change";
 const promptRowTestId = "prompt-list-item";
+const promptNameAttribute = "data-prompt-name";
 const promptContentInputTestId = "prompt-content-input";
 const promptDeleteButtonTestId = "prompt-delete-button";
 const promptDeletePopoverTestId = "prompt-delete-confirm-popover";
@@ -98,7 +102,7 @@ const existingPrompt: CustomPrompt = {
 
 function renderPromptSettings() {
   mocks.prompts = [existingPrompt];
-  render(
+  return render(
     <SettingsSaveProvider>
       <PromptsSettings />
     </SettingsSaveProvider>,
@@ -277,15 +281,6 @@ describe("PromptsSettings deletion requests", () => {
 });
 
 describe("PromptsSettings coordinated creation", () => {
-  it("treats an opened create form as a dirty route draft", () => {
-    expect(
-      getPromptDraftMeta([], null, true, { name: "", content: "", allowAgentEdits: false }),
-    ).toEqual({
-      isDirty: true,
-      revision: 'new:{"name":"","content":"","allowAgentEdits":false}',
-    });
-  });
-
   it("creates a prompt only when the floating route Save is pressed", async () => {
     render(
       <SettingsSaveProvider>
@@ -328,52 +323,18 @@ describe("PromptsSettings coordinated creation", () => {
   });
 });
 
-describe("PromptsSettings agent permission intent", () => {
-  it("preserves a remote revocation when saving an unrelated local draft", async () => {
-    mocks.prompts = [{ ...existingPrompt, allow_agent_edits: true }];
-    mocks.updatePrompt.mockImplementation(async (_id, patch) => ({
-      ...mocks.prompts[0],
-      ...patch,
-    }));
-    const tree = (
-      <SettingsSaveProvider>
-        <PromptsSettings />
-      </SettingsSaveProvider>
-    );
-    const { rerender } = render(tree);
-    fireEvent.click(screen.getByTestId(promptEditButtonTestId));
-    fireEvent.change(screen.getByTestId(promptContentInputTestId), {
-      target: { value: "Local draft" },
-    });
-    mocks.prompts = [{ ...existingPrompt, allow_agent_edits: false }];
-    rerender(
-      <SettingsSaveProvider>
-        <PromptsSettings />
-      </SettingsSaveProvider>,
-    );
-    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
-    expect((screen.getByTestId(promptContentInputTestId) as HTMLTextAreaElement).value).toBe(
-      "Local draft",
-    );
-    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
-    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledOnce());
-    expect(mocks.updatePrompt.mock.calls[0][1]).not.toHaveProperty("allow_agent_edits");
-    expect(mocks.prompts[0].allow_agent_edits).toBe(false);
-  });
-
-  it("sends an explicitly changed permission with the draft", async () => {
-    mocks.updatePrompt.mockResolvedValue({ ...existingPrompt, allow_agent_edits: true });
-    renderPromptSettings();
-    fireEvent.click(screen.getByTestId(promptEditButtonTestId));
-    fireEvent.click(screen.getByRole("switch"));
-    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
-    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledOnce());
-    expect(mocks.updatePrompt.mock.calls[0][1].allow_agent_edits).toBe(true);
-  });
-});
-
 const searchLabel = "Search...";
 const builtinNeedleName = "BuiltIn Needle";
+
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-004.3
+describe("PromptsSettings layout", () => {
+  it("draws no group card around the custom prompts, only the search bar and rows", () => {
+    renderPromptSettings();
+    const section = screen.getByTestId("prompts-custom-section");
+    expect(section.querySelector("[data-settings-group-card]")).toBeNull();
+    expect(within(section).getByTestId(promptRowTestId)).toBeTruthy();
+  });
+});
 
 describe("PromptsSettings search", () => {
   it("filters the mounted list by saved content beyond its preview", () => {
@@ -391,7 +352,7 @@ describe("PromptsSettings search", () => {
       target: { value: "hidden body" },
     });
     expect(screen.getAllByTestId(promptRowTestId)).toHaveLength(1);
-    expect(screen.getByTestId(promptRowTestId).getAttribute("data-prompt-name")).toBe("Review");
+    expect(screen.getByTestId(promptRowTestId).getAttribute(promptNameAttribute)).toBe("Review");
   });
 
   it("matches literal name and raw body case insensitively, preserves order and data, and resets", () => {
@@ -415,7 +376,7 @@ describe("PromptsSettings search", () => {
     );
     const search = screen.getByRole("searchbox", { name: searchLabel });
     const names = () =>
-      screen.queryAllByTestId(promptRowTestId).map((row) => row.getAttribute("data-prompt-name"));
+      screen.queryAllByTestId(promptRowTestId).map((row) => row.getAttribute(promptNameAttribute));
 
     fireEvent.change(search, { target: { value: "  nEeDlE  " } });
     expect(names()).toEqual([builtinNeedleName, "Second"]);
@@ -614,46 +575,5 @@ describe("PromptsSettings search during delete confirmation refresh", () => {
     expect(screen.getByText(noResultsText)).toBeTruthy();
     expect(search.hasAttribute("disabled")).toBe(false);
     expect(mocks.deletePrompt).not.toHaveBeenCalled();
-  });
-});
-
-describe("PromptsSettings search with distinct active rows", () => {
-  it("keeps both the edited row and the delete target in saved-list order", () => {
-    const second = { ...existingPrompt, id: "other", name: "Review other" };
-    mocks.prompts = [existingPrompt, second];
-    const { rerender } = render(
-      <SettingsSaveProvider>
-        <PromptsSettings />
-      </SettingsSaveProvider>,
-    );
-    const search = screen.getByRole("searchbox", { name: searchLabel });
-    fireEvent.change(search, { target: { value: promptName } });
-    const [editingRow, deleteRow] = screen.getAllByTestId(promptRowTestId);
-    fireEvent.click(within(editingRow).getByTestId(promptEditButtonTestId));
-    fireEvent.change(within(editingRow).getByTestId(promptContentInputTestId), {
-      target: { value: "Unsaved draft" },
-    });
-    fireEvent.click(within(deleteRow).getByTestId(promptDeleteButtonTestId));
-    const confirmation = screen.getByTestId(promptDeletePopoverTestId);
-    mocks.prompts = [
-      { ...existingPrompt, name: "Updated first", content: "Other first" },
-      { ...second, name: "Updated second", content: "Other second" },
-    ];
-    rerender(
-      <SettingsSaveProvider>
-        <PromptsSettings />
-      </SettingsSaveProvider>,
-    );
-    expect(screen.getAllByTestId(promptRowTestId)).toEqual([editingRow, deleteRow]);
-    expect(
-      (within(editingRow).getByTestId(promptContentInputTestId) as HTMLTextAreaElement).value,
-    ).toBe("Unsaved draft");
-    expect(screen.getByTestId(promptDeletePopoverTestId)).toBe(confirmation);
-    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
-    expect(screen.getAllByTestId(promptRowTestId)).toEqual([editingRow]);
-    expect(search.hasAttribute("disabled")).toBe(true);
-    fireEvent.click(within(editingRow).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryAllByTestId(promptRowTestId)).toHaveLength(0);
-    expect(search.hasAttribute("disabled")).toBe(false);
   });
 });

@@ -9,6 +9,8 @@
 // Comment union
 // ---------------------------------------------------------------------------
 
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
+
 export type AnnotationSide = "additions" | "deletions";
 
 type CommentBase = {
@@ -21,6 +23,7 @@ type CommentBase = {
    */
   repositoryId?: string;
   text: string;
+  attachments?: MessageAttachment[];
   createdAt: string;
   status: "pending" | "sent";
 };
@@ -110,10 +113,18 @@ export type MessageTextAnchor = {
 
 export type AgentMessageComment = CommentBase & {
   source: "agent-message";
+  /** Chat message ID, or the Office thread comment ID when `authorName` is set. */
   messageId: string;
   selectedText: string;
   anchor: MessageTextAnchor;
+  /** Set for extracts taken from an Office thread comment: the comment author's display name. */
+  authorName?: string;
 };
+
+/** Comment-store scope for pending extracts of an Office task thread (no chat session exists). */
+export function officeTaskCommentScope(taskId: string): string {
+  return `office-task:${taskId}`;
+}
 
 export type Comment =
   | DiffComment
@@ -172,6 +183,7 @@ export type CommentsActions = {
   clearPending: () => void;
   setEditingComment: (commentId: string | null) => void;
   markCommentsSent: (commentIds: string[]) => void;
+  markCommentsSentIfUnchanged: (comments: AgentMessageComment[]) => void;
   clearSessionComments: (sessionId: string) => void;
   hydrateSession: (sessionId: string) => void;
   /** Remove an acknowledged legacy plan row from memory without rewriting storage. */

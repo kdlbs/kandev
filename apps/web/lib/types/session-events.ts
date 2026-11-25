@@ -170,8 +170,18 @@ export type TurnEventPayload = {
   metadata?: Record<string, unknown>;
   /** Whether the completed turn produced any agent output. Only set on turn.completed. */
   had_output?: boolean;
+  /** Live-only ACP configuration command result. Not part of saved turn history. */
+  configuration_result?: ConfigurationCommandResult;
   created_at: string;
   updated_at: string;
+};
+
+export type ConfigurationCommandResult = {
+  status: "applied" | "clamped" | "unconfirmed";
+  config_id?: string;
+  requested: string;
+  effective?: string;
+  confirmed: boolean;
 };
 
 export type AvailableCommandsPayload = {

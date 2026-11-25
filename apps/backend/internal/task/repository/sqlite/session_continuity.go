@@ -106,11 +106,13 @@ const sessionContinuitySchema = `
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
 			resolved_at TIMESTAMP,
-			UNIQUE (session_id, incarnation_id, expected_generation, reason),
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 		);
 		CREATE INDEX IF NOT EXISTS idx_session_recovery_blocks_open
 			ON session_recovery_blocks(session_id, incarnation_id, state);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_session_recovery_blocks_open_reason
+			ON session_recovery_blocks(session_id, incarnation_id, expected_generation, reason)
+			WHERE state = 'open';
 	`
 
 func (r *Repository) initSessionContinuitySchema() error {
@@ -444,32 +446,45 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
 	if err := r.bindProjectedTerminalToRecoveryBlock(ctx, tx, block); err != nil {
 		return err
 	}
+	if block.State == models.RecoveryBlockResolved {
+		handled, err := r.upsertResolvedSessionRecoveryBlockTx(ctx, tx, block)
+		if err != nil {
+			return err
+		}
+		if handled {
+			return nil
+		}
+	}
 	query := `
 		INSERT INTO session_recovery_blocks
 		(id, session_id, incarnation_id, expected_generation, reason, state,
 		 consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
 		 delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (session_id, incarnation_id, expected_generation, reason) DO UPDATE SET
+		ON CONFLICT (session_id, incarnation_id, expected_generation, reason) WHERE state = 'open' DO UPDATE SET
 		 state = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.state ELSE excluded.state END,
 		 consumer_reference = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.consumer_reference ELSE excluded.consumer_reference END,
 		 delivery_submission_id = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.delivery_submission_id ELSE excluded.delivery_submission_id END,
 		 delivery_stream_id = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.delivery_stream_id
            WHEN session_recovery_blocks.consumer_reference = 'agent_delivery'
            AND excluded.consumer_reference = 'agent_delivery'
@@ -478,29 +493,34 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
            ELSE excluded.delivery_stream_id END,
 		 delivery_sequence = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.delivery_sequence ELSE excluded.delivery_sequence END,
 		 delivery_turn_id = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.delivery_turn_id ELSE excluded.delivery_turn_id END,
 		 delivery_outcome = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.delivery_outcome ELSE excluded.delivery_outcome END,
 		 authorized_action = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.authorized_action ELSE excluded.authorized_action END,
 		 updated_at = excluded.updated_at,
 		 resolved_at = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.resolved_at ELSE excluded.resolved_at END
 		RETURNING id`
 	var canonicalID string

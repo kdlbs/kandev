@@ -198,7 +198,7 @@ func TestLaunchPreparedSessionRejectsRetainedRuntimeBeforeEffects(t *testing.T) 
 				agentManager.setMcpModeCallCount != 0 ||
 				agentManager.stopAgentCallCount != 0 ||
 				agentManager.launchAgentCallCount != 0 ||
-				agentManager.startAgentProcessCallCount != 0 ||
+				agentManager.startAgentProcessCallCount.Load() != 0 ||
 				agentManager.promptAgentCallCount != 0 {
 				t.Fatalf(
 					"effects before admission: env=%d mcp=%d stop=%d launch=%d start=%d prompt=%d",
@@ -206,7 +206,7 @@ func TestLaunchPreparedSessionRejectsRetainedRuntimeBeforeEffects(t *testing.T) 
 					agentManager.setMcpModeCallCount,
 					agentManager.stopAgentCallCount,
 					agentManager.launchAgentCallCount,
-					agentManager.startAgentProcessCallCount,
+					agentManager.startAgentProcessCallCount.Load(),
 					agentManager.promptAgentCallCount,
 				)
 			}

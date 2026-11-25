@@ -4,7 +4,7 @@ title: "Refresh managed runtime pins"
 status: completed
 wave: 1
 depends_on: []
-created: 2026-11-08
+created: 2026-11-20
 plan: "plan.md"
 requirements:
   - REQ-AGENTS-RUNTIME-UPDATES-001
@@ -29,7 +29,13 @@ commands before writing this completed record.
 
 | Package | Previous | Proposed |
 | --- | --- | --- |
-| `@github/copilot` | `1.0.105` | `1.0.106` |
+| `@agentclientprotocol/claude-agent-acp` | `0.107.0` | `0.109.0` |
+| `@agentclientprotocol/codex-acp` | `2.7.0` | `2.8.0` |
+| `@github/copilot` | `1.0.111` | `1.0.114` |
+| `@google/gemini-cli` | `0.68.0` | `0.70.0` |
+| `@openai/codex` | `0.169.0` | `0.171.0` |
+| `@opencode/cli` | `2.3.0` | `2.3.2` |
+| `opencode-ai` | `1.19.5` | `1.19.6` |
 
 ## Validation
 

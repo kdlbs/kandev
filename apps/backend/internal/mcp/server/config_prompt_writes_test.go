@@ -17,6 +17,8 @@ func TestSharedPromptWritesCatalog(t *testing.T) {
 				if !ok {
 					continue
 				}
+				require.Contains(t, tool.Tool.Description, "explicitly requested or agreed")
+				require.Contains(t, tool.Tool.Description, "read back")
 				require.ElementsMatch(t, []string{"name", "content"}, tool.Tool.InputSchema.Required)
 				require.False(t, *tool.Tool.Annotations.ReadOnlyHint)
 				require.False(t, *tool.Tool.Annotations.OpenWorldHint)

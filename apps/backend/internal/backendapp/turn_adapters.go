@@ -9,8 +9,8 @@ import (
 	"go.uber.org/zap"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
@@ -57,6 +57,14 @@ func (a *turnServiceAdapter) ReconcileUnpublishedPromptTurns(ctx context.Context
 
 func (a *turnServiceAdapter) CompleteTurn(ctx context.Context, turnID string) error {
 	return a.svc.CompleteTurn(ctx, turnID)
+}
+
+func (a *turnServiceAdapter) CompleteTurnWithConfigurationResult(
+	ctx context.Context,
+	turnID string,
+	result *streams.ConfigurationCommandResult,
+) error {
+	return a.svc.CompleteTurnWithConfigurationResult(ctx, turnID, result)
 }
 
 func (a *turnServiceAdapter) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {
@@ -345,36 +353,6 @@ func (a *repositoryLookupAdapter) GetRepository(ctx context.Context, id string) 
 		return "", "", false
 	}
 	return repo.WorkspaceID, repo.DefaultBranch, true
-}
-
-// LookupTaskRepository resolves provider metadata only when repositoryID is
-// linked to taskID. Azure association validation fails closed on a nil result.
-func (a *repositoryLookupAdapter) LookupTaskRepository(
-	ctx context.Context,
-	taskID, repositoryID string,
-) (*azuredevops.RepositoryBinding, error) {
-	task, err := a.svc.GetTask(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	linked := false
-	for _, taskRepository := range task.Repositories {
-		if taskRepository != nil && taskRepository.RepositoryID == repositoryID {
-			linked = true
-			break
-		}
-	}
-	if !linked {
-		return nil, nil
-	}
-	repository, err := a.svc.GetRepository(ctx, repositoryID)
-	if err != nil {
-		return nil, err
-	}
-	return &azuredevops.RepositoryBinding{
-		WorkspaceID: repository.WorkspaceID, Provider: repository.Provider,
-		ProviderOwner: repository.ProviderOwner, ProviderRepoID: repository.ProviderRepoID,
-	}, nil
 }
 
 // RepositoryExists satisfies orchestrator.RepositoryChecker. It uses the

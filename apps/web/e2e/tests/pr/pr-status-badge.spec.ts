@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { expectConflictCornerGeometry } from "../../helpers/pr-badge-geometry";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
 
@@ -113,7 +114,7 @@ test.describe("PR status badge", () => {
     });
   });
 
-  test("shows and clears one conflict warning across sidebar, Home card, and pipeline row", async ({
+  test("shows and clears conflict priority across surfaces, restoring failed CI", async ({
     testPage,
     apiClient,
     seedData,
@@ -164,6 +165,7 @@ test.describe("PR status badge", () => {
       .getByTestId(`pr-task-icon-${task.id}`);
     await expect(sidebarIcon.getByTestId("pr-merge-conflict-warning")).toBeVisible();
     await expect(sidebarIcon).toHaveAttribute("aria-label", /Conflicts/);
+    await expectConflictCornerGeometry(sidebarIcon, 14);
 
     const kanban = new KanbanPage(testPage);
     // This test navigated through /tasks; explicitly select this workflow so
@@ -174,9 +176,11 @@ test.describe("PR status badge", () => {
       .taskCardInColumn(title, inboxStep.id)
       .getByTestId(`pr-task-icon-${task.id}`);
     await expect(cardIcon.getByTestId("pr-merge-conflict-warning")).toBeVisible();
+    await expectConflictCornerGeometry(cardIcon, 14);
     await kanban.switchToPipelineView();
     const pipelineIcon = kanban.pipelineTask(task.id).getByTestId(`pr-task-icon-${task.id}`);
     await expect(pipelineIcon.getByTestId("pr-merge-conflict-warning")).toBeVisible();
+    await expectConflictCornerGeometry(pipelineIcon, 14);
 
     await apiClient.mockGitHubAssociateTaskPR({
       ...pr,
@@ -199,9 +203,12 @@ test.describe("PR status badge", () => {
     await expect(pipelineIcon).toBeVisible();
     await expect(sidebarIcon.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
     await expect(pipelineIcon.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
+    await expect(sidebarIcon.getByTestId("pr-ci-bubble-failed")).toBeVisible();
+    await expect(pipelineIcon.getByTestId("pr-ci-bubble-failed")).toBeVisible();
     await kanban.viewToggleKanban.first().click();
     await expect(cardIcon).toBeVisible();
     await expect(cardIcon.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
+    await expect(cardIcon.getByTestId("pr-ci-bubble-failed")).toBeVisible();
   });
 
   test("hydrates the sidebar PR badge on /tasks when details are off", async ({

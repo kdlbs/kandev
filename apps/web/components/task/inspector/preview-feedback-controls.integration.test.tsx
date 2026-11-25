@@ -10,6 +10,7 @@ const feedback = vi.hoisted(() => ({
   snapshot: { task_id: "task-1", revision: 0, items: [] as TaskPreviewFeedback[] },
   create: vi.fn(),
   update: vi.fn(),
+  replaceScreenshot: vi.fn(),
   remove: vi.fn(),
   clear: vi.fn(),
   isMutating: false,
@@ -38,6 +39,8 @@ vi.mock("html2canvas-pro", () => ({ default: html2canvas }));
 
 const bridge = vi.hoisted(() => ({
   sendSetPreviewCaptureMode: vi.fn(),
+  sendSetAnnotationActive: vi.fn(),
+  sendCaptureSelection: vi.fn(),
   sendProjectPreviewMarkers: vi.fn(),
 }));
 vi.mock("@/lib/preview-inspect-bridge", async () => {
@@ -51,7 +54,7 @@ vi.mock("@/hooks/use-compact-task-chrome", () => ({
   useTouchDrawer: () => false,
 }));
 
-import { PreviewFeedbackControls } from "./preview-feedback-controls";
+import { PreviewAnnotationLayer } from "./preview-annotation-layer";
 import { usePreviewCapture } from "@/hooks/use-preview-capture";
 
 function Harness({ iframeRef }: { iframeRef: React.RefObject<HTMLIFrameElement | null> }) {
@@ -61,14 +64,90 @@ function Harness({ iframeRef }: { iframeRef: React.RefObject<HTMLIFrameElement |
     source: { kind: "browser", sessionId: "session-1", label: "Local app" },
     enabled: true,
   });
-  return <PreviewFeedbackControls capture={capture} enabled />;
+  return <PreviewAnnotationLayer capture={capture} />;
 }
 
 function dispatch(iframe: HTMLIFrameElement, data: unknown) {
-  window.dispatchEvent(new MessageEvent("message", { source: iframe.contentWindow, data }));
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      source: iframe.contentWindow,
+      data,
+      origin: new URL(iframe.src).origin,
+    }),
+  );
 }
 
-describe("PreviewFeedbackControls with the capture controller", () => {
+function savedItem(id: string, comment: string): TaskPreviewFeedback {
+  return {
+    id,
+    task_id: "task-1",
+    kind: "element",
+    comment,
+    source_kind: "browser",
+    source_session_id: "session-1",
+    source_label: "Local app",
+    page_route: "/checkout",
+    page_title: "Checkout",
+    element_snapshot: {
+      tag: "button",
+      selector: `#${id}`,
+      classes: [],
+      outer_html: `<button id="${id}">${comment}</button>`,
+    },
+    capture_rect: { x: 10, y: 20, width: 80, height: 30 },
+    version: 1,
+    created_at: "2026-09-15T00:00:00Z",
+    updated_at: "2026-09-15T00:00:00Z",
+  };
+}
+
+async function keepsNewerMarkerEditorOpen() {
+  const first = savedItem("marker-a", "First comment");
+  const second = savedItem("marker-b", "Second comment");
+  feedback.items = [first, second];
+  let finishUpdate: ((value: typeof feedback.snapshot) => void) | undefined;
+  feedback.update.mockImplementation(() => new Promise((resolve) => (finishUpdate = resolve)));
+  const iframe = document.createElement("iframe");
+  iframe.src = "http://localhost:3000";
+  document.body.appendChild(iframe);
+  render(<Harness iframeRef={{ current: iframe }} />);
+
+  act(() =>
+    dispatch(iframe, {
+      source: "kandev-inspector",
+      version: INSPECTOR_PROTOCOL_VERSION,
+      type: "marker-activated",
+      payload: { id: first.id },
+    }),
+  );
+  const firstInput = await screen.findByTestId("preview-feedback-edit-input");
+  fireEvent.change(firstInput, { target: { value: "Updated first comment" } });
+  fireEvent.click(screen.getByTestId("preview-feedback-edit-save"));
+  await waitFor(() =>
+    expect(feedback.update).toHaveBeenCalledWith(first.id, "Updated first comment", 1),
+  );
+
+  act(() =>
+    dispatch(iframe, {
+      source: "kandev-inspector",
+      version: INSPECTOR_PROTOCOL_VERSION,
+      type: "marker-activated",
+      payload: { id: second.id },
+    }),
+  );
+  const secondInput = await screen.findByTestId("preview-feedback-edit-input");
+  expect((secondInput as HTMLTextAreaElement).value).toBe(second.comment);
+
+  await act(async () =>
+    finishUpdate?.({ ...feedback.snapshot, revision: 1, items: [first, second] }),
+  );
+
+  expect((screen.getByTestId("preview-feedback-edit-input") as HTMLTextAreaElement).value).toBe(
+    second.comment,
+  );
+}
+
+describe("PreviewAnnotationLayer with the capture controller", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     vi.clearAllMocks();
@@ -101,6 +180,7 @@ describe("PreviewFeedbackControls with the capture controller", () => {
 
   it("retains the comment and uploaded PNG after create fails, then retries without upload", async () => {
     const iframe = document.createElement("iframe");
+    iframe.src = "http://localhost:3000";
     document.body.appendChild(iframe);
     const iframeRef = { current: iframe };
     render(<Harness iframeRef={iframeRef} />);
@@ -126,7 +206,7 @@ describe("PreviewFeedbackControls with the capture controller", () => {
 
     const comment = screen.getByLabelText("Comment on selection");
     fireEvent.change(comment, { target: { value: screenshotComment } });
-    fireEvent.click(screen.getByRole("button", { name: "Save feedback" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() =>
       expect(feedback.create).toHaveBeenCalledWith(
@@ -146,7 +226,7 @@ describe("PreviewFeedbackControls with the capture controller", () => {
     );
 
     feedback.create.mockResolvedValue(null);
-    fireEvent.click(screen.getByRole("button", { name: "Save feedback" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     await waitFor(() => expect(feedback.create).toHaveBeenCalledTimes(2));
     expect(attachments.uploadAttachment).toHaveBeenCalledTimes(1);
     expect(feedback.create).toHaveBeenLastCalledWith(
@@ -156,4 +236,6 @@ describe("PreviewFeedbackControls with the capture controller", () => {
       }),
     );
   });
+
+  it("keeps a newer marker editor open when an earlier save finishes", keepsNewerMarkerEditorOpen);
 });

@@ -19,10 +19,7 @@ import type { ResolvedDestination } from "@/lib/navigation/types";
 import type { ShortcutCatalogEntry } from "@/lib/sidebar/shortcut-catalog";
 import type { ShortcutActivityReader } from "@/hooks/domains/sidebar/use-shortcut-activity";
 import { ShortcutSection } from "@/components/app-sidebar/shortcut-section";
-import {
-  ShortcutRows,
-  type ShortcutActivation,
-} from "@/components/app-sidebar/shortcut-section-actions";
+import type { ShortcutActivation } from "@/components/app-sidebar/shortcut-section-actions";
 import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
 import {
   selectNeedsYouInboxCount,
@@ -34,6 +31,7 @@ import { MobileSidebarCustomization } from "./mobile-sidebar-customization";
 import { MobileNewTaskRow } from "./mobile-new-task-row";
 import { DestinationRows } from "./destination-rows";
 import { MobileAutomationsSection } from "./mobile-automations-section";
+import { MobileAutomationRow } from "./mobile-automation-row";
 import { MobileCoordinatorsSection } from "./mobile-coordinators-section";
 import { MobileCanvasesSection } from "./mobile-canvases-section";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
@@ -249,12 +247,16 @@ function SavedMobileAutomationRows({
         </div>
       )}
       {!catalog.loading && !catalog.error && (
-        <ShortcutRows
-          shortcuts={resourceShortcuts(node, entries, []).shortcuts}
-          activity={getActivity}
-          mobile
-          onNavigate={onNavigate}
-        />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          {resourceShortcuts(node, entries, []).shortcuts.map((shortcut) => (
+            <MobileAutomationRow
+              key={shortcut.id}
+              shortcut={shortcut}
+              activity={getActivity(shortcut.target.id)}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
       )}
       <Button asChild variant="outline" className="h-11 w-full cursor-pointer justify-start px-3">
         <Link href={workspaceSettingsHref(workspaceId!, "automations")} onClick={onNavigate}>

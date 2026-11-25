@@ -481,7 +481,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 						s.logger.Warn("failed to persist dynamic route for prepared session",
 							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(routeErr))
 					}
-					_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, routeErr, launchSession)
+					_ = s.handleSessionPreparationFailure(bgCtx, taskID, sessionID, routeErr, launchSession)
 					return
 				}
 				launchProfileID = route.launchProfileID
@@ -489,10 +489,19 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			}
 			prepExec, launchErr := s.executor.LaunchPreparedSession(bgCtx, task, sessionID, executor.LaunchOptions{AgentProfileID: launchProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID})
 			if launchErr != nil {
+				if executor.IsSessionStateSwitched(launchErr) {
+					// A concurrent workflow session switch owns this session now.
+					// This launch is not a failure of its own dynamic route.
+					launchOwned = true
+					s.logger.Info("prepared session launch superseded by a concurrent workflow session switch",
+						zap.String("task_id", taskID),
+						zap.String("session_id", sessionID))
+					return
+				}
 				// LaunchAgent failures persist FAILED in the executor. Earlier
 				// workspace failures return here and are recorded through the same
 				// session-level recovery claim.
-				launchErr = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, launchErr)
+				launchErr = s.handleSessionPreparationFailure(bgCtx, taskID, sessionID, launchErr)
 				s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
@@ -876,7 +885,7 @@ func (s *Service) startCreatedSession(
 
 	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options)
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, startPayload)
-	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, originFromAutoStart(autoStart), startPayload)
+	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, ceilingClaimedReplayOrigin(ctx, taskID, originFromAutoStart(autoStart)), startPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -998,7 +1007,9 @@ func (s *Service) startCreatedSession(
 			return nil, fmt.Errorf("session was switched but no active session found: %w", activeErr)
 		}
 		session = activeSession
-		seam2Res.rekeyToSession(ctx, activeSession.ID)
+		if err := seam2Res.rekeyToSession(ctx, activeSession.ID); err != nil {
+			return nil, err
+		}
 		sessionID = activeSession.ID
 		effectiveProfileID = activeSession.AgentProfileID
 	}
@@ -1035,19 +1046,14 @@ func (s *Service) startCreatedSession(
 	planModeActive := planMode
 	if !options.promptAlreadyComposed {
 		var generatedPromptReferenceContext string
-		if options.preserveDirectPrompt {
-			effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContextOptions(
-				ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
-				planMode, task.IsEphemeral, session.IsPassthrough, false, promptReferenceContext,
-				options.promptReferencesPrepared, true,
-			)
-		} else {
-			effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContextOptions(
-				ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
-				planMode, task.IsEphemeral, session.IsPassthrough, false, promptReferenceContext,
-				options.promptReferencesPrepared, false,
-			)
-		}
+		effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContextOptions(
+			ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
+			planMode, task.IsEphemeral, session.IsPassthrough, workflowPromptOptions{
+				trustedPromptContext:     promptReferenceContext,
+				promptReferencesPrepared: options.promptReferencesPrepared,
+				preserveDirectPrompt:     options.preserveDirectPrompt,
+			},
+		)
 		if generatedPromptReferenceContext != "" {
 			// The workflow helper preserves a direct message's acceptance-time
 			// context. Auto-started workflow prompts have no prior context, so their
@@ -1259,6 +1265,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 			IncludeCoordinatorTaskControls: !configMode,
 			IncludeTaskTitleTool:           !configMode && titleOwner,
 			IncludeCanvasGuidance:          includeCanvasGuidance,
+			IncludeWorktreeAdoption:        s.worktreeAdoptionGuidance(ctx, taskID, sessionID),
 			Autopilot:                      dbTask.Autopilot,
 			IncludeUserQuestionTool:        !dbTask.Autopilot && !session.IsPassthrough,
 			IncludeParentQuestionTool:      dbTask.Autopilot && dbTask.ParentID != "",
@@ -1275,9 +1282,37 @@ func (s *Service) handleSessionLaunchFailure(
 	launchErr error,
 	preloadedSession ...*models.TaskSession,
 ) error {
+	return s.handleSessionLaunchFailureWithRetry(ctx, taskID, sessionID, launchErr, true, preloadedSession...)
+}
+
+func (s *Service) handleSessionPreparationFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchErr error,
+	preloadedSession ...*models.TaskSession,
+) error {
+	return s.handleSessionLaunchFailureWithRetry(ctx, taskID, sessionID, launchErr, false, preloadedSession...)
+}
+
+func (s *Service) handleSessionLaunchFailureWithRetry(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchErr error,
+	allowTransientRetry bool,
+	preloadedSession ...*models.TaskSession,
+) error {
 	failureCtx := context.WithoutCancel(ctx)
 	if isFixedProfileSuspendedError(launchErr) {
 		return launchErr
+	}
+	// A workflow profile switch parks its source session while a replacement
+	// session takes over. The losing launch must exit silently: failing the
+	// task here would abort the switch and surface a spurious toast.
+	if executor.IsSessionStateSwitched(launchErr) {
+		s.logger.Info("ignoring launch superseded by a concurrent workflow session switch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return routingerr.SanitizeError(launchErr)
 	}
 	if recordErr := s.recordSessionRecoveryBlock(failureCtx, sessionID, "interactive", launchErr); recordErr != nil {
 		s.logger.Warn("failed to persist session recovery block",
@@ -1293,23 +1328,28 @@ func (s *Service) handleSessionLaunchFailure(
 	// replay payload here so an early admission or startup failure does not keep
 	// attachment data alive until a later session event.
 	s.clearTransientRetryState(sessionID)
-	_ = s.recordSessionLaunchFailure(
+	sessionFailed, taskFailed, failedSession := s.recordSessionLaunchFailure(
 		failureCtx, taskID, sessionID, safeErr, preloadedSession...,
 	)
+	if allowTransientRetry && sessionFailed && taskFailed {
+		s.scheduleTransientLaunchRetryForFailure(
+			failureCtx, taskID, sessionID, safeErr, transientLaunchIdentity(failedSession),
+		)
+	}
 	return safeErr
 }
 
 // recordSessionLaunchFailure transitions a still-active session to FAILED and
 // updates the task only while the same failed session still owns it. Typed
 // launch-error persistence belongs to the executor's session transition.
-// Returns whether the session itself was durably transitioned to FAILED.
-func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) bool {
-	_, changed := s.updateTaskSessionStateWithHook(
+// It reports whether the session and the task were durably transitioned.
+func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) (sessionFailed, taskFailed bool, failedSession *models.TaskSession) {
+	failedSession, changed := s.updateTaskSessionStateWithHook(
 		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
 		nil, preloadedSession...,
 	)
 	if !changed {
-		return false
+		return false, false, nil
 	}
 	updated, err := s.updateTaskStateForEarlyLaunchFailure(ctx, taskID, sessionID)
 	if err != nil {
@@ -1317,13 +1357,13 @@ func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessio
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return true
+		return true, false, failedSession
 	}
 	if !updated {
-		return true
+		return true, false, failedSession
 	}
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateFailed)
-	return true
+	return true, true, failedSession
 }
 
 func (s *Service) updateTaskStateForEarlyLaunchFailure(
@@ -1599,21 +1639,18 @@ func (s *Service) prepareExplicitWorkflowStartRoute(
 	workflowSessionConfigStepID string,
 	entryIDs ...int64,
 ) (*models.TaskSession, string, *models.WorkflowSessionRoute, error) {
-	if workflowSessionConfigStepID == "" || s.workflowStepGetter == nil {
-		return nil, "", nil, nil
-	}
-
-	candidateStep, err := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID)
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("load workflow step for session target: %w", err)
-	}
-	if candidateStep == nil || candidateStep.SessionTarget == nil {
-		return nil, "", nil, nil
-	}
-
-	selectedSession, profileID, err := s.selectExplicitWorkflowStartSession(ctx, taskID, candidateStep)
+	selectedSession, profileID, route, err := s.resolveExplicitWorkflowStartRoute(ctx, taskID, workflowSessionConfigStepID, nil, entryIDs...)
 	if err != nil {
 		return nil, "", nil, err
+	}
+	return s.prepareSelectedWorkflowStartRoute(ctx, taskID, selectedSession, profileID, route)
+}
+
+func (s *Service) prepareSelectedWorkflowStartRoute(
+	ctx context.Context, taskID string, selectedSession *models.TaskSession, profileID string, route *models.WorkflowSessionRoute,
+) (*models.TaskSession, string, *models.WorkflowSessionRoute, error) {
+	if route == nil {
+		return selectedSession, profileID, nil, nil
 	}
 	if s.profileExecutionResolver != nil {
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, profileID); err != nil {
@@ -1621,22 +1658,6 @@ func (s *Service) prepareExplicitWorkflowStartRoute(
 		}
 	}
 
-	startPolicy := s.resolveStepProfileSessionStartPolicy(candidateStep)
-	route := &models.WorkflowSessionRoute{
-		OperationID:       workflowSessionRouteID(taskID, candidateStep.ID, s.workflowEntryIdentity(ctx, taskID, entryIDs...), candidateStep.SessionTarget, startPolicy),
-		DestinationStepID: candidateStep.ID,
-		EntryIdentity:     s.workflowEntryIdentity(ctx, taskID, entryIDs...),
-		TargetKind:        string(candidateStep.SessionTarget.Kind),
-		TargetStepID:      candidateStep.SessionTarget.StepID,
-		AgentProfileID:    profileID,
-		Phase:             workflowSessionRoutePrepared,
-	}
-	if recordedRoute, recordedSession, err := s.loadRecordedWorkflowSessionRoute(ctx, taskID, route.OperationID, candidateStep, profileID); err != nil {
-		return nil, "", nil, err
-	} else if recordedSession != nil {
-		selectedSession = recordedSession
-		route = recordedRoute
-	}
 	if selectedSession != nil || !s.supportsAtomicWorkflowSessionRouteCreation() {
 		if err := s.persistWorkflowSessionRoute(ctx, taskID, *route); err != nil {
 			return nil, "", nil, err
@@ -1731,6 +1752,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if origin == "" {
 		origin = originFromAutoStart(autoStart)
 	}
+	origin = ceilingClaimedReplayOrigin(ctx, taskID, origin)
 	manualTaskID := ""
 	if origin == launchOriginManual && retryLaunchInContext(ctx) == nil {
 		manualTaskID = taskID
@@ -1760,8 +1782,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
-	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, origin,
-		seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts))
+	seam1Payload := seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts)
+	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, origin, seam1Payload, preflightProfileID)
 	if err != nil {
 		return nil, err
 	}
@@ -1906,12 +1928,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// have its result discarded, or a step-targeted session/executor could
 	// still be picked underneath the overwritten profile.
 	if !opts.ProfileExplicit {
-		selectedExplicitSession, explicitProfileID, explicitStartRoute, err = s.prepareExplicitWorkflowStartRoute(
-			ctx,
-			task.ID,
-			workflowSessionConfigStepID,
-			opts.WorkflowEntryID,
-		)
+		if selection := seam1Res.selection; selection != nil && selection.resolved {
+			selectedExplicitSession, explicitProfileID, explicitStartRoute, err = s.prepareSelectedWorkflowStartRoute(
+				ctx, task.ID, selection.session, selection.profileID, selection.route,
+			)
+		} else {
+			selectedExplicitSession, explicitProfileID, explicitStartRoute, err = s.prepareExplicitWorkflowStartRoute(
+				ctx, task.ID, workflowSessionConfigStepID, opts.WorkflowEntryID,
+			)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1921,9 +1946,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		}
 	}
 
-	// Use provided prompt, fall back to task description
+	// A move that skips the step prompt also skips the task description fallback.
 	effectivePrompt := prompt
-	if effectivePrompt == "" {
+	if effectivePrompt == "" && (opts.EntryOptions == nil || !opts.EntryOptions.SkipStepPrompt) {
 		effectivePrompt = task.Description
 	}
 
@@ -1945,6 +1970,19 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		}
 		if !promoted {
 			selectedExplicitSession = nil
+			if seam1Res.selection != nil && seam1Res.selection.resolved {
+				decision := seam1Res.controller.readmitSelectedStart(ctx, seam1Res.key, admissionRequest{
+					taskID: taskID, profileID: explicitProfileID, profileExplicit: true, origin: origin, seam: "startTask",
+				})
+				seam1Res, deferred, err = s.completeSeam1Admission(ctx, taskID, seam1Payload, decision, nil, origin)
+				if err != nil {
+					return nil, err
+				}
+				if deferred {
+					return nil, ErrCeilingLaunchDeferred
+				}
+				defer seam1Res.releaseIfNotConsumed()
+			}
 		}
 	}
 	if sessionID == "" && opts.reusePreparedPrimary && !isOfficeTask && explicitStartRoute == nil {
@@ -1974,7 +2012,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, failPreparedLaunch(fmt.Errorf("explicit workflow start session became terminal before promotion"))
 		}
 	}
-	seam1Res.rebindToSession(sessionID)
+	if err := seam1Res.rebindToSession(sessionID, ctx); err != nil {
+		return nil, failPreparedLaunch(err)
+	}
 	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam1Res.manualOverride, seam1Res.population, seam1Res.populationKnown, seam1Res.ceiling)
 
 	if err := s.applyMCPServerSelectionsForTask(ctx, task, sessionID, opts.MCPServerIDs); err != nil {
@@ -2047,25 +2087,14 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// wrapping and launch behavior.
 	isPassthrough = launchSession.IsPassthrough
 
-	skipStepPrompt := opts.EntryOptions != nil && opts.EntryOptions.SkipStepPrompt
-	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
-		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
-		planMode, task.IsEphemeral, isPassthrough, skipStepPrompt,
-	)
-
-	// Append one-shot workflow-move instructions to a fresh auto-started
-	// session. The prompt was rebuilt from the durable step by ID above, so a
-	// transient step overlay could not carry them; append the same sentinel
-	// block once here. The sentinel guards against a double append on retry.
-	if opts.EntryOptions != nil && opts.EntryOptions.Instructions != "" &&
-		!strings.Contains(effectivePrompt, workflowmove.InstructionsEnd) {
-		wrapped := workflowmove.WrapInstructions(opts.EntryOptions.Instructions)
-		if effectivePrompt == "" {
-			effectivePrompt = wrapped
-		} else {
-			effectivePrompt = effectivePrompt + "\n\n" + wrapped
-		}
+	promptWorkflowStepID := workflowStepID
+	if promptWorkflowStepID == "" && !isOfficeTask && !opts.PreserveWorkflowSourceBinding {
+		promptWorkflowStepID = workflowSessionConfigStepID
 	}
+	effectivePrompt, planModeActive, promptReferenceContext := s.prepareFreshTaskPrompt(
+		ctx, effectivePrompt, task.ID, sessionID, promptWorkflowStepID,
+		planMode, task.IsEphemeral, isPassthrough, opts.EntryOptions,
+	)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -2081,10 +2110,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		}
 	}
 
-	ctx, err = s.executor.PrepareMCPLaunch(ctx, task.ID, launchSession, true)
+	preparedMCPContext, err := s.executor.PrepareMCPLaunch(ctx, task.ID, launchSession, true)
 	if err != nil {
 		return nil, failPreparedLaunch(fmt.Errorf("prepare built-in MCP launch: %w", err))
 	}
+	ctx = preparedMCPContext
 
 	// Wrap the first prompt with the Kandev MCP system block (task/session IDs +
 	// tool list). Done at the orchestrator layer so recordInitialMessage persists
@@ -2120,6 +2150,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			referenceContext:          promptReferenceContext,
 			includeTaskTitleTool:      !configMode && titleOwner,
 			includeCanvasGuidance:     includeCanvasGuidance,
+			includeWorktreeAdoption:   s.worktreeAdoptionGuidance(ctx, task.ID, sessionID),
 			autopilot:                 task.Autopilot,
 			includeParentQuestionTool: task.Autopilot && task.ParentID != "",
 			spawnOrigin:               opts.SpawnOrigin,
@@ -2245,6 +2276,7 @@ type launchPromptContext struct {
 	configMode                bool
 	includeTaskTitleTool      bool
 	includeCanvasGuidance     bool
+	includeWorktreeAdoption   bool
 	autopilot                 bool
 	includeParentQuestionTool bool
 	referenceContext          string
@@ -2288,6 +2320,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 		IncludeCoordinatorTaskControls: !p.configMode,
 		IncludeTaskTitleTool:           p.includeTaskTitleTool,
 		IncludeCanvasGuidance:          p.includeCanvasGuidance,
+		IncludeWorktreeAdoption:        p.includeWorktreeAdoption,
 		Autopilot:                      p.autopilot,
 		IncludeUserQuestionTool:        !p.autopilot && !p.isPassthrough,
 		IncludeParentQuestionTool:      p.autopilot && p.includeParentQuestionTool,
@@ -2912,6 +2945,43 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 }
 
+type workflowPromptOptions struct {
+	skipStepPrompt           bool
+	trustedPromptContext     string
+	promptReferencesPrepared bool
+	preserveDirectPrompt     bool
+	moveInstructions         string
+}
+
+func (s *Service) prepareFreshTaskPrompt(
+	ctx context.Context,
+	prompt, taskID, sessionID, workflowStepID string,
+	planMode, isEphemeral, isPassthrough bool,
+	entryOptions *workflowmove.EntryOptions,
+) (string, bool, string) {
+	if entryOptions == nil {
+		return s.applyWorkflowAndPlanMode(ctx, prompt, taskID, sessionID, workflowStepID,
+			planMode, isEphemeral, isPassthrough, false)
+	}
+	return s.applyWorkflowAndPlanModeWithPromptContextOptions(
+		ctx, prompt, taskID, sessionID, workflowStepID, planMode, isEphemeral, isPassthrough,
+		workflowPromptOptions{
+			skipStepPrompt:   entryOptions.SkipStepPrompt,
+			moveInstructions: workflowmove.WrapInstructions(entryOptions.Instructions),
+		},
+	)
+}
+
+func appendWorkflowMoveInstructions(prompt, instructions string) string {
+	if instructions == "" || strings.Contains(prompt, workflowmove.InstructionsEnd) {
+		return prompt
+	}
+	if prompt == "" {
+		return instructions
+	}
+	return prompt + "\n\n" + instructions
+}
+
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
 // Returns the effective prompt and whether plan mode is active (from either the step or the caller).
 // For ephemeral tasks (quick chat), workflow step processing is skipped since they have no workflow.
@@ -2951,7 +3021,10 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContext(
 ) (string, bool, string) {
 	return s.applyWorkflowAndPlanModeWithPromptContextOptions(
 		ctx, prompt, taskID, sessionID, workflowStepID, planMode,
-		isEphemeral, isPassthrough, skipStepPrompt, trustedPromptContext, false, false,
+		isEphemeral, isPassthrough, workflowPromptOptions{
+			skipStepPrompt:       skipStepPrompt,
+			trustedPromptContext: trustedPromptContext,
+		},
 	)
 }
 
@@ -2964,21 +3037,18 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContextOptions(
 	planMode bool,
 	isEphemeral bool,
 	isPassthrough bool,
-	skipStepPrompt bool,
-	trustedPromptContext string,
-	promptReferencesPrepared bool,
-	preserveDirectPrompt bool,
+	options workflowPromptOptions,
 ) (string, bool, string) {
 	effectivePrompt := prompt
 	promptReferenceContext := ""
-	if isPassthrough && trustedPromptContext != "" {
-		trustedBlock := sysprompt.Wrap(trustedPromptContext)
+	if isPassthrough && options.trustedPromptContext != "" {
+		trustedBlock := sysprompt.Wrap(options.trustedPromptContext)
 		if strings.Contains(effectivePrompt, trustedBlock) {
 			effectivePrompt = strings.TrimSpace(strings.ReplaceAll(effectivePrompt, trustedBlock, ""))
 		}
 		// Dynamic routing can switch a prepared structured launch to a
 		// passthrough profile. Hidden saved-prompt context must not reach its PTY.
-		trustedPromptContext = ""
+		options.trustedPromptContext = ""
 		promptReferenceContext = ""
 	}
 
@@ -2994,15 +3064,15 @@ func (s *Service) applyWorkflowAndPlanModeWithPromptContextOptions(
 		} else if step != nil {
 			workflowPromptComposed = true
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-			effectivePrompt, promptReferenceContext = s.buildWorkflowStepPrompt(
-				ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt,
-				trustedPromptContext, promptReferencesPrepared, preserveDirectPrompt,
+			effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithTrustedContextOptions(
+				ctx, effectivePrompt, step, taskID, sessionID, isPassthrough, options,
 			)
 		}
 	}
 	if !workflowPromptComposed {
+		effectivePrompt = appendWorkflowMoveInstructions(effectivePrompt, options.moveInstructions)
 		effectivePrompt, promptReferenceContext = s.applyDirectPromptReferenceContext(
-			ctx, effectivePrompt, isPassthrough, trustedPromptContext, promptReferencesPrepared,
+			ctx, effectivePrompt, isPassthrough, options.trustedPromptContext, options.promptReferencesPrepared,
 		)
 	}
 
@@ -3036,30 +3106,6 @@ func (s *Service) applyDirectPromptReferenceContext(
 		return prompt, ""
 	}
 	return s.expandPromptReferencesWithContext(ctx, prompt, isPassthrough)
-}
-
-func (s *Service) buildWorkflowStepPrompt(
-	ctx context.Context,
-	basePrompt string,
-	step *wfmodels.WorkflowStep,
-	taskID string,
-	sessionID string,
-	isPassthrough bool,
-	skipStepPrompt bool,
-	trustedPromptContext string,
-	promptReferencesPrepared bool,
-	preserveDirectPrompt bool,
-) (string, string) {
-	if trustedPromptContext != "" {
-		return s.buildWorkflowPromptWithTrustedContextOptions(
-			ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt,
-			trustedPromptContext, preserveDirectPrompt, promptReferencesPrepared,
-		)
-	}
-	return s.buildWorkflowPromptWithContextOptions(
-		ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt, preserveDirectPrompt,
-		promptReferencesPrepared,
-	)
 }
 
 // backfillInitialUserMessageIfMissing records the task's description as the
@@ -3206,8 +3252,11 @@ func (s *Service) buildWorkflowPromptWithContextOptions(
 	promptReferencesPrepared bool,
 ) (string, string) {
 	return s.buildWorkflowPromptWithTrustedContextOptions(
-		ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt, "",
-		preserveDirectPrompt, promptReferencesPrepared,
+		ctx, basePrompt, step, taskID, sessionID, isPassthrough, workflowPromptOptions{
+			skipStepPrompt:           skipStepPrompt,
+			preserveDirectPrompt:     preserveDirectPrompt,
+			promptReferencesPrepared: promptReferencesPrepared,
+		},
 	)
 }
 
@@ -3226,8 +3275,10 @@ func (s *Service) buildWorkflowPromptWithTrustedContext(
 	trustedPromptContext string,
 ) (string, string) {
 	return s.buildWorkflowPromptWithTrustedContextOptions(
-		ctx, basePrompt, step, taskID, sessionID, isPassthrough, skipStepPrompt,
-		trustedPromptContext, false, false,
+		ctx, basePrompt, step, taskID, sessionID, isPassthrough, workflowPromptOptions{
+			skipStepPrompt:       skipStepPrompt,
+			trustedPromptContext: trustedPromptContext,
+		},
 	)
 }
 
@@ -3238,10 +3289,7 @@ func (s *Service) buildWorkflowPromptWithTrustedContextOptions(
 	taskID string,
 	sessionID string,
 	isPassthrough bool,
-	skipStepPrompt bool,
-	trustedPromptContext string,
-	preserveDirectPrompt bool,
-	promptReferencesPrepared bool,
+	options workflowPromptOptions,
 ) (string, string) {
 	_ = sessionID
 	var parts []string
@@ -3255,9 +3303,8 @@ func (s *Service) buildWorkflowPromptWithTrustedContextOptions(
 	}
 
 	// skip_step_prompt suppresses the step prompt and its task-description
-	// fallback for this one entry; only the workflow-level block above (and any
-	// one-time move instructions appended by the caller) remain.
-	if !skipStepPrompt {
+	// fallback for this entry. The workflow block and move instructions remain.
+	if !options.skipStepPrompt {
 		// {step_entry_number} and {task_title} are resolved against the step's
 		// own template before {{task_prompt}} substitution, so a literal token
 		// inside basePrompt (task description / direct message) is never treated
@@ -3276,11 +3323,12 @@ func (s *Service) buildWorkflowPromptWithTrustedContextOptions(
 			stepCopy.Prompt = interpolated
 			interpolatedStep = &stepCopy
 		}
-		parts = append(parts, finalizeTitle(stepPromptBodyWithOptions(interpolatedStep, taskID, basePrompt, preserveDirectPrompt)))
+		parts = append(parts, finalizeTitle(stepPromptBodyWithOptions(interpolatedStep, taskID, basePrompt, options.preserveDirectPrompt)))
 	}
 
-	joined := strings.Join(parts, "\n\n")
-	if trustedPromptContext == "" && !promptReferencesPrepared {
+	joined := appendWorkflowMoveInstructions(strings.Join(parts, "\n\n"), options.moveInstructions)
+	trustedPromptContext := options.trustedPromptContext
+	if trustedPromptContext == "" && !options.promptReferencesPrepared {
 		return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
 	}
 	acceptedContext := trustedPromptContext
@@ -3603,6 +3651,9 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	continuation func(context.Context, *resumeAttempt, *executor.TaskExecution) error,
 	preReserved *sessionKeyedCeilingReservation,
 ) (*executor.TaskExecution, error) {
+	if identity, ok := transientLaunchIdentityFromResumeOptions(options); ok {
+		ctx = withTransientLaunchRetryContext(ctx, identity)
+	}
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -3621,6 +3672,11 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	defer releaseRouteOperationLock()
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
+	if identity, ok := transientLaunchFailureFromContext(ctx); ok {
+		if err := s.validateTransientLaunchFailure(ctx, taskID, sessionID, identity); err != nil {
+			return nil, err
+		}
+	}
 
 	admission, err := s.prepareResumeSessionAdmission(ctx, taskID, sessionID, options, continuation != nil, entryBinding)
 	if err != nil {
@@ -4088,6 +4144,12 @@ func (s *Service) idleSuspensionResumeShortcut(
 	session *models.TaskSession,
 	running *models.ExecutorRunning,
 ) (*executor.TaskExecution, error) {
+	if session == nil {
+		return nil, ErrIdleSuspensionProvenanceRequired
+	}
+	if _, parked := models.LoadWorkflowParking(session.Metadata); parked {
+		return nil, ErrIdleSuspensionProvenanceRequired
+	}
 	if running != nil && running.IdleSuspensionState == models.ExecutorIdleSuspensionNone && idleTaskSessionState(session.State) {
 		if execution, exists := s.executor.GetExecutionBySession(sessionID); exists && execution != nil {
 			return execution, nil
@@ -4200,8 +4262,8 @@ func (s *Service) waitForSessionAndAgentReady(ctx context.Context, sessionID, wa
 	return session, nil
 }
 
-func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
-	s.logger.Debug("waiting for starting session to become promptable",
+func (s *Service) waitForSessionPromptable(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
+	s.logger.Debug("waiting for session to become promptable",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
 	session, err := s.waitForSessionAndAgentReady(ctx, sessionID, "for prompt")
@@ -4212,6 +4274,13 @@ func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, 
 		return nil, err
 	}
 	return session, nil
+}
+
+// WaitForSessionPromptable waits until a task session and its agent can accept
+// a prompt. It also covers launches deferred while session capacity is full.
+func (s *Service) WaitForSessionPromptable(ctx context.Context, taskID, sessionID string) error {
+	_, err := s.waitForSessionPromptable(ctx, taskID, sessionID)
+	return err
 }
 
 // StartSessionForWorkflowStep starts an existing session with a workflow step's prompt configuration.
@@ -5140,6 +5209,14 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
 		resp.IsAgentRunning = true
 		resp.IsIdleSuspended = false
+		resp.NeedsResume = false
+		return resp, nil
+	}
+	if session.State == models.TaskSessionStateStarting && running != nil &&
+		running.Status == models.ExecutorRunningStatusPrepared &&
+		time.Since(session.UpdatedAt) < executor.AgentStartupGracePeriod {
+		// A prepared runtime is normally workspace-only. STARTING records that
+		// agent launch has claimed it, so passive recovery must wait for startup.
 		resp.NeedsResume = false
 		return resp, nil
 	}
@@ -7781,18 +7858,7 @@ func (s *Service) finishPromptExecutorDispatch(
 	}
 	if execErr != nil {
 		execErr = s.persistRuntimeReplacementRecoveryBlock(ctx, sessionID, delivery, execErr)
-		if delivery != nil {
-			unknownErr := delivery.markInterrupted(
-				context.WithoutCancel(ctx), "prompt_dispatch_failed",
-			)
-			recoveryErr := s.deliveryRecoveryError(
-				context.WithoutCancel(ctx), sessionID, "unknown_prompt_outcome", delivery,
-			)
-			if unknownErr != nil {
-				execErr = errors.Join(execErr, unknownErr)
-			}
-			execErr = errors.Join(execErr, recoveryErr)
-		}
+		execErr = s.settlePromptDispatchError(context.WithoutCancel(ctx), sessionID, delivery, dispatchAccepted, execErr)
 		// Missing-execution recovery reacquires the cancel guard while it resets
 		// the session. Release dispatch admission before entering that path.
 		if releaseDispatchGuard != nil {
@@ -7915,10 +7981,12 @@ func (s *Service) validateAndRunDispatchBoundary(
 	}
 	boundaryErr := runBeforeDispatch()
 	if boundaryErr == nil {
-		boundaryErr = s.admitCeilingDispatch(promptCtx, taskID)
+		// Failures after the delivery boundary but before the executor call
+		// provably sent nothing.
+		boundaryErr = lifecycle.MarkPromptNotDispatched(s.admitCeilingDispatch(promptCtx, taskID))
 	}
 	if boundaryErr == nil {
-		boundaryErr = runAfterDispatchAdmission()
+		boundaryErr = lifecycle.MarkPromptNotDispatched(runAfterDispatchAdmission())
 	}
 	if boundaryErr != nil {
 		if releaseDispatchGuard != nil {
@@ -8178,7 +8246,7 @@ func (s *Service) loadPromptableSession(ctx context.Context, taskID, sessionID s
 		if !errors.Is(promptErr, ErrSessionNotPromptable) || session.State != models.TaskSessionStateStarting {
 			return nil, promptErr
 		}
-		return s.waitForStartingSessionPromptable(ctx, taskID, sessionID)
+		return s.waitForSessionPromptable(ctx, taskID, sessionID)
 	}
 	return session, nil
 }
@@ -8511,10 +8579,10 @@ func (s *Service) attemptModelSwitchForPromptWithAdmission(
 		s.beginInitialPromptAttempt(ctx, sessionID, s.isDynamicPromptSession(session))
 		admissionErr := runBeforeDispatch()
 		if admissionErr == nil {
-			admissionErr = s.admitCeilingDispatch(ctx, taskID)
+			admissionErr = lifecycle.MarkPromptNotDispatched(s.admitCeilingDispatch(ctx, taskID))
 		}
 		if admissionErr == nil {
-			admissionErr = runAfterDispatchAdmission()
+			admissionErr = lifecycle.MarkPromptNotDispatched(runAfterDispatchAdmission())
 		}
 		if admissionErr != nil {
 			s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
@@ -10158,6 +10226,13 @@ func (s *Service) RespondToPermission(ctx context.Context, taskID, sessionID, re
 	return err
 }
 
+// CancelAgentPermission dismisses one live permission request on the same
+// generation-safe path as RespondToPermission. Unlike that wrapper, the caller
+// supplies Source and ActorKind, so the audit record names who dismissed it.
+func (s *Service) CancelAgentPermission(ctx context.Context, request ResolveAgentPermissionRequest) error {
+	return s.cancelAgentPermission(ctx, request)
+}
+
 // DrainQueuedMessage dispatches one queued message for a session that is ready
 // for input. It is intentionally one-at-a-time: each successful prompt will
 // complete its own turn and then drain the next entry through handleAgentReady.
@@ -11475,6 +11550,10 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 		return err
 	}
 	defer guard.release()
+
+	if err := s.verifyCancelTarget(ctx, sessionID); err != nil {
+		return err
+	}
 
 	// Cancellation can arrive just after the backend settled the turn, while
 	// the control is still visible. A fully idle target has nothing to

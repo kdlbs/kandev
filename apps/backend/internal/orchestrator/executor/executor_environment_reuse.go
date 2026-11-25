@@ -29,6 +29,9 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 func (e *Executor) validateReuseEnvironmentInventoryWithIdentity(
 	ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment, preserveCanonicalIdentity bool,
 ) error {
+	if env != nil && env.IsRetired() {
+		return fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
+	}
 	if !req.WorkspaceReuseRequired || env == nil || env.ID == "" || e.repo == nil {
 		return nil
 	}
@@ -226,7 +229,8 @@ func matchingCanonicalEnvironmentRepoRows(spec RepoSpec, rows []*models.TaskEnvi
 
 func canonicalEnvironmentRepoRowEligible(row *models.TaskEnvironmentRepo, useWorktree bool) bool {
 	return row != nil && row.DeletedAt == nil && row.Status != taskEnvironmentRepoStatusFailed &&
-		row.Status != taskEnvironmentRepoStatusDeleted && (!useWorktree || row.WorktreeID != "")
+		row.Status != taskEnvironmentRepoStatusDeleted && row.Status != models.TaskEnvironmentRepoStatusDetached &&
+		(!useWorktree || row.WorktreeID != "")
 }
 
 // pinDirtyCloneRelocationToSelectedWorktrees keeps an explicitly relocated

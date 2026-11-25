@@ -11,6 +11,8 @@ import type {
 import type { NativeMCPDiagnostic } from "@/lib/prepare/native-mcp-diagnostic";
 import type { ModelCatalog } from "@kandev/types/model-catalog";
 import type { UserShellScope } from "@/lib/state/user-shell-scope";
+import type { WorkspaceRootFilesResponse } from "@/lib/types/workspace-files";
+import type * as ConfigurationFeedback from "./session-configuration-feedback";
 
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
@@ -203,6 +205,10 @@ export type GitStatusRefreshState = {
   tracker_epoch?: number;
   snapshot_revision?: number;
   timestamp?: string;
+};
+
+export type WorkspaceRootFilesState = {
+  byEnvironmentId: Record<string, WorkspaceRootFilesResponse>;
 };
 
 // Git Snapshot types for historical tracking
@@ -399,6 +405,7 @@ export type SessionModelsState = {
       settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model. */
       fallbackModel?: string;
+      savedModelPreferenceId?: string;
     }
   >;
 };
@@ -619,7 +626,7 @@ export type BackgroundOutputWindow = {
   evicted: number;
 };
 
-export type SessionRuntimeSliceState = {
+export type SessionRuntimeSliceState = ConfigurationFeedback.ConfigurationFeedbackState & {
   terminal: TerminalState;
   shell: ShellState;
   processes: ProcessState;
@@ -646,11 +653,12 @@ export type SessionRuntimeSliceState = {
   sessionPollMode: SessionPollModeState;
   embeddedVscodeSupport: EmbeddedVscodeSupportState;
   workspaceFilesRefresh: { bySessionId: Record<string, number> };
+  workspaceRootFiles: WorkspaceRootFilesState;
   workspaceRestoration: WorkspaceRestorationState;
   backgroundWork: BackgroundWorkState;
 };
 
-export type SessionRuntimeSliceActions = {
+export type SessionRuntimeSliceActions = ConfigurationFeedback.ConfigurationFeedbackActions & {
   setTerminalOutput: (terminalId: string, data: string) => void;
   appendShellOutput: (sessionId: string, data: string) => void;
   setShellStatus: (
@@ -671,7 +679,14 @@ export type SessionRuntimeSliceActions = {
     refresh: GitStatusRefreshState | null,
   ) => void;
   clearGitStatus: (sessionId: string) => void;
+  /** Drops one repository scope after its root leaves the task. */
+  clearGitRepositoryStatus: (
+    sessionId: string,
+    environmentId: string,
+    repositoryName: string,
+  ) => void;
   bumpWorkspaceFilesRefresh: (sessionId: string) => void;
+  setWorkspaceRootFiles: (environmentId: string, files: WorkspaceRootFilesResponse) => void;
   /** Drops the pre-multi-repo (empty-repo-name) git-status entries so a
    *  freshly-multi-branch session doesn't surface a stale snapshot from the
    *  workspace tracker that was replaced on the backend during rescan. */
@@ -735,6 +750,7 @@ export type SessionRuntimeSliceActions = {
       /** Set when the session started on the profile's fallback model
        *  because the configured start model was unavailable. */
       fallbackModel?: string;
+      savedModelPreferenceId?: string;
     },
   ) => void;
   /** Hide a previous execution's provider configuration while startup identity settles. */

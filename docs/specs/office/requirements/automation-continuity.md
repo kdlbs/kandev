@@ -19,6 +19,12 @@ environment. The system must keep each firing addressable, preserve the
 complete shared transcript, and expose one backend-owned coordinator authority
 only to hidden automation agents.
 
+## Package-selection extension
+
+[Automation MCP selection](automation-mcp-selection.md) extends the fixed native catalog with explicit human-selected packages.
+It includes Configuration and preserves the Automation principal, hidden-run lifecycle, and Core coordination restrictions.
+Legacy automations retain the fixed catalog. Explicit selections use the linked extension.
+
 ## Terminology
 
 - **New-task policy:** `new_task`, which creates an isolated hidden task,
@@ -117,14 +123,17 @@ while preventing owner-wide access, self-targeting, and task-local questions.
 #### Acceptance criteria
 
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.1:** Every hidden automation task
-  session shall receive the fixed `SurfaceAutomation` profile resolved by the
+  session shall receive the `SurfaceAutomation` profile resolved by the
   backend before MCP dispatch. A visible normal task shall receive its normal
   task profile instead.
-- **AC-OFFICE-AUTOMATION-CONTINUITY-004.2:** The fixed catalog shall include
+- **AC-OFFICE-AUTOMATION-CONTINUITY-004.2:** The legacy Core catalog shall include
   workspace inventory, read-only launch catalog, task/session inspection,
   task coordination, and blocker coordination tools, and shall exclude
   `ask_user_question_kandev`, permanent task deletion, configuration writes,
   task-local authoring, diagnostics, plugin tools, and provider PR/MR tools.
+  Explicit native packages and plugin approvals extend this catalog under
+  [automation MCP selection](automation-mcp-selection.md) and
+  [plugin tools](automation-plugin-tools.md).
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.3:** The trusted principal shall carry
   the automation, workspace, caller task, caller session, and surface
   identities. Handlers shall use it as the workspace boundary and audit the
@@ -135,9 +144,9 @@ while preventing owner-wide access, self-targeting, and task-local questions.
   workspaces. Archiving shall be exempt from the self-target rejection so
   that an automation can archive its own hidden task as its end-of-run
   completion signal; a run bound to a specific target task shall still
-  archive only that bound target. Every other mutation on the automation's
-  own hidden task shall remain rejected, as shall any foreign-workspace
-  target.
+  archive only that bound target. Other coordination mutations on the automation's own hidden task
+  shall remain rejected, as shall any foreign-workspace target. Selected
+  package authoring tools may write reports on the caller's own task.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.5:** A task spawned on another task
   shall receive that target task's normal profile and shall not inherit
   `SurfaceAutomation` from its caller.
@@ -145,6 +154,6 @@ while preventing owner-wide access, self-targeting, and task-local questions.
 ## Out of scope
 
 - Concurrent turns or additional sessions on a reusable automation.
-- Per-automation MCP capability settings or arbitrary tool allowlists.
+- Arbitrary native tool allowlists.
 - Cross-workspace coordinator authority or self-approval.
 - Automatic reset or rebase of a reused worktree.

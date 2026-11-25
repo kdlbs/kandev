@@ -2,10 +2,12 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -24,7 +26,7 @@ func (r *Repository) lockTaskTransferRelations(
 		return err
 	}
 	tableSet := map[string]struct{}{
-		"workspaces": {}, "workflows": {}, "workflow_steps": {}, "task_transfer_operations": {},
+		"tasks": {}, "task_step_transitions": {}, "workspaces": {}, "workflows": {}, "workflow_steps": {}, "task_transfer_operations": {},
 		"task_transfer_audit": {}, "task_transfer_serialization": {},
 	}
 	if inventory.labels {
@@ -39,15 +41,37 @@ func (r *Repository) lockTaskTransferRelations(
 	for _, relation := range append(append([]transferWorkspaceProjection{}, projections...), counts...) {
 		tableSet[relation.table] = struct{}{}
 	}
+	var workspaceTable string
 	tables := make([]string, 0, len(tableSet))
 	for table := range tableSet {
 		if !validTransferRelationName(table) {
 			return fmt.Errorf("invalid task transfer relation name")
 		}
-		tables = append(tables, `"`+strings.ReplaceAll(table, `"`, `""`)+`"`)
+		quoted := `"` + strings.ReplaceAll(table, `"`, `""`) + `"`
+		if table == "workspaces" {
+			workspaceTable = quoted
+			continue
+		}
+		tables = append(tables, quoted)
 	}
 	sort.Strings(tables)
-	_, err := tx.ExecContext(ctx, `LOCK TABLE `+strings.Join(tables, ", ")+` IN SHARE ROW EXCLUSIVE MODE`)
+	if workspaceTable != "" {
+		if err := lockTaskTransferRelationsNowait(ctx, tx, workspaceTable, "SHARE ROW EXCLUSIVE"); err != nil {
+			return err
+		}
+	}
+	return lockTaskTransferRelationsNowait(ctx, tx, strings.Join(tables, ", "), "EXCLUSIVE")
+}
+
+func lockTaskTransferRelationsNowait(ctx context.Context, tx *sqlx.Tx, tables, mode string) error {
+	if tables == "" {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `LOCK TABLE `+tables+` IN `+mode+` MODE NOWAIT`)
+	var busy *pgconn.PgError
+	if errors.As(err, &busy) && busy.Code == "55P03" {
+		return fmt.Errorf("%w: transfer relations busy", repoerrors.ErrTaskTransferConflict)
+	}
 	return err
 }
 

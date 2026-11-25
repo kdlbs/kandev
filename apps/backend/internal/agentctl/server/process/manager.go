@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/opencode"
 	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/startupdiag"
@@ -50,12 +52,13 @@ import (
 type Status string
 
 const (
-	StatusStopped  Status = "stopped"
-	StatusStarting Status = "starting"
-	StatusRunning  Status = "running"
-	StatusPaused   Status = "paused"
-	StatusStopping Status = "stopping"
-	StatusError    Status = "error"
+	StatusStopped      Status = "stopped"
+	StatusStarting     Status = "starting"
+	StatusRunning      Status = "running"
+	StatusPaused       Status = "paused"
+	StatusStopping     Status = "stopping"
+	StatusError        Status = "error"
+	claudeACPAgentType        = "claude-acp"
 )
 
 // defaultUpdatesChannelCapacity is the updates channel buffer size used when
@@ -125,6 +128,8 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	filePreviewOnce          sync.Once
+	filePreviews             *filePreviewPool
 	processManagerID         string
 	questionImageWorkDir     string
 	questionImageOnce        sync.Once
@@ -193,6 +198,7 @@ type Manager struct {
 	stderrReader       io.ReadCloser
 	stderrWriter       io.WriteCloser
 	status             atomic.Value // Status
+	stopInProgress     atomic.Int32
 	exitCode           atomic.Int32
 	exitErr            atomic.Value // error
 
@@ -228,6 +234,7 @@ type Manager struct {
 	// repoTrackersMu so a rebind snapshots its proposed policy before creating
 	// replacement trackers.
 	workspaceSourceRoots           []string
+	workspaceExcludedRoots         []string
 	workspaceFileExclusions        []string
 	workspaceFileExclusionRevision uint64
 	// rescanMu serializes RescanRepositories calls so two concurrent
@@ -358,14 +365,17 @@ type Manager struct {
 	stopChSnapshot atomic.Value // chan struct{}
 	shutdownIntent atomic.Pointer[atomic.Bool]
 	doneCh         chan struct{}
-	// attachedCount is the live count of backend event-stream connections
-	// (see attachment.go). Zero value correctly starts an instance detached.
-	attachedCount atomic.Int32
+	// attach tracks the live backend event-stream connections (see
+	// attachment.go). Zero value correctly starts an instance detached.
+	attach attachTracker
 	// turnOutcomeMu guards recorder wiring independently of lifecycle transitions.
 	turnOutcomeMu            sync.RWMutex
 	turnOutcomeRecorder      TurnOutcomeRecorder
 	turnOutcomeInstanceID    string
 	startMu                  sync.Mutex
+	credentialImport         bool // guarded by startMu
+	credentialImportBlocked  bool // guarded by startMu; held after uncertain process cleanup
+	credentialStoreLock      *os.File
 	startOperationMu         sync.Mutex
 	admissionMu              sync.Mutex
 	admissionCount           int
@@ -545,6 +555,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		deliveryPromptByGeneration: make(map[uint64]string),
 		deliverySubmissionHistory:  make(map[uint64]string),
 		workspaceSourceRoots:       canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
+		workspaceExcludedRoots:     canonicalWorkspaceSourceRoots(cfg.WorkspaceExcludedRoots),
 		trackerGitEnv:              append([]string(nil), cfg.AgentEnv...),
 	}
 	if cfg.HomeDir != "" {
@@ -713,6 +724,76 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 	return descriptor, nil
 }
 
+// SuccessorDeliveryStreams lists streams in this session lifetime that belong
+// to generations newer than the process owner's configured generation.
+func (m *Manager) SuccessorDeliveryStreams(ctx context.Context) ([]journal.Stream, error) {
+	if m == nil || m.cfg == nil {
+		return nil, journal.ErrOwnerMismatch
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return nil, err
+	}
+	return deliveryJournal.ListSuccessorStreams(
+		ctx, m.cfg.SessionID, m.DeliveryIncarnationID(), m.DeliveryHarnessGeneration(),
+	)
+}
+
+// AbandonSuccessorDeliveryStream removes an uncommitted successor stream while
+// the configured generation owner is idle. This process owns the journal and
+// emits only to its configured stream, so a newer-generation stream has no
+// live writer through this owner.
+func (m *Manager) AbandonSuccessorDeliveryStream(ctx context.Context, expected journal.Stream) error {
+	if m == nil || m.cfg == nil {
+		return journal.ErrOwnerMismatch
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	if expected.SessionID != sessionID || expected.IncarnationID != incarnationID ||
+		expected.HarnessGeneration <= generation || m.activeDeliverySubmissionID() != "" {
+		return journal.ErrOwnerMismatch
+	}
+	return deliveryJournal.AbandonStream(ctx, expected)
+}
+
+// AbandonFailedBootstrapDeliveryStream removes this owner's stream after its
+// agent process has stopped and the lifecycle has confirmed that SQL never
+// committed the successor generation or its cursor.
+func (m *Manager) AbandonFailedBootstrapDeliveryStream(ctx context.Context, streamID string, generation uint64) error {
+	if m == nil || m.cfg == nil || m.Status() != StatusStopped {
+		return journal.ErrSubmissionState
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	sessionID, incarnationID, configuredGeneration := m.DeliverySubmissionIdentity()
+	if streamID != m.DeliveryStreamID() || generation != configuredGeneration ||
+		m.activeDeliverySubmissionID() != "" {
+		return journal.ErrOwnerMismatch
+	}
+	stream, err := deliveryJournal.GetStream(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	if stream.SessionID != sessionID || stream.IncarnationID != incarnationID ||
+		stream.HarnessGeneration != generation {
+		return journal.ErrOwnerMismatch
+	}
+	return deliveryJournal.AbandonStream(ctx, stream)
+}
+
 // DeliveryStreamID returns the stable transport stream identity. Agentctl
 // instance IDs identify a process incarnation and may change during executor
 // replacement; the Kandev session owns the retained event stream.
@@ -835,7 +916,11 @@ func (m *Manager) DispatchDeliverySubmission(
 		m.deliveryActiveMu.Unlock()
 	}()
 	stopping := m.shutdownIntent.Load()
-	return (&SubmissionDelivery{Journal: deliveryJournal, Stopping: stopping}).Dispatch(ctx, id, call)
+	return (&SubmissionDelivery{Journal: deliveryJournal, Stopping: stopping}).Dispatch(ctx, id, func(ctx context.Context) error {
+		m.setBudgetInFlight(id)
+		defer m.clearBudgetInFlight(id)
+		return call(streams.WithPromptSubmissionID(ctx, id))
+	})
 }
 
 func (m *Manager) activeDeliverySubmissionID() string {
@@ -889,6 +974,9 @@ func (m *Manager) submissionForGeneration(generation uint64) string {
 }
 
 func (m *Manager) deliverySubmissionIDForEvent(update adapter.AgentEvent) string {
+	if update.Type == streams.EventTypeMCPStartupWarning {
+		return ""
+	}
 	active := m.activeDeliverySubmissionID()
 	m.deliveryPromptMu.Lock()
 	defer m.deliveryPromptMu.Unlock()
@@ -943,6 +1031,78 @@ func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recov
 	return err
 }
 
+// RetireMissingUnknownDeliverySubmission writes a non-replayable journal record
+// for a SQL-confirmed interrupted prompt while the process dispatcher is idle.
+func (m *Manager) RetireMissingUnknownDeliverySubmission(ctx context.Context, submission journal.Submission) error {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	if !validMissingUnknownSubmissionShape(submission) || !m.missingUnknownSubmissionOwned(submission) {
+		return journal.ErrOwnerMismatch
+	}
+	existing, err := deliveryJournal.GetSubmission(ctx, submission.ID)
+	if errors.Is(err, journal.ErrSubmissionNotFound) {
+		return m.createMissingUnknownSubmission(ctx, deliveryJournal, submission)
+	}
+	if err != nil {
+		return err
+	}
+	return m.retireExistingMissingUnknown(ctx, deliveryJournal, existing, submission)
+}
+
+func validMissingUnknownSubmissionShape(submission journal.Submission) bool {
+	return submission.ID != "" && submission.Hash != "" && len(submission.Payload) == 0 &&
+		submission.State == journal.SubmissionInterruptedUnknown && !submission.Retired &&
+		submission.HarnessGeneration > 0 && submission.StreamID != ""
+}
+
+func (m *Manager) missingUnknownSubmissionOwned(submission journal.Submission) bool {
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	return submission.SessionID == sessionID && submission.IncarnationID == incarnationID &&
+		submission.HarnessGeneration <= generation && submission.StreamID == m.DeliveryStreamID()
+}
+
+func (m *Manager) createMissingUnknownSubmission(ctx context.Context, deliveryJournal *journal.Journal, submission journal.Submission) error {
+	submission.Retired = true
+	created, err := deliveryJournal.PutSubmission(ctx, submission)
+	if err != nil {
+		return err
+	}
+	if !created.Retired || created.State != journal.SubmissionInterruptedUnknown || !sameMissingUnknownSubmissionIdentity(created, submission) {
+		return journal.ErrSubmissionState
+	}
+	return nil
+}
+
+func (m *Manager) retireExistingMissingUnknown(ctx context.Context, deliveryJournal *journal.Journal, existing, requested journal.Submission) error {
+	if !sameMissingUnknownSubmissionIdentity(existing, requested) {
+		return journal.ErrOwnerMismatch
+	}
+	if existing.State != journal.SubmissionInterruptedUnknown {
+		if existing.State == journal.SubmissionPrepared || existing.State == journal.SubmissionDispatching || existing.State == journal.SubmissionAccepted {
+			return journal.ErrSubmissionState
+		}
+		return journal.ErrOwnerMismatch
+	}
+	if existing.Retired {
+		return nil
+	}
+	_, err := deliveryJournal.RetireSubmission(ctx, requested.ID, m.DeliveryHarnessGeneration())
+	return err
+}
+
+func sameMissingUnknownSubmissionIdentity(existing, requested journal.Submission) bool {
+	return existing.ID == requested.ID && existing.SessionID == requested.SessionID &&
+		existing.IncarnationID == requested.IncarnationID &&
+		existing.HarnessGeneration == requested.HarnessGeneration &&
+		existing.StreamID == requested.StreamID && existing.Hash == requested.Hash
+}
+
 // CancelDeliverySubmission settles one prompt after an explicit user cancel.
 // Unlike retirement, cancellation is valid in the current harness generation
 // and preserves the record as an auditable terminal outcome.
@@ -959,7 +1119,7 @@ func (m *Manager) CancelDeliverySubmission(ctx context.Context, id string) error
 		Type:                 adapter.EventTypeComplete,
 		SessionID:            submission.SessionID,
 		DeliverySubmissionID: id,
-		Data:                 map[string]any{"stop_reason": "cancelled"},
+		Data:                 map[string]any{"stop_reason": stopReasonCancelled},
 	})
 	if err != nil {
 		return err
@@ -1024,6 +1184,16 @@ func (m *Manager) SetWorkspaceSourceRoots(roots []string) {
 			tracker.SetAllowedSourceRoots(canonical)
 		}
 	}
+}
+
+// SetWorkspaceExcludedRoots replaces the detached checkouts that repository
+// discovery must not re-adopt.
+func (m *Manager) SetWorkspaceExcludedRoots(roots []string) {
+	canonical := canonicalWorkspaceSourceRoots(roots)
+	m.repoTrackersMu.Lock()
+	defer m.repoTrackersMu.Unlock()
+	m.workspaceExcludedRoots = canonical
+	m.cfg.WorkspaceExcludedRoots = append([]string(nil), canonical...)
 }
 
 // SetWorkspaceFileExclusions installs exact trusted recovery-artifact paths
@@ -1143,13 +1313,17 @@ type repositorySubdir struct {
 // that are themselves git repositories or worktrees. Returns an empty slice
 // when workDir doesn't exist, isn't readable, or contains zero git children.
 // Used to detect multi-repo task roots at Manager construction.
-func scanRepositorySubdirs(workDir string, allowedSourceRoots []string) []repositorySubdir {
+func scanRepositorySubdirs(workDir string, allowedSourceRoots []string, excludedRoots ...[]string) []repositorySubdir {
 	if workDir == "" {
 		return nil
 	}
 	entries, err := os.ReadDir(workDir)
 	if err != nil {
 		return nil
+	}
+	var excluded []string
+	if len(excludedRoots) > 0 {
+		excluded = excludedRoots[0]
 	}
 	var out []repositorySubdir
 	for _, entry := range entries {
@@ -1161,28 +1335,44 @@ func scanRepositorySubdirs(workDir string, allowedSourceRoots []string) []reposi
 		if err != nil {
 			continue
 		}
-		repositoryPath := candidate
-		if linkInfo.Mode()&os.ModeSymlink != 0 {
-			resolved, err := filepath.EvalSymlinks(candidate)
-			if err != nil || !pathWithinSourceRoots(resolved, allowedSourceRoots) {
-				continue
-			}
-			repositoryPath = resolved
-		}
-		// Directory links are how a Local task exposes durable folder and
-		// repository attachments. DirEntry.IsDir is false for a Unix symlink;
-		// Stat follows only a link already proven under a registered source root.
-		// codeql[go/path-injection] Candidate is a child of workDir; links pass containment above.
-		info, err := os.Stat(repositoryPath)
-		if err != nil || !info.IsDir() {
+		repositoryPath, contained, ok := repositorySubdirPath(candidate, linkInfo, allowedSourceRoots)
+		if !ok {
 			continue
 		}
-		if resolveGitIndexPath(repositoryPath) == "" {
+		if len(excluded) > 0 && pathWithinSourceRoots(contained, excluded) {
 			continue
 		}
 		out = append(out, repositorySubdir{name: entry.Name(), path: repositoryPath})
 	}
 	return out
+}
+
+// repositorySubdirPath validates one directory entry as a repository scope.
+// Directory links are how a Local task exposes durable folder and repository
+// attachments. DirEntry.IsDir is false for a Unix symlink; Stat follows only a
+// link already proven under a registered source root.
+// codeql[go/path-injection] Candidate is a child of workDir; links pass containment at the caller.
+func repositorySubdirPath(candidate string, linkInfo os.FileInfo, allowedSourceRoots []string) (string, string, bool) {
+	repositoryPath := candidate
+	if linkInfo.Mode()&os.ModeSymlink != 0 {
+		resolved, err := filepath.EvalSymlinks(candidate)
+		if err != nil || !pathWithinSourceRoots(resolved, allowedSourceRoots) {
+			return "", "", false
+		}
+		repositoryPath = resolved
+	}
+	info, err := os.Stat(repositoryPath)
+	if err != nil || !info.IsDir() {
+		return "", "", false
+	}
+	if resolveGitIndexPath(repositoryPath) == "" {
+		return "", "", false
+	}
+	contained := repositoryPath
+	if resolved, err := filepath.EvalSymlinks(repositoryPath); err == nil {
+		contained = resolved
+	}
+	return repositoryPath, contained, true
 }
 
 func canonicalWorkspaceSourceRoots(roots []string) []string {
@@ -1872,6 +2062,9 @@ func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
 	// from Git's slash-separated gitlink paths and create an unanchored lazy
 	// tracker instead.
 	scope := filepath.ToSlash(cleaned)
+	if tracked := m.trackedRepositoryPath(scope); tracked != "" {
+		return scope, tracked, nil
+	}
 	full := filepath.Join(m.cfg.WorkDir, filepath.FromSlash(scope))
 	info, err := os.Stat(full)
 	if err != nil {
@@ -1881,6 +2074,40 @@ func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
 		return "", "", fmt.Errorf("repo subpath is not a directory: %q", subpath)
 	}
 	return scope, full, nil
+}
+
+// workspaceRootForDiscovery is the containment boundary for linked-worktree
+// discovery. Host launches pass the task root explicitly; single-repository
+// legacy launches fall back to the agent workspace.
+func (m *Manager) workspaceRootForDiscovery() string {
+	if m == nil || m.cfg == nil {
+		return ""
+	}
+	if m.cfg.TaskWorkspaceRoot != "" {
+		return filepath.Clean(m.cfg.TaskWorkspaceRoot)
+	}
+	return filepath.Clean(m.cfg.WorkDir)
+}
+
+// trackedRepositoryPath returns the live tracker root for a repository scope.
+// A linked worktree can live at an arbitrary depth (for example
+// .claude/worktrees/fix-b), so its repository name cannot be joined onto the
+// workspace root.
+func (m *Manager) trackedRepositoryPath(repositoryName string) string {
+	if repositoryName == "" {
+		return ""
+	}
+	_, trackers := m.snapshotTrackers()
+	for _, tracker := range trackers {
+		if tracker == nil || !tracker.live() || tracker.RepositoryName() != repositoryName {
+			continue
+		}
+		if _, err := os.Stat(tracker.workDir); err != nil {
+			return ""
+		}
+		return tracker.workDir
+	}
+	return ""
 }
 
 // WorkDir returns the absolute workspace root for this agentctl instance.
@@ -2099,6 +2326,9 @@ func (m *Manager) startWithGeneration(
 ) (uint64, error) {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
+	if m.credentialImport {
+		return 0, errors.New("OpenCode credential import is in progress")
+	}
 	release, err := m.admitStart()
 	if err != nil {
 		return 0, err
@@ -2388,7 +2618,9 @@ func (m *Manager) buildAdapterConfig() error {
 		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
 	}
 	m.adapterCfg = &adapter.Config{
+		ACPProtocolVersion:         m.requestedACPProtocolVersion(),
 		WorkDir:                    m.cfg.WorkDir,
+		ClaudeConfigDir:            claudeConfigDirFromLaunch(m.cfg.AgentType, m.cfg.AgentEnv, m.cfg.StripEnv),
 		AutoApprove:                m.adapterAutoApprove(),
 		McpServers:                 mcpServers,
 		ProjectMCPDelivery:         projectDelivery.Clone(),
@@ -2404,14 +2636,18 @@ func (m *Manager) buildAdapterConfig() error {
 		PromptSuggestions:          m.cfg.PromptSuggestions,
 		CopilotNativeSessionEvents: m.cfg.CopilotNativeSessionEvents,
 	}
+
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
-		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
-		if harness == "" {
-			bundle, err := antigravityruntime.Resolve(context.Background(), antigravityruntime.ResolveOptions{})
-			if err != nil {
-				return fmt.Errorf("resolve Antigravity harness: %w", err)
+		harness := ""
+		if m.cfg.AuthPolicy.RuntimeVariant != acpcompat.AntigravityRuntimeCLI {
+			harness = acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
+			if harness == "" {
+				bundle, err := antigravityruntime.Resolve(context.Background(), antigravityruntime.ResolveOptions{})
+				if err != nil {
+					return fmt.Errorf("resolve Antigravity harness: %w", err)
+				}
+				harness = bundle.HarnessPath
 			}
-			harness = bundle.HarnessPath
 		}
 		env, err := acpcompat.PrepareLocalAntigravityEnv(m.cfg.AgentEnv, harness)
 		if err != nil {
@@ -2476,6 +2712,37 @@ func (m *Manager) buildAdapterConfig() error {
 	// must be configured with fresh evidence.
 	m.cfg.ProjectMCPDelivery = nil
 	return nil
+}
+
+func claudeConfigDirFromLaunch(agentType string, env, stripEnv []string) string {
+	if agentType != claudeACPAgentType {
+		return ""
+	}
+	for _, key := range stripEnv {
+		if key == "CLAUDE_CONFIG_DIR" {
+			return ""
+		}
+	}
+	if configDir := acpcompat.EnvValue(env, "CLAUDE_CONFIG_DIR"); configDir != "" {
+		if !filepath.IsAbs(configDir) {
+			return ""
+		}
+		return filepath.Clean(configDir)
+	}
+	homeVariable := "HOME"
+	if runtime.GOOS == checkpointWindowsOS && acpcompat.EnvValue(env, "USERPROFILE") != "" {
+		homeVariable = "USERPROFILE"
+	}
+	for _, key := range stripEnv {
+		if key == homeVariable {
+			return ""
+		}
+	}
+	home := acpcompat.EnvValue(env, homeVariable)
+	if !filepath.IsAbs(home) {
+		return ""
+	}
+	return filepath.Join(filepath.Clean(home), ".claude")
 }
 
 // buildFinalCommand assembles the full command args and creates the exec.Cmd.
@@ -2677,7 +2944,7 @@ func (m *Manager) closeStderrPipe() error {
 // startAgentShell auto-creates a shell session when ShellEnabled is configured.
 // Failure is non-fatal: the agent can still work without a shell session.
 func (m *Manager) startAgentShell() {
-	if !m.cfg.ShellEnabled {
+	if !m.cfg.ShellEnabled || m.shell != nil {
 		return
 	}
 	// Start calls this while holding startMu. Copy AgentEnv directly instead of
@@ -2749,7 +3016,7 @@ func lookupEnvValue(env []string, key string) string {
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, nil, nil, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, false, nil, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithEnvironment sets the agent command and replaces the complete
@@ -2757,39 +3024,48 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 // instance variables that are absent from env remain available to the agent.
 // This must be called before Start() if the instance was created without a command.
 func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, nil, nil, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, false, nil, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithProjectDelivery sets the agent command together with
 // execution-bound project delivery evidence. A missing record clears any
 // previous evidence so a new configuration cannot inherit it by omission.
 func (m *Manager) ConfigureWithProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, nil, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, false, delivery, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithProjectDeliveryAndInstallContext adds authenticated installer
 // provenance for reusable managed npm repairs.
 func (m *Manager) ConfigureWithProjectDeliveryAndInstallContext(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, installContext, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, false, delivery, installContext, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithEnvironmentAndProjectDelivery combines complete environment
 // replacement with execution-bound project delivery evidence.
 func (m *Manager) ConfigureWithEnvironmentAndProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, nil, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, false, delivery, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext combines
 // complete environment replacement with authenticated installer provenance.
 func (m *Manager) ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, installContext, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, false, delivery, installContext, opencode.Runtime{}, wrapper...)
 }
 
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
+// ConfigureRuntime atomically carries resolved runtime identity with launch
+// configuration.
+func (m *Manager) ConfigureRuntime(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv, preferACPV2 bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, runtime opencode.Runtime, wrapper launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, replaceEnv, preferACPV2, delivery, installContext, runtime, wrapper)
+}
+
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv, preferACPV2 bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, runtime opencode.Runtime, wrapper ...launchwrapper.Spec) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
+	if m.credentialImport {
+		return errors.New("OpenCode credential import is in progress")
+	}
 
-	if m.Status() == StatusRunning || m.Status() == StatusStarting {
+	if m.commandActive() {
 		return ErrConfigureWhileRunning
 	}
 
@@ -2829,15 +3105,14 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	m.cfg.AgentCommand = command
 	m.cfg.AgentCommandConfigured = true
 	m.cfg.AgentArgs = args
+	m.cfg.OpenCodeRuntime = runtime
+	m.cfg.PreferACPV2 = preferACPV2
 	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
 	m.cfg.LaunchWrapperRequired = !spec.IsZero()
 	m.cfg.ProjectMCPDelivery = acceptedDelivery
 
 	// Store continue command for one-shot adapters
-	if continueArgsPresent {
-		m.cfg.ContinueCommand = continueCommand
-		m.cfg.ContinueArgs = continueArgs
-	} else if continueCommand != "" {
+	if continueArgsPresent || continueCommand != "" {
 		m.cfg.ContinueCommand = continueCommand
 		m.cfg.ContinueArgs = continueArgs
 	}
@@ -2872,6 +3147,11 @@ func configuredContinueArgs(continueArgs []string, present bool, command string)
 		return nil, fmt.Errorf("invalid continue command: %w", err)
 	}
 	return parsed, nil
+}
+
+func (m *Manager) commandActive() bool {
+	status := m.Status()
+	return status == StatusRunning || status == StatusStarting || status == StatusStopping
 }
 
 type installedManagedGitTools struct {
@@ -2980,29 +3260,34 @@ func (m *Manager) createAdapter() error {
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
-	m.adapter = adpt
+	if setter, ok := adpt.(adapter.MCPAttachmentEventPersisterSetter); ok {
+		setter.SetMCPAttachmentEventPersister(m.persistDeliveryEvent)
+	}
 
 	// Set stderr provider if the adapter implements the optional StderrProviderSetter interface
-	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
+	if setter, ok := adpt.(adapter.StderrProviderSetter); ok {
 		setter.SetStderrProvider(m)
 	}
-	if consumer, ok := m.adapter.(adapter.StderrLineConsumer); ok {
+	if consumer, ok := adpt.(adapter.StderrLineConsumer); ok {
 		m.stderrConsumer = consumer
 	} else {
 		m.stderrConsumer = nil
 	}
-	if sanitizer, ok := m.adapter.(adapter.StderrLineSanitizer); ok {
+	if sanitizer, ok := adpt.(adapter.StderrLineSanitizer); ok {
 		m.stderrSanitizer = sanitizer
 	} else {
 		m.stderrSanitizer = nil
 	}
 
 	// Set the permission handler
-	m.adapter.SetPermissionHandler(m.handlePermissionRequest)
-	if setter, ok := m.adapter.(adapter.UserInputRequestHandlerSetter); ok {
+	adpt.SetPermissionHandler(m.handlePermissionRequest)
+	if setter, ok := adpt.(adapter.UserInputRequestHandlerSetter); ok {
 		setter.SetUserInputRequestHandler(m.userInputRequestHandler)
 	}
 
+	m.mu.Lock()
+	m.adapter = adpt
+	m.mu.Unlock()
 	return nil
 }
 
@@ -3042,7 +3327,11 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 				continue
 			}
 		}
-		persisted, err := m.persistDeliveryEvent(update)
+		persisted := update
+		var err error
+		if !isCommittedMCPAttachmentEvent(update) {
+			persisted, err = m.persistDeliveryEvent(update)
+		}
 		if err != nil {
 			m.logger.Error("failed to commit durable delivery event", zap.Error(err))
 			// Capture the failure before cancellation, then keep the sole
@@ -3125,6 +3414,9 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 // ingress. A cancelled caller receives an error and no acknowledgement even if
 // the writer later commits the queued observation.
 func (m *Manager) persistDeliveryEventContext(ctx context.Context, update adapter.AgentEvent) (adapter.AgentEvent, error) {
+	if connectionScopedStartupControlEvent(update) {
+		return update, nil
+	}
 	deliveryJournal, eventLimit, configured, writer := m.deliveryWriteState()
 	if eventLimit <= 0 {
 		eventLimit = deliverylimits.MaxEventBytes
@@ -3189,6 +3481,10 @@ func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter
 	}
 	events := make([]journal.Event, len(updates))
 	for i, update := range updates {
+		if update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError {
+			update = m.applyTerminalStamp(update)
+			updates[i] = update
+		}
 		payload, err := json.Marshal(update)
 		if err != nil {
 			return updates, err
@@ -3243,6 +3539,23 @@ func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter
 	return updates, nil
 }
 
+func connectionScopedStartupControlEvent(event adapter.AgentEvent) bool {
+	if event.SessionID != "" || event.DeliveryStreamID != "" || event.DeliveryIncarnationID != "" ||
+		event.DeliveryHarnessGeneration != 0 || event.DeliverySequence != 0 {
+		return false
+	}
+	switch event.Type {
+	case streams.EventTypeAgentCapabilities, streams.EventTypeAuthRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+func isCommittedMCPAttachmentEvent(event adapter.AgentEvent) bool {
+	return event.Type == streams.EventTypeMCPAttachment && event.DeliveryStreamID != "" && event.DeliverySequence > 0
+}
+
 // GetUpdates returns the channel for agent event notifications
 func (m *Manager) GetUpdates() <-chan adapter.AgentEvent {
 	return m.updatesCh
@@ -3289,12 +3602,37 @@ func (m *Manager) SendErrorEventWithProviderError(
 // existing agent update stream. Diagnostics are best effort: an overloaded
 // consumer must never delay the agent process or create a second stream.
 func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
-	event := adapter.AgentEvent{
+	m.publishMCPAttachmentEvent(adapter.AgentEvent{
 		Type:          streams.EventTypeMCPAttachment,
 		MCPAttachment: &evidence,
+	},
+		"failed to commit durable MCP attachment event",
+		"adapter updates channel full, dropping MCP attachment evidence",
+		"updates channel full, dropping MCP attachment evidence",
+		zap.String("attempt_id", evidence.AttemptID),
+		zap.String("server_name", evidence.ServerName),
+		zap.String("kind", string(evidence.Kind)),
+	)
+}
+
+func (m *Manager) publishMCPAttachmentEvent(
+	event adapter.AgentEvent,
+	commitFailureMessage string,
+	adapterDropMessage string,
+	fallbackDropMessage string,
+	fields ...zap.Field,
+) {
+	if publisher := m.mcpAttachmentEventPublisher(); publisher != nil {
+		queued, err := publisher.TryPublishMCPAttachmentEvent(event, m.persistDeliveryEvent)
+		if err != nil {
+			m.logMCPAttachmentCommitError(commitFailureMessage, err)
+		} else if !queued {
+			m.logger.Warn(adapterDropMessage, fields...)
+		}
+		return
 	}
 	if persisted, err := m.persistDeliveryEvent(event); err != nil {
-		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment event", err)
+		m.logMCPAttachmentCommitError(commitFailureMessage, err)
 		return
 	} else {
 		event = persisted
@@ -3302,32 +3640,33 @@ func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
 	if m.sendUpdateNonBlockingRecorded(event) {
 		return
 	} else {
-		m.logger.Warn("updates channel full, dropping MCP attachment evidence",
-			zap.String("attempt_id", evidence.AttemptID),
-			zap.String("server_name", evidence.ServerName),
-			zap.String("kind", string(evidence.Kind)))
+		m.logger.Warn(fallbackDropMessage, fields...)
 	}
 }
 
 // PublishMCPAttachmentAttempt starts an attachment-evidence timeline through
 // the existing non-blocking agent update stream.
 func (m *Manager) PublishMCPAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
-	event := adapter.AgentEvent{
+	m.publishMCPAttachmentEvent(adapter.AgentEvent{
 		Type:                 streams.EventTypeMCPAttachment,
 		MCPAttachmentAttempt: &attempt,
+	},
+		"failed to commit durable MCP attachment attempt",
+		"adapter updates channel full, dropping MCP attachment attempt",
+		"updates channel full, dropping MCP attachment attempt",
+		zap.String("attempt_id", attempt.AttemptID),
+	)
+}
+
+func (m *Manager) mcpAttachmentEventPublisher() adapter.MCPAttachmentEventPublisher {
+	if m.stopInProgress.Load() > 0 {
+		return nil
 	}
-	if persisted, err := m.persistDeliveryEvent(event); err != nil {
-		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment attempt", err)
-		return
-	} else {
-		event = persisted
+	if status, ok := m.status.Load().(Status); ok && (status == StatusStopping || status == StatusStopped) {
+		return nil
 	}
-	if m.sendUpdateNonBlockingRecorded(event) {
-		return
-	} else {
-		m.logger.Warn("updates channel full, dropping MCP attachment attempt",
-			zap.String("attempt_id", attempt.AttemptID))
-	}
+	publisher, _ := m.GetAdapter().(adapter.MCPAttachmentEventPublisher)
+	return publisher
 }
 
 // GetAdapter returns the protocol adapter
@@ -3382,6 +3721,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 // StopForTeardown permanently closes process admission and drains prior owners
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
+	m.StopOfflineBudget()
 	m.CloseAdmission()
 	passthroughErr := m.passthrough.StopAll(ctx)
 	passthroughErr = errors.Join(passthroughErr, m.cleanupPassthroughFiles(ctx))
@@ -3495,6 +3835,8 @@ func (m *Manager) closeDeliveryJournal() error {
 
 func (m *Manager) stop(ctx context.Context) error {
 	m.retireManagedRuntimeRepair()
+	m.stopInProgress.Add(1)
+	defer m.stopInProgress.Add(-1)
 	if err := m.passthrough.StopAll(ctx); err != nil {
 		return err
 	}
@@ -4219,13 +4561,7 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 				"startup_evidence":   evidence,
 			},
 		}
-		m.recordTerminalOutcome(&event)
-		if persisted, persistErr := m.persistDeliveryEvent(event); persistErr != nil {
-			m.logger.Error("failed to commit durable exit error event", zap.Error(persistErr))
-		} else {
-			event = persisted
-			m.sendUpdateBlockingRecorded(event)
-		}
+		m.publishProcessExitError(event)
 	default:
 		m.exitCode.Store(0)
 		m.logger.Info("agent process exited successfully",

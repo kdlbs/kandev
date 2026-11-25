@@ -10,28 +10,27 @@ owners:
 
 ## Overview
 
-Let a local Kandev user run Antigravity with a personal Google AI subscription.
-Use Google's standalone ACP server, which has separate credentials from the `agy` CLI.
-Provide installation, Google sign-in, model discovery, human questions, reliable failures, and native usage reporting.
+The built-in Antigravity profile uses ACP with a personal Google AI subscription.
+When the host has an ACP-capable CLI, the profile uses its existing Google sign-in.
+The standalone server has its own sign-in and session store.
 
-This revision extends the built-in agent. It does not claim the changes have shipped.
-The [system design](../system-design/antigravity-acp-agent.md) defines boundaries.
-The [implementation plan](../../../plans/antigravity-local-subscription/plan.md) records delivery and evidence.
+See the [design](../system-design/antigravity-acp-agent.md) and the
+[standalone](../../../plans/antigravity-local-subscription/plan.md) and
+[CLI](../../../plans/antigravity-cli-acp/plan.md) delivery plans.
 
 ## Terminology
 
-- **ACP server:** The executable from the `antigravity-acp` ACP registry entry.
-- **Harness:** Its companion `localharness_external`, with `localharness` as a legacy manual-install alternative.
-- **Native store:** Server-owned settings, credentials, and conversations under `~/.gemini/antigravity-acp` or the native credential backend.
-- **Subscription mode:** ACP method `oauth-personal`. Google determines entitlement and allowance.
-- **Local execution:** A native process sharing the Kandev host's user home. Local worktrees qualify; containers and remote machines do not.
-- **Estimated cost:** Tokens multiplied by model prices. This is not evidence of an additional Google charge.
+- **Standalone server** means the executable from the `antigravity-acp` registry entry.
+- **Harness** means its companion `localharness_external` or legacy `localharness`.
+- **Native store** means the settings, credentials, and conversations that Google manages for each runtime.
+- **Subscription mode** uses personal Google OAuth. Google determines entitlement and allowance.
+- **Local execution** runs a native process in the Kandev host's user home, including local worktrees.
+- **Estimated cost** is the token count multiplied by model prices.
 
 ## Draft revision and traceability
 
 The September draft assumed manual installation and inherited API-key billing.
-The following criteria retain their identifiers and historical meanings but are retired acceptance gates.
-New criteria replace them explicitly. Identifiers are not reused.
+The table keeps retired identifiers and identifies their replacements.
 
 | Retired draft criteria | Former constraint | Replacement |
 | --- | --- | --- |
@@ -71,17 +70,17 @@ New criteria replace them explicitly. Identifiers are not reused.
 - **AC-AGENTS-ANTIGRAVITY-ACP-002.8:** Filesystem discovery shall create no files, write no configuration, and start no process.
 - **AC-AGENTS-ANTIGRAVITY-ACP-002.9:** Cancelled or expired discovery shall return the context error.
 
-### REQ-AGENTS-ANTIGRAVITY-ACP-003: One launch command across every surface
+### REQ-AGENTS-ANTIGRAVITY-ACP-003: Consistent runtime selection
 
 **Intent:** Preserve deterministic base commands and consistent resolution.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.1:** The base command shall be `agy_acp_server.exe` on Windows and `agy_acp_server.par` elsewhere outside Linux.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.2:** The Linux base command shall remain `agy_acp_server.par --uid=`.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.1:** The standalone base command shall be `agy_acp_server.exe` on Windows and `agy_acp_server.par` on macOS.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.2:** The standalone Linux base command shall be `agy_acp_server.par --uid=`.
 - **AC-AGENTS-ANTIGRAVITY-ACP-003.3:** Base command platform selection shall use the Kandev host platform. Cross-platform remote execution remains excluded.
 - **AC-AGENTS-ANTIGRAVITY-ACP-003.4:** Base construction shall remain deterministic, without filesystem, environment, or PATH reads.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.5:** Session, runtime, and inference shall use equivalent base vectors.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.5:** Session, runtime, and inference shall use equivalent base commands for the selected runtime.
 - **AC-AGENTS-ANTIGRAVITY-ACP-003.6:** Base arguments shall not vary with model, permissions, auto-approve, agent type, or resume target.
 - **AC-AGENTS-ANTIGRAVITY-ACP-003.7:** Agent-owned construction shall add neither `--debug` nor `--notices`.
 - **AC-AGENTS-ANTIGRAVITY-ACP-003.8:** Task sessions shall use their workspace as the working directory.
@@ -89,14 +88,17 @@ New criteria replace them explicitly. Identifiers are not reused.
 - **AC-AGENTS-ANTIGRAVITY-ACP-003.11:** The agent shall retain graceful shutdown rather than always requesting immediate kill.
 - **AC-AGENTS-ANTIGRAVITY-ACP-003.12:** One-shot inference shall remain supported.
 - **AC-AGENTS-ANTIGRAVITY-ACP-003.13:** Shared profile flags and sandbox prefixes shall retain their behavior after base construction.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.14:** A qualified `agy` shall serve local previews, model discovery, inference, and new local or worktree sessions.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.15:** If no CLI qualifies, new local operations shall select the complete standalone server.
+  A failure from the selected runtime shall report that runtime's error.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-004: Config root, sessions, and skills
 
-**Intent:** Share one native store across tasks and preserve resume.
+**Intent:** Use the vendor store for each runtime and preserve resume.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-004.1:** The session directory template shall remain `{home}/.gemini/antigravity-acp`.
+- **AC-AGENTS-ANTIGRAVITY-ACP-004.1:** The standalone session directory shall remain `{home}/.gemini/antigravity-acp`. The CLI shall use its own default store.
 - **AC-AGENTS-ANTIGRAVITY-ACP-004.3:** Native resume and recovery declarations shall remain supported.
 - **AC-AGENTS-ANTIGRAVITY-ACP-004.4:** Kandev shall add no per-launch root, injected `GEMINI_HOME`, or config-root flag.
 - **AC-AGENTS-ANTIGRAVITY-ACP-004.5:** Project skills shall use `.agents/skills`.
@@ -105,6 +107,8 @@ New criteria replace them explicitly. Identifiers are not reused.
 - **AC-AGENTS-ANTIGRAVITY-ACP-004.8:** Kandev shall not modify native state during a session. Existing explicit remote-auth copying remains the only Kandev write exception.
   Writes performed by the ACP server remain server-owned.
 - **AC-AGENTS-ANTIGRAVITY-ACP-004.10:** The container session-directory target shall remain empty, without a new bind mount.
+- **AC-AGENTS-ANTIGRAVITY-ACP-004.11:** A saved conversation shall resume with the runtime that created it.
+  Older Antigravity sessions use the standalone server. If the runtime is unavailable, Kandev shall preserve the conversation and report the resume failure.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-005: Authentication owned by the ACP server
 
@@ -132,6 +136,7 @@ New criteria replace them explicitly. Identifiers are not reused.
 - **AC-AGENTS-ANTIGRAVITY-ACP-006.2:** The agent shall add no assumed HTTP or SSE MCP capability override.
 - **AC-AGENTS-ANTIGRAVITY-ACP-006.3:** MCP servers shall pass through session creation without a project-local MCP strategy.
 - **AC-AGENTS-ANTIGRAVITY-ACP-006.4:** The agent shall add no assumed server namespace for MCP tool names.
+- **AC-AGENTS-ANTIGRAVITY-ACP-006.5:** At the next process start, all local CLI profiles and models shall receive required MCP servers without profile edits.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-007: No automated remote provisioning
 
@@ -159,18 +164,20 @@ New criteria replace them explicitly. Identifiers are not reused.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-009.1:** Settings shall offer explicit local installation of a reviewed, exact release for supported hosts.
-  Both executables shall be installed. Guidance shall explain that `agy` alone is insufficient.
+- **AC-AGENTS-ANTIGRAVITY-ACP-009.1:** Settings shall identify the standalone install and install both executables from a reviewed release.
+  A qualified CLI satisfies local installation.
 - **AC-AGENTS-ANTIGRAVITY-ACP-009.2:** Installation shall verify trusted digest and bounded size, reject unsafe archive entries, and activate only a complete bundle.
   Failure or cancellation shall preserve the previous usable installation. Launch and discovery shall never download implicitly.
-- **AC-AGENTS-ANTIGRAVITY-ACP-009.3:** Local operations shall resolve the same complete managed bundle, otherwise a complete manual PATH install.
+- **AC-AGENTS-ANTIGRAVITY-ACP-009.3:** Standalone operations shall resolve the same complete managed bundle, otherwise a complete manual PATH install.
   An invalid existing managed bundle shall fail visibly without silently switching versions. Manual harness overrides shall be validated.
 - **AC-AGENTS-ANTIGRAVITY-ACP-009.4:** Installation and readiness shall remain distinct. Native crashes and unsupported platforms shall have actionable unavailable results.
   Kandev shall not silently add CPU affinity or claim live qualification from fixture tests.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-010: Local personal Google authentication
 
-**Intent:** Use one Google subscription login without a hosted OAuth service.
+**Intent:** Use the Google sign-in that belongs to the selected runtime.
+
+Criteria 010.1 through 010.6 apply to the standalone server.
 
 #### Acceptance criteria
 
@@ -187,6 +194,8 @@ New criteria replace them explicitly. Identifiers are not reused.
   Late results shall not replace newer state. Success shall require native authentication and refreshed capabilities, not a clicked Done button.
 - **AC-AGENTS-ANTIGRAVITY-ACP-010.6:** Consent URLs shall come from the active native process and pass Google HTTPS and loopback-redirect validation.
   URLs shall remain transient and operator-only. Logs, task messages, durable events, and fixtures shall contain no secrets or consent URLs.
+- **AC-AGENTS-ANTIGRAVITY-ACP-010.7:** Local CLI ACP shall use the existing CLI sign-in. When Google sign-in is required, Settings shall offer the CLI sign-in action.
+  The CLI shall share the Kandev user's home. Readiness shall come from a fresh ACP probe after sign-in.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-011: Consistent ACP compatibility
 
@@ -194,8 +203,8 @@ New criteria replace them explicitly. Identifiers are not reused.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-011.1:** Every Antigravity initialize path shall send `clientInfo.name = zed` and `clientInfo.version = 0.0.0`.
-  Other agents shall retain their identities. Product records and logs shall identify Kandev normally.
+- **AC-AGENTS-ANTIGRAVITY-ACP-011.1:** Standalone initialization shall send `clientInfo.name = zed` and `clientInfo.version = 0.0.0`.
+  CLI ACP shall use Kandev's regular ACP identity. Product records and logs shall identify Kandev normally.
 - **AC-AGENTS-ANTIGRAVITY-ACP-011.2:** Models shall come from authenticated ACP discovery, without copying `agy models` or inventing entitlement.
   An unavailable selected model shall fail explicitly without fallback.
 - **AC-AGENTS-ANTIGRAVITY-ACP-011.3:** New sessions, advertised resume/load, probes, and utility inference shall use the same runtime, home, auth, and client policy.
@@ -251,20 +260,20 @@ New criteria replace them explicitly. Identifiers are not reused.
 #### Acceptance criteria
 
 - **AC-AGENTS-ANTIGRAVITY-ACP-015.1:** Settings shall distinguish missing runtime, installing, needs sign-in, signing in, ready, and actionable failure.
-  Sign-in success shall refresh models. Task auth guidance shall link to setup and preserve the task draft.
+  Sign-in success shall refresh models. Task auth guidance shall open setup for its runtime and preserve the task draft.
 - **AC-AGENTS-ANTIGRAVITY-ACP-015.2:** Desktop shall use existing settings cards and focused dialogs.
   Phone shall use an inset sheet or focused screen, visible primary actions, 44px touch targets, and no horizontal overflow.
-  Phone users shall be able to start, monitor, cancel, and copy the link.
+  For standalone consent, phone users shall be able to start, monitor, cancel, and copy the link.
   Guidance shall require consent in a browser on the Kandev machine. Opening a phone loopback callback shall not be presented as supported.
 - **AC-AGENTS-ANTIGRAVITY-ACP-015.3:** New copy shall use localization, accessible status announcements, focus management, and retry/cancel actions.
   Reload shall reattach to active attempts. Closed or expired attempts shall not retain actionable stale URLs.
+- **AC-AGENTS-ANTIGRAVITY-ACP-015.4:** The agent list and profile shall identify the selected runtime and offer its sign-in action.
+  When no compatible runtime is installed, the agent list shall offer CLI setup and the standalone install where supported.
 
 ## Out of scope
 
-- Multiple accounts, per-task homes, credential import from `agy`, and Kandev-owned refresh.
-- Hosted callbacks, remote callback forwarding, SSH/container provisioning, and cross-platform remote launch guarantees.
-- Enterprise, ADC, API-key, and gateway setup UI. Existing remote-auth declarations remain compatible metadata only.
-- Automatic runtime updates, mutable `latest` downloads, and overwriting external PATH installs.
-- Automatic CPU affinity. The native Linux crash remains a compatibility gate until qualified evidence resolves it.
-- Google quota polling, Office allowance bars, quota-based routing, and full history-database usage accounting.
-- Static model curation and guarantees that a subscription includes every advertised model.
+- Multiple accounts, alternate homes, credential import, and Kandev-owned refresh.
+- Hosted callbacks, remote forwarding or provisioning, and new enterprise or API-key setup.
+- Automatic runtime updates and CPU affinity.
+- Quota polling, allowance bars, quota-based routing, and history-database accounting.
+- Static model catalogs and subscription entitlement guarantees.

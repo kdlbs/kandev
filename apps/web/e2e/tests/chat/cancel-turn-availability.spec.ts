@@ -32,6 +32,7 @@ test.describe.serial("Cancel turn availability", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    const cancellation = await holdCancellationSettlement(testPage);
     const releaseMarker = path.join(backend.tmpDir, `cancel-availability-${randomUUID()}`);
     const { session, sessionId } = await seedRunningGeneratingSession(
       testPage,
@@ -54,19 +55,17 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(activeSessionChat.getByTestId("submit-message-button")).toBeVisible();
 
     const cancelButton = activeSessionChat.getByTestId("cancel-agent-button");
-    const cancellation = await holdCancellationSettlement(testPage);
     cancellation.arm(sessionId);
     try {
       await cancelButton.click();
       await expect
-        .poll(
-          async () => {
-            if (!(await cancelButton.isVisible().catch(() => false))) return true;
-            return cancelButton.isDisabled();
-          },
-          { timeout: 15_000 },
-        )
+        .poll(cancellation.pendingObserved, {
+          message: "the WebSocket barrier should receive the pending cancellation event",
+          timeout: 15_000,
+        })
         .toBe(true);
+      await waitForActiveSessionCancellationPending(testPage, true);
+      await expect(cancelButton).toBeDisabled();
     } finally {
       cancellation.release();
     }

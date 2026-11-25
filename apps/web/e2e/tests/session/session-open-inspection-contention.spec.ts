@@ -63,7 +63,9 @@ test.describe("session open inspection contention", () => {
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 15_000 });
     await session.recoveryResumeButton().click();
     await expect.poll(() => proxy.interceptedResumeCount()).toBe(1);
-    await expect(session.activeChat().getByText("Resuming...", { exact: true })).toBeVisible();
+    await expect(session.activeChat().getByTestId("recovery-progress-status")).toHaveText(
+      "Resuming session",
+    );
     await expect(
       session
         .activeChat()

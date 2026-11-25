@@ -96,6 +96,10 @@ func copyDeliveryTerminalIdentity(
 	payload.DeliveryHarnessGeneration = terminal.DeliveryHarnessGeneration
 	payload.DeliverySequence = terminal.DeliverySequence
 	payload.DeliverySubmissionID = terminal.DeliverySubmissionID
+	payload.DetachedAtCommit = terminal.DetachedAtCommit
+	payload.CommittedAt = terminal.CommittedAt
+	payload.CancelCause = terminal.CancelCause
+	payload.CancelDecidedAt = terminal.CancelDecidedAt
 	copyTerminalStorageIdentity(payload, terminal, execution)
 	payload.DeliveryOutcome = string(models.DeliverySubmissionCompleted)
 	if isError, _ := terminal.Data["is_error"].(bool); isError {
@@ -391,8 +395,16 @@ func newACPSessionCreatedPayload(execution *AgentExecution, sessionID, attemptID
 		DeliveryStreamID:                   execution.DeliveryStreamID,
 		DeliveryIncarnationID:              execution.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:          execution.DeliveryHarnessGeneration,
+		AdapterVersion:                     adapterVersionForExecution(execution),
 		DeliveryReplacesNativeConversation: execution.ReplacesNativeConversation,
 	}
+}
+
+func adapterVersionForExecution(execution *AgentExecution) string {
+	if execution == nil || execution.AuthPolicy == nil {
+		return ""
+	}
+	return execution.AuthPolicy.AdapterVersion
 }
 
 // PublishAgentStreamEvent publishes an agent stream event to the event bus for WebSocket streaming.
@@ -461,6 +473,10 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 }
 
 func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData {
+	configurationResult := event.ConfigurationCommandResult
+	if event.Recovered {
+		configurationResult = nil
+	}
 	return &AgentStreamEventData{
 		Type:                             event.Type,
 		ACPSessionID:                     event.SessionID,
@@ -482,6 +498,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		SessionSettingsPolicy:            event.SessionSettingsPolicy,
 		SessionSettingsGeneration:        event.SessionSettingsGeneration,
 		PromptGeneration:                 event.PromptGeneration,
+		ConfigurationCommandResult:       configurationResult,
 		RetractedMessageIDs:              append([]string(nil), event.RetractedMessageIDs...),
 		TurnID:                           event.TurnID,
 		Data:                             event.Data,
@@ -552,6 +569,44 @@ func agentStreamSubjectID(ownerKind ExecutionOwnerKind, sessionID, runSessionID 
 		return runSessionID
 	}
 	return sessionID
+}
+
+// PublishWorktreeInventory publishes one filtered linked-worktree snapshot.
+// Identity comes from the execution, never from the agentctl payload.
+func (p *EventPublisher) PublishWorktreeInventory(execution *AgentExecution, inventory *agentctl.WorktreeInventory) {
+	if p.eventBus == nil || execution == nil || inventory == nil {
+		return
+	}
+	entries := make([]WorktreeInventoryEntryData, 0, len(inventory.Entries))
+	for _, entry := range inventory.Entries {
+		entries = append(entries, WorktreeInventoryEntryData{
+			Path:    entry.Path,
+			Branch:  entry.Branch,
+			HeadSHA: entry.HeadSHA,
+		})
+	}
+	observedAt := inventory.ObservedAt
+	if observedAt.IsZero() {
+		observedAt = time.Now().UTC()
+	}
+	payload := &WorktreeInventoryData{
+		TaskID:            execution.TaskID,
+		SessionID:         execution.SessionID,
+		TaskEnvironmentID: execution.TaskEnvironmentID,
+		ExecutorType:      execution.ExecutorType,
+		RepositoryName:    inventory.RepositoryName,
+		CommonDir:         inventory.CommonDir,
+		Entries:           entries,
+		ObservedAt:        observedAt.Format(time.RFC3339Nano),
+	}
+	event := bus.NewEvent(events.WorkspaceWorktreesObserved, "lifecycle", payload)
+	subject := events.BuildWorkspaceWorktreesSubject(execution.SessionID)
+	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+		p.logger.Error("failed to publish worktree inventory",
+			zap.String("task_id", execution.TaskID),
+			zap.String("session_id", execution.SessionID),
+			zap.Error(err))
+	}
 }
 
 // PublishGitEvent publishes a unified git event to the event bus.

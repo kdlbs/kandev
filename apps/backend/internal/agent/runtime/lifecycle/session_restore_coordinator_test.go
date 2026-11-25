@@ -19,8 +19,10 @@ func TestRestoreCoordinatorPreservesRuntimeConfiguration(t *testing.T) {
 			SessionID:         "session-1",
 			IncarnationID:     "incarnation-1",
 			HarnessGeneration: 2,
+			AdapterVersion:    "antigravity-cli/1.5.15",
 			NativeSessionID:   "native-old",
 		},
+		AdapterVersion:        "antigravity-cli/1.5.15",
 		Action:                RestoreActionContinueFromHistory,
 		ExplicitAuthorization: true,
 		TargetWorkspace:       "/workspace/new",
@@ -44,6 +46,9 @@ func TestRestoreCoordinatorPreservesRuntimeConfiguration(t *testing.T) {
 			committed = generation.NativeSessionID
 			if expected != 2 || generation.Generation != 3 {
 				t.Fatalf("generation commit = %+v, expected %d", generation, expected)
+			}
+			if generation.AdapterVersion != "antigravity-cli/1.5.15" {
+				t.Fatalf("adapter version = %q, want CLI runtime identity", generation.AdapterVersion)
 			}
 			return true, nil
 		},

@@ -81,7 +81,7 @@ See [docs/features.md](docs/features.md) for the full feature inventory, includi
   <a href="https://slack.com/"><img src="https://img.shields.io/badge/Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white" alt="Slack"></a>
 </p>
 
-Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull issues into the kanban, link tasks to PRs, and surface review activity inline. Bitbucket support is available through the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket).
+Connect Kandev to GitHub, GitLab, Jira, Linear, and Sentry to pull issues into the kanban, link tasks to PRs, and surface review activity inline. Bitbucket and Azure DevOps support is available through the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket) and the [Azure DevOps plugin](https://github.com/JnManso/kandev-plugin-azure-devops).
 
 ## Supported Agent CLIs
 
@@ -109,7 +109,7 @@ Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull
 | **Oh My Pi** | `omp` *(install `@oh-my-pi/pi-coding-agent` with Bun)* |
 | **Grok** | `grok` *(install `@xai-official/grok` with npm)* |
 | **Hermes** | `hermes` *(install with the official Hermes installer)* |
-| **Antigravity** | `agy_acp_server.par` / `.exe` *(no automated install; download from the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp), extract both archive entries into one directory, and put that directory on PATH)* |
+| **Antigravity** | Local and worktree sessions use `agy acp` 1.5.0 or later when `agy acp --help` advertises `--process-per-session`. Kandev adds this flag to each local CLI launch. If the CLI does not qualify, **Settings > Agents > Browse** installs the pinned standalone ACP bundle from the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp). The runtimes keep separate Google sign-ins. |
 
 > Most structured agent integrations communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Codex app-server is a separate experimental native integration. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/public/add-agent-cli.md) for a step-by-step guide.
 
@@ -173,6 +173,10 @@ Requires npm 7+. Installs the CLI plus a platform-matched runtime bundle in one 
 npm install -g kandev@latest
 kandev
 ```
+
+### Run your first task
+
+Follow the [first-task guide](docs/public/use-kandev.md#add-a-local-repository) to add a local repository, configure an agent, and start a task.
 
 ### Updates
 

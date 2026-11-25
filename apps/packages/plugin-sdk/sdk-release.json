@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "sdk_version": "0.2.1",
+  "sdk_version": "0.5.0",
   "host_release": null,
   "min_kandev_version": null,
   "api_versions": [1, 2],
-  "change_kind": "patch"
+  "change_kind": "additive"
 }

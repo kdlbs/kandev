@@ -185,6 +185,14 @@ describe("selection failure correlation", () => {
       true,
     );
     expect(isSelectionFailureRecoveryMetadata({ code: "permission_mode_mismatch" })).toBe(true);
+    for (const code of [
+      "thinking_level_unavailable",
+      "thinking_level_failed",
+      "thinking_level_mismatch",
+      "thinking_level_unconfirmed",
+    ]) {
+      expect(isSelectionFailureRecoveryMetadata({ causes: [{ code }] })).toBe(true);
+    }
     expect(
       isSelectionFailureRecoveryMetadata({ causes: [{ code: "transport_unavailable" }] }),
     ).toBe(false);

@@ -15,7 +15,6 @@ import (
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/coordinator"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
@@ -37,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
+	"github.com/kandev/kandev/internal/promptsync"
 	quickterminalrepository "github.com/kandev/kandev/internal/quickterminal/repository"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
@@ -60,13 +60,15 @@ import (
 )
 
 type Repositories struct {
-	SSHConnections   *sshconnections.Store
-	SSHIdentityVault *secrets.SSHIdentityVault
-	RequiredStores   *requiredstores.Tracker
-	Task             *sqliterepo.Repository
-	Analytics        analyticsrepository.Repository
-	AgentSettings    settingsstore.Repository
-	User             userstore.Repository
+	RequiredStores                   *requiredstores.Tracker
+	gitCredentialReissueSigner       *gitcredentials.ReissueCapabilitySigner
+	gitCredentialReissueSignerSource string
+	Task                             *sqliterepo.Repository
+	Analytics                        analyticsrepository.Repository
+	AgentSettings                    settingsstore.Repository
+	User                             userstore.Repository
+	SSHConnections                   *sshconnections.Store
+	SSHIdentityVault                 *secrets.SSHIdentityVault
 	// UserAccounts is the account-management view of the same user store
 	// (list/create/role/status), consumed by the auth service.
 	UserAccounts  userstore.AccountRepository
@@ -109,16 +111,18 @@ type Services struct {
 	GitHub        *github.Service
 	GitLab        *gitlab.Service
 	GitLabCleanup func() error
-	AzureDevOps   *azuredevops.Service
 	Jira          *jira.Service
 	Linear        *linear.Service
 	Sentry        *sentry.Service
 	// WorkflowSync keeps workspace workflows in sync with definition files
 	// in a configured GitHub repository. Nil when GitHub is unavailable.
 	WorkflowSync *workflowsync.Service
-	Share        *share.HTTPHandlers
-	Office       *officeservice.Service
-	OfficeSvcs   *office.Services
+	// PromptSync keeps install-wide saved prompts in sync with Markdown files
+	// in one repository directory.
+	PromptSync *promptsync.Service
+	Share      *share.HTTPHandlers
+	Office     *officeservice.Service
+	OfficeSvcs *office.Services
 	// OrchScheduler is the office SchedulerIntegration constructed by
 	// startSchedulingRuntime. Exposed here so registerRoutes can
 	// wire SetTaskContextProvider after the HandoffService is built.

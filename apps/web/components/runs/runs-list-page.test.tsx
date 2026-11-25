@@ -238,3 +238,18 @@ describe("RunsListPage live refresh", () => {
     expect(mocks.listAutomationSummaries).toHaveBeenCalledTimes(1);
   });
 });
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.19 AC-OFFICE-AUTOMATION-RUNS-001.21
+it("agenda outcome does not replace next-firing reason", async () => {
+  mocks.listAutomations.mockResolvedValue([mkAutomation({ enabled: false })]);
+  mocks.listAutomationSummaries.mockResolvedValue([
+    summary({ last_run: mkRun({ status: "failed" }) }),
+  ]);
+  render(<RunsListPage workspaceId={WORKSPACE_ID} />);
+  const row = await screen.findByTestId(`agenda-row-${AUTOMATION_ID}`);
+  await waitFor(() => expect(row.textContent).toContain("Failed"));
+  expect(screen.getByTestId("automation-next-run").textContent).toContain("Switched off");
+  expect(row.textContent).toContain("Paused");
+  expect(row.querySelector(".bg-red-500")).toBeNull();
+  expect(row.textContent).not.toContain("ago");
+});

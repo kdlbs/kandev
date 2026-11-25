@@ -486,6 +486,7 @@ type Service struct {
 	unitReach                       UnitReachResolver
 	userOrgs                        func(ctx context.Context, userID string) (string, error)
 	tasks                           repository.TaskRepository
+	sidebarGroupingResolver         sidebarGroupingResolver
 	taskRepos                       repository.TaskRepoRepository
 	workspaceFolders                repository.TaskWorkspaceFolderRepository
 	workflows                       repository.WorkflowRepository
@@ -523,6 +524,7 @@ type Service struct {
 	agentProfileExecutorValidator   AgentProfileExecutorValidator
 	workspacePolicyAttacher         WorkspacePolicyAttacher
 	projectRepositorySourceReader   ProjectRepositorySourceReader
+	projectWorkspaceReader          ProjectWorkspaceReader
 	autoArchiveCoordinator          AutoArchiveCoordinator
 	workflowTaskArchiveCoordinator  WorkflowTaskArchiveCoordinator
 	taskLifecycleCoordinator        TaskLifecycleCoordinator
@@ -556,6 +558,10 @@ type Service struct {
 	cleanupActivity                 TaskResourceCleanupActivityGate
 	branchMaterializer              BranchMaterializer
 	workspaceSourceMaterializer     WorkspaceSourceMaterializer
+	workspaceSourceRescanner        WorkspaceSourceRescanner
+	nestedWorkspaceExclusioner      NestedWorkspaceExclusioner
+	worktreeObservationMu           sync.Mutex
+	worktreeObservations            *worktreeObservationWorker
 	workspaceSourceLocksMu          sync.Mutex
 	workspaceSourceLocks            map[string]*sync.Mutex
 	taskDeletePreviewMu             sync.Mutex
@@ -628,6 +634,9 @@ type Service struct {
 	// task.updated events. Optional — unset omits the field's live update path
 	// and task.updated payloads read false/0/0, matching D9's defaults.
 	taskParkedProvider TaskParkedProvider
+	// approverNameResolver adds display names when a completion policy refuses
+	// a human action. Policy enforcement remains in the repository transaction.
+	approverNameResolver ApproverNameResolver
 	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
 	// emitted per task. It bounds live-propagation task.updated emissions to an
 	// actual change of the aggregated three-state value.
@@ -778,6 +787,12 @@ func (s *Service) SetProjectRepositorySourceReader(reader ProjectRepositorySourc
 	s.projectRepositorySourceReader = reader
 }
 
+// SetProjectWorkspaceReader wires Office project membership validation for
+// task creation paths that explicitly select a project.
+func (s *Service) SetProjectWorkspaceReader(reader ProjectWorkspaceReader) {
+	s.projectWorkspaceReader = reader
+}
+
 // SetTaskLifecycleCoordinator installs the canonical destructive task
 // transition used by automatic cleanup callers.
 func (s *Service) SetTaskLifecycleCoordinator(coordinator TaskLifecycleCoordinator) {
@@ -915,6 +930,19 @@ func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 
 func (s *Service) SetWorkspaceSourceMaterializer(m WorkspaceSourceMaterializer) {
 	s.workspaceSourceMaterializer = m
+}
+
+// SetWorkspaceSourceRescanner wires live tracker updates for adoption and
+// detach. Optional — without it, attachment rows persist and the next session
+// launch builds the tracker graph from the inventory.
+func (s *Service) SetWorkspaceSourceRescanner(r WorkspaceSourceRescanner) {
+	s.workspaceSourceRescanner = r
+}
+
+// SetNestedWorkspaceExclusioner wires the managed Git exclude used when a
+// task root is nested inside another attached checkout.
+func (s *Service) SetNestedWorkspaceExclusioner(e NestedWorkspaceExclusioner) {
+	s.nestedWorkspaceExclusioner = e
 }
 
 // SetWorkspaceSourceProviderRefresher wires the best-effort live MCP provider

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
@@ -19,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/ctxmutex"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/opencode"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -34,6 +36,10 @@ const AgentCtlPort = ports.AgentCtl
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
 	builtinMCPMu sync.Mutex
+	// registrationSettled closes after this newly created execution is either
+	// persisted as the session's current runtime or rolled back.
+	registrationSettled     chan struct{}
+	registrationSettledOnce sync.Once
 	// projectMCP carries execution-bound evidence that the host materialized
 	// the selected built-in packages into a project configuration file. It is
 	// produced only after a successful write and never persisted.
@@ -103,6 +109,9 @@ type AgentExecution struct {
 	// launches, where AgentProfileID owns both identity and execution config.
 	OfficeAgentProfileID string
 	AgentID              string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	// LocalRuntimeSelection pins host-local command provenance across later promotion.
+	LocalRuntimeSelection *agents.LocalRuntimeSelection
+	LocalRuntimeEnv       map[string]string
 	// CopilotNativeSessionEvents reports whether this launch requested the
 	// Copilot native event stream from a capable agentctl peer.
 	CopilotNativeSessionEvents bool
@@ -138,9 +147,11 @@ type AgentExecution struct {
 	// adoption. It is used to reconcile the descriptor's bounded high-water
 	// mark before a live stream is attached.
 	DeliveryReplayCursor uint64
-	AgentCommand         string               // Command to start the agent subprocess
-	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
-	LaunchWrapper        launchwrapper.Spec   `json:"-"`
+	AgentCommand         string             // Command to start the agent subprocess
+	ContinueCommand      string             // Command for follow-up prompts (one-shot agents)
+	LaunchWrapper        launchwrapper.Spec `json:"-"`
+	OpenCodeRuntime      opencode.Runtime
+	preferACPV2          bool
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
@@ -261,10 +272,10 @@ type AgentExecution struct {
 	agentctlSourceMu          sync.RWMutex
 	remoteInstanceLifecycleMu ctxmutex.Mutex
 	// contextResetMu owns the reset attempt boundary. While a session reset is
-	// in flight, fresh-session setup events are retained until the lifecycle
-	// manager has committed the new ACP session. A timed-out attempt discards
-	// those events and fences all later provider use until an explicit restart
-	// succeeds.
+	// in flight, bounded setup events and all retired-watch projections are
+	// retained until the lifecycle manager commits the new ACP session. A
+	// timed-out attempt discards those events and fences later provider use until
+	// an explicit restart succeeds.
 	// contextResetAdmissionMu is the shared operation lease: ordinary provider
 	// operations hold a read lease, while a reset holds the write lease through
 	// session replacement, configuration restoration, and ready publication.
@@ -275,6 +286,7 @@ type AgentExecution struct {
 	contextResetFenceReason      string
 	contextResetRecoveryInFlight bool
 	contextResetEvents           []agentctl.AgentEvent
+	contextResetSetupEventCount  int
 	// agentctlReady records the successful health check independently of the
 	// agent process and workspace stream lifecycles. Prepared sessions have a
 	// healthy agentctl before either of those is started or attached.
@@ -393,6 +405,7 @@ type AgentExecution struct {
 	providerDefaultModelState    *CachedModelState
 	authoritativeConfigResponses map[string]*CachedModelState
 	pendingConfigSettlement      *configSettlement
+	sessionConfigurationMu       sync.Mutex
 	modelStateMu                 sync.RWMutex
 
 	// Cached auth methods from agent_capabilities (for error recovery metadata)
@@ -491,6 +504,27 @@ type AgentExecution struct {
 	// callback cannot validate one generation and mutate another after the
 	// validation lock is released.
 	startupCallbackMu sync.RWMutex
+}
+
+func (e *AgentExecution) settleRegistration() {
+	if e == nil || e.registrationSettled == nil {
+		return
+	}
+	e.registrationSettledOnce.Do(func() {
+		close(e.registrationSettled)
+	})
+}
+
+func (e *AgentExecution) waitRegistrationSettled(ctx context.Context) error {
+	if e == nil || e.registrationSettled == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-e.registrationSettled:
+		return nil
+	}
 }
 
 // SessionSettingsPolicy controls whether startup restores the saved mode/model
@@ -1762,6 +1796,12 @@ type LaunchRequest struct {
 	// AuthPolicy is the internal child-process authentication contract for
 	// eligible host-local providers. Nil preserves existing behavior.
 	AuthPolicy *acpcompat.AuthPolicy
+	// RuntimeAdapterVersion pins a resumed native conversation to its recorded
+	// local provider runtime. Empty legacy Antigravity values select standalone.
+	RuntimeAdapterVersion string
+	// LocalRuntimeSelection pins one qualified host-local command across command
+	// construction, instance creation, and promotion for this launch.
+	LocalRuntimeSelection *agents.LocalRuntimeSelection `json:"-"`
 	// LocalRuntimeEnv pins a validated host-local helper after environment merge.
 	LocalRuntimeEnv map[string]string
 	WorkspaceLayout string
@@ -1871,8 +1911,9 @@ type LaunchRequest struct {
 	// When non-empty it is the source of truth; the legacy single-repo top-level
 	// fields above are populated from Repositories[0] for callers that have not
 	// yet been updated.
-	Repositories     []RepoLaunchSpec
-	WorkspaceFolders []WorkspaceFolderSpec
+	Repositories           []RepoLaunchSpec
+	WorkspaceFolders       []WorkspaceFolderSpec
+	DetachedWorkspaceRoots []string
 
 	// managedGoCachePath is resolved once before local preparation so setup
 	// scripts and the runtime instance cannot observe different settings.
@@ -1925,6 +1966,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 
 // MessageAttachment represents an image or file attachment for agent prompts.
 type MessageAttachment struct {
+	CommentID    string
 	AttachmentID string // file-backed descriptor ID; Data is empty for staged files
 	Type         string // "image", "audio", or "resource"
 	Data         string // base64-encoded data
@@ -1948,7 +1990,7 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ResourceCircuitKey string
+	ExecutionGrade     string
 	ProfileID          string
 	ProfileName        string
 	AgentID            string
@@ -1956,6 +1998,7 @@ type AgentProfileInfo struct {
 	Model              string // applied through ACP model selection at session start
 	Mode               string // applied via ACP session/set_mode at session start (empty = use agent default)
 	ConfigOptions      map[string]string
+	ResourceCircuitKey string
 	// FallbackModel is the optional single ACP model ID to switch to when
 	// Model is unavailable. Ignored when AutoFallback is enabled.
 	FallbackModel string
@@ -2066,16 +2109,17 @@ type WorkspaceInfo struct {
 	WorkspacePath          string // Path to the effective workspace root or repository
 	// WorkspaceLayout classifies WorkspacePath so repository-relative source
 	// destinations can be resolved after a restart. Empty is legacy data.
-	WorkspaceLayout       string
-	WorkspaceFolders      []WorkspaceFolderSpec
-	WorkspaceRepositories []WorkspaceRepositorySpec
-	TaskDirName           string
-	WorkspaceID           string
-	AgentProfileID        string // Stable Office agent identity (or the execution profile for legacy sessions)
-	ExecutionProfileID    string // Concrete CLI profile selected for this execution
-	ExecutorProfileID     string // Concrete executor profile selected for this execution
-	AgentID               string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
-	ACPSessionID          string // Agent's session ID for conversation resumption (from session metadata)
+	WorkspaceLayout        string
+	WorkspaceFolders       []WorkspaceFolderSpec
+	WorkspaceRepositories  []WorkspaceRepositorySpec
+	DetachedWorkspaceRoots []string
+	TaskDirName            string
+	WorkspaceID            string
+	AgentProfileID         string // Stable Office agent identity (or the execution profile for legacy sessions)
+	ExecutionProfileID     string // Concrete CLI profile selected for this execution
+	ExecutorProfileID      string // Concrete executor profile selected for this execution
+	AgentID                string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	ACPSessionID           string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
 	// from session metadata, declared via the set_session_mode workflow action or
 	// a user toggle. Applied as a mode override at ACP session init so a fresh

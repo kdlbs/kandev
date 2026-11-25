@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"runtime"
 	"time"
 
@@ -27,9 +28,15 @@ const AntigravityACPAgentID = acpcompat.AntigravityAgentID
 const antigravityConfigRelDir = ".gemini/antigravity-acp"
 
 var (
-	_ Agent          = (*AntigravityACP)(nil)
-	_ InferenceAgent = (*AntigravityACP)(nil)
+	_ Agent                  = (*AntigravityACP)(nil)
+	_ InferenceAgent         = (*AntigravityACP)(nil)
+	_ LocalRuntimeAgent      = (*AntigravityACP)(nil)
+	_ SavedLocalRuntimeAgent = (*AntigravityACP)(nil)
+	_ LoginAgent             = (*AntigravityACP)(nil)
+	_ ContextLoginAgent      = (*AntigravityACP)(nil)
 )
+
+const antigravityCLILoginVariant = "antigravity-cli"
 
 // AntigravityACP implements Agent for Google's standalone Antigravity ACP
 // server (registry entry "antigravity-acp"), a signed native binary distinct
@@ -47,10 +54,9 @@ func (a *AntigravityACP) ID() string          { return AntigravityACPAgentID }
 func (a *AntigravityACP) Name() string        { return "Antigravity ACP Agent" }
 func (a *AntigravityACP) DisplayName() string { return "Antigravity" }
 func (a *AntigravityACP) Description() string {
-	return "Google's standalone Antigravity ACP server (registry entry antigravity-acp), distributed separately from the agy CLI. " +
-		"Install it from Settings > Agents > Antigravity, then sign in with your personal Google AI subscription. " +
-		"The agy CLI and the ACP server keep separate logins. Kandev launches " +
-		"agy_acp_server.par (agy_acp_server.exe on Windows) from the managed bundle or PATH."
+	return "Uses the compatible Antigravity CLI (`agy acp`) from PATH when available, otherwise the standalone antigravity-acp server " +
+		"(`agy_acp_server.par` or `agy_acp_server.exe`). Install or check the standalone ACP server in Settings. " +
+		"Each runtime uses its own Google sign-in and conversation store."
 }
 func (a *AntigravityACP) Enabled() bool     { return true }
 func (a *AntigravityACP) DisplayOrder() int { return 22 }
@@ -84,12 +90,14 @@ func antigravityACPArgv() []string {
 	return []string{antigravityACPBinaryName()}
 }
 
-// IsInstalled reports whether one complete runtime exists. Managed bundles are
-// preferred; a complete manual PATH install is the fallback. Filesystem
-// discovery creates no files and starts no process.
+// IsInstalled reports whether one complete runtime exists. A compatible host
+// CLI is preferred; otherwise a complete standalone bundle must be available.
 func (a *AntigravityACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	bundle, err := antigravityruntime.Resolve(ctx, antigravityruntime.ResolveOptions{})
+	selected, err := antigravityruntime.ResolveLocal(ctx, antigravityruntime.ResolveOptions{})
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if errors.Is(err, antigravityruntime.ErrUnavailable) {
 			return &DiscoveryResult{Available: false}, nil
 		}
@@ -97,7 +105,7 @@ func (a *AntigravityACP) IsInstalled(ctx context.Context) (*DiscoveryResult, err
 	}
 	return &DiscoveryResult{
 		Available:   true,
-		MatchedPath: bundle.ServerPath,
+		MatchedPath: selected.Args[0],
 		SupportsMCP: true,
 		Capabilities: DiscoveryCapabilities{
 			SupportsSessionResume: true,
@@ -117,15 +125,69 @@ func (a *AntigravityACP) LocalInstall(ctx context.Context, progress func(string)
 // ResolveLocalRuntime returns the complete host-local command and the
 // environment entry that pins the validated harness. It is only called for
 // local executions; remote executors keep the base command.
-func (a *AntigravityACP) ResolveLocalRuntime(ctx context.Context) (Command, map[string]string, error) {
-	bundle, err := antigravityruntime.Resolve(ctx, antigravityruntime.ResolveOptions{})
+func (a *AntigravityACP) ResolveLocalRuntime(ctx context.Context) (LocalRuntimeSelection, error) {
+	selected, err := antigravityruntime.ResolveLocal(ctx, antigravityruntime.ResolveOptions{})
 	if err != nil {
-		return Command{}, nil, err
+		return LocalRuntimeSelection{}, err
 	}
-	argv := antigravityACPArgv()
-	argv[0] = bundle.ServerPath
-	env := map[string]string{acpcompat.AntigravityHarnessPathEnv: bundle.HarnessPath}
-	return NewCommand(argv...), env, nil
+	return antigravitySelection(selected), nil
+}
+
+// ResolveSavedLocalRuntime preserves the executable family that owns the
+// native conversation. Legacy records without a runtime tag use standalone.
+func (a *AntigravityACP) ResolveSavedLocalRuntime(ctx context.Context, adapterVersion string) (LocalRuntimeSelection, error) {
+	selected, err := antigravityruntime.ResolveSaved(ctx, antigravityruntime.ResolveOptions{}, adapterVersion)
+	if err != nil {
+		return LocalRuntimeSelection{}, err
+	}
+	return antigravitySelection(selected), nil
+}
+
+// LoginCommand exposes CLI sign-in only when the compatible CLI is the
+// selected host runtime. Standalone sign-in keeps its dedicated ACP flow.
+func (a *AntigravityACP) LoginCommand() *LoginCommand {
+	command, err := a.ResolveLoginCommand(context.Background(), antigravityCLILoginVariant)
+	if err != nil {
+		return nil
+	}
+	return command
+}
+
+// ResolveLoginCommand rechecks the runtime after the settings page submits its
+// selected variant. This prevents a stale CLI action from starting a PTY.
+func (a *AntigravityACP) ResolveLoginCommand(
+	ctx context.Context,
+	variant string,
+) (*LoginCommand, error) {
+	if variant != antigravityCLILoginVariant {
+		return nil, ErrLoginRuntimeChanged
+	}
+	selection, err := a.ResolveLocalRuntime(ctx)
+	if err != nil || selection.Variant != acpcompat.AntigravityRuntimeCLI {
+		return nil, ErrLoginRuntimeChanged
+	}
+	command := []string{selection.Command.Args()[0], "acp", "--login"}
+	return &LoginCommand{
+		Cmd:      command,
+		Variants: map[string][]string{antigravityCLILoginVariant: command},
+	}, nil
+}
+
+func antigravitySelection(selected *antigravityruntime.LocalRuntime) LocalRuntimeSelection {
+	policy := acpcompat.AntigravityAuthPolicyForRuntime(selected.Variant, selected.Version, false)
+	selection := LocalRuntimeSelection{
+		Command:        NewCommand(selected.Args...),
+		Variant:        selected.Variant,
+		Version:        selected.Version,
+		AdapterVersion: policy.AdapterVersion,
+	}
+	if selected.Bundle != nil {
+		selection.Env = map[string]string{acpcompat.AntigravityHarnessPathEnv: selected.Bundle.HarnessPath}
+	}
+	if selection.AdapterVersion == "" {
+		selection.AdapterVersion = fmt.Sprintf("antigravity-%s", selected.Variant)
+	}
+	return selection
 }
 
 func (a *AntigravityACP) BuildCommand(opts CommandOptions) Command {

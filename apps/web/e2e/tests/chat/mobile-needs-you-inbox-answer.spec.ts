@@ -5,6 +5,7 @@
 // desktop coverage rather than duplicating its assertions.
 import { test, expect } from "../../fixtures/test-base";
 import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
+import { expectInboxToOpenQuickChat } from "./inbox-quick-chat-helpers";
 
 const MIN_TOUCH_TARGET_PX = 44;
 
@@ -64,4 +65,10 @@ test.describe("Needs-you Inbox answer flow on mobile", () => {
     }));
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
   });
+});
+
+// @covers AC-UI-INBOX-OPEN-TASK-001.1
+test("opens the target Quick Chat from Inbox", async ({ testPage }) => {
+  test.setTimeout(90_000);
+  await expectInboxToOpenQuickChat(testPage, true);
 });

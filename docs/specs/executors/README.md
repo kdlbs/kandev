@@ -56,6 +56,7 @@ from actual execution, including retained workers and authorized Stop.
 - [Remote Docker Executor](requirements/remote-docker-executor.md)
 - [Remote Docker container inputs](requirements/remote-docker-container-inputs.md)
 - [Docker container network selection](requirements/docker-container-networks.md)
+- [Docker server dependency extensions](requirements/docker-server-extensions.md)
 - [Task MCP executor discovery](requirements/task-mcp-discovery.md)
 
 ### System design
@@ -83,6 +84,7 @@ from actual execution, including retained workers and authorized Stop.
 - [Remote Docker Executor](system-design/remote-docker-executor.md)
 - [Remote Docker container inputs](system-design/remote-docker-container-inputs.md)
 - [Docker container network selection](system-design/docker-container-networks.md)
+- [Docker server dependency extensions](system-design/docker-server-extensions.md)
 - [Task MCP executor discovery](system-design/task-mcp-discovery.md)
 
 ## Migration record

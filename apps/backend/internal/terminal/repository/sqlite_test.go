@@ -58,6 +58,29 @@ func TestCreate_AssignsSequentialSeqs(t *testing.T) {
 	}
 }
 
+func TestCreateWithWorkingDirPersistsAndReadsBack(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	term, err := repo.CreateWithWorkingDir(ctx, "task-1", "env-1", "shell-root", "", "/task/.claude/worktrees/fix", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if term.WorkingDir != "/task/.claude/worktrees/fix" {
+		t.Fatalf("working_dir = %q", term.WorkingDir)
+	}
+	got, err := repo.Get(ctx, term.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkingDir != term.WorkingDir {
+		t.Fatalf("read back working_dir = %q, want %q", got.WorkingDir, term.WorkingDir)
+	}
+	listed, err := repo.ListByTask(ctx, "task-1", true)
+	if err != nil || len(listed) != 1 || listed[0].WorkingDir != term.WorkingDir {
+		t.Fatalf("listed = %+v, err=%v", listed, err)
+	}
+}
+
 func TestOneShotInitialCommandCanBeConsumedOnlyOnce(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()

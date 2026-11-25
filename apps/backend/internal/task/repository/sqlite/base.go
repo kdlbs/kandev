@@ -13,10 +13,12 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 )
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
+	completionPolicies      []completion.Policy
 	executorBindingGuard    ExecutorBindingGuard
 	db                      *sqlx.DB // writer
 	ro                      *sqlx.DB // reader (read-only pool)

@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/planws"
 	"github.com/kandev/kandev/internal/task/previewfeedback"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/repository/previewfeedbacktx"
@@ -117,6 +118,10 @@ type recordedMessageSteerer interface {
 
 type taskCanvasGuidanceResolver interface {
 	TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error)
+}
+
+type taskWorktreeAdoptionGuidanceResolver interface {
+	WorktreeAdoptionGuidance(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
 type promptTaskWithPromptContext interface {
@@ -284,12 +289,14 @@ func (h *MessageHandlers) injectMessageContext(
 		}
 		return content
 	}
+	includeWorktreeAdoption, _ := h.resolveWorktreeAdoptionGuidance(ctx, req.TaskID, req.TaskSessionID)
 	return sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, content, sysprompt.KandevContextOptions{
 		BuiltinPackages:                req.builtinPackages,
 		RequiresCompletionSignal:       requiresSignal,
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
 		IncludeCanvasGuidance:          includeCanvasGuidance,
+		IncludeWorktreeAdoption:        includeWorktreeAdoption,
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
@@ -305,6 +312,17 @@ func (h *MessageHandlers) resolveCanvasGuidance(
 		return false, nil
 	}
 	return resolver.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
+}
+
+func (h *MessageHandlers) resolveWorktreeAdoptionGuidance(
+	ctx context.Context,
+	taskID, sessionID string,
+) (bool, error) {
+	resolver, ok := h.orchestrator.(taskWorktreeAdoptionGuidanceResolver)
+	if !ok {
+		return false, nil
+	}
+	return resolver.WorktreeAdoptionGuidance(ctx, taskID, sessionID)
 }
 
 func (h *MessageHandlers) prepareDirectPrompt(
@@ -769,6 +787,15 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		h.logger.Error("failed to authorize task and session", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to authorize message", nil)
+	}
+
+	if err := h.service.CanonicalizeCommentFiles(admissionCtx, req.TaskID, req.Attachments); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid comment files", nil)
+	}
+	if v1.HasCommentAttachments(req.Attachments) {
+		if err := validateAttachments(req.Attachments); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 	}
 
 	// Check session state — may block the message or flag it as a create-start
@@ -1543,6 +1570,9 @@ func validateAddMessageRequest(req wsAddMessageRequest) string {
 	if len(req.PlanCommentRefs) > 0 && plancomments.ContainsReservedPlaceholder(req.Content) {
 		return "content contains a reserved plan comment marker"
 	}
+	if err := v1.ValidateCommentAttachments(req.Content, req.Attachments); err != nil {
+		return err.Error()
+	}
 	if err := validateAttachments(req.Attachments); err != nil {
 		return err.Error()
 	}
@@ -1557,7 +1587,8 @@ func queuedMessageAttachments(attachments []v1.MessageAttachment) []messagequeue
 	for _, attachment := range attachments {
 		queued = append(queued, messagequeue.MessageAttachment{
 			Type: attachment.Type, AttachmentID: attachment.AttachmentID, Data: attachment.Data,
-			MimeType: attachment.MimeType, Name: attachment.Name, SizeBytes: attachment.SizeBytes,
+			CommentID: attachment.CommentID,
+			MimeType:  attachment.MimeType, Name: attachment.Name, SizeBytes: attachment.SizeBytes,
 			DeliveryMode: attachment.DeliveryMode,
 		})
 	}
@@ -1565,6 +1596,10 @@ func queuedMessageAttachments(attachments []v1.MessageAttachment) []messagequeue
 }
 
 func planCommentMessageError(msg *ws.Message, err error) *ws.Message {
+	if validation := planws.CommentAttachmentValidationMessage(err); validation != "" {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, validation, nil)
+		return response
+	}
 	if errors.Is(err, plancomments.ErrRenderedTooLarge) || errors.Is(err, previewfeedback.ErrPromptTooLarge) {
 		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Rendered message content is too long", nil)
 		return response

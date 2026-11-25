@@ -89,7 +89,7 @@ func (m *Manager) stopAbsentRemoteOwner(
 	outcome RecoveryCandidateOutcome,
 	stopWatch *stopWaitWatch,
 ) (bool, error) {
-	if outcome != RecoveryOutcomeNoMatchingInstance {
+	if !remoteRecoveryOutcomeProvesAbsence(entry.record.Runtime, outcome) {
 		return false, fmt.Errorf("remote stop could not prove the persisted agent instance is absent: %s", outcome)
 	}
 	if err := m.validatePendingRemoteStopOwner(ctx, entry); err != nil {

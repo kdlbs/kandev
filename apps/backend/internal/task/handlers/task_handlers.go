@@ -295,12 +295,14 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)
 	api.POST("/tasks/:id/workspace-sources/preview", h.httpPreviewWorkspaceSources)
 	api.PATCH("/tasks/:id/repositories/:repo_id", h.httpUpdateTaskRepository)
+	api.DELETE("/tasks/:id/repositories/:repo_id", h.httpDetachTaskRepository)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
 	api.POST("/tasks/:id/move-preview", h.httpMoveTaskPreview)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
 	api.POST("/tasks/:id/archive", h.httpArchiveTask)
 	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
 	api.GET("/tasks/:id/subtask-count", h.httpTaskSubtaskCount)
+	api.GET("/tasks/:id/step-transitions", h.httpListTaskStepTransitions)
 
 	// Task-cost-ledger read surface (docs/specs/task-cost-ledger/spec.md
 	// AC-18): per-task and per-session usage/cost totals.
@@ -352,6 +354,7 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskGet, h.wsGetTask)
 	dispatcher.RegisterFunc(ws.ActionTaskUpdate, h.wsUpdateTask)
 	dispatcher.RegisterFunc(ws.ActionTaskRepoUpdate, h.wsUpdateTaskRepository)
+	dispatcher.RegisterFunc(ws.ActionTaskRepoDetach, h.wsDetachTaskRepository)
 	dispatcher.RegisterFunc(ws.ActionTaskDelete, h.wsDeleteTask)
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)

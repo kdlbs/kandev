@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
+import { waitForFiniteAnimations } from "../helpers/pr-capture";
+import { watchWs } from "../helpers/causal-waits";
 
 /**
  * The automation detail page on a phone.
@@ -15,7 +17,13 @@ import type { ApiClient } from "../helpers/api-client";
  * completely broken.
  */
 
-type Seed = { workspaceId: string; workflowId: string; startStepId: string };
+type Seed = {
+  workspaceId: string;
+  workflowId: string;
+  startStepId: string;
+  agentProfileId: string;
+  repositoryId: string;
+};
 
 /** The standing instruction, seeded so the run-detail panel has one to show. */
 const STANDING_INSTRUCTION = "Check the overnight drift report and summarise what changed.";
@@ -52,51 +60,28 @@ async function openDetail(testPage: Page, automationId: string) {
   await expect(testPage.getByTestId("runs-drawer-trigger")).toBeVisible({ timeout: 15_000 });
 }
 
-async function seedOpenRun(
-  apiClient: import("../helpers/api-client").ApiClient,
-  seed: Seed & { agentProfileId: string; repositoryId: string },
-  name: string,
-) {
+async function seedOpenRun(apiClient: ApiClient, seed: Seed, name: string) {
   const automation = await apiClient.seedAutomation({
     workspaceId: seed.workspaceId,
     name,
     workflowId: seed.workflowId,
     workflowStepId: seed.startStepId,
-    prompt: STANDING_INSTRUCTION,
+    prompt: "/sleep 30",
     agentProfileId: seed.agentProfileId,
+    repositoryIds: [seed.repositoryId],
   });
-  const task = await apiClient.createTaskWithAgent(
-    seed.workspaceId,
-    `${name} — running task`,
-    seed.agentProfileId,
-    {
-      description: "/sleep 30",
-      start_agent: false,
-      metadata: { automation_id: automation.id },
-      workflow_id: seed.workflowId,
-      workflow_step_id: seed.startStepId,
-      repository_ids: [seed.repositoryId],
-    },
-  );
-  await apiClient.setTaskOrigin(task.id, "automation_run");
-  const launched = await apiClient.launchSession({
-    task_id: task.id,
-    agent_profile_id: seed.agentProfileId,
-    intent: "start",
-  });
-  task.session_id = launched.session_id;
+  const fired = await apiClient.triggerAutomationManual(automation.id);
+  expect(fired.run_task_id).toBeTruthy();
+  const task = await apiClient.getTask(fired.run_task_id!);
   await expect
     .poll(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(task.id);
-        return sessions.find((session) => session.id === task.session_id)?.state;
+        return sessions.some((session) => session.state === "RUNNING");
       },
       { timeout: 30_000 },
     )
-    .toBe("RUNNING");
-  const run = await apiClient.seedAutomationRun(automation.id, "task_created", task.id);
-  expect(run.session_id).not.toBe("");
-  expect(run.turn_id).not.toBe("");
+    .toBe(true);
   return automation;
 }
 
@@ -160,6 +145,79 @@ test.describe("Automation detail on mobile", () => {
     // The topbar drops the next-firing note on a phone for want of width, so
     // this is where it said it went.
     await expect(panel.getByTestId("run-detail-next-run")).not.toHaveText("");
+  });
+
+  test("supports schedule trigger recovery from the drawer with a touch-sized action", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { automation } = await seedAutomationWithRuns(
+      apiClient,
+      seedData,
+      "Mobile Schedule Recovery",
+    );
+    const future = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    const cronExpression = `17 3 ${future.getUTCDate()} ${future.getUTCMonth() + 1} *`;
+    const trigger = await apiClient.seedTrigger({
+      automationId: automation.id,
+      type: "scheduled",
+      config: { cron_expression: cronExpression, timezone: "UTC" },
+      enabled: false,
+    });
+    const watcher = watchWs(testPage);
+    await openDetail(testPage, automation.id);
+    await testPage.addStyleTag({ content: "html { font-size: 14px; }" });
+
+    await testPage.getByTestId("runs-drawer-trigger").tap();
+    const drawer = testPage.getByTestId("runs-drawer");
+    await waitForFiniteAnimations(drawer);
+    await drawer.getByTestId("run-detail-toggle").tap();
+    const nextRun = drawer.getByTestId("run-detail-next-run");
+    await expect(nextRun).toContainText("Schedule trigger is switched off");
+
+    const enable = drawer.getByTestId("enable-schedule-action");
+    await waitForFiniteAnimations(drawer);
+    const actionBox = await enable.boundingBox();
+    const drawerBox = await drawer.boundingBox();
+    expect(actionBox?.height).toBeGreaterThanOrEqual(44);
+    expect(actionBox && drawerBox && actionBox.x).toBeGreaterThanOrEqual(drawerBox.x);
+    expect(actionBox && drawerBox && actionBox.x + actionBox.width).toBeLessThanOrEqual(
+      drawerBox.x + drawerBox.width,
+    );
+    const documentWidth = await testPage.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+    expect(documentWidth.scroll).toBeLessThanOrEqual(documentWidth.client);
+
+    const scheduleUpdate = watcher.waitForResponse("automation.trigger.update", {
+      requestWhere: (payload) => payload.id === trigger.id,
+    });
+    await enable.tap();
+    await scheduleUpdate;
+    await expect(nextRun).not.toContainText("Schedule trigger is switched off", {
+      timeout: 15_000,
+    });
+    await expect(nextRun).not.toContainText("No schedule");
+    const saved = await apiClient.wsRequest<{
+      triggers: Array<{ id: string; enabled: boolean; config: Record<string, unknown> }>;
+    }>("automation.get", { id: automation.id });
+    expect(saved.triggers.find((entry) => entry.id === trigger.id)).toMatchObject({
+      id: trigger.id,
+      enabled: true,
+      config: { cron_expression: cronExpression, timezone: "UTC" },
+    });
+
+    await testPage.reload();
+    await openDetail(testPage, automation.id);
+    await testPage.getByTestId("runs-drawer-trigger").tap();
+    const refreshedDrawer = testPage.getByTestId("runs-drawer");
+    await refreshedDrawer.getByTestId("run-detail-toggle").tap();
+    await expect(refreshedDrawer.getByTestId("enable-schedule-action")).toHaveCount(0);
+    await expect(refreshedDrawer.getByTestId("run-detail-next-run")).not.toContainText(
+      "Schedule trigger is switched off",
+    );
   });
 
   test("offers a composer on a run with a conversation", async ({

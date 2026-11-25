@@ -1,3 +1,4 @@
+import { usesSavedSidebarDisclosure } from "@/lib/sidebar/sidebar-disclosure-query";
 import type { BuiltinMCPInitialPreferences } from "@/lib/types/builtin-mcp";
 import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import { fetchJson, type ApiRequestOptions } from "../client";
@@ -226,6 +227,20 @@ export async function previewTaskWorkspaceSources(
     {
       ...options,
       init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
+}
+
+export async function detachTaskRepository(
+  taskId: string,
+  taskRepositoryId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ detached: boolean }>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/repositories/${encodeURIComponent(taskRepositoryId)}`,
+    {
+      ...options,
+      init: { method: "DELETE", ...(options?.init ?? {}) },
     },
   );
 }
@@ -516,16 +531,6 @@ export async function reorderStepTasks(
   );
 }
 
-export async function bulkMoveSelectedTasks(
-  payload: { task_ids: string[]; target_workflow_id: string; target_step_id: string },
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<{ moved_count: number }>("/api/v1/tasks/bulk-move", {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
-  });
-}
-
 export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
 }
@@ -629,7 +634,11 @@ export async function querySidebarTasks(
     ...options,
     init: {
       method: "POST",
-      body: JSON.stringify(query),
+      body: JSON.stringify(
+        usesSavedSidebarDisclosure(query)
+          ? { ...query, collapsed_group_keys: [] }
+          : { ...query, disclosure_view_id: undefined },
+      ),
       ...(options?.init ?? {}),
     },
   });

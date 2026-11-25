@@ -95,14 +95,7 @@ describe("useSettingsMenuBranches integration visibility", () => {
     disableIn(WORKSPACE_ID, "github");
     disableIn(WORKSPACE_ID, "sentry");
 
-    expect(listedIntegrations()).toEqual([
-      "azure-devops",
-      "github",
-      "gitlab",
-      "jira",
-      "linear",
-      "sentry",
-    ]);
+    expect(listedIntegrations()).toEqual(["github", "gitlab", "jira", "linear", "sentry"]);
   });
 
   it("hides the disabled integrations once the setting is on", () => {
@@ -110,7 +103,7 @@ describe("useSettingsMenuBranches integration visibility", () => {
     disableIn(WORKSPACE_ID, "sentry");
     hideDisabled.value = true;
 
-    expect(listedIntegrations()).toEqual(["azure-devops", "gitlab", "jira", "linear"]);
+    expect(listedIntegrations()).toEqual(["gitlab", "jira", "linear"]);
   });
 
   it("hides an integration only in the workspace that disabled it", () => {
@@ -126,14 +119,7 @@ describe("useSettingsMenuBranches integration visibility", () => {
   it("keeps every integration when the setting is on but none are disabled", () => {
     hideDisabled.value = true;
 
-    expect(listedIntegrations()).toEqual([
-      "azure-devops",
-      "github",
-      "gitlab",
-      "jira",
-      "linear",
-      "sentry",
-    ]);
+    expect(listedIntegrations()).toEqual(["github", "gitlab", "jira", "linear", "sentry"]);
   });
 
   it("keeps an enabled integration listed even though nothing here knows it is connected", () => {

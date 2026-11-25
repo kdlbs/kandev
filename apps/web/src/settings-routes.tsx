@@ -157,9 +157,6 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   // Integrations are per-workspace pages now; the old install-level paths
   // forward into the active workspace's Integrations tab.
   "/settings/integrations": () => <ActiveWorkspaceSectionRedirect section="integrations" />,
-  "/settings/integrations/azure-devops": () => (
-    <ActiveWorkspaceSectionRedirect section="integrations/azure-devops" />
-  ),
   "/settings/integrations/github": () => (
     <ActiveWorkspaceSectionRedirect section="integrations/github" />
   ),

@@ -23,6 +23,7 @@ type MentionMenuProps = {
   onSelect: (item: MentionItem) => void;
   onClose: () => void;
   setSelectedIndex: (index: number) => void;
+  promptList?: { id: string; inline?: boolean };
 };
 
 // Get the appropriate icon for an item
@@ -61,6 +62,7 @@ export function MentionMenu({
   onSelect,
   onClose,
   setSelectedIndex,
+  promptList,
 }: MentionMenuProps) {
   const { t } = useTranslation();
   const { setItemRef } = useMenuItemRefs(selectedIndex);
@@ -81,7 +83,9 @@ export function MentionMenu({
       isOpen={isOpen}
       position={position ?? null}
       clientRect={clientRect}
-      title={t("task:mentionTasksFilesPrompts")}
+      title={promptList ? t("common:prompts") : t("task:mentionTasksFilesPrompts")}
+      listId={promptList?.id}
+      inline={promptList?.inline}
       selectedIndex={selectedIndex}
       onClose={onClose}
       hasItems={items.length > 0}
@@ -94,6 +98,9 @@ export function MentionMenu({
             key={item.id}
             icon={getItemIcon(item)}
             label={label}
+            id={promptList ? `${promptList.id}-${index}` : undefined}
+            accessibleLabel={promptList ? label : undefined}
+            compact={Boolean(promptList)}
             description={description}
             isSelected={selectedIndex === index}
             onClick={() => onSelect(item)}

@@ -277,6 +277,7 @@ func buildStandaloneCreateInstanceRequest(
 ) *agentctl.CreateInstanceRequest {
 	return &agentctl.CreateInstanceRequest{
 		ID:                    req.InstanceID,
+		ScopedMCPRoutes:       true,
 		WorkspacePath:         req.WorkspacePath,
 		AgentCommand:          "", // Agent command set via Configure endpoint
 		Protocol:              req.Protocol,
@@ -301,6 +302,7 @@ func buildStandaloneCreateInstanceRequest(
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKill,
+		OfflineBudgetMinutes:       offlineBudgetFromMetadata(req.Metadata),
 		StripEnv:                   stripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		AuthPolicy:                 req.AuthPolicy,
@@ -312,6 +314,8 @@ func buildStandaloneCreateInstanceRequest(
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
+		WorkspaceExcludedRoots:     req.WorkspaceExcludedRoots,
+		TaskWorkspaceRoot:          req.TaskWorkspaceRoot,
 		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
 }
@@ -435,12 +439,14 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	var client *agentctl.Client
 	if lease != nil {
 		client = lease.NewBoundInstanceClient(resp.Port, r.logger,
-			agentctl.WithExecutionID(resp.ID), agentctl.WithSessionID(req.SessionID))
+			agentctl.WithExecutionID(resp.ID), agentctl.WithSessionID(req.SessionID),
+			agentctl.WithBuiltinMCPScopedRoutes(resp.ScopedMCPRoutes))
 	} else {
 		client = agentctl.NewClient(r.host, resp.Port, r.logger,
 			agentctl.WithExecutionID(resp.ID),
 			agentctl.WithSessionID(req.SessionID),
-			agentctl.WithAuthToken(r.authToken))
+			agentctl.WithAuthToken(r.authToken),
+			agentctl.WithBuiltinMCPScopedRoutes(resp.ScopedMCPRoutes))
 	}
 
 	// Build metadata
@@ -874,12 +880,16 @@ func (r *StandaloneExecutor) buildRecoveredInstancesWithLease(
 		var client *agentctl.Client
 		if lease != nil {
 			client = lease.NewBoundInstanceClient(inst.Port, r.logger,
-				agentctl.WithExecutionID(inst.ID), agentctl.WithSessionID(sessionID))
+				agentctl.WithExecutionID(inst.ID), agentctl.WithSessionID(sessionID),
+				agentctl.WithBuiltinMCPScopedRoutes(inst.ScopedMCPRoutes),
+				agentctl.WithACPProtocolVersion(inst.ACPProtocolVersion))
 		} else {
 			client = agentctl.NewClient(r.host, inst.Port, r.logger,
 				agentctl.WithExecutionID(inst.ID),
 				agentctl.WithSessionID(sessionID),
-				agentctl.WithAuthToken(r.authToken))
+				agentctl.WithAuthToken(r.authToken),
+				agentctl.WithBuiltinMCPScopedRoutes(inst.ScopedMCPRoutes),
+				agentctl.WithACPProtocolVersion(inst.ACPProtocolVersion))
 		}
 		deliveryStatus, legacyEvidence, deliveryErr := r.discoverDeliveryStatus(ctx, client)
 

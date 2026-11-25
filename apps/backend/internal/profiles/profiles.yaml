@@ -110,6 +110,11 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  KANDEV_FEATURES_ACP_V2:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Normalized background work and subagent lifecycle management. Enabled by
   # default so inspection is standard behavior; the runtime flag remains an
   # operator off switch that gates the read/action endpoints as well.
@@ -246,10 +251,6 @@ mocks:
     dev:  ""
     e2e:  "true"
   KANDEV_MOCK_SENTRY:
-    prod: ""
-    dev:  ""
-    e2e:  "true"
-  KANDEV_MOCK_AZURE_DEVOPS:
     prod: ""
     dev:  ""
     e2e:  "true"

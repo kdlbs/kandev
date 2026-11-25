@@ -3,6 +3,7 @@
 import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef } from "react";
 import { countGroupTasks, type SidebarGroup } from "@/lib/sidebar/apply-view";
 import type { GroupKey } from "@/lib/state/slices/ui/sidebar-view-types";
+import { sidebarTaskOccurrenceKey } from "@/lib/sidebar/visible-task-order";
 import {
   SortableTaskLevel,
   SortableTaskNode,
@@ -27,6 +28,7 @@ export type TaskRowBaseProps = Omit<
 >;
 
 type TaskTreeContext = {
+  occurrenceScope: string;
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
   collapsedSubs: Set<string>;
   onToggleSubtasks?: (parentTaskId: string) => void;
@@ -83,6 +85,7 @@ function taskTreeNodeEqual(previous: TaskTreeNodeProps, next: TaskTreeNodeProps)
   if (
     previous.task !== next.task ||
     previous.depth !== next.depth ||
+    previous.ctx.occurrenceScope !== next.ctx.occurrenceScope ||
     previous.isDraggable !== next.isDraggable ||
     previous.ctx.rowProps !== next.ctx.rowProps ||
     previous.ctx.getNestCandidateTasks !== next.ctx.getNestCandidateTasks ||
@@ -100,6 +103,17 @@ function taskTreeNodeEqual(previous: TaskTreeNodeProps, next: TaskTreeNodeProps)
   return nodeSubtreeEqual(previous.task.id, previous.ctx, next.ctx, new Set());
 }
 
+function useOccurrenceSelection(
+  callback: TaskRowProps["onToggleSelectTask"],
+  occurrenceKey: string,
+) {
+  const handler = useCallback(
+    (id: string) => callback?.(id, occurrenceKey),
+    [callback, occurrenceKey],
+  );
+  return callback ? handler : undefined;
+}
+
 const TaskTreeNode = memo(function TaskTreeNode({
   task,
   depth,
@@ -107,6 +121,10 @@ const TaskTreeNode = memo(function TaskTreeNode({
   isDraggable,
 }: TaskTreeNodeProps) {
   const { t } = useTranslation();
+  const occurrenceKey = sidebarTaskOccurrenceKey(ctx.occurrenceScope, task.id);
+  const { onToggleSelectTask, onSelectTaskRange } = ctx.rowProps;
+  const toggleSelection = useOccurrenceSelection(onToggleSelectTask, occurrenceKey);
+  const selectRange = useOccurrenceSelection(onSelectTaskRange, occurrenceKey);
   const subs = ctx.subTasksByParentId.get(task.id);
   const subtaskCount =
     task.subtaskCount ?? (subs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0);
@@ -132,7 +150,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
   const handle = (
     // The relative wrapper keeps the nest drop zone pinned to this row's
     // left edge rather than spanning the nested subtree below it.
-    <div className="relative">
+    <div className="relative" data-sidebar-occurrence={occurrenceKey}>
       {task.continuationParentTitle && (
         <div className="truncate pl-3 pt-1 text-xs text-muted-foreground">
           {t("sidebar:continuedFrom", { title: task.continuationParentTitle })}
@@ -146,6 +164,8 @@ const TaskTreeNode = memo(function TaskTreeNode({
         isPinned={isRoot && ctx.pinnedSet.has(task.id)}
         {...ctx.rowProps}
         getNestCandidateTasks={ctx.getNestCandidateTasks}
+        onToggleSelectTask={toggleSelection}
+        onSelectTaskRange={selectRange}
         getNestHierarchyTasks={ctx.getNestHierarchyTasks}
         onTogglePin={isRoot ? ctx.rowProps.onTogglePin : undefined}
       />
@@ -346,6 +366,7 @@ export const GroupSection = memo(function GroupSection({
   const renderTree = (nestTargetIds: Set<string>) => {
     if (isCollapsed) return null;
     const ctx: TaskTreeContext = {
+      occurrenceScope: group.key,
       subTasksByParentId,
       collapsedSubs: new Set(collapsedSubtaskParentIds ?? []),
       onToggleSubtasks,
@@ -382,6 +403,7 @@ export const GroupSection = memo(function GroupSection({
           id={headerId}
           controlsId={bodyId}
           label={group.label}
+          color={group.color}
           groupKey={group.key}
           count={totalCount}
           isCollapsed={isCollapsed}

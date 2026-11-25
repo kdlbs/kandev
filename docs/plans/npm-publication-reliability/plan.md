@@ -175,3 +175,6 @@ Each work order records its exact implementation checks and results.
 
 Their completed results remain historical evidence.
 This package does not reopen their work orders or change their contracts.
+
+The [preflight response diagnostics repair](../npm-preflight-response-diagnostics/plan.md) addresses the later failure in run `43038508616`.
+This package's completed verification remains historical evidence.

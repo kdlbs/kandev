@@ -6,6 +6,7 @@ import Link from "@/components/routing/app-link";
 import type { ResolvedDestination } from "@/lib/navigation/types";
 import { usePathname } from "@/lib/routing/client-router";
 import { cn } from "@/lib/utils";
+import { PromptConflictIndicator } from "@/components/settings/prompt-conflict-indicator";
 
 type DestinationRowsProps = {
   destinations: ResolvedDestination[];
@@ -30,6 +31,9 @@ type DestinationRowsProps = {
  * `useAppDestinations` / `useStaticDestinations`), so a destination added to the
  * manifest shows up here without touching this file.
  */
+// The Settings destination carries the app-wide settings attention marker.
+const SETTINGS_DESTINATION_ID = "settings";
+
 export function DestinationRows({
   destinations,
   onNavigate,
@@ -120,6 +124,7 @@ export function DestinationRow({
       >
         <Icon className="h-4 w-4 shrink-0" />
         <span className="flex-1 truncate text-left">{destination.label}</span>
+        {destination.id === SETTINGS_DESTINATION_ID && <PromptConflictIndicator />}
         {showChevron && (
           <IconChevronRight
             className="size-3.5 shrink-0 text-muted-foreground"

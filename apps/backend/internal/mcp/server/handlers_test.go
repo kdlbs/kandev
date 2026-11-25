@@ -132,7 +132,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, workspaceModeDesc, "new_workspace")
 	assert.Contains(t, workspaceModeDesc, "different non-Kubernetes executor")
 	assert.Contains(t, workspaceModeDesc, "separate child-owned workspace")
-	assert.Contains(t, workspaceModeDesc, "uncommitted parent changes are not copied")
+	assert.Contains(t, workspaceModeDesc, "does not copy uncommitted parent changes")
 	assert.Contains(t, workspaceModeDesc, "Kubernetes environments cannot be shared across tasks")
 
 	// parent_id, workspace_id, workflow_id, workflow_step_id should NOT be required
@@ -675,6 +675,46 @@ func TestAddBranchToTask_ForwardsRepositoryURL(t *testing.T) {
 	assert.Contains(t, text.Text, `"worktree_path": "/task/kandev-feature-x"`)
 	assert.Contains(t, text.Text, `"task_workspace_path": "/task"`)
 	assert.Contains(t, text.Text, `"agent_cwd_changed": false`)
+}
+
+func TestAddBranchToTask_ForwardsWorktreePath(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{
+			"id": "tr-1", "task_id": "task-current", "worktree_path": "/task/.claude/worktrees/fix-b",
+			"adopted": true, "already_attached": false,
+		},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "add_branch_to_task_kandev", map[string]interface{}{
+		"worktree_path": "/task/.claude/worktrees/fix-b",
+		"base_branch":   "main",
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPAddBranchToTask, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "/task/.claude/worktrees/fix-b", payload["worktree_path"])
+	assert.Equal(t, "main", payload["base_branch"])
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, `"adopted": true`)
+}
+
+func TestAddBranchToTask_RejectsWorktreePathWithLocator(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+	result := callTool(t, s, "add_branch_to_task_kandev", map[string]interface{}{
+		"worktree_path": "/task/.claude/worktrees/fix-b",
+		"repository_id": "repo-1",
+	})
+	assert.True(t, result.IsError)
+	require.NotEmpty(t, result.Content)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, "worktree_path cannot be combined")
+	assert.Nil(t, backend.lastPayload)
 }
 
 func TestAddBranchToTask_RejectsAnotherTask(t *testing.T) {

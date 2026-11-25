@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -16,6 +18,9 @@ func prepareACPLaunch(cfg *InferenceConfigDTO, admitted string, args, env []stri
 	}
 	inner := append(slices.Clone(args), cfg.CLIFlags...)
 	inner[0] = admitted
+	if cfg.AuthPolicy != nil && cfg.AuthPolicy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI {
+		inner = antigravityruntime.RequireWorkerMode(inner)
+	}
 	if !cfg.LaunchWrapper.IsZero() {
 		return launchwrapper.Prepare(cfg.LaunchWrapper, inner, launchwrapper.Context{WorkDir: cfg.WorkDir, Env: env})
 	}

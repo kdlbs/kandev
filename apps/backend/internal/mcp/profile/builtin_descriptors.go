@@ -52,9 +52,10 @@ func BuiltinPackageCatalog() []BuiltinPackageDescriptor {
 		{ID: PackageWalkthroughs, RuntimeName: "kandev-walkthroughs", DefaultPolicy: "default", Surfaces: []Surface{SurfaceKanbanTask}},
 		{ID: PackageDiagnostics, RuntimeName: "kandev-diagnostics", DefaultPolicy: "default", Surfaces: []Surface{SurfaceKanbanTask}},
 	}
-	result[0].RequiredSurfaces = slices.Clone(result[0].Surfaces)
+	result[0].RequiredSurfaces = append(slices.Clone(result[0].Surfaces), SurfaceAutomation)
 	for i := range result {
 		d := &result[i]
+		d.Surfaces = append(d.Surfaces, SurfaceAutomation)
 		d.LabelKey = "settings:builtinMcp.packages." + string(d.ID) + ".label"
 		d.DescriptionKey = "settings:builtinMcp.packages." + string(d.ID) + ".description"
 		for name, id := range builtinToolPackages {
@@ -78,7 +79,9 @@ func BuiltinToolActions(name string) []string {
 	}
 	actions := []string{"mcp." + strings.TrimSuffix(name, "_kandev")}
 	switch name {
-	case "ask_user_question_kandev", "ask_parent_question_kandev":
+	case "ask_user_question_kandev":
+		actions = append(actions, ws.ActionMCPClarificationTimeout, ws.ActionMCPCancelNativeClarification)
+	case "ask_parent_question_kandev":
 		actions = append(actions, ws.ActionMCPClarificationTimeout)
 	case "transfer_task_kandev":
 		actions = append(actions, ws.ActionMCPAuditTaskTransferAttempt)

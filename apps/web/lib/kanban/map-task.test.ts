@@ -442,8 +442,6 @@ it.each([
   ["jira_issue_watch_id", true, false],
   ["linear_issue_watch_id", true, false],
   ["sentry_issue_watch_id", true, false],
-  ["azure_devops_work_item_watch_id", true, false],
-  ["azure_devops_pr_watch_id", false, true],
 ] as const)("maps watcher %s identically from HTTP and WS", (key, issue, review) => {
   for (const makeTask of [httpDTO, wsPayload]) {
     const mapped = toKanbanTask(makeTask({ metadata: { [key]: "watch" } }));

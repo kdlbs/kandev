@@ -76,6 +76,20 @@ type WorkspaceTracker struct {
 	// GitStatusUpdate / FileListUpdate so the frontend can key per-repo state.
 	// Empty for the single-repo case.
 	repositoryName string
+	// workspaceRoot is the task workspace root used to contain linked-worktree
+	// discovery. It is set by the manager and never by a client payload.
+	workspaceRoot string
+	// worktreeObserver holds the cheap stat gate and the last published list.
+	// Only the git poll goroutine reads or writes it.
+	worktreeObserver worktreeObserverState
+	// workspaceRootFileObserver is owned by the monitor goroutine.
+	workspaceRootFileObserver workspaceRootFileObserverState
+	// checkoutRoots are canonical repository roots excluded from root-file scans.
+	checkoutRoots []string
+	// worktreeInventoryMu guards the latest snapshot replayed to a subscriber
+	// that connects after the change-only publication.
+	worktreeInventoryMu     sync.RWMutex
+	latestWorktreeInventory *types.WorktreeInventory
 
 	// baseBranch is the task-specific base branch used to compute diff stats
 	// (BaseCommit, Ahead/Behind). When set, it takes precedence over the

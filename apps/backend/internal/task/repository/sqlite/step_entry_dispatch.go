@@ -1,6 +1,8 @@
 package sqlite
 
-import "context"
+import (
+	"context"
+)
 
 // StepEntryDispatcher executes a step's session-independent on_enter
 // sequence for one committed arrival. Implemented in production by an
