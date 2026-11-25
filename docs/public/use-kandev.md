@@ -207,6 +207,10 @@ Settings, direct **Stats** access, theme switching, and the three-dot menu share
 single-row desktop footer, in that order. The three-dot menu contains plugin utilities,
 Improve Kandev, and release notes.
 
+Improve Kandev prepares its repository before it can create a contribution. If preparation fails,
+choose **Retry** in the dialog. Your title and description stay in place. If the app restarts while
+preparing, reopen Improve Kandev and retry; completed workspace setup is reused.
+
 Expand **Automations** and choose **Open automations** below its entries to see the
 full list. This labelled link sits inside the group on desktop and phones, like
 **Integration settings** inside Integrations.

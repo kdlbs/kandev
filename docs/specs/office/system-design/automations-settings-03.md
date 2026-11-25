@@ -29,6 +29,7 @@ required.
 | `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | .20, .21, .22, .23, .24 | [Definition identity](#definition-identity), [Persistent boundary](#persistent-boundary) |
 | `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | .25, .27 | [Admission ordering](#admission-ordering) |
 | `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | .18, .26 | [Calendar and recovery](#calendar-and-recovery) |
+| `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | .28, .29, .30 | [Schedule trigger recovery](#schedule-trigger-recovery) |
 
 ## Definition identity
 
@@ -167,3 +168,21 @@ Exact tests, files, and commands belong to the
 [implementation package](../../../plans/automation-schedule-replacement/plan.md).
 The requirement, design, and regression evidence preserve this local correction's
 rationale. No separate architecture decision is required.
+
+## Schedule trigger recovery
+
+`RunDetailDisclosure` is shared by the desktop Runs rail and phone Runs
+drawer. Use `scheduleBinding` to select the same trigger as the status.
+Show the action when the automation is enabled and that trigger has a
+configured expression and is disabled.
+
+On activation, call `updateTrigger(trigger.id, { enabled: true })`. The
+existing `automation.trigger.update` action authorizes and applies the
+partial update. Its enabled-only path preserves the schedule boundary.
+A due schedule can still produce one catch-up run on the next check.
+
+Disable the button while the write is pending. On success, call the existing
+automation activity refresh. On failure, use the existing request error
+message and allow another attempt. Place the action below the reason in the
+disclosure with the shared button's phone and coarse-pointer touch sizing.
+The existing rail and drawer own the layout. See the [work order](../../../plans/automation-schedule-trigger-recovery/task-01-enable-schedule.md).

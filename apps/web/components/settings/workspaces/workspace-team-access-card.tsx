@@ -177,14 +177,7 @@ function AddMemberRow({ users, busy, onAdd }: AddMemberRowProps) {
   );
 }
 
-/**
- * Workspace membership.
- *
- * Membership here is the exception path. Reach normally follows the
- * organization unit the workspace sits in, so a team sets that once and never
- * anyone. Membership below is the exception path, for private workspaces,
- * guests, and narrowing a colleague to a viewer.
- */
+/** Displays roles granted directly on this workspace. */
 export function WorkspaceTeamAccessCard(props: WorkspaceTeamAccessCardProps) {
   const { t } = useTranslation();
   const access = useWorkspaceTeamAccess(props);

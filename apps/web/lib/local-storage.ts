@@ -527,6 +527,16 @@ export function markPRClosedBannerDismissed(taskId: string): void {
   }
 }
 
+const STORAGE_NOTICE_DISMISSED_PREFIX = "kandev.storage-notice-dismissed.";
+
+export function wasStorageNoticeDismissed(taskId: string): boolean {
+  return getSessionStorage<boolean>(`${STORAGE_NOTICE_DISMISSED_PREFIX}${taskId}`, false) === true;
+}
+
+export function markStorageNoticeDismissed(taskId: string): void {
+  setSessionStorage(`${STORAGE_NOTICE_DISMISSED_PREFIX}${taskId}`, true);
+}
+
 // Internal storage keys for open file tabs
 const OPEN_FILES_KEY = "kandev.openFiles";
 const ACTIVE_TAB_KEY = "kandev.activeTab";
@@ -537,6 +547,8 @@ const ACTIVE_TAB_KEY = "kandev.activeTab";
  * preview tab (restored as preview).
  */
 export interface StoredFileTab {
+  /** Explicit plugin/viewer selection, scoped to this user file tab. */
+  fileViewer?: string;
   path: string;
   name: string;
   /** Multi-repo subpath (repository_name) so a restored tab re-fetches its
@@ -591,7 +603,14 @@ export function setOpenFileTabs(sessionId: string, tabs: StoredFileTab[]): void 
   if (typeof window === "undefined") return;
   try {
     const key = `${OPEN_FILES_KEY}.${sessionId}`;
-    window.sessionStorage.setItem(key, JSON.stringify(tabs.map(normalizeStoredFileTab)));
+    const previous = getOpenFileTabs(sessionId);
+    const withViewers = tabs.map((tab) => ({
+      ...tab,
+      fileViewer:
+        tab.fileViewer ??
+        previous.find((old) => old.path === tab.path && old.repo === tab.repo)?.fileViewer,
+    }));
+    window.sessionStorage.setItem(key, JSON.stringify(withViewers.map(normalizeStoredFileTab)));
   } catch {
     // Ignore write failures
   }
@@ -784,6 +803,8 @@ export function cleanupTaskStorage(
   // PR merged / closed banner dismissal (sessionStorage, keyed per task)
   removeSessionStorage(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`);
   removeSessionStorage(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`);
+
+  removeSessionStorage(`${STORAGE_NOTICE_DISMISSED_PREFIX}${taskId}`);
 
   // Sidebar collapsed-subtask set (sessionStorage, array keyed by parent taskId)
   const collapsed = getStoredCollapsedSubtaskParents();

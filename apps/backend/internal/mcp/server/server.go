@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/mcpurl"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -127,6 +128,7 @@ type Server struct {
 	mode                       string // "task" (default), "task-title-pending", "config", "external", "office", or "automation"
 	mcpProviders               []string
 	sseBaseURL                 string
+	nativeRoutePrefix          string
 	profile                    mcpprofile.Context
 	legacyModeCapabilities     []mcpprofile.Capability
 	namespacesMCPToolsByServer bool
@@ -154,6 +156,7 @@ type Server struct {
 	filteredPluginTools        plugintools.Snapshot
 	filteredPluginToolsReady   bool
 	pluginToolsEpoch           atomic.Uint64
+	keepAliveCalls             uint64
 }
 
 // ServerOption configures the per-instance MCP transport.
@@ -173,6 +176,22 @@ func WithSSEBaseURL(baseURL string) ServerOption {
 	return func(s *Server) {
 		s.sseBaseURL = strings.TrimSuffix(baseURL, "/")
 	}
+}
+
+// WithNativeRoutePrefix scopes the instance-owned MCP transports under one
+// helper path. External backend routes do not use this option.
+func WithNativeRoutePrefix(prefix string) ServerOption {
+	return func(s *Server) {
+		s.nativeRoutePrefix = prefix
+	}
+}
+
+func (s *Server) nativeRoutePath(endpoint string) string {
+	path, err := mcpurl.RoutePath(s.nativeRoutePrefix, endpoint)
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 type mcpAttachmentAttemptContextKey struct{}
@@ -212,11 +231,13 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 		profileContext = profileContext.WithoutCapability(mcpprofile.CapabilityUserQuestion)
 	}
 	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext, options...)
-	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(s.sseBaseURLForPort(port)),
-	)
+	sseOptions := []server.SSEOption{server.WithBaseURL(s.sseBaseURLForPort(port))}
+	if s.nativeRoutePrefix != "" {
+		sseOptions = append(sseOptions, server.WithStaticBasePath(s.nativeRoutePrefix))
+	}
+	s.sseServer = server.NewSSEServer(s.mcpServer, sseOptions...)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
-		server.WithEndpointPath("/mcp"),
+		server.WithEndpointPath(s.nativeRoutePath("/mcp")),
 		server.WithStateful(s.profile.BuiltinPackages != nil),
 		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
@@ -309,6 +330,7 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		server.WithToolCapabilities(true),
 		server.WithCacheHints(0, mcp.CacheScopePrivate),
 		server.WithHooks(hooks),
+		server.WithToolHandlerMiddleware(s.keepAliveMiddleware),
 	)
 	hooks.AddBeforeAny(func(ctx context.Context, _ any, _ mcp.MCPMethod, _ any) {
 		if server.IsModernRequest(ctx) {
@@ -1583,6 +1605,7 @@ func (s *Server) registerTaskExecutionTools() {
 				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
 			),
 			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
+			mcp.WithString("operation_id", mcp.Description("Optional kanban task identity for one send (letters, digits, dot, underscore, colon, hyphen; 1-128 characters). After a timeout, read get_task_message_operation_kandev before deciding to resend. Replaying a retained identity returns its recorded outcome without delivering again; different target, prompt, mode, session, or question fields return operation_id_conflict. Not accepted with delivery_mode=\"report\".")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
@@ -1646,7 +1669,7 @@ func (s *Server) registerTaskPRLinkTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("manage_task_change_request_kandev",
-			"Link, unlink, or replace a GitHub pull request or GitLab merge request for a task. Provide the operation, target task, provider, canonical repository identity, and positive change request number. Replacement requires the complete old identity and keeps both identities on the same provider.",
+			"Link, unlink, or replace a GitHub pull request or GitLab merge request for a task. Provide the operation, target task, provider, Kandev repository ID, and positive change request number. For link, the repository ID must be attached to the target task. Replacement requires the complete old identity and keeps both identities on the same provider.",
 			taskChangeRequestToolSchema(),
 		),
 		s.wrapHandler("manage_task_change_request_kandev", s.manageTaskChangeRequestHandler()),
@@ -1723,7 +1746,7 @@ func taskChangeRequestToolSchema() json.RawMessage {
 // guidance differ by mode: in external mode there is no current task, so the
 // 'self' shorthand is omitted.
 func (s *Server) registerCreateTaskTool() {
-	toolDesc := `Create a persistent Kandev task or subtask and optionally start its agent. Use only for user-requested Kandev-tracked work; use the host's native subagent mechanism for ordinary delegation. Set parent_id="self" for a subtask of the current task and omit it for an unrelated top-level task. For a Kanban child, self placement creates a sibling under its common parent because Kanban allows one subtask level. The common parent owns coordination; the creating session keeps ordinary messaging. Subtasks inherit the parent's workspace, workflow, repository, profiles, executor, and materialized workspace unless overridden. external_id provides create-if-absent idempotency and is not a lookup.`
+	toolDesc := `Create a persistent Kandev task or subtask and optionally start its agent. Use only for user-requested Kandev-tracked work; use the host's native subagent mechanism for ordinary delegation. Set parent_id="self" for a subtask of the current task and omit it for an unrelated top-level task. For a Kanban child, self placement creates a sibling under its common parent because Kanban allows one subtask level. The common parent owns coordination; the creating session keeps ordinary messaging. Subtasks inherit applicable task defaults from the parent; workspace_mode controls the materialized workspace. external_id provides create-if-absent idempotency and is not a lookup.`
 	parentDesc := "Parent task ID for subtasks. Use 'self' for a user-requested Kandev subtask or plan phase. For a Kanban child, self placement creates a sibling under the common parent because Kanban allows one subtask level. The common parent owns coordination. Omit only for unrelated top-level tasks."
 	agentProfileDesc := "Accepts an agent profile ID only. An ID that names no profile is rejected and creates nothing; the words current_task and workspace_default are values of the mcp_task_agent_profile_default user setting, not accepted arguments, so omit this argument to use the configured policy. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks an explicit ID; otherwise an explicit agent_profile_id wins. When both are absent, the current_task policy uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call, then falls back to the current/source or parent profile without verified session context. The workspace_default policy skips those task profiles and the creating session, then uses workflow profiles before the target workspace default. Explicit profiles do not copy creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start. agent_profile_id is the launch profile only and does not set an Office task's assignee; set the Office assignee through the Office UI or PATCH /api/v1/office/tasks/:id with an assignee_agent_profile_id field in the request body. Agent callers need can_assign_tasks for this PATCH operation (agent_profile_id there is not recognized)."
 
@@ -1740,7 +1763,7 @@ func (s *Server) registerCreateTaskTool() {
 			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Auto-resolved if only one workspace exists. Defaulted from parent for subtasks when omitted.")),
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Defaulted from parent for subtasks when workspace_id is also omitted; if supplied, it must belong to the effective workspace_id.")),
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
-			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. Omit for subtasks to inherit the parent's workspace/worktree. inherit_parent requires parent_id and normally reuses the parent's materialized workspace/worktree. If a new launch selects a different non-Kubernetes executor, Kandev creates a separate child-owned workspace; uncommitted parent changes are not copied. A session still bound to the inherited environment must resume with its original executor, and Kubernetes environments cannot be shared across tasks. new_workspace requests a separate workspace/worktree.")),
+			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. For subtasks, omitting this field creates a separate workspace with fresh checkouts; use inherit_parent to share the parent's exact existing checkout(s) and files. inherit_parent requires parent_id. If a new launch selects a different non-Kubernetes executor, Kandev creates a separate child-owned workspace and does not copy uncommitted parent changes. A session still bound to the inherited environment must resume with its original executor, and Kubernetes environments cannot be shared across tasks. new_workspace also requests a separate workspace. Omit the field instead of sending blank input.")),
 			mcp.WithString("title", mcp.Required(), mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
 			mcp.WithString("prompt", mcp.Description("The initial prompt for the task agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the task agent without task-specific context.")),
 			mcp.WithString("priority", mcp.Enum(models.TaskPriorityCritical, models.TaskPriorityHigh, models.TaskPriorityMedium, models.TaskPriorityLow), mcp.DefaultString(models.TaskPriorityMedium), mcp.Description("Task priority. Defaults to medium when omitted.")),

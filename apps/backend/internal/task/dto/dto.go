@@ -196,6 +196,7 @@ type EnvironmentDTO struct {
 }
 
 type TaskDTO struct {
+	ExecutionGrade              string                         `json:"execution_grade"`
 	ID                          string                         `json:"id"`
 	WorkspaceID                 string                         `json:"workspace_id"`
 	InitialWorkspaceLayout      string                         `json:"initial_workspace_layout,omitempty"`
@@ -412,9 +413,11 @@ type SessionRecoveryBlockDTO struct {
 }
 
 type TaskSessionDTO struct {
-	ID                 string `json:"id"`
-	TaskID             string `json:"task_id"`
-	QueueIncarnationID string `json:"queue_incarnation_id"`
+	AdmittedExecutionGrade      string `json:"admitted_execution_grade"`
+	AdmittedExecutionGradeKnown bool   `json:"admitted_execution_grade_known"`
+	ID                          string `json:"id"`
+	TaskID                      string `json:"task_id"`
+	QueueIncarnationID          string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name             string `json:"name"`
@@ -423,21 +426,22 @@ type TaskSessionDTO struct {
 	// ExecutionRuntime is the observed runtime recorded for the same
 	// executors_running row as AgentExecutionID/ContainerID. Null means
 	// unknown; it is never inferred from the selected executor.
-	ExecutionRuntime   *string `json:"execution_runtime"`
-	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
-	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
-	RouteGeneration    int64   `json:"route_generation,omitempty"`
-	RouteState         string  `json:"route_state,omitempty"`
-	RouteReason        string  `json:"route_reason,omitempty"`
-	ExecutorID         string  `json:"executor_id,omitempty"`
-	ExecutorProfileID  string  `json:"executor_profile_id,omitempty"`
-	EnvironmentID      string  `json:"environment_id,omitempty"`
-	RepositoryID       string  `json:"repository_id,omitempty"`
-	BaseBranch         string  `json:"base_branch,omitempty"`
-	BaseCommitSHA      string  `json:"base_commit_sha,omitempty"`
-	WorktreeID         string  `json:"worktree_id,omitempty"`
-	WorktreePath       string  `json:"worktree_path,omitempty"`
-	WorktreeBranch     string  `json:"worktree_branch,omitempty"`
+	ExecutionRuntime      *string `json:"execution_runtime"`
+	AgentProfileID        string  `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID    string  `json:"execution_profile_id,omitempty"`
+	RuntimeAdapterVersion string  `json:"runtime_adapter_version,omitempty"`
+	RouteGeneration       int64   `json:"route_generation,omitempty"`
+	RouteState            string  `json:"route_state,omitempty"`
+	RouteReason           string  `json:"route_reason,omitempty"`
+	ExecutorID            string  `json:"executor_id,omitempty"`
+	ExecutorProfileID     string  `json:"executor_profile_id,omitempty"`
+	EnvironmentID         string  `json:"environment_id,omitempty"`
+	RepositoryID          string  `json:"repository_id,omitempty"`
+	BaseBranch            string  `json:"base_branch,omitempty"`
+	BaseCommitSHA         string  `json:"base_commit_sha,omitempty"`
+	WorktreeID            string  `json:"worktree_id,omitempty"`
+	WorktreePath          string  `json:"worktree_path,omitempty"`
+	WorktreeBranch        string  `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
@@ -571,6 +575,9 @@ func EnrichSessionRecoveryBlocks(
 	if generation == nil || generation.Generation < 1 {
 		return nil
 	}
+	if generation.AdapterVersion != "" {
+		result.RuntimeAdapterVersion = generation.AdapterVersion
+	}
 	blocks, err := reader.ListOpenSessionRecoveryBlocks(ctx, session.ID, incarnationID, generation.Generation)
 	if err != nil {
 		return err
@@ -619,9 +626,11 @@ func WorkspaceRecoveryFromOperation(
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
 // Used for list endpoints where snapshots are not needed, reducing response size by ~40-60%.
 type TaskSessionSummaryDTO struct {
-	ID                 string `json:"id"`
-	TaskID             string `json:"task_id"`
-	QueueIncarnationID string `json:"queue_incarnation_id"`
+	AdmittedExecutionGrade      string `json:"admitted_execution_grade"`
+	AdmittedExecutionGradeKnown bool   `json:"admitted_execution_grade_known"`
+	ID                          string `json:"id"`
+	TaskID                      string `json:"task_id"`
+	QueueIncarnationID          string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name             string `json:"name"`
@@ -630,21 +639,22 @@ type TaskSessionSummaryDTO struct {
 	// ExecutionRuntime is the observed runtime recorded for the same
 	// executors_running row as AgentExecutionID/ContainerID. Null means
 	// unknown; it is never inferred from the selected executor.
-	ExecutionRuntime   *string `json:"execution_runtime"`
-	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
-	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
-	RouteGeneration    int64   `json:"route_generation,omitempty"`
-	RouteState         string  `json:"route_state,omitempty"`
-	RouteReason        string  `json:"route_reason,omitempty"`
-	ExecutorID         string  `json:"executor_id,omitempty"`
-	ExecutorProfileID  string  `json:"executor_profile_id,omitempty"`
-	EnvironmentID      string  `json:"environment_id,omitempty"`
-	RepositoryID       string  `json:"repository_id,omitempty"`
-	BaseBranch         string  `json:"base_branch,omitempty"`
-	BaseCommitSHA      string  `json:"base_commit_sha,omitempty"`
-	WorktreeID         string  `json:"worktree_id,omitempty"`
-	WorktreePath       string  `json:"worktree_path,omitempty"`
-	WorktreeBranch     string  `json:"worktree_branch,omitempty"`
+	ExecutionRuntime      *string `json:"execution_runtime"`
+	AgentProfileID        string  `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID    string  `json:"execution_profile_id,omitempty"`
+	RuntimeAdapterVersion string  `json:"runtime_adapter_version,omitempty"`
+	RouteGeneration       int64   `json:"route_generation,omitempty"`
+	RouteState            string  `json:"route_state,omitempty"`
+	RouteReason           string  `json:"route_reason,omitempty"`
+	ExecutorID            string  `json:"executor_id,omitempty"`
+	ExecutorProfileID     string  `json:"executor_profile_id,omitempty"`
+	EnvironmentID         string  `json:"environment_id,omitempty"`
+	RepositoryID          string  `json:"repository_id,omitempty"`
+	BaseBranch            string  `json:"base_branch,omitempty"`
+	BaseCommitSHA         string  `json:"base_commit_sha,omitempty"`
+	WorktreeID            string  `json:"worktree_id,omitempty"`
+	WorktreePath          string  `json:"worktree_path,omitempty"`
+	WorktreeBranch        string  `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
@@ -1190,6 +1200,7 @@ func FromTaskWithSessionInfo(
 		Description:                 task.Description,
 		State:                       task.State,
 		Priority:                    task.Priority,
+		ExecutionGrade:              task.ExecutionGrade,
 		WIPAdmitted:                 task.WIPAdmitted,
 		QueuedForStepID:             task.QueuedForStepID,
 		QueuedAt:                    task.QueuedAt,
@@ -1260,37 +1271,40 @@ func observedExecutionRuntimePtr(runtime string) *string {
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
 func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
-		ID:                 session.ID,
-		TaskID:             session.TaskID,
-		QueueIncarnationID: session.QueueIncarnationID,
-		Name:               session.Name,
-		AgentExecutionID:   session.AgentExecutionID,
-		ContainerID:        session.ContainerID,
-		ExecutionRuntime:   observedExecutionRuntimePtr(session.ExecutionRuntime),
-		AgentProfileID:     session.AgentProfileID,
-		ExecutionProfileID: session.ExecutionProfileID,
-		RouteGeneration:    session.RouteGeneration,
-		RouteState:         session.RouteState,
-		RouteReason:        session.RouteReason,
-		ExecutorID:         session.ExecutorID,
-		ExecutorProfileID:  session.ExecutorProfileID,
-		EnvironmentID:      session.EnvironmentID,
-		RepositoryID:       session.RepositoryID,
-		BaseBranch:         session.BaseBranch,
-		BaseCommitSHA:      session.BaseCommitSHA,
-		WorkspacePath:      session.WorkspacePath,
-		AgentWorkspacePath: agentWorkspacePathPtr(session.AgentWorkspacePath),
-		State:              session.State,
-		ErrorMessage:       session.ErrorMessage,
-		Metadata:           session.Metadata,
-		StartedAt:          session.StartedAt,
-		CompletedAt:        session.CompletedAt,
-		UpdatedAt:          session.UpdatedAt,
-		IsPrimary:          session.IsPrimary,
-		IsPassthrough:      session.IsPassthrough,
-		ReviewStatus:       session.ReviewStatus,
-		TaskEnvironmentID:  session.TaskEnvironmentID,
-		LastReadMessageID:  session.LastReadMessageID,
+		ID:                          session.ID,
+		TaskID:                      session.TaskID,
+		QueueIncarnationID:          session.QueueIncarnationID,
+		Name:                        session.Name,
+		AgentExecutionID:            session.AgentExecutionID,
+		ContainerID:                 session.ContainerID,
+		ExecutionRuntime:            observedExecutionRuntimePtr(session.ExecutionRuntime),
+		AgentProfileID:              session.AgentProfileID,
+		ExecutionProfileID:          session.ExecutionProfileID,
+		RuntimeAdapterVersion:       models.ACPAdapterVersionForNativeSession(session.Metadata, session.DownstreamACPSessionID),
+		RouteGeneration:             session.RouteGeneration,
+		RouteState:                  session.RouteState,
+		RouteReason:                 session.RouteReason,
+		ExecutorID:                  session.ExecutorID,
+		ExecutorProfileID:           session.ExecutorProfileID,
+		EnvironmentID:               session.EnvironmentID,
+		RepositoryID:                session.RepositoryID,
+		BaseBranch:                  session.BaseBranch,
+		BaseCommitSHA:               session.BaseCommitSHA,
+		WorkspacePath:               session.WorkspacePath,
+		AgentWorkspacePath:          agentWorkspacePathPtr(session.AgentWorkspacePath),
+		State:                       session.State,
+		ErrorMessage:                session.ErrorMessage,
+		Metadata:                    session.Metadata,
+		StartedAt:                   session.StartedAt,
+		CompletedAt:                 session.CompletedAt,
+		UpdatedAt:                   session.UpdatedAt,
+		IsPrimary:                   session.IsPrimary,
+		IsPassthrough:               session.IsPassthrough,
+		ReviewStatus:                session.ReviewStatus,
+		TaskEnvironmentID:           session.TaskEnvironmentID,
+		LastReadMessageID:           session.LastReadMessageID,
+		AdmittedExecutionGrade:      session.AdmittedExecutionGrade,
+		AdmittedExecutionGradeKnown: session.AdmittedExecutionGradeKnown,
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
@@ -1309,36 +1323,38 @@ func FromTaskSessionSummaryObservation(observation *models.TaskSessionSummaryObs
 
 func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 	result := TaskSessionDTO{
-		ID:                   session.ID,
-		TaskID:               session.TaskID,
-		QueueIncarnationID:   session.QueueIncarnationID,
-		Name:                 session.Name,
-		AgentExecutionID:     session.AgentExecutionID,
-		ContainerID:          session.ContainerID,
-		ExecutionRuntime:     observedExecutionRuntimePtr(session.ExecutionRuntime),
-		AgentProfileID:       session.AgentProfileID,
-		ExecutionProfileID:   session.ExecutionProfileID,
-		RouteGeneration:      session.RouteGeneration,
-		RouteState:           session.RouteState,
-		RouteReason:          session.RouteReason,
-		ExecutorID:           session.ExecutorID,
-		ExecutorProfileID:    session.ExecutorProfileID,
-		EnvironmentID:        session.EnvironmentID,
-		RepositoryID:         session.RepositoryID,
-		BaseBranch:           session.BaseBranch,
-		BaseCommitSHA:        session.BaseCommitSHA,
-		WorkspacePath:        session.WorkspacePath,
-		AgentWorkspacePath:   agentWorkspacePathPtr(session.AgentWorkspacePath),
-		State:                session.State,
-		ErrorMessage:         session.ErrorMessage,
-		Metadata:             session.Metadata,
-		AgentProfileSnapshot: session.AgentProfileSnapshot,
-		ExecutorSnapshot:     session.ExecutorSnapshot,
-		EnvironmentSnapshot:  session.EnvironmentSnapshot,
-		RepositorySnapshot:   session.RepositorySnapshot,
-		StartedAt:            session.StartedAt,
-		CompletedAt:          session.CompletedAt,
-		UpdatedAt:            session.UpdatedAt,
+		ID:                          session.ID,
+		TaskID:                      session.TaskID,
+		QueueIncarnationID:          session.QueueIncarnationID,
+		Name:                        session.Name,
+		AgentExecutionID:            session.AgentExecutionID,
+		ContainerID:                 session.ContainerID,
+		ExecutionRuntime:            observedExecutionRuntimePtr(session.ExecutionRuntime),
+		AgentProfileID:              session.AgentProfileID,
+		ExecutionProfileID:          session.ExecutionProfileID,
+		RouteGeneration:             session.RouteGeneration,
+		RouteState:                  session.RouteState,
+		RouteReason:                 session.RouteReason,
+		ExecutorID:                  session.ExecutorID,
+		ExecutorProfileID:           session.ExecutorProfileID,
+		EnvironmentID:               session.EnvironmentID,
+		RepositoryID:                session.RepositoryID,
+		BaseBranch:                  session.BaseBranch,
+		BaseCommitSHA:               session.BaseCommitSHA,
+		WorkspacePath:               session.WorkspacePath,
+		AgentWorkspacePath:          agentWorkspacePathPtr(session.AgentWorkspacePath),
+		State:                       session.State,
+		ErrorMessage:                session.ErrorMessage,
+		Metadata:                    session.Metadata,
+		AgentProfileSnapshot:        session.AgentProfileSnapshot,
+		ExecutorSnapshot:            session.ExecutorSnapshot,
+		EnvironmentSnapshot:         session.EnvironmentSnapshot,
+		RepositorySnapshot:          session.RepositorySnapshot,
+		StartedAt:                   session.StartedAt,
+		CompletedAt:                 session.CompletedAt,
+		UpdatedAt:                   session.UpdatedAt,
+		AdmittedExecutionGrade:      session.AdmittedExecutionGrade,
+		AdmittedExecutionGradeKnown: session.AdmittedExecutionGradeKnown,
 		// Workflow fields
 		IsPrimary:             session.IsPrimary,
 		IsPassthrough:         session.IsPassthrough,
@@ -1565,16 +1581,17 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 
 // TaskPlanCommentDTO is pending feedback attached to a task's current plan.
 type TaskPlanCommentDTO struct {
-	ID           string    `json:"id"`
-	TaskID       string    `json:"task_id"`
-	PlanID       string    `json:"plan_id"`
-	Body         string    `json:"body"`
-	SelectedText string    `json:"selected_text"`
-	AnchorFrom   int       `json:"anchor_from"`
-	AnchorTo     int       `json:"anchor_to"`
-	Version      int64     `json:"version"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Attachments  []v1.MessageAttachment `json:"attachments,omitempty"`
+	ID           string                 `json:"id"`
+	TaskID       string                 `json:"task_id"`
+	PlanID       string                 `json:"plan_id"`
+	Body         string                 `json:"body"`
+	SelectedText string                 `json:"selected_text"`
+	AnchorFrom   int                    `json:"anchor_from"`
+	AnchorTo     int                    `json:"anchor_to"`
+	Version      int64                  `json:"version"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
 }
 
 // TaskPlanCommentSnapshotDTO is a complete, versioned replacement snapshot.
@@ -1596,7 +1613,8 @@ func TaskPlanCommentSnapshotFromModel(snapshot *models.TaskPlanCommentSnapshot) 
 	}
 	for _, comment := range snapshot.Comments {
 		out.Comments = append(out.Comments, &TaskPlanCommentDTO{
-			ID: comment.ID, TaskID: comment.TaskID, PlanID: comment.PlanID,
+			Attachments: comment.Attachments,
+			ID:          comment.ID, TaskID: comment.TaskID, PlanID: comment.PlanID,
 			Body: comment.Body, SelectedText: comment.SelectedText,
 			AnchorFrom: comment.AnchorFrom, AnchorTo: comment.AnchorTo, Version: comment.Version,
 			CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt,

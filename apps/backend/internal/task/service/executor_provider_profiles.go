@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kandev/kandev/internal/common/offlinebudget"
 	"math"
 	"strconv"
 	"strings"
@@ -36,9 +37,13 @@ var kandevExecutorProfileKeys = map[string]func() any{
 	"remote_auth_target_home": nil,
 	"git_user_name":           nil,
 	"git_user_email":          nil,
+	offlinebudget.Key:         nil,
 }
 
 func validateKandevExecutorProfileValue(key, value string) error {
+	if key == offlinebudget.Key {
+		return validateOfflineBudgetConfig(map[string]string{key: value})
+	}
 	shape := kandevExecutorProfileKeys[key]
 	if shape == nil {
 		return nil

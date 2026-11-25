@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getPinnedWidth } from "./sizing";
+import { computeRootAxisSizes, getPinnedWidth } from "./sizing";
 import { computeSidebarMaxPx } from "./caps";
 import type { LayoutColumn } from "./types";
 import { getGlobalSidebarWidth, setGlobalSidebarWidth } from "@/lib/local-storage";
@@ -53,4 +53,64 @@ describe("getPinnedWidth — global sidebar width pref", () => {
     // roomier 288px default while retaining space for its tools.
     expect(getPinnedWidth(right(), 960, undefined)).toBe(288);
   });
+});
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe("computeRootAxisSizes", () => {
+  const center = (extra: Partial<LayoutColumn> = {}): LayoutColumn =>
+    ({ id: "center", groups: [], ...extra }) as LayoutColumn;
+
+  it("sizes a VERTICAL root along the height and ignores horizontal pinning", () => {
+    const columns = [center({ width: 300 }), right({ width: 400, maxWidth: 120, minWidth: 100 })];
+
+    const sized = computeRootAxisSizes(columns, "VERTICAL", 1400, 700, new Map([["right", 250]]));
+
+    expect(sized).toEqual({ sizes: [300, 400], orthogonal: 1400 });
+  });
+
+  it("scales a complete set of VERTICAL root extents to the available height", () => {
+    const columns = [center({ width: 300 }), right({ width: 400 })];
+
+    const sized = computeRootAxisSizes(columns, "VERTICAL", 1400, 350, new Map());
+
+    expect(sized.sizes).toEqual([150, 200]);
+  });
+
+  it("keeps the explicit and flexible distribution for incomplete VERTICAL extents", () => {
+    const columns = [center({ width: 300 }), right()];
+
+    const sized = computeRootAxisSizes(columns, "VERTICAL", 1400, 700, new Map());
+
+    expect(sized.sizes).toEqual([300, 400]);
+  });
+
+  it.each([
+    { widths: [600, 600, undefined], expected: [350, 350, 0] },
+    { widths: [600, 600, 600, undefined], expected: [233, 234, 233, 0] },
+  ])(
+    "fits oversubscribed incomplete vertical rows into the available height: $widths",
+    ({ widths, expected }) => {
+      const columns = widths.map((width) => center({ width }));
+      expect(computeRootAxisSizes(columns, "VERTICAL", 1400, 700, new Map()).sizes).toEqual(
+        expected,
+      );
+    },
+  );
+
+  it.each([["HORIZONTAL" as const], [undefined]])(
+    "keeps the pinned width policy for a %s root",
+    (orientation) => {
+      const columns = [center(), right({ width: 400 })];
+
+      const sized = computeRootAxisSizes(
+        columns,
+        orientation,
+        1400,
+        700,
+        new Map([["right", 300]]),
+      );
+
+      expect(sized).toEqual({ sizes: [1100, 300], orthogonal: 700 });
+    },
+  );
 });

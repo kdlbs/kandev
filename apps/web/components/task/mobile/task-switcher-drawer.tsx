@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Drawer, DrawerContent } from "@kandev/ui/drawer";
+import { keepMoveOpenForPromptSuggestions } from "../workflow-move-surface";
 import {
   MobileConfirmationHost,
   MobileConfirmationHostBody,
@@ -24,6 +25,7 @@ export function TaskSwitcherDrawer({
             <DrawerContent
               onCloseAutoFocus={onCloseAutoFocus}
               {...contentProps}
+              onEscapeKeyDown={contentProps.onEscapeKeyDown ?? keepMoveOpenForPromptSuggestions}
               className="h-[88dvh] max-h-[88dvh] overflow-hidden pb-[max(0.5rem,env(safe-area-inset-bottom))]"
             >
               <MobileConfirmationHostBody>{children}</MobileConfirmationHostBody>

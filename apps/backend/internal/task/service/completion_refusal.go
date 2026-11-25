@@ -82,26 +82,32 @@ func (s *Service) UpdateTaskAsHuman(ctx context.Context, id string, req *UpdateT
 
 // CompleteOfficeTaskAsHuman applies the Office Done action to the current
 // final step through the same transaction that evaluates completion policies.
-func (s *Service) CompleteOfficeTaskAsHuman(ctx context.Context, id, expectedStepID string) (*models.Task, error) {
+func (s *Service) CompleteOfficeTaskAsHuman(
+	ctx context.Context, id, expectedStepID string,
+) (models.TaskStateChange, error) {
 	task, err := s.officeHumanCompletionTaskSnapshot(ctx, id)
 	if err != nil {
-		return nil, err
+		return models.TaskStateChange{}, err
 	}
 	if task.WorkflowStepID != expectedStepID {
-		return nil, repoerrors.ErrWorkflowChangeConflict
+		return models.TaskStateChange{}, repoerrors.ErrWorkflowChangeConflict
 	}
 	repo, ok := s.tasks.(finalStepCompletionRepository)
 	if !ok {
-		return nil, fmt.Errorf("final-step completion repository not configured")
+		return models.TaskStateChange{}, fmt.Errorf("final-step completion repository not configured")
 	}
 	updated, previousState, changed, err := repo.CompleteTaskOnFinalStep(ctx, id, humanCompletionAdmission(task, completion.FinalStepDone))
 	if err != nil {
-		return nil, s.translateCompletionError(ctx, err)
+		return models.TaskStateChange{}, s.translateCompletionError(ctx, err)
 	}
-	if changed {
-		s.PublishTaskStateChanged(ctx, updated, previousState)
+	change := models.TaskStateChange{
+		Matched:  true,
+		Changed:  changed,
+		OldState: previousState,
+		Task:     updated,
 	}
-	return updated, nil
+	s.PublishCommittedTaskStateChange(ctx, change, false)
+	return change, nil
 }
 
 // officeHumanCompletionTaskSnapshot binds the existing authorization decision

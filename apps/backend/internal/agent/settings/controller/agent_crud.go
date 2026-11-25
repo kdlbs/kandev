@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
 func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, error) {
@@ -129,6 +130,7 @@ type CreateAgentRequest struct {
 }
 
 type CreateAgentProfileRequest struct {
+	ExecutionGrade          string
 	Name                    string
 	Model                   string
 	FallbackModel           string
@@ -182,6 +184,12 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 	// leaving an orphaned agent behind.
 	for i := range req.Profiles {
 		if err := validateCreateProfileRequest(req.Profiles[i]); err != nil {
+			return nil, err
+		}
+		if err := validateClaudeExactModelAliasConflict(
+			req.Name, req.Profiles[i].Model, req.Profiles[i].RequireExactModel,
+			envVarsFromDTO(req.Profiles[i].EnvVars),
+		); err != nil {
 			return nil, err
 		}
 		mode, envVars := devinProfilePermissionDefaults(
@@ -266,6 +274,9 @@ func (c *Controller) findMatchedAvailability(name string, results []discovery.Av
 // agent-create profile. Kept separate so CreateAgent can validate every profile
 // before inserting the agent row (avoiding an orphaned agent on a bad profile).
 func validateCreateProfileRequest(p CreateAgentProfileRequest) error {
+	if err := sessioncapacity.ValidateGrade(p.ExecutionGrade); err != nil {
+		return err
+	}
 	if err := validateRequireExactModelPolicy(p.Model, p.RequireExactModel, false, false); err != nil {
 		return err
 	}
@@ -298,6 +309,7 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			cliFlags = seedCLIFlags(agentConfig)
 		}
 		profile := &models.AgentProfile{
+			ExecutionGrade:          profileReq.ExecutionGrade,
 			AgentID:                 agentID,
 			Name:                    profileReq.Name,
 			AgentDisplayName:        displayName,

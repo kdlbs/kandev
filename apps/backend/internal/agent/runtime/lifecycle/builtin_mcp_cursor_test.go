@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/stretchr/testify/require"
 )
@@ -14,7 +15,8 @@ import (
 func TestBuiltinCursorRefreshPreservesUserChanges(t *testing.T) {
 	mgr := newTestManager(t)
 	workspace := t.TempDir()
-	execution := &AgentExecution{TaskID: "task-a", WorkspaceID: "workspace", WorkspacePath: workspace, standalonePort: 41234}
+	execution := &AgentExecution{ID: "cursor-execution", TaskID: "task-a", WorkspaceID: "workspace", WorkspacePath: workspace, standalonePort: 41234}
+	client := agentctl.NewClient("127.0.0.1", 41234, newTestLogger(), agentctl.WithExecutionID("cursor-helper"))
 	bind := func(ids ...p.PackageID) {
 		encoded, err := p.MarshalBuiltinBinding(builtinDispatchProfile(ids...))
 		require.NoError(t, err)
@@ -24,7 +26,7 @@ func TestBuiltinCursorRefreshPreservesUserChanges(t *testing.T) {
 	generation := beginCursorProjectMCPPreparation(key)
 	defer finishCursorProjectMCPPreparation(key, generation)
 	refresh := func() error {
-		_, err := mgr.reconcileCursorProjectMCPFiles(context.Background(), workspace, key, generation, execution, nil, nil)
+		_, err := mgr.reconcileCursorProjectMCPFiles(context.Background(), workspace, key, generation, execution, client, nil, nil)
 		return err
 	}
 	file := filepath.Join(workspace, ".cursor", "mcp.json")

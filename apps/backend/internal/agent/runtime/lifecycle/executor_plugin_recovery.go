@@ -274,9 +274,14 @@ func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Co
 	if state.inventory.InstancePort == 0 {
 		return nil, errors.New("plugin executor inventory has no agentctl instance port")
 	}
+	runtimeIdentity := pluginExecutorRuntimeIdentity(state.inventory, record.AgentExecutionID)
+	info, err := r.readRecoveredAgentctlInstance(ctx, record, state, runtimeIdentity, record.TransientAuthToken)
+	if err != nil {
+		return nil, err
+	}
 	client, err := r.newAgentctlClient(
 		ctx, r.connectionResolver(state.operationContext, state.inventory.Resource, state.inventory.InstancePort), r.logger,
-		record.AgentExecutionID, record.TransientAuthToken,
+		info.ID, record.TransientAuthToken, info.ScopedMCPRoutes,
 	)
 	if err != nil {
 		return nil, errors.New("plugin executor agentctl transport is unavailable")
@@ -284,11 +289,6 @@ func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Co
 	if err := r.ready(ctx, client); err != nil {
 		client.Close()
 		return nil, errors.New("plugin executor agentctl readiness check failed")
-	}
-	info, err := r.readRecoveredAgentctlInstance(ctx, record, state)
-	if err != nil {
-		client.Close()
-		return nil, err
 	}
 	metadata := clonePluginExecutorMetadata(record.Metadata)
 	metadata[MetadataKeyPluginExecutor] = state.inventory
@@ -305,24 +305,29 @@ func (r *PluginRemoteExecutor) readRecoveredAgentctlInstance(
 	ctx context.Context,
 	record *models.ExecutorRunning,
 	state *pluginExecutorRecoveryState,
+	nativeIdentity string,
+	token string,
 ) (*agentctl.InstanceInfo, error) {
 	if record == nil || state == nil || r.recoveredAgentctlInfoReader == nil {
 		return nil, errors.New("plugin executor instance metadata reader is unavailable")
+	}
+	if nativeIdentity == "" || token == "" {
+		return nil, errors.New("plugin executor instance metadata credentials are unavailable")
 	}
 	info, err := r.recoveredAgentctlInfoReader(
 		ctx,
 		r.connectionResolver(state.operationContext, state.inventory.Resource, pluginExecutorRuntimePort),
 		r.logger,
-		record.AgentExecutionID,
-		record.TransientAuthToken,
+		nativeIdentity,
+		token,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("read authenticated plugin agentctl instance metadata: %w", err)
 	}
-	if info == nil || info.ID != record.AgentExecutionID || info.TaskID != record.TaskID ||
+	if info == nil || info.ID != nativeIdentity || info.TaskID != record.TaskID ||
 		info.SessionID != record.SessionID || info.Port < 1 || uint32(info.Port) != state.inventory.InstancePort ||
 		strings.TrimSpace(info.WorkspacePath) == "" {
-		return nil, errors.New("authenticated plugin agentctl instance metadata does not match persisted owner")
+		return nil, errors.New("authenticated plugin agentctl instance metadata does not match selected runtime owner")
 	}
 	return info, nil
 }

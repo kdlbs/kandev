@@ -11,14 +11,15 @@ owners:
 ## Overview
 
 An agent must identify the option a user selected without guessing the meaning
-of a generated option ID. The Tasks system owns clarification answers and their
-association with the original questions. Agent transports consume this contract.
+of a generated option ID. The Tasks system owns the association between
+clarification answers and the original questions. This applies to tool results
+and to prompts that deliver answers after the tool wait ends.
 
 ## Requirements
 
 ### REQ-TASKS-QUESTION-ANSWER-LABELS-001: Readable selected answers
 
-**Intent:** Return the selected option's displayed label with its existing ID.
+**Intent:** Deliver the displayed label with the selected option ID.
 
 #### Acceptance criteria
 
@@ -38,6 +39,10 @@ association with the original questions. Agent transports consume this contract.
 - **AC-TASKS-QUESTION-ANSWER-LABELS-001.4:** The discovered output schema shall
   describe `selected_option` as an option ID and `selected_label` as its label.
   Structured results and the JSON text result shall contain equivalent answers.
+- **AC-TASKS-QUESTION-ANSWER-LABELS-001.5:** When a resume prompt lists selected
+  options from a current-turn answer, it shall show each selected option ID.
+  When the ID has one match in its question, the prompt shall show the
+  exact label beside the ID if the label is nonempty.
 
 ## Out of scope
 

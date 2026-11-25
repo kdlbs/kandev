@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -282,8 +281,8 @@ func TestDeleteEphemeralTaskClearsPromptSequence(t *testing.T) {
 	taskID, sessionID, turnID := "ephemeral-prompt-task", "ephemeral-prompt-session", "ephemeral-prompt-turn"
 	seedForMsgTest(t, repo, taskID, sessionID, turnID)
 	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
-		UPDATE tasks SET is_ephemeral = 1 WHERE id = ?
-	`), taskID); err != nil {
+		UPDATE tasks SET is_ephemeral = 1, metadata = ? WHERE id = ?
+	`), `{"config_mode":true}`, taskID); err != nil {
 		t.Fatalf("mark task ephemeral: %v", err)
 	}
 	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
@@ -307,31 +306,24 @@ func TestDeleteEphemeralTaskClearsPromptSequence(t *testing.T) {
 	}
 }
 
-func TestDeleteExpiredQuickChatClearsPromptSequence(t *testing.T) {
+func TestDeleteTaskClearsPromptSequence(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
-	taskID, sessionID, turnID := "expired-prompt-task", "expired-prompt-session", "expired-prompt-turn"
+	taskID, sessionID, turnID := "deleted-prompt-task", "deleted-prompt-session", "deleted-prompt-turn"
 	seedForMsgTest(t, repo, taskID, sessionID, turnID)
-	cutoff := time.Now().UTC()
-	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
-		UPDATE tasks SET is_ephemeral = 1, updated_at = ? WHERE id = ?
-	`), cutoff.Add(-time.Hour), taskID); err != nil {
-		t.Fatalf("expire task: %v", err)
-	}
 	if err := repo.CreateMessage(ctx, &models.Message{
-		ID: "expired-prompt", TaskID: taskID, TaskSessionID: sessionID, TurnID: turnID,
+		ID: "deleted-prompt", TaskID: taskID, TaskSessionID: sessionID, TurnID: turnID,
 		AuthorType: models.MessageAuthorUser, Content: "prompt",
 	}); err != nil {
 		t.Fatalf("create user prompt: %v", err)
 	}
-	deleted, err := repo.DeleteExpiredQuickChatTask(ctx, taskID, cutoff)
-	if err != nil || !deleted {
-		t.Fatalf("delete expired quick chat = %t, %v; want deleted", deleted, err)
+	if err := repo.DeleteTask(ctx, taskID); err != nil {
+		t.Fatalf("delete task: %v", err)
 	}
-	seedForMsgTest(t, repo, taskID, sessionID, "expired-prompt-turn-new")
+	seedForMsgTest(t, repo, taskID, sessionID, "deleted-prompt-turn-new")
 	hasHistory, err := repo.HasUserPromptHistory(ctx, sessionID)
 	if err != nil || hasHistory {
-		t.Fatalf("recreated quick-chat session history = %t, %v; want empty", hasHistory, err)
+		t.Fatalf("recreated session history = %t, %v; want empty", hasHistory, err)
 	}
 }
 

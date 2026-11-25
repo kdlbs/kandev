@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/taskdependencies"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -29,6 +28,17 @@ var validPriorities = map[string]struct{}{
 	"high":     {},
 	"medium":   {},
 	"low":      {},
+}
+
+const postCommitSideEffectTimeout = 5 * time.Second
+
+// detachedPostCommitContext keeps committed state side effects ordered even
+// when the request is cancelled immediately after the database commit.
+func detachedPostCommitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), postCommitSideEffectTimeout)
 }
 
 // UpdateTaskPriority sets the priority field. Validates the value against
@@ -583,10 +593,6 @@ type TaskStatusUpdateRequest struct {
 	// ResumeIntent=true is an explicit "pick this up again" with required
 	// follow-up comment. Forces task_reopened_via_comment.
 	ResumeIntent bool
-	// SuppressStatusActivity is used by the orchestrator when it will publish
-	// the canonical task.state_changed event that owns the activity row. Gate
-	// redirects still log here because they do not publish that event.
-	SuppressStatusActivity bool
 	// Automatic terminal writes must not overwrite a later business-state change.
 	ExpectedCurrentState   string
 	ExpectedWorkflowStepID string
@@ -622,10 +628,8 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	if s.taskStateWriter == nil {
 		return errors.New("task status writer is not configured")
 	}
-
-	preStatus := ""
-	if exec, err := s.repo.GetTaskExecutionFields(ctx, req.TaskID); err == nil && exec != nil {
-		preStatus = exec.State
+	if s.taskStateChangeEvents == nil {
+		return errors.New("task state change publisher is not configured")
 	}
 
 	expectedStepID := ""
@@ -635,18 +639,23 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 		return gateErr
 	}
 
-	if err := s.persistTaskStatus(ctx, req, dbState, expectedStepID); err != nil {
+	change, err := s.persistTaskStatus(ctx, req, dbState, expectedStepID)
+	if err != nil {
 		return err
 	}
 
-	commentID := s.maybeCreateStatusComment(ctx, req)
-	if !req.SuppressStatusActivity || pendingErr != nil {
-		s.logTaskStatusChangeActivity(ctx, req)
+	postCommitCtx, cancelPostCommit := detachedPostCommitContext(ctx)
+	defer cancelPostCommit()
+	commentID := s.maybeCreateStatusComment(postCommitCtx, req)
+	if change.Changed {
+		s.logTaskStatusChangeActivity(postCommitCtx, req)
+		s.taskStateChangeEvents.PublishCommittedTaskStateChange(postCommitCtx, change, true)
 	}
-	s.publishTaskStatusChanged(ctx, req)
-	s.publishCanonicalTaskUpdated(ctx, req.TaskID)
-	s.runReactivityForStatus(ctx, req, commentID, preStatus)
-	s.maybeSupersedeOnRework(ctx, req.TaskID, preStatus, dbState)
+	s.publishTaskStatusChanged(postCommitCtx, req)
+	s.publishCanonicalTaskUpdated(postCommitCtx, req.TaskID)
+	preStatus := string(change.OldState)
+	s.runReactivityForStatus(postCommitCtx, req, commentID, preStatus)
+	s.maybeSupersedeOnRework(postCommitCtx, req.TaskID, preStatus, dbState)
 
 	return gateErr
 }
@@ -807,9 +816,6 @@ func (s *DashboardService) runReactivityForStatus(
 		ActorType:    actorType,
 		ReopenIntent: req.ReopenIntent,
 		ResumeIntent: req.ResumeIntent,
-	}
-	if normaliseStatus(req.NewStatus) == "CANCELLED" {
-		change.BlockerFailureOccurrenceID = "office-status:" + uuid.NewString()
 	}
 	if commentID != "" {
 		change.Comment = &TaskReactivityComment{

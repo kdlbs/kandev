@@ -7,11 +7,16 @@ import (
 	"go.uber.org/zap"
 )
 
-func (w *Worker) batchRowLimit(phase string) int {
+func (w *Worker) configuredBatchRowLimit(phase string) int {
 	limit := w.opts.BatchRows
 	if phase == "retention" {
 		limit = min(limit, BackgroundBatchRows)
 	}
+	return limit
+}
+
+func (w *Worker) batchRowLimit(phase string) int {
+	limit := w.configuredBatchRowLimit(phase)
 	if reduced := w.batchRows[phase]; reduced > 0 {
 		limit = min(limit, reduced)
 	}
@@ -37,4 +42,18 @@ func (w *Worker) recordBatchFailure(ctx context.Context, phase, reason string, e
 			zap.Int("candidate_rows", previous), zap.Int("next_candidate_rows", w.batchRowLimit(phase)),
 			zap.Error(err))
 	}
+}
+
+func (w *Worker) recordBatchSuccess(phase string) {
+	reduced := w.batchRows[phase]
+	if reduced <= 0 {
+		return
+	}
+	limit := w.configuredBatchRowLimit(phase)
+	recovered := min(reduced*2, limit)
+	if recovered >= limit {
+		delete(w.batchRows, phase)
+		return
+	}
+	w.batchRows[phase] = recovered
 }

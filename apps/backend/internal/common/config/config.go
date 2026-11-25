@@ -158,6 +158,7 @@ type LauncherConfig struct {
 type GitHubCredentialBrokerConfig struct {
 	PublicBaseURL     string `mapstructure:"publicBaseUrl" json:"-"`
 	ReissueSigningKey string `mapstructure:"reissueSigningKey" json:"-"`
+	DisableReissue    bool   `mapstructure:"disableReissue" json:"-"`
 }
 
 func (c GitHubCredentialBrokerConfig) validate() error {
@@ -613,6 +614,9 @@ type FeaturesConfig struct {
 	// adapter and profile catalogue are composed at startup.
 	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
 
+	// ACPV2 opts qualified local structured sessions into ACP v2.
+	ACPV2 bool `mapstructure:"acp_v2" json:"acpV2"`
+
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.
 	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`
@@ -906,14 +910,6 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 	// camelCase key, so AutomaticEnv would expose the undocumented
 	// KANDEV_AUTH_COOKIENAME; the canonical override is KANDEV_AUTH_COOKIE_NAME.
 	_ = v.BindEnv("auth.cookieName", "KANDEV_AUTH_COOKIE_NAME")
-	_ = v.BindEnv(
-		"githubCredentialBroker.publicBaseUrl",
-		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
-	)
-	_ = v.BindEnv(
-		"githubCredentialBroker.reissueSigningKey",
-		"KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY",
-	)
 
 	selection, found, err := selectConfigFile(configPath, homeDir)
 	if err != nil {

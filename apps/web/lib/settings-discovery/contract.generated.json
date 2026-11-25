@@ -129,6 +129,21 @@
       },
       "fields": [
         {
+          "key": "agent_profile.execution_grade",
+          "field_path": "execution_grade",
+          "label": "execution_grade",
+          "description": "Explicit execution classification; empty is unconfigured.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
           "key": "agent_profile.name",
           "field_path": "name",
           "label": "name",
@@ -1650,7 +1665,7 @@
           "key": "github_settings.repo_scope_mode",
           "field_path": "repo_scope_mode",
           "label": "Repository scope mode",
-          "description": "Repository scope selection mode.",
+          "description": "Choose all repositories or selected owners and exact repositories; legacy orgs/repos inputs stay exclusive.",
           "json_type": "string",
           "support": "supported",
           "classification": "writable",
@@ -4485,6 +4500,21 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.markdown_preview_by_default",
+          "field_path": "markdown_preview_by_default",
+          "label": "Open Markdown files in Preview",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
           "key": "user_settings.lsp_status_location",
           "field_path": "lsp_status_location",
           "label": "LSP status location",
@@ -6031,6 +6061,7 @@
       "dynamic",
       "enabled",
       "env_vars",
+      "execution_grade",
       "fallback_model",
       "mcp_selected_servers",
       "mcp_selection_mode",
@@ -6074,6 +6105,7 @@
       "lsp_auto_start_languages",
       "lsp_server_configs",
       "lsp_status_location",
+      "markdown_preview_by_default",
       "mcp_task_agent_profile_default",
       "message_time_display",
       "preferred_shell",

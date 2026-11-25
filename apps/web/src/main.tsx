@@ -59,7 +59,7 @@ function AppBody({ payload }: { payload: BootPayload }) {
   return (
     <SystemInfoQueryProvider bootId={payload.runtime?.bootId}>
       <>
-        <PluginBootBridge plugins={payload.plugins} />
+        <PluginBootBridge plugins={payload.plugins} sidebarGroupings={payload.sidebarGroupings} />
         <AppShell>
           <RouteErrorBoundary>
             <SpaRoutes routeData={payload.routeData} />

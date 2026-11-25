@@ -234,6 +234,30 @@ type WorktreeInventory struct {
 	ObservedAt     time.Time                `json:"observed_at"`
 }
 
+// WorkspaceRootFile describes a regular file outside the repository checkouts
+// in a multi-repository task workspace.
+type WorkspaceRootFile struct {
+	Path       string    `json:"path"`
+	Size       int64     `json:"size"`
+	ModifiedAt time.Time `json:"modified_at"`
+}
+
+// WorkspaceRootDestination identifies a repository checkout that can receive
+// a workspace root file.
+type WorkspaceRootDestination struct {
+	RepositoryName string `json:"repository_name"`
+	Path           string `json:"path"`
+}
+
+// WorkspaceRootFiles is the bounded listing of files outside repository
+// checkouts for a task workspace.
+type WorkspaceRootFiles struct {
+	Supported    bool                       `json:"supported"`
+	Files        []WorkspaceRootFile        `json:"files"`
+	Truncated    bool                       `json:"truncated"`
+	Destinations []WorkspaceRootDestination `json:"destinations"`
+}
+
 // WorkspaceStreamMessage is the unified message format for the workspace stream.
 // It carries all workspace events (shell I/O, git status, file changes) with
 // message type differentiation.

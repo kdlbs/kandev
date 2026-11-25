@@ -335,6 +335,7 @@ func (w *Worker) runPassBatch(ctx context.Context, phase string, remaining time.
 		snapshot.CommittedBatches++
 		batchesTotal.Add("committed", 1)
 		lastSuccess.Set(w.opts.Now().Unix())
+		w.recordBatchSuccess(phase)
 	}
 	return true
 }

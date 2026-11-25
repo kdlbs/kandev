@@ -2,11 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/office/dashboard"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -19,29 +21,97 @@ import (
 // can observe both what the orchestrator asked for and what state ends
 // up persisted — without standing up the full dashboard service.
 type recordingOfficeStatusUpdater struct {
-	repo     *sqliterepo.Repository
-	newState v1.TaskState // state to persist; defaults to COMPLETED
-	err      error        // returned after the write, mirrors UpdateTaskStatus's contract
-	calls    []dashboard.TaskStatusUpdateRequest
+	repo             *sqliterepo.Repository
+	newState         v1.TaskState // state to persist; defaults to COMPLETED
+	err              error        // returned after the write, mirrors UpdateTaskStatus's contract
+	mu               sync.Mutex
+	calls            []dashboard.TaskStatusUpdateRequest
+	committedChanges []models.TaskStateChange
+	onCommit         func(context.Context, models.TaskStateChange)
 }
 
 func (u *recordingOfficeStatusUpdater) UpdateTaskStatus(ctx context.Context, req dashboard.TaskStatusUpdateRequest) error {
+	u.mu.Lock()
 	u.calls = append(u.calls, req)
+	u.mu.Unlock()
 	state := v1.TaskStateCompleted
 	if u.newState != "" {
 		state = u.newState
 	}
-	task, err := u.repo.GetTask(ctx, req.TaskID)
+	expectedState := v1.TaskState(req.ExpectedCurrentState)
+	write := models.TaskStateWrite{
+		State:                  state,
+		ExpectedWorkflowStepID: &req.ExpectedWorkflowStepID,
+		ExpectedState:          &expectedState,
+	}
+	change, err := u.repo.CommitTaskState(ctx, req.TaskID, write)
 	if err != nil {
 		return err
 	}
-	task.State = state
-	task.UpdatedAt = time.Now().UTC()
-	if err := u.repo.UpdateTask(ctx, task); err != nil {
-		return err
+	if !change.Matched {
+		return dashboard.ErrAutomaticCompletionStale
+	}
+	if change.Changed {
+		u.mu.Lock()
+		u.committedChanges = append(u.committedChanges, change)
+		u.mu.Unlock()
+		if u.onCommit != nil {
+			u.onCommit(ctx, change)
+		}
 	}
 	return u.err
 }
+
+func (u *recordingOfficeStatusUpdater) committed() []models.TaskStateChange {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]models.TaskStateChange(nil), u.committedChanges...)
+}
+
+func routeCommittedStateToOrchestrator(ctx context.Context, svc *Service, change models.TaskStateChange) {
+	if change.Task == nil {
+		return
+	}
+	oldState, newState := change.OldState, change.Task.State
+	svc.handleTaskStateChanged(ctx, watcher.TaskEventData{
+		TaskID:   change.Task.ID,
+		Task:     change.Task.ToAPI(),
+		OldState: &oldState,
+		NewState: &newState,
+	})
+}
+
+type recordingTaskEventPublisher struct {
+	mu           sync.Mutex
+	updated      []string
+	stateChanges []recordedStateChange
+}
+
+type recordedStateChange struct {
+	taskID   string
+	oldState v1.TaskState
+	newState v1.TaskState
+}
+
+func (r *recordingTaskEventPublisher) PublishTaskUpdated(_ context.Context, task *models.Task, _ ...string) {
+	if task == nil {
+		return
+	}
+	r.mu.Lock()
+	r.updated = append(r.updated, task.ID)
+	r.mu.Unlock()
+}
+
+func (r *recordingTaskEventPublisher) PublishTaskStateChanged(_ context.Context, task *models.Task, oldState v1.TaskState) {
+	if task == nil {
+		return
+	}
+	r.mu.Lock()
+	r.stateChanges = append(r.stateChanges, recordedStateChange{taskID: task.ID, oldState: oldState, newState: task.State})
+	r.mu.Unlock()
+}
+
+func (r *recordingTaskEventPublisher) PublishTaskActivityIfChanged(context.Context, string) {}
 
 // requireCreateOfficeTask creates a task with a non-empty ProjectID so the
 // repo's IsFromOffice projection reports true (see isFromOfficeProjection).
@@ -230,7 +300,7 @@ func TestMarkOfficeTaskCompleted_RechecksStepAfterPerTaskLock(t *testing.T) {
 	svc.markTaskCompletedForTerminalStep(ctx, "office-recheck", "child_done")
 
 	if len(updater.calls) != 0 {
-		t.Fatalf("seam calls = %+v, want none after the locked reload observes a new step", updater.calls)
+		t.Fatalf("seam calls = %+v, want none after the status reload observes a new step", updater.calls)
 	}
 	task, err := baseRepo.GetTask(ctx, "office-recheck")
 	if err != nil {
@@ -338,35 +408,6 @@ func TestMarkOfficeTaskCompleted_SeamNil_SkipsWrite(t *testing.T) {
 	}
 }
 
-// recordingTaskEventPublisher captures PublishTaskUpdated /
-// PublishTaskStateChanged calls so tests can assert the emitted events
-// themselves, not just the persisted task state.
-type recordingTaskEventPublisher struct {
-	updated      []string
-	stateChanges []recordedStateChange
-}
-
-type recordedStateChange struct {
-	taskID   string
-	oldState v1.TaskState
-	newState v1.TaskState
-}
-
-func (r *recordingTaskEventPublisher) PublishTaskUpdated(_ context.Context, task *models.Task, _ ...string) {
-	if task != nil {
-		r.updated = append(r.updated, task.ID)
-	}
-}
-
-func (r *recordingTaskEventPublisher) PublishTaskStateChanged(_ context.Context, task *models.Task, oldState v1.TaskState) {
-	if task == nil {
-		return
-	}
-	r.stateChanges = append(r.stateChanges, recordedStateChange{taskID: task.ID, oldState: oldState, newState: task.State})
-}
-
-func (r *recordingTaskEventPublisher) PublishTaskActivityIfChanged(context.Context, string) {}
-
 // waitStepWithChildrenCompletedTrigger seeds a two-step workflow (position 0
 // "step-wait" with an on_children_completed move-to-next action, position 1
 // "step-done") on the mockStepGetter and returns it. seedSession always
@@ -387,14 +428,9 @@ func waitStepWithChildrenCompletedTrigger() *mockStepGetter {
 	return stepGetter
 }
 
-// TestMarkOfficeTaskCompleted_NoApprovers_FiresTerminalSideEffects is the
-// BLOCKER-1 regression test (review round 2): the raw (non-Office)
-// completion path publishes task.updated / task.state_changed and drives
-// the parent's on_children_completed trigger. The Office seam dropped all
-// three when it landed on COMPLETED, so dependency resolution, the parent
-// workflow transition, and every task.updated subscriber silently stopped
-// seeing Office completions. Assert the emitted events and the parent's
-// resulting workflow step, not just the child's persisted state.
+// TestMarkOfficeTaskCompleted_NoApprovers_FiresTerminalSideEffects verifies
+// that the committed state event drives the parent's children-completed
+// transition after the Office status pipeline completes a task.
 func TestMarkOfficeTaskCompleted_NoApprovers_FiresTerminalSideEffects(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -409,9 +445,11 @@ func TestMarkOfficeTaskCompleted_NoApprovers_FiresTerminalSideEffects(t *testing
 	})
 
 	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
-	svc.SetOfficeTaskStatusUpdater(&recordingOfficeStatusUpdater{repo: repo})
-	events := &recordingTaskEventPublisher{}
-	svc.SetTaskEventPublisher(events)
+	updater := &recordingOfficeStatusUpdater{repo: repo}
+	updater.onCommit = func(ctx context.Context, change models.TaskStateChange) {
+		routeCommittedStateToOrchestrator(ctx, svc, change)
+	}
+	svc.SetOfficeTaskStatusUpdater(updater)
 	onEnterDone := make(chan struct{}, 1)
 	svc.onProcessOnEnterComplete = func() {
 		select {
@@ -423,35 +461,12 @@ func TestMarkOfficeTaskCompleted_NoApprovers_FiresTerminalSideEffects(t *testing
 	svc.markTaskCompletedForTerminalStep(ctx, "office-done-fx", "child_done")
 	// The parent's on_children_completed transition launches its own step's
 	// session prep on a detached goroutine (launchProcessOnEnter); join it
-	// before reading events/parent state below, or those reads race the
-	// goroutine's own writes (recordingTaskEventPublisher is not
-	// synchronized, matching event_handlers_children_completed_test.go's
-	// waitForChildrenCompletedOnEnter pattern for the same trigger).
+	// before reading the parent state.
 	waitForChildrenCompletedOnEnter(t, onEnterDone)
 
-	// The parent's own on_children_completed transition legitimately
-	// republishes task.updated for the parent itself; only assert on the
-	// completed child's events, which are what BLOCKER 1 dropped.
-	childUpdates := 0
-	for _, id := range events.updated {
-		if id == "office-done-fx" {
-			childUpdates++
-		}
-	}
-	if childUpdates != 1 {
-		t.Fatalf("PublishTaskUpdated calls = %+v, want exactly one for office-done-fx", events.updated)
-	}
-	var childChanges []recordedStateChange
-	for _, c := range events.stateChanges {
-		if c.taskID == "office-done-fx" {
-			childChanges = append(childChanges, c)
-		}
-	}
-	if len(childChanges) != 1 {
-		t.Fatalf("PublishTaskStateChanged calls for office-done-fx = %+v, want exactly one", childChanges)
-	}
-	if change := childChanges[0]; change.oldState != v1.TaskStateInProgress || change.newState != v1.TaskStateCompleted {
-		t.Fatalf("state change = %+v, want IN_PROGRESS -> COMPLETED", change)
+	changes := updater.committed()
+	if len(changes) != 1 || changes[0].OldState != v1.TaskStateInProgress || changes[0].Task.State != v1.TaskStateCompleted {
+		t.Fatalf("committed state changes = %+v, want one IN_PROGRESS -> COMPLETED receipt", changes)
 	}
 
 	parentAfter, err := repo.GetTask(ctx, "parent-office")
@@ -465,9 +480,7 @@ func TestMarkOfficeTaskCompleted_NoApprovers_FiresTerminalSideEffects(t *testing
 }
 
 // TestMarkOfficeTaskCompleted_ApproversPending_DoesNotFireCompletionSideEffects
-// is the negative half of the BLOCKER-1 regression: a gate redirect to
-// in_review is not a completion, so it must not publish task.updated /
-// task.state_changed, nor drive the parent's on_children_completed trigger.
+// verifies that a gate redirect to REVIEW does not drive terminal handling.
 func TestMarkOfficeTaskCompleted_ApproversPending_DoesNotFireCompletionSideEffects(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -482,19 +495,21 @@ func TestMarkOfficeTaskCompleted_ApproversPending_DoesNotFireCompletionSideEffec
 	})
 
 	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
-	svc.SetOfficeTaskStatusUpdater(&recordingOfficeStatusUpdater{
+	updater := &recordingOfficeStatusUpdater{
 		repo:     repo,
 		newState: v1.TaskStateReview,
 		err:      &dashboard.ApprovalsPendingError{Pending: []string{"agent-A"}},
-	})
-	events := &recordingTaskEventPublisher{}
-	svc.SetTaskEventPublisher(events)
+	}
+	updater.onCommit = func(ctx context.Context, change models.TaskStateChange) {
+		routeCommittedStateToOrchestrator(ctx, svc, change)
+	}
+	svc.SetOfficeTaskStatusUpdater(updater)
 
 	svc.markTaskCompletedForTerminalStep(ctx, "office-pending-fx", "child_done")
 
-	if len(events.updated) != 0 || len(events.stateChanges) != 0 {
-		t.Fatalf("events = updated=%v stateChanges=%v, want none: a gate redirect is not a completion",
-			events.updated, events.stateChanges)
+	changes := updater.committed()
+	if len(changes) != 1 || changes[0].Task.State != v1.TaskStateReview {
+		t.Fatalf("committed state changes = %+v, want one redirect to REVIEW", changes)
 	}
 	parentAfter, err := repo.GetTask(ctx, "parent-office")
 	if err != nil {
@@ -506,56 +521,30 @@ func TestMarkOfficeTaskCompleted_ApproversPending_DoesNotFireCompletionSideEffec
 	}
 }
 
-// blockingOfficeStatusUpdater wraps recordingOfficeStatusUpdater so a test
-// can hold the FIRST UpdateTaskStatus call open (simulating a slow seam
-// call) while a second, concurrent delivery races in. Only the first call
-// blocks: if the fix under test fails to serialize duplicate deliveries, a
-// second call must still return promptly (recorded, not blocked) so the
-// test fails on an assertion instead of hanging.
+// blockingOfficeStatusUpdater holds the first request while a second guarded
+// state write races to commit.
 type blockingOfficeStatusUpdater struct {
 	inner   *recordingOfficeStatusUpdater
 	started chan struct{}
+	second  chan struct{}
 	proceed chan struct{}
 	calls   atomic.Int32
 }
 
 func (u *blockingOfficeStatusUpdater) UpdateTaskStatus(ctx context.Context, req dashboard.TaskStatusUpdateRequest) error {
-	if u.calls.Add(1) == 1 {
+	switch u.calls.Add(1) {
+	case 1:
 		close(u.started)
 		<-u.proceed
+	case 2:
+		close(u.second)
 	}
 	return u.inner.UpdateTaskStatus(ctx, req)
 }
 
-// waitForOfficeTerminalCompletionLockRefs polls
-// officeTerminalCompletionLocks until the named task's ref count reaches
-// want, mirroring waitForChildCompletionLockRefs in
-// event_handlers_children_completed_test.go for the twin lock.
-func waitForOfficeTerminalCompletionLockRefs(t *testing.T, svc *Service, taskID string, want int) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		svc.officeTerminalCompletionLocksMu.Lock()
-		got := 0
-		if entry := svc.officeTerminalCompletionLocks[taskID]; entry != nil {
-			got = entry.refs
-		}
-		svc.officeTerminalCompletionLocksMu.Unlock()
-		if got == want {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for office terminal completion lock refs = %d", want)
-}
-
-// TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce is
-// the review-round-3 MAJOR-2 regression test: two deliveries for the same
-// Office task's terminal-step completion (e.g. a duplicate event) can both
-// pass markTaskCompletedForTerminalStep's non-terminal check before either
-// has written, since that check-then-act is not atomic across the Office
-// seam call. Only one delivery may reach the seam and fire the completion
-// side effects; the other must find the task already terminal and no-op.
+// TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce verifies
+// that repository guards permit one completion receipt when two deliveries
+// race from the same observed state.
 func TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -573,11 +562,13 @@ func TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce(t *tes
 	updater := &blockingOfficeStatusUpdater{
 		inner:   &recordingOfficeStatusUpdater{repo: repo},
 		started: make(chan struct{}),
+		second:  make(chan struct{}),
 		proceed: make(chan struct{}),
 	}
+	updater.inner.onCommit = func(ctx context.Context, change models.TaskStateChange) {
+		routeCommittedStateToOrchestrator(ctx, svc, change)
+	}
 	svc.SetOfficeTaskStatusUpdater(updater)
-	events := &recordingTaskEventPublisher{}
-	svc.SetTaskEventPublisher(events)
 	onEnterDone := make(chan struct{}, 1)
 	svc.onProcessOnEnterComplete = func() {
 		select {
@@ -586,8 +577,7 @@ func TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce(t *tes
 		}
 	}
 
-	// Delivery A: reaches the seam first and blocks inside it, holding the
-	// per-task completion lock with the task row still IN_PROGRESS.
+	// Delivery A reaches the seam first and pauses before its guarded write.
 	doneA := make(chan struct{})
 	go func() {
 		defer close(doneA)
@@ -599,15 +589,18 @@ func TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce(t *tes
 		t.Fatal("timed out waiting for delivery A to reach the seam")
 	}
 
-	// Delivery B: a duplicate delivery for the same task. Its own
-	// non-terminal check (under taskRuntimeStateMu) races in while the row
-	// is still IN_PROGRESS, then it blocks behind A on the per-task lock.
+	// Delivery B observes the same state and reaches the repository while A is
+	// still paused.
 	doneB := make(chan struct{})
 	go func() {
 		defer close(doneB)
 		svc.markTaskCompletedForTerminalStep(ctx, "office-concurrent", "child_done")
 	}()
-	waitForOfficeTerminalCompletionLockRefs(t, svc, "office-concurrent", 2)
+	select {
+	case <-updater.second:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for delivery B to reach the status seam")
+	}
 
 	close(updater.proceed)
 
@@ -620,34 +613,15 @@ func TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce(t *tes
 	}
 	waitOrFatal(doneA, "delivery A")
 	waitOrFatal(doneB, "delivery B")
-	// The winning delivery's parent on_children_completed transition launches
-	// its own step's session prep on a detached goroutine
-	// (launchProcessOnEnter); join it before reading events below, or the
-	// read races that goroutine's writes to the shared, unsynchronized
-	// recordingTaskEventPublisher.
+	// The winning delivery's parent transition launches session prep on a
+	// detached goroutine. Join it before reading the parent state.
 	waitForChildrenCompletedOnEnter(t, onEnterDone)
 
-	if got := updater.calls.Load(); got != 1 {
-		t.Fatalf("seam calls = %d, want exactly 1: a duplicate delivery must not re-run the status pipeline", got)
+	if got := updater.calls.Load(); got != 2 {
+		t.Fatalf("seam calls = %d, want both deliveries to reach the guarded status write", got)
 	}
-
-	childUpdates := 0
-	for _, id := range events.updated {
-		if id == "office-concurrent" {
-			childUpdates++
-		}
-	}
-	if childUpdates != 1 {
-		t.Fatalf("PublishTaskUpdated calls for office-concurrent = %d, want exactly 1 (both deliveries fired side effects)", childUpdates)
-	}
-	var childChanges []recordedStateChange
-	for _, c := range events.stateChanges {
-		if c.taskID == "office-concurrent" {
-			childChanges = append(childChanges, c)
-		}
-	}
-	if len(childChanges) != 1 {
-		t.Fatalf("PublishTaskStateChanged calls for office-concurrent = %+v, want exactly 1", childChanges)
+	if changes := updater.inner.committed(); len(changes) != 1 {
+		t.Fatalf("committed state changes = %+v, want exactly one completion receipt", changes)
 	}
 
 	task, err := repo.GetTask(ctx, "office-concurrent")
@@ -658,12 +632,6 @@ func TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce(t *tes
 		t.Fatalf("state = %q, want COMPLETED", task.State)
 	}
 
-	svc.officeTerminalCompletionLocksMu.Lock()
-	_, exists := svc.officeTerminalCompletionLocks["office-concurrent"]
-	svc.officeTerminalCompletionLocksMu.Unlock()
-	if exists {
-		t.Fatal("expected office terminal completion lock entry to be deleted after both deliveries exit")
-	}
 }
 
 // staleOfficeStatusUpdater models a dashboard write that lost its state/step
@@ -697,16 +665,11 @@ func TestMarkOfficeTaskCompleted_Blocked_SkipsSeamAndSideEffects(t *testing.T) {
 	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
 	updater := &recordingOfficeStatusUpdater{repo: repo}
 	svc.SetOfficeTaskStatusUpdater(updater)
-	events := &recordingTaskEventPublisher{}
-	svc.SetTaskEventPublisher(events)
 
 	svc.markTaskCompletedForTerminalStep(ctx, "office-blocked-fx", "child_done")
 
 	if len(updater.calls) != 0 {
 		t.Fatalf("seam calls = %+v, want none for a BLOCKED task", updater.calls)
-	}
-	if len(events.updated) != 0 || len(events.stateChanges) != 0 {
-		t.Fatalf("events = updated=%v stateChanges=%v, want none for a BLOCKED task", events.updated, events.stateChanges)
 	}
 	task, err := repo.GetTask(ctx, "office-blocked-fx")
 	if err != nil {
@@ -743,16 +706,11 @@ func TestMarkOfficeTaskCompleted_StaleAutomaticWrite_SkipsSideEffects(t *testing
 	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
 	updater := &staleOfficeStatusUpdater{}
 	svc.SetOfficeTaskStatusUpdater(updater)
-	events := &recordingTaskEventPublisher{}
-	svc.SetTaskEventPublisher(events)
 
 	svc.markTaskCompletedForTerminalStep(ctx, "office-stale-fx", "child_done")
 
 	if updater.calls != 1 {
 		t.Fatalf("seam calls = %d, want 1", updater.calls)
-	}
-	if len(events.updated) != 0 || len(events.stateChanges) != 0 {
-		t.Fatalf("events = updated=%v stateChanges=%v, want none for a stale automatic write", events.updated, events.stateChanges)
 	}
 	task, err := repo.GetTask(ctx, "office-stale-fx")
 	if err != nil {

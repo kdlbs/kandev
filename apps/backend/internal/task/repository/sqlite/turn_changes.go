@@ -116,6 +116,8 @@ func validateTurnChangeSetInput(changeSet *models.TurnChangeSet) error {
 }
 
 func validateTurnChangeSetRelationship(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, changeSet *models.TurnChangeSet) error {
+	// The admitted session binding also covers inherited and shared workspaces,
+	// whose environment row is owned by a different task.
 	var valid int
 	err := tx.GetContext(ctx, &valid, db.Rebind(`
 		SELECT 1
@@ -123,7 +125,7 @@ func validateTurnChangeSetRelationship(ctx context.Context, tx *sqlx.Tx, db *sql
 		JOIN task_session_turns turn_row
 		  ON turn_row.id = ? AND turn_row.task_session_id = s.id AND turn_row.task_id = s.task_id
 		JOIN task_environments environment
-		  ON environment.id = ? AND environment.task_id = s.task_id
+		  ON environment.id = ?
 		WHERE s.id = ? AND s.task_id = ? AND s.task_environment_id = environment.id
 	`), changeSet.TurnID, changeSet.TaskEnvironmentID, changeSet.TaskSessionID, changeSet.TaskID)
 	if err != nil {

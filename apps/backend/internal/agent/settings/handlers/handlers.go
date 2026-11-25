@@ -341,6 +341,7 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
 		return
 	}
+	extendUpdateStatusWriteDeadline(c)
 	var preview *dto.AgentUpdatePreviewDTO
 	var err error
 	switch {
@@ -368,6 +369,7 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 }
 
 func (h *Handlers) httpListAgentUpdateStatuses(c *gin.Context) {
+	extendUpdateStatusWriteDeadline(c)
 	resp, err := h.controller.ListAgentUpdateStatuses(c.Request.Context())
 	if err != nil {
 		h.logger.Error("failed to list agent runtime update statuses", zap.Error(err))
@@ -605,6 +607,7 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
+	ExecutionGrade          string                 `json:"execution_grade,omitempty"`
 	Name                    string                 `json:"name"`
 	Model                   string                 `json:"model"`
 	FallbackModel           string                 `json:"fallback_model,omitempty"`
@@ -635,8 +638,13 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
 			return
 		}
+		if err := (dto.ProfileCreateRequest{AgentID: body.Name, Name: profile.Name, ExecutionGrade: profile.ExecutionGrade}).Validate(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
 			Name:                    profile.Name,
+			ExecutionGrade:          profile.ExecutionGrade,
 			Model:                   profile.Model,
 			FallbackModel:           profile.FallbackModel,
 			AutoFallback:            profile.AutoFallback,
@@ -656,6 +664,9 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		Profiles:    profiles,
 	})
 	if err != nil {
+		if writeClaudeExactModelAliasConflict(c, err) {
+			return
+		}
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
 			errors.Is(err, controller.ErrInvalidProviderConfig) || errors.Is(err, controller.ErrInvalidDevinPermissionIntent) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
@@ -667,6 +678,19 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+const claudeExactModelAliasConflictMessage = "Choose a full model ID in Start model, or remove ANTHROPIC_MODEL from Environment Variables."
+
+func writeClaudeExactModelAliasConflict(c *gin.Context, err error) bool {
+	if !errors.Is(err, controller.ErrClaudeExactModelAliasConflict) {
+		return false
+	}
+	c.JSON(http.StatusBadRequest, gin.H{
+		"error":      claudeExactModelAliasConflictMessage,
+		"error_code": controller.ClaudeExactModelAliasConflictErrorCode,
+	})
+	return true
 }
 
 func (h *Handlers) httpGetAgent(c *gin.Context) {

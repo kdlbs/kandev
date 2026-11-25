@@ -351,6 +351,7 @@ const (
 
 	// Workspace file operations
 	ActionWorkspaceFileTreeGet       = "workspace.tree.get"
+	ActionWorkspaceRootFilesList     = "workspace.root_files.list"
 	ActionWorkspaceFileContentGet    = "workspace.file.get"
 	ActionWorkspaceFileContentGetRef = "workspace.file.get_at_ref"
 	ActionWorkspaceFileContentUpdate = "workspace.file.update"
@@ -436,7 +437,8 @@ const (
 	// connections that one of their per-user plugin storage keys changed
 	// (Approach F1). Payload: {pluginId, scope, scopeId, key, updatedAt,
 	// writerId, deleted} — keys only, never the stored value.
-	ActionPluginUserStateUpdated = "plugin.user-state.updated"
+	ActionPluginUserStateUpdated       = "plugin.user-state.updated"
+	ActionPluginSidebarGroupingUpdated = "plugin.sidebar-grouping.updated"
 
 	// System maintenance jobs (VACUUM, factory reset, snapshot create/restore,
 	// disk walk). Broadcast to all connected clients so the System pages can
@@ -517,6 +519,7 @@ const (
 	ActionMCPDeleteWalkthrough                     = "mcp.delete_walkthrough"
 	ActionMCPPublishReviewFindings                 = "mcp.publish_review_findings"
 	ActionMCPClarificationTimeout                  = "mcp.clarification_timeout"
+	ActionMCPCancelNativeClarification             = "mcp.cancel_native_clarification"
 	ActionMCPSetTaskTitle                          = "mcp.set_task_title"
 	ActionMCPGetDiagnosticBundle                   = "mcp.get_diagnostic_bundle"
 	// Office task handoffs (cross-task context).
@@ -583,6 +586,7 @@ const (
 	ActionMCPStopTask                    = "mcp.stop_task"
 	ActionMCPSpawnSession                = "mcp.spawn_session"
 	ActionMCPGetTaskConversation         = "mcp.get_task_conversation"
+	ActionMCPGetTaskMessageOperation     = "mcp.get_task_message_operation"
 	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
 	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
 	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"

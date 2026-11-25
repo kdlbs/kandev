@@ -32,6 +32,7 @@ describe("plan comment API", () => {
       selectedText: "selection",
       anchorFrom: 3,
       anchorTo: 8,
+      attachmentIds: ["first", "second"],
     });
     await updateTaskPlanComment({
       taskId: "task-1",
@@ -39,6 +40,7 @@ describe("plan comment API", () => {
       id: "comment-1",
       body: "updated",
       expectedVersion: 2,
+      attachmentIds: [],
     });
     await deleteTaskPlanComment({
       taskId: "task-1",
@@ -59,6 +61,7 @@ describe("plan comment API", () => {
           selected_text: "selection",
           anchor_from: 3,
           anchor_to: 8,
+          attachment_ids: ["first", "second"],
         },
       ],
       [
@@ -69,6 +72,7 @@ describe("plan comment API", () => {
           id: "comment-1",
           body: "updated",
           expected_version: 2,
+          attachment_ids: [],
         },
       ],
       [

@@ -22,6 +22,8 @@ async function expectTouchTarget(locator: Locator) {
 }
 
 async function openSingleFileDiff(testPage: Page, session: SessionPage, filePath: string) {
+  // Re-activating Changes requests a fresh status after the fixture writes the file.
+  await session.clickTab("Files");
   await session.clickTab("Changes");
   const row = testPage.getByTestId(`file-row-${filePath.replace(/[/\\]/g, "-")}`).first();
   await expect(row).toBeVisible({ timeout: 20_000 });

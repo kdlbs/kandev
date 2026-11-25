@@ -379,7 +379,7 @@ func TestSQLiteQueueAdmissionAutoMergeStoresSurvivingQueueID(t *testing.T) {
 	}
 	seedQueueSessionIdentity(t, repo, identity)
 	service := NewService(repo, 1, logger.Default())
-	service.SetAutoMergePolicy(true, 1)
+	service.SetGlobalAutoMergePolicy(AutoMergePolicy{Enabled: true, Revision: 1})
 	ctx := context.Background()
 	first, _, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
 		ctx, identity, "client-first", "first", "", QueuedByUser, false, nil, nil, nil,
@@ -461,7 +461,7 @@ func TestQueueAdmissionStagedAttachmentFullQueueRejects(t *testing.T) {
 	}
 	seedQueueSessionIdentity(t, repo, identity)
 	service := NewService(repo, 1, logger.Default())
-	service.SetAutoMergePolicy(true, 1)
+	service.SetGlobalAutoMergePolicy(AutoMergePolicy{Enabled: true, Revision: 1})
 	ctx := context.Background()
 	first, _, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
 		ctx, identity, "client-first", "first", "", QueuedByUser, false, nil, nil, nil,
@@ -518,7 +518,7 @@ func TestMemoryQueueAdmissionStagedAttachmentFullQueueRejects(t *testing.T) {
 	}
 	seedQueueSessionIdentity(t, repo, identity)
 	service := NewService(repo, 1, logger.Default())
-	service.SetAutoMergePolicy(true, 1)
+	service.SetGlobalAutoMergePolicy(AutoMergePolicy{Enabled: true, Revision: 1})
 	ctx := context.Background()
 	first, _, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
 		ctx, identity, "client-first", "first", "", QueuedByUser, false, nil, nil, nil,
@@ -587,7 +587,7 @@ func TestMemoryQueueAdmissionAutoMergeAdvancesQueuedAtAndReplayKeepsIt(t *testin
 	}
 	seedQueueSessionIdentity(t, repo, identity)
 	service := NewService(repo, 1, logger.Default())
-	service.SetAutoMergePolicy(true, 1)
+	service.SetGlobalAutoMergePolicy(AutoMergePolicy{Enabled: true, Revision: 1})
 	ctx := context.Background()
 	first, _, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
 		ctx, identity, "client-first", "first", "", QueuedByUser, false, nil, nil, nil,

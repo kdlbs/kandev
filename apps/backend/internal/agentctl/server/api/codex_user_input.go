@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	clarificationprotocol "github.com/kandev/kandev/internal/clarification/protocol"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcp "github.com/kandev/kandev/internal/mcp/server"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -27,17 +28,24 @@ func newCodexUserInputRequestHandler(
 			return nil, err
 		}
 		payload := struct {
-			SessionID         string                           `json:"session_id"`
+			clarificationprotocol.NativeQuestionScope
 			TaskID            string                           `json:"task_id"`
 			Questions         []clarificationprotocol.Question `json:"questions"`
 			AllowFreeTextOnly bool                             `json:"allow_free_text_only,omitempty"`
 		}{
-			SessionID:         cfg.SessionID,
-			TaskID:            cfg.TaskID,
-			Questions:         questions,
-			AllowFreeTextOnly: true,
+			NativeQuestionScope: clarificationprotocol.NativeQuestionScope{SessionID: cfg.SessionID},
+			TaskID:              cfg.TaskID,
+			Questions:           questions,
+			AllowFreeTextOnly:   true,
 		}
 		var result clarificationprotocol.Response
+		if request.ScopedCancellation {
+			payload.NativeRequestID = request.ItemID
+			if err := requestScopedClarification(ctx, backend, payload.NativeQuestionScope, payload, &result, log); err != nil {
+				return nil, err
+			}
+			return normalizeClarificationResponse(request.Questions, result)
+		}
 		if err := backend.RequestPayload(ctx, ws.ActionMCPAskUserQuestion, payload, &result); err != nil {
 			if ctx.Err() != nil {
 				go notifyCodexQuestionCancellation(backend, cfg.SessionID, log)
@@ -45,6 +53,37 @@ func newCodexUserInputRequestHandler(
 			return nil, err
 		}
 		return normalizeClarificationResponse(request.Questions, result)
+	}
+}
+
+func requestScopedClarification(
+	ctx context.Context, backend *mcp.ChannelBackendClient, scope clarificationprotocol.NativeQuestionScope,
+	payload any, result *clarificationprotocol.Response, log *logger.Logger,
+) error {
+	if scope.PendingID() == "" {
+		return errors.New("missing native clarification identity")
+	}
+	ctx = mcporigin.WithTrustedInternalCall(ctx)
+	for {
+		err := backend.RequestPayload(ctx, ws.ActionMCPAskUserQuestion, payload, result)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			go notifyNativeQuestionCancellation(backend, scope, log)
+			return ctx.Err()
+		}
+		if !errors.Is(err, mcp.ErrKandevCallOutcomeUnknown) {
+			return err
+		}
+	}
+}
+
+func notifyNativeQuestionCancellation(backend *mcp.ChannelBackendClient, scope clarificationprotocol.NativeQuestionScope, log *logger.Logger) {
+	ctx, cancel := context.WithTimeout(mcporigin.WithTrustedInternalCall(context.Background()), 10*time.Second)
+	defer cancel()
+	if err := backend.RequestPayload(ctx, ws.ActionMCPCancelNativeClarification, scope, nil); err != nil {
+		log.Warn("failed to cancel native clarification", zap.String("session_id", scope.SessionID), zap.Error(err))
 	}
 }
 

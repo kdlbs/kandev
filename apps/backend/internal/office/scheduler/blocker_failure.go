@@ -30,45 +30,11 @@ func isTerminalTaskState(state string) bool {
 	return taskmodels.IsTerminalTaskState(v1.TaskState(state))
 }
 
-// RegisterBlockerFailureSubscriber evaluates every task-service transition
-// into FAILED or CANCELLED and every task a tree cancel moves to CANCELLED.
-// Office status changes publish neither event; reactToStatusChange evaluates
-// those.
+// RegisterBlockerFailureSubscriber evaluates committed task-state transitions
+// into FAILED or CANCELLED, including Office status changes and tree cancels.
 func (ss *SchedulerService) RegisterBlockerFailureSubscriber(eb bus.EventBus) error {
-	if _, err := eb.Subscribe(events.TaskStateChanged, ss.handleBlockerFailure); err != nil {
-		return err
-	}
-	_, err := eb.Subscribe(events.OfficeTaskTreeHoldCreated, ss.handleTreeCancelBlockerFailures)
+	_, err := eb.Subscribe(events.TaskStateChanged, ss.handleBlockerFailure)
 	return err
-}
-
-// handleTreeCancelBlockerFailures evaluates each task a cancel hold moved to
-// CANCELLED. Members that were already FAILED or CANCELLED made no failure
-// transition.
-func (ss *SchedulerService) handleTreeCancelBlockerFailures(ctx context.Context, event *bus.Event) error {
-	var hold models.TreeHold
-	encoded, err := json.Marshal(event.Data)
-	if err != nil {
-		return fmt.Errorf("encode tree hold: %w", err)
-	}
-	if err := json.Unmarshal(encoded, &hold); err != nil {
-		return fmt.Errorf("decode tree hold: %w", err)
-	}
-	if hold.Mode != models.TreeHoldModeCancel {
-		return nil
-	}
-	members, err := ss.repo.ListHoldMembers(ctx, hold.ID)
-	if err != nil {
-		return fmt.Errorf("list cancelled tree members: %w", err)
-	}
-	var errs []error
-	for _, member := range members {
-		if member.SkipReason != "" || isFailedTaskState(member.TaskStatus) {
-			continue
-		}
-		errs = append(errs, ss.escalateBlockerFailure(ctx, member.TaskID, taskStateCancelled, "tree:"+hold.ID))
-	}
-	return errors.Join(errs...)
 }
 
 func (ss *SchedulerService) handleBlockerFailure(ctx context.Context, event *bus.Event) error {

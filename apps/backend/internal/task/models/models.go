@@ -827,6 +827,39 @@ const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
 // reconnection. It is display metadata and is not replayed to the provider.
 const SessionMetaKeyACPModelState = "acp_model_state"
 
+// SessionMetaKeyACPAdapterIdentity keeps runtime provenance attached to the
+// current native ACP session when a legacy session has no generation row.
+const SessionMetaKeyACPAdapterIdentity = "acp_adapter_identity"
+
+// ACPAdapterIdentity binds a tagged adapter version to the native session ID
+// it describes. The ID check prevents stale provenance from selecting a
+// runtime after the provider conversation changes.
+type ACPAdapterIdentity struct {
+	NativeSessionID string `json:"native_session_id"`
+	AdapterVersion  string `json:"adapter_version"`
+}
+
+// ACPAdapterVersionForNativeSession reads provenance only when it belongs to
+// the requested native conversation.
+func ACPAdapterVersionForNativeSession(metadata map[string]interface{}, nativeSessionID string) string {
+	if nativeSessionID == "" || metadata == nil {
+		return ""
+	}
+	raw, ok := metadata[SessionMetaKeyACPAdapterIdentity]
+	if !ok || raw == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return ""
+	}
+	var identity ACPAdapterIdentity
+	if err := json.Unmarshal(encoded, &identity); err != nil || identity.NativeSessionID != nativeSessionID {
+		return ""
+	}
+	return identity.AdapterVersion
+}
+
 // SessionMetaKeyMCPAttachmentState records bounded, safe evidence about MCP
 // attachment for this task session and its immediate prior attempts.
 const SessionMetaKeyMCPAttachmentState = "mcp_attachment_state"
@@ -1317,6 +1350,10 @@ func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
 		decodeOptionalErrorCauseString(fields, "attempted_model", &cause.AttemptedModel)
 		decodeOptionalErrorCauseString(fields, "requested_mode", &cause.RequestedMode)
 		decodeOptionalErrorCauseString(fields, "effective_mode", &cause.EffectiveMode)
+		decodeOptionalErrorCauseString(fields, "requested_setting", &cause.RequestedSetting)
+		decodeOptionalErrorCauseString(fields, "effective_setting", &cause.EffectiveSetting)
+		decodeOptionalErrorCauseString(fields, "setting_config_id", &cause.SettingConfigID)
+		decodeOptionalErrorCauseString(fields, "setting_source", &cause.SettingSource)
 		decodeOptionalErrorCauseString(fields, "runtime_version", &cause.RuntimeVersion)
 		if value, ok := fields["prompt_not_sent"]; ok {
 			var promptNotSent bool
@@ -1590,6 +1627,7 @@ func IsAutomationTaskOrigin(origin string) bool {
 
 // Task represents a task in the database
 type Task struct {
+	ExecutionGrade         string `json:"execution_grade"`
 	ID                     string `json:"id"`
 	WorkspaceID            string `json:"workspace_id"`
 	InitialWorkspaceLayout string `json:"initial_workspace_layout,omitempty"`
@@ -2010,6 +2048,11 @@ type TaskRepository struct {
 	UpdatedAt                     time.Time              `json:"updated_at"`
 }
 
+// TaskRepositoryInheritedCheckoutReuseOnlyMetadataKey marks a copied
+// inherited checkout selector that identifies a shared workspace slot but
+// must not pin a fresh checkout after an executor transition.
+const TaskRepositoryInheritedCheckoutReuseOnlyMetadataKey = "inherited_checkout_reuse_only"
+
 // TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
 // It stays separate from TaskRepository because folders are not Git sources.
 type TaskWorkspaceFolder struct {
@@ -2203,6 +2246,9 @@ const (
 	// PermissionActorCoordinatorUnattended marks a denial made by the backend
 	// for a coordinator's unattended turn, where no person is present.
 	PermissionActorCoordinatorUnattended PermissionResolutionActorKind = "coordinator_unattended"
+	// PermissionActorLinkedIdentity marks a Kandev user who decided on an
+	// external surface linked to their account, relayed by a plugin.
+	PermissionActorLinkedIdentity PermissionResolutionActorKind = "linked_identity"
 )
 
 type PermissionResolutionSource string
@@ -2219,6 +2265,9 @@ const (
 	// PermissionSourceCoordinatorWake identifies a denial made during a
 	// coordinator wake's unattended turn.
 	PermissionSourceCoordinatorWake PermissionResolutionSource = "coordinator_wake"
+	// PermissionSourcePlugin identifies a response a plugin relayed with a
+	// receipt minted for a linked Kandev user.
+	PermissionSourcePlugin PermissionResolutionSource = "plugin"
 )
 
 type PermissionResolutionResult string
@@ -2544,18 +2593,20 @@ type TaskSession struct {
 	// It can differ from WorkspacePath after a live attachment promotes the
 	// Files root without moving the running agent. Read-only projection of the
 	// current harness generation; empty means unknown.
-	AgentWorkspacePath   string                 `json:"agent_workspace_path,omitempty"`
-	Worktrees            []*TaskEnvironmentRepo `json:"-"` // Environment repository rows for this session's workspace
-	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
-	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
-	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
-	RepositorySnapshot   map[string]interface{} `json:"repository_snapshot,omitempty"`
-	State                TaskSessionState       `json:"state"`
-	ErrorMessage         string                 `json:"error_message,omitempty"`
-	Metadata             map[string]interface{} `json:"metadata,omitempty"`
-	StartedAt            time.Time              `json:"started_at"`
-	CompletedAt          *time.Time             `json:"completed_at,omitempty"`
-	UpdatedAt            time.Time              `json:"updated_at"`
+	AgentWorkspacePath          string                 `json:"agent_workspace_path,omitempty"`
+	Worktrees                   []*TaskEnvironmentRepo `json:"-"` // Environment repository rows for this session's workspace
+	AgentProfileSnapshot        map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
+	ExecutorSnapshot            map[string]interface{} `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot         map[string]interface{} `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot          map[string]interface{} `json:"repository_snapshot,omitempty"`
+	State                       TaskSessionState       `json:"state"`
+	ErrorMessage                string                 `json:"error_message,omitempty"`
+	Metadata                    map[string]interface{} `json:"metadata,omitempty"`
+	StartedAt                   time.Time              `json:"started_at"`
+	CompletedAt                 *time.Time             `json:"completed_at,omitempty"`
+	UpdatedAt                   time.Time              `json:"updated_at"`
+	AdmittedExecutionGrade      string                 `json:"admitted_execution_grade"`
+	AdmittedExecutionGradeKnown bool                   `json:"admitted_execution_grade_known"`
 
 	// Environment reference
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
@@ -2651,23 +2702,28 @@ func observedExecutionRuntime(runtime string) interface{} {
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
-		"id":                   s.ID,
-		"task_id":              s.TaskID,
-		"queue_incarnation_id": s.QueueIncarnationID,
-		"agent_execution_id":   s.AgentExecutionID,
-		"container_id":         s.ContainerID,
-		"execution_runtime":    observedExecutionRuntime(s.ExecutionRuntime),
-		"agent_profile_id":     s.AgentProfileID,
-		"execution_profile_id": s.ExecutionProfileID,
-		"executor_id":          s.ExecutorID,
-		"executor_profile_id":  s.ExecutorProfileID,
-		"environment_id":       s.EnvironmentID,
-		"repository_id":        s.RepositoryID,
-		"base_branch":          s.BaseBranch,
-		"base_commit_sha":      s.BaseCommitSHA,
-		"state":                string(s.State),
-		"started_at":           s.StartedAt,
-		"updated_at":           s.UpdatedAt,
+		"id":                             s.ID,
+		"task_id":                        s.TaskID,
+		"queue_incarnation_id":           s.QueueIncarnationID,
+		"agent_execution_id":             s.AgentExecutionID,
+		"container_id":                   s.ContainerID,
+		"execution_runtime":              observedExecutionRuntime(s.ExecutionRuntime),
+		"agent_profile_id":               s.AgentProfileID,
+		"execution_profile_id":           s.ExecutionProfileID,
+		"executor_id":                    s.ExecutorID,
+		"executor_profile_id":            s.ExecutorProfileID,
+		"environment_id":                 s.EnvironmentID,
+		"repository_id":                  s.RepositoryID,
+		"base_branch":                    s.BaseBranch,
+		"base_commit_sha":                s.BaseCommitSHA,
+		"state":                          string(s.State),
+		"started_at":                     s.StartedAt,
+		"updated_at":                     s.UpdatedAt,
+		"admitted_execution_grade":       s.AdmittedExecutionGrade,
+		"admitted_execution_grade_known": s.AdmittedExecutionGradeKnown,
+	}
+	if adapterVersion := ACPAdapterVersionForNativeSession(s.Metadata, s.DownstreamACPSessionID); adapterVersion != "" {
+		result["runtime_adapter_version"] = adapterVersion
 	}
 	if s.RouteGeneration > 0 {
 		result["route_generation"] = s.RouteGeneration
@@ -3211,8 +3267,15 @@ type TaskEnvironment struct {
 	// repository slot. Populated by repository getters.
 	Repos []*TaskEnvironmentRepo `json:"repos,omitempty"`
 
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// RetiredAt retains an unusable environment without occupying the active owner slot.
+	RetiredAt *time.Time `json:"retired_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// IsRetired reports whether the environment is retained rather than canonical.
+func (te *TaskEnvironment) IsRetired() bool {
+	return te != nil && te.RetiredAt != nil
 }
 
 // EffectiveExecutorType returns the environment's persisted executor type. A
@@ -3456,16 +3519,18 @@ type TaskPlan struct {
 
 // TaskPlanComment is pending user feedback attached to the current task plan.
 type TaskPlanComment struct {
-	ID           string    `json:"id"`
-	TaskID       string    `json:"task_id"`
-	PlanID       string    `json:"plan_id"`
-	Body         string    `json:"body"`
-	SelectedText string    `json:"selected_text"`
-	AnchorFrom   int       `json:"anchor_from"`
-	AnchorTo     int       `json:"anchor_to"`
-	Version      int64     `json:"version"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	AttachmentIDs []string               `json:"-"`
+	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
+	ID            string                 `json:"id"`
+	TaskID        string                 `json:"task_id"`
+	PlanID        string                 `json:"plan_id"`
+	Body          string                 `json:"body"`
+	SelectedText  string                 `json:"selected_text"`
+	AnchorFrom    int                    `json:"anchor_from"`
+	AnchorTo      int                    `json:"anchor_to"`
+	Version       int64                  `json:"version"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
 // TaskPlanCommentSnapshot is the authoritative pending-comment collection for a plan.
@@ -3525,6 +3590,17 @@ type TaskPreviewFeedbackSnapshot struct {
 	TaskID   string                 `json:"task_id" db:"task_id"`
 	Revision int64                  `json:"revision" db:"revision"`
 	Items    []*TaskPreviewFeedback `json:"items"`
+}
+
+// TaskPreviewFeedbackScreenshotReplacement replaces a saved screenshot item's
+// rectangle and image at an exact version. An empty Comment keeps the stored one.
+type TaskPreviewFeedbackScreenshotReplacement struct {
+	TaskID                 string
+	ItemID                 string
+	ExpectedVersion        int64
+	Comment                string
+	CaptureRect            json.RawMessage
+	ScreenshotAttachmentID string
 }
 
 // TaskPreviewFeedbackRef identifies the exact pending item version included in delivery.
@@ -3800,10 +3876,11 @@ type TaskMessageAttachment struct {
 }
 
 const (
-	AttachmentStateStaged  = "staged"
-	AttachmentStateClaimed = "claimed"
-	AttachmentStateExpired = "expired"
-	AttachmentStateDeleted = "deleted"
+	AttachmentStateStaged      = "staged"
+	AttachmentStateClaimed     = "claimed"
+	AttachmentStatePlanComment = "plan_comment"
+	AttachmentStateExpired     = "expired"
+	AttachmentStateDeleted     = "deleted"
 )
 
 // SessionFileReview tracks per-file review state within a session
@@ -3838,6 +3915,7 @@ func (t *Task) ToAPI() *v1.Task {
 	}
 
 	result := &v1.Task{
+		ExecutionGrade:         t.ExecutionGrade,
 		ID:                     t.ID,
 		WorkspaceID:            t.WorkspaceID,
 		InitialWorkspaceLayout: t.InitialWorkspaceLayout,

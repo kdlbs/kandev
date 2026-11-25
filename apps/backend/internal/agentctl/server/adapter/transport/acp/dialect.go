@@ -5,6 +5,12 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
+const (
+	acpSessionUpdateToolCall       = "tool_call"
+	acpSessionUpdateToolCallUpdate = "tool_call_update"
+	acpToolCallKindOther           = "other"
+)
+
 // acpDialect contains pure compatibility decisions for an agent's observed
 // ACP implementation. The Adapter remains responsible for RPC execution,
 // session state, serialization, and event delivery.
@@ -30,11 +36,13 @@ type acpDialect struct {
 	normalizePromptUsage func(*streams.PromptUsage, map[string]any) *streams.PromptUsage
 	subagentFrame        func(map[string]any, string, any) (subagentFrame, bool)
 	mcpToolCall          func(map[string]any, any) (mcpToolCallFrame, bool)
+	cursorShellWatch     func(acp.SessionUpdate) (cursorShellWatchFrame, bool)
 	mcpToolResult        func(any) (any, bool)
 	responseAttemptReset func(map[string]any) bool
 	permissionToolName   func(*string, map[string]any, string, string) *string
 	subagentControl      func(string, map[string]any, any) streams.SubagentControl
 	subagentResult       func(any) (SubagentTaskResult, bool)
+	configurationCommand func(string, []modelInfo, []streams.ConfigOption, []streams.AvailableCommand) *configurationCommandSpec
 }
 
 type mcpToolCallFrame struct {
@@ -77,7 +85,7 @@ func newACPDialect(agentID string) acpDialect {
 	case mockAgentID:
 		return newMockACPDialect()
 	}
-	return acpDialect{}
+	return acpDialect{configurationCommand: modelConfigurationCommand}
 }
 
 func (d acpDialect) parseSubagentFrame(meta map[string]any, title string, rawInput any) (subagentFrame, bool) {

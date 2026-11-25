@@ -11,6 +11,7 @@ import {
   assertRestartDataRetained,
   assertRestartSubmissionBlocked,
   routeRestartContinuationGuidance,
+  suppressSessionFocusLaunches,
 } from "./session-tab-restart-helpers";
 
 test.use({ trace: "retain-on-failure" });
@@ -88,7 +89,9 @@ test("keeps history and recovery available after restarting an interrupted turn"
   seedData,
 }) => {
   test.setTimeout(120_000);
-  const fixture = await createRestartScenario(testPage, apiClient, seedData);
+  const fixture = await createRestartScenario(testPage, apiClient, seedData, async () => {
+    await suppressSessionFocusLaunches(testPage);
+  });
   await fixture.session.sendMessage('e2e:message("Restart running witness")\ne2e:delay(60000)');
   await expect(
     fixture.session.chat.getByText("Restart running witness", { exact: true }),
@@ -97,7 +100,12 @@ test("keeps history and recovery available after restarting an interrupted turn"
   expect(before.target.state).toBe("RUNNING");
   const stop = fixture.wire.waitForResponse("session.stop");
   const launch = fixture.wire
-    .waitForResponse("session.launch", { timeout: 30_000, timeoutAfter: stop })
+    .waitForResponse("session.launch", {
+      requestWhere: (payload) =>
+        payload.session_id === fixture.sessionId && payload.activation_source !== "session_focus",
+      timeout: 30_000,
+      timeoutAfter: stop,
+    })
     .catch((error: unknown) => error);
   const wireStart = fixture.traffic.frames.length;
   await fixture.session.sessionTabBySessionId(fixture.sessionId).click({ button: "right" });
@@ -107,11 +115,14 @@ test("keeps history and recovery available after restarting an interrupted turn"
   if (launchOutcome instanceof Error) {
     expect(launchOutcome.message).toContain("unknown_prompt_outcome");
   }
+  await expect(testPage.getByTestId("session-restart-status")).not.toBeVisible();
   await expect
-    .poll(async () =>
-      (await apiClient.getTaskSession(fixture.sessionId)).session.session_recovery_blocks?.some(
-        (block) => block.reason === "unknown_prompt_outcome",
-      ),
+    .poll(
+      async () =>
+        (await apiClient.getTaskSession(fixture.sessionId)).session.session_recovery_blocks?.some(
+          (block) => block.reason === "unknown_prompt_outcome",
+        ),
+      { timeout: 30_000 },
     )
     .toBe(true);
   const recovery = testPage.getByTestId("failed-session-banner");

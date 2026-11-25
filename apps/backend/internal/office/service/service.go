@@ -452,6 +452,8 @@ type Service struct {
 	configSyncCleaner       ConfigSyncCleaner
 	taskCreator             TaskCreator
 	taskStateWriter         shared.TaskStateWriter
+	taskStateBatchWriter    shared.TaskStateBatchWriter
+	taskStateChangeEvents   shared.TaskStateChangePublisher
 	workspaceCreator        WorkspaceCreator
 	taskPRs                 TaskPRLister
 	agentTokenMinter        AgentTokenMinter
@@ -716,6 +718,18 @@ func (s *Service) SetTaskTreeDeleter(deleter TaskTreeDeleter) {
 // changes and completion guards.
 func (s *Service) SetTaskStateWriter(writer shared.TaskStateWriter) {
 	s.taskStateWriter = writer
+}
+
+// SetTaskStateBatchWriter wires the task repository batch used by tree
+// cancellation.
+func (s *Service) SetTaskStateBatchWriter(writer shared.TaskStateBatchWriter) {
+	s.taskStateBatchWriter = writer
+}
+
+// SetTaskStateChangePublisher wires canonical publication for Office tree
+// state transitions.
+func (s *Service) SetTaskStateChangePublisher(publisher shared.TaskStateChangePublisher) {
+	s.taskStateChangeEvents = publisher
 }
 
 // SetConfigSyncCleaner wires the config sync service after startup

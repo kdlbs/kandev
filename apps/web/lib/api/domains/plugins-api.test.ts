@@ -22,6 +22,9 @@ import {
   updatePluginConfig,
   updatePluginSettings,
   revokePluginCapabilityApproval,
+  createPluginIdentityLinkCode,
+  listPluginIdentityLinks,
+  revokePluginIdentityLink,
 } from "./plugins-api";
 import { ApiError } from "../client";
 
@@ -120,6 +123,40 @@ describe("plugin capability approvals", () => {
     expect(String(url)).toBe(`${PLUGIN_URL}/capability-approvals`);
     expect(init?.method).toBe("DELETE");
     expect(JSON.parse(String(init?.body))).toEqual(input);
+  });
+});
+
+describe("plugin identity links", () => {
+  it("lists own or all links, creates a code, and revokes an encoded link", async () => {
+    const link = {
+      id: "link/1",
+      provider: "discord",
+      subject: "1234",
+      display_name: "alice",
+      user_id: "user-1",
+      user_display_name: "Alice",
+      created_at: "2026-11-22T10:00:00Z",
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ links: [link] }));
+    await expect(listPluginIdentityLinks(PLUGIN_ID, "own")).resolves.toEqual([link]);
+    expect(String(fetchSpy.mock.calls.at(-1)?.[0])).toBe(`${PLUGIN_URL}/identity-links`);
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse({}));
+    await expect(listPluginIdentityLinks(PLUGIN_ID, "all")).resolves.toEqual([]);
+    expect(String(fetchSpy.mock.calls.at(-1)?.[0])).toBe(`${PLUGIN_URL}/identity-links?scope=all`);
+
+    const code = { code: "ABCD-EFGH-JKMN", expires_at: "2026-11-22T10:10:00Z" };
+    fetchSpy.mockResolvedValueOnce(jsonResponse(code, 201));
+    await expect(createPluginIdentityLinkCode(PLUGIN_ID)).resolves.toEqual(code);
+    const [codeUrl, codeInit] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(codeUrl)).toBe(`${PLUGIN_URL}/identity-links/codes`);
+    expect(codeInit?.method).toBe("POST");
+
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await expect(revokePluginIdentityLink(PLUGIN_ID, link.id)).resolves.toBeUndefined();
+    const [revokeUrl, revokeInit] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(revokeUrl)).toBe(`${PLUGIN_URL}/identity-links/link%2F1`);
+    expect(revokeInit?.method).toBe("DELETE");
   });
 });
 

@@ -26,6 +26,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	runtimekind "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -1461,6 +1462,23 @@ type Service struct {
 	// duplicate-delivery optimization; the durable consumed tombstone lives in
 	// session metadata.
 	parkedProfileSwitchStops sync.Map
+	// transientLaunchRetries records the timestamp of the last automatic retry
+	// per session. Entries live for transientLaunchRetryTTL, so a retried
+	// launch is never retried twice, and expired entries are swept, so the map
+	// neither grows without bound nor blocks self-healing forever.
+	transientLaunchRetries sync.Map
+	// launchRetryMu guards the automatic retry workers' lifecycle:
+	// launchRetryCtx is cancelled by Stop, after which no retry is scheduled,
+	// and launchRetries tracks the workers so Stop and tests can wait for
+	// them. launchRetryDelay and launchRetry are test seams; production leaves
+	// both zero-valued.
+	launchRetryMu      sync.Mutex
+	launchRetryCtx     context.Context
+	launchRetryCancel  context.CancelFunc
+	launchRetryStopped bool
+	launchRetries      *sync.WaitGroup
+	launchRetryDelay   time.Duration
+	launchRetry        func(context.Context, string, string) error
 
 	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
 	// The spec allows at most one in-flight steer per session; a second attempt
@@ -1745,6 +1763,7 @@ func (s *Service) SetRouteActionHandler(handler func(context.Context, RouteActio
 // task and workflow launches.
 func (s *Service) SetProfileExecutionResolver(resolver *agentruntime.ProfileExecutionResolver) {
 	s.profileExecutionResolver = resolver
+	s.wireAdmissionGrade(resolver)
 	if resolver != nil {
 		resolver.SetKeywordContextEnabled(s.config.ProviderKeywordContext)
 	}
@@ -2018,6 +2037,7 @@ func NewService(
 		)
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
+	exec.SetOnLaunchFailureRecorded(s.handleRecordedLaunchFailure)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
 	exec.SetOnStaleExecutionCleanup(func(ctx context.Context, sessionID string) {
 		s.settleBackgroundWorkLocked(ctx, sessionID, "")
@@ -3074,7 +3094,17 @@ func (s *Service) completeExpectedTurn(ctx context.Context, sessionID, expectedT
 	if turn.ID != expectedTurnID {
 		return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, turn.ID)
 	}
-	if err := s.turnService.CompleteTurn(ctx, expectedTurnID); err != nil {
+	var completeErr error
+	if result := configurationCommandResultFromContext(ctx); result != nil {
+		completer, ok := s.turnService.(configurationCommandTurnCompleter)
+		if !ok {
+			return fmt.Errorf("turn service cannot publish configuration command result")
+		}
+		completeErr = completer.CompleteTurnWithConfigurationResult(ctx, expectedTurnID, result)
+	} else {
+		completeErr = s.turnService.CompleteTurn(ctx, expectedTurnID)
+	}
+	if err := completeErr; err != nil {
 		return fmt.Errorf("complete captured turn %s: %w", expectedTurnID, err)
 	}
 	s.activeTurns.CompareAndDelete(sessionID, expectedTurnID)
@@ -3312,6 +3342,10 @@ func (s *Service) sessionSettingsSnapshotLock(sessionID string) *sync.Mutex {
 	return &s.sessionSettingsSnapshotLocks[hash.Sum32()%uint32(len(s.sessionSettingsSnapshotLocks))]
 }
 
+// tryAcquireSessionLifecycleLock acquires the session lifecycle lock only when
+// it is free. Lock order is lifecycle before queue admission, so a caller that
+// holds queue admission must use this instead of acquireSessionLifecycleLock:
+// resume and recovery can hold the lifecycle lock until their prompt is admitted.
 func (s *Service) tryAcquireSessionLifecycleLock(sessionID string) (func(), bool) {
 	if sessionID == "" {
 		return nil, false
@@ -3421,6 +3455,7 @@ func (s *Service) Start(ctx context.Context) (startErr error) {
 	// sweep while the service is active.
 	s.resetLifecycleSweepWorkers()
 	s.resetSilentRestoreRecovery()
+	s.resetTransientLaunchRetries()
 	s.running = true
 	s.startedAt = time.Now()
 	recoveryLifecycleCtx, recoveryLifecycleCancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -3656,6 +3691,7 @@ func (s *Service) Stop() error {
 		return ErrServiceNotRunning
 	}
 	s.running = false
+	cancelLaunchRetries, launchRetryWorkers := s.closeTransientLaunchRetries()
 	recoveryLifecycleCancel := s.recoveryLifecycleCancel
 	stopRecoveryParent := s.stopRecoveryParent
 	s.recoveryLifecycleCtx = nil
@@ -3670,6 +3706,7 @@ func (s *Service) Stop() error {
 	}
 
 	s.logger.Info("stopping orchestrator service")
+	s.awaitTransientLaunchRetries(cancelLaunchRetries, launchRetryWorkers)
 	// Stop owns every in-flight resume attempt. Its detached request context
 	// must not let startup callbacks outlive the service generation.
 	s.cancelResumeAttempts()
@@ -3922,6 +3959,9 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		if isTaskSessionNotFound(err) {
+			if s.preserveRemoteWorkspaceOnStartup(running, "missing") {
+				return
+			}
 			s.handleMissingSessionOnStartup(ctx, running, report, scope)
 			return
 		}
@@ -3932,6 +3972,12 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	}
 
 	previousState := session.State
+	if startupCleanupState(previousState) && s.preserveRemoteWorkspaceOnStartup(running, string(previousState)) {
+		if previousState == models.TaskSessionStateFailed {
+			s.ensureFailedTaskReviewOnStartup(ctx, session)
+		}
+		return
+	}
 
 	// Handle terminal and never-started states (reuse existing cleanup logic)
 	if skip := s.handleTerminalSessionOnStartup(ctx, session, running, previousState, report, scope); skip {
@@ -4204,27 +4250,33 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 	return false
 }
 
+func startupCleanupState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled,
+		models.TaskSessionStateFailed, models.TaskSessionStateCreated:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) preserveRemoteWorkspaceOnStartup(running *models.ExecutorRunning, state string) bool {
+	if running == nil || running.Runtime != runtimekind.RuntimeRemoteDocker &&
+		running.Runtime != runtimekind.RuntimePluginRemote {
+		return false
+	}
+	s.logger.Info("preserving remote workspace ownership during startup reconciliation",
+		zap.String("session_id", running.SessionID),
+		zap.String("runtime", string(running.Runtime)),
+		zap.String("state", state))
+	return true
+}
+
 // handleFailedSessionOnStartup handles a failed session during startup recovery.
 func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, report *startupCleanupReport, scope interface{}) {
 	sessionID := session.ID
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
-	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
-	if session.TaskID != "" {
-		task, taskErr := s.repo.GetTask(ctx, session.TaskID)
-		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
-			s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
-				zap.String("task_id", session.TaskID),
-				zap.String("session_id", sessionID))
-			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
-			// so the write is atomic against archived_at — see the matching
-			// comment in reconcileOneSessionOnStartup above.
-			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, session.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
-				s.logger.Warn("failed to update task state to REVIEW",
-					zap.String("task_id", session.TaskID),
-					zap.Error(updateErr))
-			}
-		}
-	}
+	s.ensureFailedTaskReviewOnStartup(ctx, session)
 	if canResumeRunning(running) {
 		s.logger.Info("preserving executor record for resumable failed session",
 			zap.String("session_id", sessionID),
@@ -4239,6 +4291,25 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 		// Prune only subject to the resume-safety invariant (a lingering
 		// resume_token is repaired in place rather than deleted).
 		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateFailed)
+	}
+}
+
+func (s *Service) ensureFailedTaskReviewOnStartup(ctx context.Context, session *models.TaskSession) {
+	if session == nil || session.TaskID == "" {
+		return
+	}
+	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS).
+	task, taskErr := s.repo.GetTask(ctx, session.TaskID)
+	if taskErr != nil || task == nil || task.State != v1.TaskStateInProgress || taskArchived(task) {
+		return
+	}
+	s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
+		zap.String("task_id", session.TaskID), zap.String("session_id", session.ID))
+	// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState) so the
+	// write is atomic against archived_at; see the matching comment above.
+	if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, session.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
+		s.logger.Warn("failed to update task state to REVIEW",
+			zap.String("task_id", session.TaskID), zap.Error(updateErr))
 	}
 }
 
@@ -4470,20 +4541,35 @@ func (s *Service) QueueUserPrompt(
 	metadata map[string]interface{},
 	userMessageRecorded bool,
 ) error {
+	_, err := s.QueueUserPromptWithReceipt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
+	return err
+}
+
+// QueueUserPromptWithReceipt retains the accepted queue identity under the
+// existing workflow admission and fast-path dispatch rules.
+func (s *Service) QueueUserPromptWithReceipt(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	metadata map[string]interface{},
+	userMessageRecorded bool,
+) (string, error) {
 	if s.messageQueue == nil {
-		return errors.New("message queue is not configured")
+		return "", errors.New("message queue is not configured")
 	}
 	queueMetadata := make(map[string]interface{}, len(metadata)+1)
 	for key, value := range metadata {
 		queueMetadata[key] = value
 	}
 	if err := retainBuiltinIntent(ctx, taskID, sessionID, queueMetadata); err != nil {
-		return err
+		return "", err
 	}
 	if userMessageRecorded {
 		queueMetadata[metaKeyUserMessageRecorded] = true
 	}
 	deferInitialBriefDrain := false
+	queuedEntryID := ""
 	if err := s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		session, err := s.repo.GetTaskSession(admittedCtx, sessionID)
 		if err != nil {
@@ -4492,7 +4578,7 @@ func (s *Service) QueueUserPrompt(
 		if session == nil || isTerminalSessionState(session.State) {
 			return ErrSessionNotPromptable
 		}
-		if _, err := s.messageQueue.QueueMessageWithMetadata(
+		queued, err := s.messageQueue.QueueMessageWithMetadata(
 			admittedCtx,
 			sessionID,
 			taskID,
@@ -4502,20 +4588,22 @@ func (s *Service) QueueUserPrompt(
 			planMode,
 			toQueuedAttachments(attachments),
 			queueMetadata,
-		); err != nil {
+		)
+		if err != nil {
 			return fmt.Errorf("queue user prompt: %w", err)
 		}
+		queuedEntryID = queued.ID
 		deferInitialBriefDrain = s.isInitialTaskBriefDispatchPending(sessionID)
 		return nil
 	}); err != nil {
-		return err
+		return "", err
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 	if deferInitialBriefDrain {
 		// A later first-message contender is already durably queued. Let the
 		// admitted candidate finish its first dispatch. Its turn-tail drain or
 		// CompleteInitialTaskBriefDispatch will deliver this entry in FIFO order.
-		return nil
+		return queuedEntryID, nil
 	}
 
 	// T2: enqueue-side fast-path drain. The user's WIP wait is a
@@ -4532,7 +4620,7 @@ func (s *Service) QueueUserPrompt(
 	// isCancelInFlight / isQueuedDispatchInFlight / isSteerInFlight
 	// in-flight checks (cheaper than the DB read).
 	s.tryFastPathDrainAfterEnqueue(ctx, taskID, sessionID)
-	return nil
+	return queuedEntryID, nil
 }
 
 // MaxQueuedPromptsPerSession exposes the active queue capacity to transaction

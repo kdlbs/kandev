@@ -4,6 +4,7 @@ import {
   assertNoDocumentHorizontalOverflow,
   assertNoElementHorizontalOverflow,
 } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
@@ -44,6 +45,7 @@ test.describe("Create task dependency selector on mobile", () => {
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
+    await waitForFiniteAnimations(dialog);
     const advancedTrigger = dialog.getByTestId("task-create-advanced-settings-trigger");
     const advancedTriggerBox = await advancedTrigger.boundingBox();
     expect(advancedTriggerBox).not.toBeNull();
@@ -84,6 +86,7 @@ test.describe("Create task dependency selector on mobile", () => {
     await trigger.tap();
     const picker = dialog.getByTestId("task-create-dependencies-popover");
     await expect(picker).toBeVisible();
+    await waitForFiniteAnimations(picker);
     await assertLocatorWithinViewportX(picker, "mobile dependency picker");
     await assertNoElementHorizontalOverflow(picker, "mobile dependency picker");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile dependency picker");
@@ -155,6 +158,7 @@ test.describe("Create task dependency selector on mobile", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     const editDependencies = dialog.getByTestId("task-edit-dependencies");
     await expect(editDependencies).toBeVisible();
+    await waitForFiniteAnimations(dialog);
     const trigger = dialog.getByTestId("task-create-dependencies-trigger");
     await expect(trigger).toBeVisible({ timeout: 30_000 });
     const triggerBox = await trigger.boundingBox();
@@ -167,6 +171,7 @@ test.describe("Create task dependency selector on mobile", () => {
     await trigger.tap();
     const picker = dialog.getByTestId("task-create-dependencies-popover");
     await expect(picker).toBeVisible();
+    await waitForFiniteAnimations(picker);
     await assertLocatorWithinViewportX(picker, "mobile edit dependency picker");
     await assertNoElementHorizontalOverflow(picker, "mobile edit dependency picker");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile edit dependency picker");

@@ -64,6 +64,7 @@ func TestCursorMCPDisableInheritanceUsesTrustedPrimaryRepository(t *testing.T) {
 				WorkspaceSourceRoots: []string{attachedFolder, secondary},
 				metadata:             metadata,
 			}
+			attachLegacyMCPRouteClient(execution)
 			execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 			mgr := newTestManager(t)
 			agent := agents.NewCursorACP()
@@ -142,6 +143,7 @@ func TestCursorMCPImportsInjectedNativeInventoryForACPAndTerminal(t *testing.T) 
 				metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: true,
 					MetadataKeyRepositoryPath: sourceRepository},
 			}
+			attachLegacyMCPRouteClient(execution)
 			execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 			agent := agents.NewCursorACP()
 			profile := &AgentProfileInfo{CursorPluginsMCPEnabled: true, CursorMCPAuthEnabled: true}
@@ -175,6 +177,7 @@ func TestCursorMCPSelectedProfileImportsOnlyExactNativeIdentities(t *testing.T) 
 	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "mcp.json"), []byte(`{"mcpServers":{"atlassian":{"url":"https://selected.example/mcp"},"figma":{"url":"https://unselected.example/mcp"}}}`), 0o600))
 	workspace := t.TempDir()
 	execution := &AgentExecution{WorkspacePath: workspace, standalonePort: 1234, metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: false}}
+	attachLegacyMCPRouteClient(execution)
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	mgr := newTestManager(t)
 	profile := &AgentProfileInfo{
@@ -204,6 +207,7 @@ func TestCursorMCPPreparationApprovesFinalOwnedIdentityWithRuntimeContext(t *tes
 	mgr.SetCursorNativeMCPCommandRunner(runner)
 	execution := &AgentExecution{WorkspacePath: workspace, standalonePort: 1234,
 		metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: false}}
+	attachLegacyMCPRouteClient(execution)
 	execution.setRuntimeEnvironment(map[string]string{"HOME": home, "PATH": "/runtime/bin"})
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	profile := &AgentProfileInfo{CursorPluginsMCPEnabled: true, MCPSelectionMode: "selected",
@@ -290,6 +294,7 @@ func TestCursorMCPInventoryFailureKeepsExplicitLocalAndGlobalDefinitions(t *test
 		}},
 	}}
 	execution := &AgentExecution{WorkspacePath: t.TempDir(), standalonePort: 1234}
+	attachLegacyMCPRouteClient(execution)
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	profile := &AgentProfileInfo{ProfileID: "explicit-profile", CursorPluginsMCPEnabled: true}
 	require.NoError(t, mgr.reconcileAndMaterializeCursorProjectMCP(context.Background(), execution,
@@ -324,6 +329,7 @@ func TestCursorMCPUnavailableDisableContextPreservesExplicitConfiguration(t *tes
 	}}
 	execution := &AgentExecution{WorkspacePath: t.TempDir(), standalonePort: 1234,
 		metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: true, MetadataKeyRepositoryPath: source}}
+	attachLegacyMCPRouteClient(execution)
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	profile := &AgentProfileInfo{ProfileID: "profile", CursorPluginsMCPEnabled: true}
 	require.NoError(t, mgr.reconcileAndMaterializeCursorProjectMCP(context.Background(), execution,
@@ -362,6 +368,7 @@ func TestCursorMCPNewerPreparationFencesDeferredInventory(t *testing.T) {
 	makeExecution := func(path string) *AgentExecution {
 		execution := &AgentExecution{WorkspacePath: path, standalonePort: 1234,
 			metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: false}}
+		attachLegacyMCPRouteClient(execution)
 		execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 		return execution
 	}
@@ -410,6 +417,7 @@ func TestCursorMCPRechecksWorkspacePathAfterInventory(t *testing.T) {
 	}
 	execution := &AgentExecution{WorkspacePath: workspace, standalonePort: 1234,
 		metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: false}}
+	attachLegacyMCPRouteClient(execution)
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	agent := agents.NewCursorACP()
 	done := make(chan error, 1)
@@ -439,6 +447,7 @@ func TestCursorMCPContextCancellationDoesNotPublishInventory(t *testing.T) {
 	}
 	execution := &AgentExecution{WorkspacePath: t.TempDir(), standalonePort: 1234,
 		metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: false}}
+	attachLegacyMCPRouteClient(execution)
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	agent := agents.NewCursorACP()
 	err := mgr.reconcileAndMaterializeCursorProjectMCP(ctx, execution, agent,
@@ -479,6 +488,7 @@ func TestCursorMCPAuthAndImportPreferencesAreIndependent(t *testing.T) {
 				workspace := t.TempDir()
 				execution := &AgentExecution{WorkspacePath: workspace, standalonePort: 1234,
 					metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: false}}
+				attachLegacyMCPRouteClient(execution)
 				execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 				profile := &AgentProfileInfo{CursorMCPAuthEnabled: authEnabled, CursorPluginsMCPEnabled: importEnabled}
 				agent := agents.NewCursorACP()
@@ -525,6 +535,7 @@ func TestCursorMCPInventoryIsSkippedForIneligibleLaunches(t *testing.T) {
 			}
 			execution := &AgentExecution{WorkspacePath: t.TempDir(), standalonePort: 1234,
 				metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: false}}
+			attachLegacyMCPRouteClient(execution)
 			if test.differentHome {
 				execution.setRuntimeEnvironment(map[string]string{"HOME": t.TempDir()})
 			}

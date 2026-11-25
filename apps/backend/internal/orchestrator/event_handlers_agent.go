@@ -1144,7 +1144,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Complete the current turn
 	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
-	completionCtx := withWorkflowEffect(ctx, workflowEffectForEvent(data))
+	s.recordTurnStatusNotice(ctx, data)
+	completionCtx := withWorkflowEffect(ctx, workflowEffectForCompletion(data, turnAtEventFire))
+	if turnAtEventFire != "" {
+		completionCtx = withConfigurationCommandResult(completionCtx, data.ConfigurationCommandResult)
+	}
 	if turnAtEventFire != "" {
 		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, turnAtEventFire)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
@@ -1984,12 +1988,15 @@ func (s *Service) executeQueuedMessageWithReservation(
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	var promptReferenceContext string
 	var preparedPromptContent *string
-	if isQueuedWorkflowAutoStart(queuedMsg) {
+	moveInstructions, _ := queuedMsg.Metadata[metaKeyWorkflowMoveInstructions].(bool)
+	if isQueuedWorkflowAutoStart(queuedMsg) || moveInstructions {
+		passthrough := (s.agentManager != nil && s.agentManager.IsPassthroughSession(promptCtx, queuedMsg.SessionID)) ||
+			s.resolveIsPassthroughForLaunch(promptCtx, queuedMsg.SessionID)
 		// Resolve workflow aliases at the drain boundary, before persistence.
 		// Recovery must carry this exact server-generated context because the
 		// shared saved definition can change while PromptAgent is in flight.
 		promptContent, promptReferenceContext = s.expandPromptReferencesWithContext(
-			promptCtx, promptContent, false,
+			promptCtx, promptContent, passthrough,
 		)
 		preparedPromptContent = &promptContent
 	}
@@ -2134,6 +2141,12 @@ func (s *Service) executeQueuedMessageWithReservation(
 	if isBuiltinIntentError(err) {
 		allowFollowupDrain = false
 	}
+	if deliveryAttempted && err != nil &&
+		s.requeueUndispatchedDelivery(promptCtx, dispatchIdentity, queuedMsg, err) {
+		// A persistent failure waits for the next ready signal instead of spinning.
+		allowFollowupDrain = false
+		return
+	}
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
 		lifecyclePrompt, userMessageRecorded, deliveryAttempted, err,
@@ -2263,6 +2276,7 @@ func (s *Service) finishQueuedMessageExecution(
 ) {
 	exactReservation := reservation != nil && reservation.identity.SessionIncarnationID != ""
 	if deliveryAttempted && err != nil {
+		s.logPossiblyDeliveredAcknowledgement(queuedMsg, err)
 		if exactReservation {
 			s.acknowledgeLifecycleQueueEntryForSession(ctx, reservation.identity, queuedMsg)
 		} else {
@@ -2687,8 +2701,8 @@ func queuedMessageAttachmentsToV1(attachments []messagequeue.MessageAttachment) 
 	converted := make([]v1.MessageAttachment, len(attachments))
 	for index, attachment := range attachments {
 		converted[index] = v1.MessageAttachment{
-			Type:         attachment.Type,
-			AttachmentID: attachment.AttachmentID,
+			Type:      attachment.Type,
+			CommentID: attachment.CommentID, AttachmentID: attachment.AttachmentID,
 			Data:         attachment.Data,
 			MimeType:     attachment.MimeType,
 			Name:         attachment.Name,
@@ -2771,6 +2785,18 @@ func (s *Service) handleAgentCompletedAfterGuard(ctx context.Context, data watch
 	s.handleAgentCompletedLocked(ctx, data, guard)
 }
 
+func (s *Service) turnlessDeliveryCompletionOwnsPrompt(data watcher.AgentEventData) bool {
+	if data.SessionID == "" || data.AgentExecutionID == "" || data.PromptGeneration == 0 {
+		return false
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	return ok && generationOwner.OwnsPromptGeneration(
+		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	)
+}
+
 // handleAgentCompletedLocked runs with the per-session cancel-in-flight guard
 // held, except around calls that themselves acquire the session lifecycle
 // lock (reclaimIdleSession, directly or via setSessionWaitingForInputIfRequested):
@@ -2785,6 +2811,15 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID))
+	if data.TurnID == "" && agentDeliveryEventIdentityPresent(data) && !s.turnlessDeliveryCompletionOwnsPrompt(data) {
+		s.logger.Debug("ignoring turn-less delivery completion without current prompt ownership",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.Uint64("event_prompt_generation", data.PromptGeneration),
+			zap.String("submission_id", data.DeliverySubmissionID))
+		return
+	}
 
 	s.markExecutionCompleted(data.SessionID, data.AgentExecutionID)
 	// agent.completed is terminal for this lifecycle execution. Retire its
@@ -2891,7 +2926,9 @@ func (s *Service) finishAgentCompleted(
 	if !completionFollowUp {
 		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	}
-	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForEvent(data))
+	s.recordTurnStatusNotice(ctx, data)
+	closingTurnID := s.completedEventClosingTurn(ctx, data)
+	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForCompletion(data, closingTurnID))
 	if data.TurnID != "" {
 		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, data.TurnID)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
@@ -2906,6 +2943,20 @@ func (s *Service) finishAgentCompleted(
 			return
 		}
 		s.profileExecutionResolver.ResetFixedProfileCircuitFailures(completionCtx, fixedResourceKey)
+	} else if agentDeliveryEventIdentityPresent(data) {
+		if closingTurnID != "" {
+			if err := s.completeTurnForTaskSessionCheckedOwned(
+				completionCtx, data.TaskID, data.SessionID, closingTurnID,
+			); err != nil {
+				s.logger.Warn("ignoring turn-less delivery completion for superseded turn",
+					zap.String("task_id", data.TaskID),
+					zap.String("session_id", data.SessionID),
+					zap.String("turn_id", closingTurnID),
+					zap.Error(err))
+				go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+				return
+			}
+		}
 	} else {
 		s.completeTurnForSession(completionCtx, data.SessionID)
 	}

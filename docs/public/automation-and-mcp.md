@@ -59,15 +59,15 @@ Task creation depends on the caller surface and the destination workspace:
 
 Office sessions do not receive an MCP task-creation tool. A direct backend call from an Office session is also denied. External MCP uses the same `create_task_kandev` contract for both workspace modes, subject to the client's authorization. The `workspace_mode` argument controls materialized workspace behavior, not Kanban or Office mode. `agent_profile_id` selects a launch profile and is not an Office assignee.
 
-The optional `workspace_mode` field advertises exactly two values: `inherit_parent` normally reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
+The optional `workspace_mode` field advertises exactly two values: `inherit_parent` reuses the parent's exact materialized checkouts and files and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `new_workspace`, including when the parent has a saved child-workspace preference. Omission on a top-level task keeps its existing behavior.
 
 If a new launch for an inherited child selects a different non-Kubernetes executor from the parent's materialized environment, Kandev creates a separate workspace owned by the child. Uncommitted parent changes are not copied into that workspace. A session that is still bound to the inherited environment must resume with its original executor. Kubernetes environments remain task-owned and cannot be shared across tasks.
 
 For a Kubernetes parent, use `workspace_mode: "new_workspace"` when creating a child that will run. Kubernetes Pods belong to one task, so a child cannot attach to the parent's environment.
 
-Queued creation with `start_agent: false` still succeeds with the default `inherit_parent`, but opening or launching that child returns `workspace_reuse_unsupported` before a session is created. Create a separate-workspace task to proceed; retrying or restoring the healthy parent does not enable cross-task attachment. Additional sessions on the same Kubernetes task remain supported.
+Queued creation with `start_agent: false` omits the materialized workspace until launch. If you explicitly select `inherit_parent`, creation still succeeds, but opening or launching that child returns `workspace_reuse_unsupported` before a session is created. Select `new_workspace` to proceed; retrying or restoring the healthy parent does not enable cross-task attachment. Additional sessions on the same Kubernetes task remain supported.
 
-Omit `workspace_mode` to use defaulting instead of sending an empty string. MCP schema validation rejects empty, whitespace-only, and padded values before backend dispatch, even though the backend policy resolver still trims strings. `shared` and `shared_group` are not supported by this MCP endpoint.
+Omit `workspace_mode` to create an isolated subtask by default; send `inherit_parent` to share the parent's existing files and checkout. Use omission instead of an empty string to request defaulting. MCP schema validation rejects empty, whitespace-only, and padded values before backend dispatch, even though the backend policy resolver still trims strings. `shared` and `shared_group` are not supported by this MCP endpoint.
 
 ## Quick path
 
@@ -213,6 +213,11 @@ Editing a saved schedule starts the new definition at its first occurrence after
 
 Clearing the expression stops automatic runs. Entering a non-empty expression later starts from that later save.
 
+An automation can be enabled while its schedule trigger is disabled. In Run
+detail, select **Turn on schedule** to enable only the trigger without changing
+its schedule. If the current schedule has a missed occurrence, it can run once
+on the next scheduler check.
+
 <DocsVideo
   webm="./media/feature-guides/scheduled-workflow-automation.webm"
   mp4="./media/feature-guides/scheduled-workflow-automation.mp4"
@@ -318,6 +323,8 @@ Trigger payloads are untrusted input. Do not let a PR body or webhook field sile
 ## Read what an automation has been doing
 
 **Automations** in the sidebar lists the workspace's automations with a health dot. Picking one opens it. **`/automations`** is the agenda across all of them, what fires next, and the recent runs of every automation in one feed. **`/automations/<id>`** is one automation's conversation: it opens on the newest run's transcript, carries the run's title snapshot and a reply box, and groups runs as Running / Completed in a rail or mobile drawer. A selected open run exposes **Stop current run**, which cancels its exact task, session, and turn without touching another run in a shared session. Configuration is behind **Details**, because an automation is configured once and read continuously.
+
+The Automations section, agenda, and phone navigation prioritize running work (blue), then a paused automation or disabled schedule (gray); otherwise the indicator follows the newest run: red for failure or a retry that could not be scheduled, green for success, amber for cancellation or a scheduled retry, and gray for skipped or archived runs. Non-success outcomes remain visible even when paused: the desktop sidebar shows the outcome before its age, such as **Failed, 4m ago**, while the agenda keeps its next-firing information and phone rows show status without adding an age. A newer success clears an earlier failure after refresh; an automation that has never run retains its idle or paused indication without an outcome label or last-run age.
 
 ![Kandev sidebar showing the Automations section with workspace automation shortcuts.](../screenshots/automation-sidebar.png)
 
@@ -468,7 +475,21 @@ Use `manage_task_change_request_kandev` with `operation` set to `link`, `unlink`
 or `replace`. Every mutation needs `task_id`, `provider` (`github` or `gitlab`),
 the canonical `repository_id`, and a positive request number. A number by itself
 is rejected, so a fork and its canonical repository can safely have the same
-number. For example:
+number.
+
+For a new `link`, use the Kandev ID in `repositories[].repository_id` from
+`list_tasks_kandev`. The repository must be attached to the target task. An
+unmatched ID returns a validation error for `repository_id`.
+
+For `unlink`, use the repository ID from the stored association. Unlink can
+remove that association after its repository is detached. The management tool
+is available only in task-mode sessions whose calling task has at least one
+attached GitHub or GitLab repository. If the calling task has none, attach a
+supported repository and start or resume its task session to restore the tool.
+Then unlink the target task's association with its stored provider, repository
+ID, and request number.
+
+For example:
 
 ```json
 {
@@ -806,9 +827,10 @@ preference is saved on this device and applies when a card has no retained
 Show/Hide choice. You can always select **Preview**, then click or tap the
 visible image to open the larger dialog.
 Other files load only after you select
-**Preview**. **Open file** uses the native desktop or mobile viewer. If the
-workspace disappears, the report remains and the file preview reports that it
-is unavailable.
+**Preview**. For a text preview, select **Hide preview**, then **Preview** to
+read the current workspace contents. **Open file** uses the native desktop or
+mobile viewer. If the workspace disappears, the report remains and the file
+preview reports that it is unavailable.
 
 Historical version 1 reports still render, including their stored CSV snapshots.
 New version 1 calls are rejected with guidance to refresh tool discovery and
@@ -1288,7 +1310,7 @@ notifications sent when a client restores a conversation.
 Tool requests still require their normal metadata. Explicitly supplied metadata,
 duplicate JSON members, and noncanonical field spellings retain SDK validation.
 
-Agent-attached MCP servers keep `/mcp`, `/sse`, and `/message` on the agentctl port. The external server keeps `/mcp`, `/mcp/sse`, and `/mcp/message`.
+New managed agentctl instances negotiate helper-scoped native MCP routes during creation. Core routes use `/i/<helper-id>/mcp`, `/i/<helper-id>/sse`, and `/i/<helper-id>/message`; optional built-in package routes add `/packages/<package-id>` after the transport path. Older helpers that omit this mode continue to use the bare agentctl routes. The external server keeps `/mcp`, `/mcp/sse`, and `/mcp/message`.
 
 ### Configured third-party MCP servers
 

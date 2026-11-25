@@ -1,7 +1,7 @@
 import { readResizableRootSplitview, type RootSplitview } from "../dockview-internals";
-import type { DockviewApi } from "dockview-react";
-import type { LayoutState } from "./types";
-import { toSerializedDockview } from "./serializer";
+import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
+import type { LayoutOrientation, LayoutState } from "./types";
+import { readRootOrientation, toSerializedDockview } from "./serializer";
 import {
   SIDEBAR_LOCK,
   SIDEBAR_GROUP,
@@ -12,7 +12,8 @@ import {
 } from "./constants";
 import { computePinnedMaxPxFor, LAYOUT_PINNED_MIN_PX } from "./caps";
 import { getPinnedWidth } from "./sizing";
-import { setPinnedTarget } from "./pinned-targets";
+import { clearPinnedTarget, setPinnedTarget } from "./pinned-targets";
+import { refreshPinnedRightConstraints } from "./pinned-right-constraints";
 
 export type LayoutGroupIds = {
   centerGroupId: string;
@@ -23,6 +24,38 @@ export type LayoutGroupIds = {
 
 export function getRootSplitview(api: DockviewApi): RootSplitview | null {
   return readResizableRootSplitview(api);
+}
+
+/**
+ * Orientation of Dockview's outermost split. Root width policy (sidebar/right
+ * pinning, caps, manual widths) applies only to a HORIZONTAL root; a VERTICAL
+ * root's children are rows whose extent is a height.
+ */
+export function getRootOrientation(api: DockviewApi): LayoutOrientation {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const root = (api as any).component?.gridview?.root;
+  return readRootOrientation(root, root?.splitview);
+}
+
+/** Only a dedicated sidebar leaf at the horizontal root reserves sidebar width. */
+export function getRootSidebarWidth(api: DockviewApi): number {
+  if (getRootOrientation(api) === "VERTICAL") return 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const root = (api as any).component?.gridview?.root;
+  if (!root?.children) return 0;
+  const sidebar = api.getPanel("sidebar")?.group;
+  if (!sidebar) return 0;
+  const index = root?.children?.findIndex(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (child: any) => !child.children && child.view === sidebar,
+  );
+  return index >= 0 ? root.splitview.getViewSize(index) : 0;
+}
+
+/** Drop sidebar/right width targets left by a previous horizontal layout. */
+export function clearHorizontalPinnedTargets(): void {
+  clearPinnedTarget("sidebar");
+  clearPinnedTarget("right");
 }
 
 /** Find a group by well-known ID, falling back to panel-based lookup. */
@@ -95,9 +128,16 @@ export function applyLayout(
   // we force the live column back to its target width via `sv.resizeView`.
   // This avoids the "lock to current" ratchet bug where transient container
   // shrinks would permanently pin the sidebar at the smaller size.
-  const sv = getRootSplitview(api);
-  configureSidebarPinned(api, state, sv, w, pinnedWidths);
-  configureRightPinned(api, state, sv, w, pinnedWidths);
+  //
+  // Pinning is a horizontal width policy: a VERTICAL root's children are rows
+  // sized by height, so none of it applies.
+  if (state.rootOrientation === "VERTICAL") {
+    clearHorizontalPinnedTargets();
+  } else {
+    const sv = getRootSplitview(api);
+    configureSidebarPinned(api, state, sv, w, pinnedWidths);
+    configureRightPinned(api, state, sv, w, pinnedWidths);
+  }
 
   return resolveGroupIds(api);
 }
@@ -183,7 +223,7 @@ function configureRightPinned(
     if (col.id === "sidebar" || !col.pinned) continue;
     // Same rationale as `configureSidebarPinned`: derive the cap from the
     // measured dockview width, not `window.innerWidth`.
-    const sidebarWidth = sv && sv.length >= 3 ? sv.getViewSize(0) : 0;
+    const sidebarWidth = getRootSidebarWidth(api);
     const cap = col.maxWidth ?? computePinnedMaxPxFor(col.id, viewportWidth, sidebarWidth);
     applyConstraintsToAllPanelGroups(api, col, cap);
     if (col.id !== "right") continue;
@@ -201,18 +241,20 @@ function applyConstraintsToAllPanelGroups(
   col: LayoutState["columns"][number],
   cap: number,
 ): void {
-  const seen = new Set<string>();
+  const groups = new Set<DockviewGroupPanel>();
   for (const group of col.groups) {
     for (const p of group.panels) {
       const pnl = api.getPanel(p.id);
       if (!pnl) continue;
-      if (seen.has(pnl.group.id)) break;
-      seen.add(pnl.group.id);
-      pnl.group.api.setConstraints({
-        maximumWidth: cap,
-        minimumWidth: LAYOUT_PINNED_MIN_PX,
-      });
+      groups.add(pnl.group);
       break;
     }
+  }
+  if (col.id === "right") {
+    refreshPinnedRightConstraints(api, { groups: [...groups], maximumWidth: cap });
+    return;
+  }
+  for (const group of groups) {
+    group.api.setConstraints({ maximumWidth: cap, minimumWidth: LAYOUT_PINNED_MIN_PX });
   }
 }

@@ -34,7 +34,7 @@ keep in agreement with this one.
 | `REQ-WORKSPACES-ORG-UNITS-002` | [Resolution](#resolution) |
 | `REQ-WORKSPACES-ORG-UNITS-003` | [Personal units](#personal-units) |
 | `REQ-WORKSPACES-ORG-UNITS-004` | [Resolution](#resolution) |
-| `REQ-WORKSPACES-ORG-UNITS-005` | [Placement and movement](#placement-and-movement) |
+| `REQ-WORKSPACES-ORG-UNITS-005` | [Placement and movement](#placement-and-movement), [Workspace Overview](#workspace-overview) |
 
 ## Components and responsibilities
 
@@ -145,6 +145,22 @@ moved.
 Both operations publish a workspace reach-changed event so the WebSocket
 gateway can drop subscriptions held by users who no longer reach the workspace,
 reusing the revocation path that membership removal already uses.
+
+## Workspace Overview
+
+`WorkspaceEditForm` renders `WorkspaceAccessSettings`. That component reads the
+app-store auth snapshot. It mounts the Authentication & users group and its
+divider when `auth.mode` is `enabled` and `auth.authenticated` is true. The group
+uses `SettingsGroup` with `frame="none"` and contains `WorkspacePlacementCard` and
+`WorkspaceTeamAccessCard`. This keeps their unit, member, and directory requests
+out of single-user settings. The auth service supplies the snapshot after
+applying `features.auth`.
+
+Both cards continue to receive scopes from the live workspace record. The unit
+picker uses `workspace.manage` and the member actions use `member.manage`.
+The group stays expanded in the workspace settings scroll area. On phones the
+help wraps above each card's controls and stays visible without a gesture.
+The `workspaces` locale namespace supplies the headings and help text.
 
 ## Failure and recovery
 

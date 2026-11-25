@@ -179,6 +179,7 @@ type UserSettings struct {
 	LspAutoStartLanguages             []string                          `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages           []string                          `json:"lsp_auto_install_languages"`
 	LspServerConfigs                  map[string]map[string]interface{} `json:"lsp_server_configs"`
+	MarkdownPreviewByDefault          bool                              `json:"markdown_preview_by_default"`
 	LspStatusLocation                 string                            `json:"lsp_status_location"`
 	SavedLayouts                      []SavedLayout                     `json:"saved_layouts"`
 	SidebarViewsByWorkspace           map[string]SidebarWorkspaceState  `json:"sidebar_views_by_workspace"`
@@ -252,14 +253,20 @@ type SavedLayout struct {
 // The payload is stored and returned as-is; the server does not interpret
 // clause values beyond passing them through.
 type SidebarView struct {
-	ID              string                      `json:"id"`
-	Name            string                      `json:"name"`
-	Filters         []SidebarViewClause         `json:"filters"`
-	Sort            SidebarViewSort             `json:"sort"`
-	Group           string                      `json:"group"`
-	GroupIndent     *bool                       `json:"group_indent,omitempty"`
-	CollapsedGroups []string                    `json:"collapsed_groups"`
-	TaskRow         *SidebarTaskRowPresentation `json:"task_row,omitempty"`
+	ID                      string                          `json:"id"`
+	Name                    string                          `json:"name"`
+	Filters                 []SidebarViewClause             `json:"filters"`
+	Sort                    SidebarViewSort                 `json:"sort"`
+	Group                   string                          `json:"group"`
+	GroupIndent             *bool                           `json:"group_indent,omitempty"`
+	CollapsedGroups         []string                        `json:"collapsed_groups"`
+	TaskRow                 *SidebarTaskRowPresentation     `json:"task_row,omitempty"`
+	GeneratedPluginGrouping *SidebarGeneratedPluginGrouping `json:"generated_plugin_grouping,omitempty"`
+}
+
+type SidebarGeneratedPluginGrouping struct {
+	Reference string `json:"reference"`
+	Name      string `json:"name"`
 }
 
 type SidebarViewClause struct {
@@ -283,12 +290,13 @@ type SidebarViewSortCriterion struct {
 }
 
 type SidebarViewDraft struct {
-	BaseViewID  string                      `json:"base_view_id"`
-	Filters     []SidebarViewClause         `json:"filters"`
-	Sort        SidebarViewSort             `json:"sort"`
-	Group       string                      `json:"group"`
-	GroupIndent *bool                       `json:"group_indent,omitempty"`
-	TaskRow     *SidebarTaskRowPresentation `json:"task_row,omitempty"`
+	BaseViewID      string                      `json:"base_view_id"`
+	Filters         []SidebarViewClause         `json:"filters"`
+	Sort            SidebarViewSort             `json:"sort"`
+	Group           string                      `json:"group"`
+	GroupIndent     *bool                       `json:"group_indent,omitempty"`
+	CollapsedGroups []string                    `json:"collapsed_groups,omitempty"`
+	TaskRow         *SidebarTaskRowPresentation `json:"task_row,omitempty"`
 }
 
 // SidebarTaskRowPresentation controls the optional metadata and trailing
