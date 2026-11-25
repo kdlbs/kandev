@@ -128,11 +128,13 @@ func injectedKandevMCPConfigured(cfg *config.InstanceConfig) bool {
 		}
 		switch server.Type {
 		case "http":
-			if server.URL == config.MCPServerURL(cfg.MCPHost, cfg.Port, "/mcp") {
+			wantURL, err := config.MCPServerURLForInstance(cfg.MCPHost, cfg.Port, cfg.InstanceID, cfg.ScopedMCPRoutes, "/mcp")
+			if err == nil && server.URL == wantURL {
 				return true
 			}
 		case "sse":
-			if server.URL == config.MCPServerURL(cfg.MCPHost, cfg.Port, "/sse") {
+			wantURL, err := config.MCPServerURLForInstance(cfg.MCPHost, cfg.Port, cfg.InstanceID, cfg.ScopedMCPRoutes, "/sse")
+			if err == nil && server.URL == wantURL {
 				return true
 			}
 		}

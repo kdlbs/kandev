@@ -38,7 +38,7 @@ test.describe("Completed conversation resume on mobile", () => {
     await expect(
       viewer
         .getByTestId("mobile-file-viewer-content")
-        .locator(".cm-line")
+        .locator(".cm-line, .monaco-editor .view-line")
         .filter({ hasText: RETAINED_WORKSPACE_CONTENT }),
     ).toBeVisible();
     await viewer.getByRole("button", { name: "Close" }).tap();

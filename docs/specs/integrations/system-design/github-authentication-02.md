@@ -364,6 +364,15 @@ It must apply the refreshed environment before `SetExecutionEnv` and agent start
 Reuse the repository set already resolved for preparation instead of cloning or reconciling it a second time.
 An environment delivery failure must prevent a claim that the refreshed environment is active.
 
+When a workspace read creates an execution before a launch arrives,
+`promoteWorkspaceExecution` composes the launch's managed credential environment
+with the workspace environment and its per-run values. The current launch owns
+the broker values and generated Git helpers. Promotion stores the result in the
+in-memory execution environment and consumes the overlay before startup. The
+recomposed environment invalidates the workspace's installer digest. A
+required lease with no available broker, an incomplete lease environment, or a
+composition error prevents the new agent process from starting.
+
 The agentctl configure boundary has two explicit modes. The existing API mode composes a request-only
 overlay with the instance block. It removes obsolete managed authorization and generated helper entries
 before it applies the incoming contract. Lifecycle launch and

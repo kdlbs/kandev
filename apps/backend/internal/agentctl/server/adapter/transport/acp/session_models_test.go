@@ -113,6 +113,9 @@ func TestInitialSessionModelState_UsesConfigOptionsWithoutModels(t *testing.T) {
 	if ev.CurrentModelID != "gpt-5.5" {
 		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "gpt-5.5")
 	}
+	if got := ev.Data[streams.ConfigOptionsSourceKey]; got != streams.ConfigOptionsSourceSessionSetup {
+		t.Errorf("config options source = %q, want session setup", got)
+	}
 	if len(ev.ConfigOptions) != 1 {
 		t.Fatalf("ConfigOptions len = %d, want 1", len(ev.ConfigOptions))
 	}

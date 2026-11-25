@@ -284,6 +284,7 @@ type prWatchWorkspaceBatchOutcome struct {
 	// workflowUnfinished lists open known PRs whose Actions-attention refresh
 	// did not complete. They resume the workflow phase alone.
 	workflowUnfinished []*PRWatch
+	statusPending      []prWatchSyncPending
 	state              prWatchBatchOutcomeState
 	results            []PRWatchSyncResult
 	deferred           *AdmissionDeferredError
@@ -353,6 +354,7 @@ func (p *Poller) checkWorkspacePRWatches(
 		watches:            watches,
 		unfinished:         prWatchStatusPendingWatches(syncOutcome.Pending),
 		workflowUnfinished: prWatchWorkflowPendingWatches(syncOutcome.Pending),
+		statusPending:      syncOutcome.Pending,
 		results:            syncOutcome.Results,
 		deferred:           syncOutcome.Deferred,
 		workflowDeferred:   syncOutcome.WorkflowDeferred,

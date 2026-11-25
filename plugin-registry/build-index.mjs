@@ -531,7 +531,14 @@ export async function buildEntry(
     name: presentation.display_name || humanize(pluginId),
     description: presentation.description || release.name || "",
     author: kind === "canvas" ? presentation.author || meta.author : curatedOwner(repo),
-    categories: manifest.categories || spec.categories || [],
+    categories: [
+      ...new Set([
+        ...(manifest.categories ?? []),
+        ...(spec.categories ?? []),
+        ...(verified?.file_extensions?.length ? ["File viewers"] : []),
+      ]),
+    ],
+    file_extensions: verified?.file_extensions ?? [],
     icon_url: iconUrl,
     repo_url: presentation.repo_url || canonicalRepoURL,
     version: version || null,

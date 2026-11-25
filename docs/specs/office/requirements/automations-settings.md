@@ -49,6 +49,10 @@ Users want to schedule an agent to run a prompt on a cron (or on a GitHub PR eve
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.26:** When the backend misses occurrences after the current schedule boundary, it shall retain the existing single catch-up execution on its next check. Saving an unchanged schedule shall not discard that pending execution.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.27:** When a schedule edit follows run admission, the admitted run shall retain its lifecycle and history. That run's evaluation shall not move the replacement boundary backward.
 
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.28:** When an enabled automation reports that its configured schedule trigger is off, Run detail shall offer **Turn on schedule** beside that reason on desktop and phone.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.29:** **Turn on schedule** shall change only the enabled state of the scheduled trigger shown in Run detail. After success, Run detail shall show the next-firing status from saved state.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.30:** If the trigger update fails, Run detail shall show an error and allow the user to retry.
+
 ## List contract exclusions
 
 These criteria govern settings list reads and their visible state. They do not

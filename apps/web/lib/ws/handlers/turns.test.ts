@@ -13,8 +13,10 @@ const TURN_COMPLETED = "session.turn.completed";
 const NOTIFICATION = "notification";
 const TURN_STARTED_AT = "2026-07-23T10:00:00.000Z";
 const TURN_COMPLETED_AT = "2026-07-23T10:01:00.000Z";
+const RECEIPT_TURN_ID = "turn-receipt";
 const FAILED_TURN_ID = "turn-failed";
 const WORKSPACE_ID = "workspace-1";
+const MOCK_SMART_MODEL_NAME = "Mock Smart";
 
 type TurnTestState = SessionSlice & {
   quickChat: {
@@ -50,11 +52,12 @@ function turn(
   id: string,
   startedAt: string,
   completedAt?: string,
-  evidence: Pick<TurnEventPayload, "metadata" | "had_output"> = {},
+  evidence: Pick<TurnEventPayload, "metadata" | "had_output" | "configuration_result"> = {},
+  eventSessionId = SESSION_ID,
 ): TurnEventPayload {
   return {
     id,
-    session_id: SESSION_ID,
+    session_id: eventSessionId,
     task_id: TASK_ID,
     started_at: startedAt,
     completed_at: completedAt,
@@ -64,25 +67,34 @@ function turn(
   };
 }
 
-function addTurnUserPrompt(store: ReturnType<typeof makeStore>, turnId: string): void {
+function addTurnUserPrompt(
+  store: ReturnType<typeof makeStore>,
+  turnId: string,
+  sessionId = SESSION_ID,
+  content = "Please continue.",
+): void {
   store.getState().addMessage({
     id: `user-${turnId}`,
-    session_id: SESSION_ID,
+    session_id: sessionId,
     task_id: TASK_ID,
     turn_id: turnId,
     author_type: "user",
-    content: "Please continue.",
+    content,
     type: "message",
     created_at: TURN_STARTED_AT,
   } as never);
 }
 
-function emptyTurnNoticeCount(store: ReturnType<typeof makeStore>, turnId: string): number {
+function emptyTurnNoticeCount(
+  store: ReturnType<typeof makeStore>,
+  turnId: string,
+  sessionId = SESSION_ID,
+): number {
   return (
     store
       .getState()
       .messages.bySession[
-        SESSION_ID
+        sessionId
       ]?.filter((message) => message.turn_id === turnId && message.metadata?.empty_turn === true)
       .length ?? 0
   );
@@ -238,6 +250,99 @@ describe("session turn WebSocket handlers", () => {
     expect(store.getState().turns.bySession[SESSION_ID][0].completed_at).toBe(completed);
   });
 
+  it("does not recreate a dismissed receipt for a duplicate completion", () => {
+    const store = makeStore();
+    addTurnUserPrompt(store, RECEIPT_TURN_ID, SESSION_ID, "/model mock-smart");
+    const completion = turn(RECEIPT_TURN_ID, TURN_STARTED_AT, TURN_COMPLETED_AT, {
+      had_output: false,
+      configuration_result: {
+        status: "applied",
+        config_id: "model",
+        requested: MOCK_SMART_MODEL_NAME,
+        effective: MOCK_SMART_MODEL_NAME,
+        confirmed: true,
+      },
+    });
+
+    send(store, TURN_COMPLETED, completion);
+    expect(emptyTurnNoticeCount(store, RECEIPT_TURN_ID)).toBe(1);
+    store.getState().removeMessage(SESSION_ID, `empty-turn-${RECEIPT_TURN_ID}`);
+    send(store, TURN_COMPLETED, completion);
+
+    expect(emptyTurnNoticeCount(store, RECEIPT_TURN_ID)).toBe(0);
+  });
+
+  it("emits a first receipt when history already contains the completed turn", () => {
+    const store = makeStore();
+    addTurnUserPrompt(store, RECEIPT_TURN_ID, SESSION_ID, "/model mock-smart");
+    store.getState().addTurn({
+      id: RECEIPT_TURN_ID,
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      started_at: TURN_STARTED_AT,
+      completed_at: TURN_COMPLETED_AT,
+      created_at: TURN_STARTED_AT,
+      updated_at: TURN_COMPLETED_AT,
+    } as never);
+
+    send(
+      store,
+      TURN_COMPLETED,
+      turn(RECEIPT_TURN_ID, TURN_STARTED_AT, TURN_COMPLETED_AT, {
+        had_output: false,
+        configuration_result: {
+          status: "applied",
+          config_id: "model",
+          requested: MOCK_SMART_MODEL_NAME,
+          effective: MOCK_SMART_MODEL_NAME,
+          confirmed: true,
+        },
+      }),
+    );
+
+    const receipt = store
+      .getState()
+      .messages.bySession[
+        SESSION_ID
+      ]?.find((message) => message.id === `empty-turn-${RECEIPT_TURN_ID}`);
+    expect(receipt?.metadata?.configuration_command_feedback).toBe(true);
+  });
+
+  it("upgrades a visible empty-turn notice when the receipt arrives later", () => {
+    const store = makeStore();
+    addTurnUserPrompt(store, RECEIPT_TURN_ID, SESSION_ID, "/model mock-smart");
+    send(
+      store,
+      TURN_COMPLETED,
+      turn(RECEIPT_TURN_ID, TURN_STARTED_AT, TURN_COMPLETED_AT, { had_output: false }),
+    );
+    expect(emptyTurnNoticeCount(store, RECEIPT_TURN_ID)).toBe(1);
+
+    send(
+      store,
+      TURN_COMPLETED,
+      turn(RECEIPT_TURN_ID, TURN_STARTED_AT, TURN_COMPLETED_AT, {
+        had_output: false,
+        configuration_result: {
+          status: "applied",
+          config_id: "model",
+          requested: MOCK_SMART_MODEL_NAME,
+          effective: MOCK_SMART_MODEL_NAME,
+          confirmed: true,
+        },
+      }),
+    );
+
+    const receipt = store
+      .getState()
+      .messages.bySession[
+        SESSION_ID
+      ]?.find((message) => message.id === `empty-turn-${RECEIPT_TURN_ID}`);
+    expect(emptyTurnNoticeCount(store, RECEIPT_TURN_ID)).toBe(1);
+    expect(receipt?.metadata?.configuration_command_feedback).toBe(true);
+    expect(receipt?.content).toContain(`The agent applied ${MOCK_SMART_MODEL_NAME}.`);
+  });
+
   it.each([
     ["synthetic lifecycle history", { lifecycle_only: true }],
     ["recoverable failure outcome", { error_terminated: true }],
@@ -308,6 +413,44 @@ describe("session turn WebSocket handlers", () => {
     );
 
     expect(emptyTurnNoticeCount(store, "turn-new")).toBe(1);
+  });
+
+  it("suppresses empty-turn feedback for the completed event's passthrough session only", () => {
+    const store = makeStore();
+    const passthroughSessionId = "session-passthrough";
+    store.getState().setTaskSession({
+      id: passthroughSessionId,
+      task_id: TASK_ID,
+      is_passthrough: true,
+    } as never);
+    store.getState().setTaskSession({
+      id: SESSION_ID,
+      task_id: TASK_ID,
+      is_passthrough: false,
+      agent_profile_snapshot: { cli_passthrough: true },
+    } as never);
+    addTurnUserPrompt(store, "turn-passthrough", passthroughSessionId);
+    addTurnUserPrompt(store, "turn-structured");
+
+    send(
+      store,
+      TURN_COMPLETED,
+      turn(
+        "turn-passthrough",
+        TURN_STARTED_AT,
+        TURN_COMPLETED_AT,
+        { had_output: false },
+        passthroughSessionId,
+      ),
+    );
+    send(
+      store,
+      TURN_COMPLETED,
+      turn("turn-structured", TURN_STARTED_AT, TURN_COMPLETED_AT, { had_output: false }),
+    );
+
+    expect(emptyTurnNoticeCount(store, "turn-passthrough", passthroughSessionId)).toBe(0);
+    expect(emptyTurnNoticeCount(store, "turn-structured")).toBe(1);
   });
 
   it("preserves cancelled tool-call status when the containing turn completes", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { multiSelectReducer, INITIAL_STATE } from "./use-task-multi-select";
+import { multiSelectReducer, INITIAL_STATE } from "./task-multi-select-state";
 
 describe("multiSelectReducer — anchor + range", () => {
   const ordered = ["a", "b", "c", "d", "e"];

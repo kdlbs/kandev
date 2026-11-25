@@ -187,12 +187,6 @@ const (
 	RepositoryDeleted = "repository.deleted"
 )
 
-// Event types emitted by Azure DevOps watcher polling.
-const (
-	AzureDevOpsWorkItemWatchMatch    = "azure_devops.work_item_watch.match"
-	AzureDevOpsPullRequestWatchMatch = "azure_devops.pull_request_watch.match"
-)
-
 // Event types for repository sets
 const (
 	RepositorySetCreated = "repository_set.created"
@@ -252,6 +246,10 @@ const (
 // docs/decisions/2026-08-01-per-user-plugin-storage.md. Routed to the
 // writing user's own WS connections only, via UserEventBroadcaster.
 const PluginUserStateUpdated = "plugin.user-state.updated"
+
+// PluginSidebarGroupingUpdated carries only provider identity and an optional
+// workspace. Catalog changes carry catalog=true without any workspace data.
+const PluginSidebarGroupingUpdated = "plugins.sidebar-grouping.updated"
 
 // Event types for system maintenance jobs (VACUUM, factory reset, snapshot
 // create/restore, disk walk). Published by internal/system/jobs.Tracker on

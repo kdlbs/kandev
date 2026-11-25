@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "@/components/routing/app-link";
-import { IconAlertTriangle, IconChevronDown } from "@tabler/icons-react";
+import { IconAlertTriangle, IconChevronDown, IconX } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { markStorageNoticeDismissed, wasStorageNoticeDismissed } from "@/lib/local-storage";
 import type { RuntimeStorageHealth } from "@/lib/types/http";
 import {
   formatStorageUsage,
@@ -154,9 +155,20 @@ function cachedReceiptElapsed(health?: RuntimeStorageHealth | null): number {
 }
 
 /** One compact advisory or blocked-output row. It never offers Resume. */
-export function SessionDeliveryStorageNotice({ health }: { health?: RuntimeStorageHealth | null }) {
+type StorageNoticeProps = { health?: RuntimeStorageHealth | null; taskId?: string | null };
+
+export function SessionDeliveryStorageNotice(props: StorageNoticeProps) {
+  return <TaskStorageNotice key={props.taskId ?? ""} {...props} />;
+}
+
+function TaskStorageNotice({ health, taskId }: StorageNoticeProps) {
   const { t } = useTranslation();
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [dismissed, setDismissed] = useState(() => !!taskId && wasStorageNoticeDismissed(taskId));
+  const dismiss = () => {
+    if (taskId) markStorageNoticeDismissed(taskId);
+    setDismissed(true);
+  };
   const visible = storageAdvisoryVisible(health);
   const capacityReceiptKey = health
     ? `${health.epoch}:${health.revision}:${health.observed_at ?? ""}`
@@ -173,7 +185,7 @@ export function SessionDeliveryStorageNotice({ health }: { health?: RuntimeStora
   const cachedElapsed = cachedReceiptElapsed(health);
   const capacityElapsed = useReceiptElapsed(capacityReceiptKey, cachedElapsed);
   const pressureElapsed = useReceiptElapsed(pressureReceiptKey, cachedElapsed);
-  if (!health || !visible) return null;
+  if (!health || !visible || dismissed) return null;
   const view = buildNoticeView(health, t);
   const stale = view.pressure
     ? isRuntimeStoragePressureStale(health.pressure_age_seconds, pressureElapsed)
@@ -196,6 +208,7 @@ export function SessionDeliveryStorageNotice({ health }: { health?: RuntimeStora
         stale={stale}
         detailsOpen={detailsOpen}
         onToggleDetails={() => setDetailsOpen((open) => !open)}
+        onDismiss={dismiss}
       />
     </div>
   );
@@ -208,6 +221,7 @@ function StorageNoticeRow({
   stale,
   detailsOpen,
   onToggleDetails,
+  onDismiss,
 }: {
   health: RuntimeStorageHealth;
   view: NoticeView;
@@ -215,6 +229,7 @@ function StorageNoticeRow({
   stale: boolean;
   detailsOpen: boolean;
   onToggleDetails: () => void;
+  onDismiss: () => void;
 }) {
   const { t } = useTranslation();
   const usageLabel = view.usage ? t("task:storageAdvisoryUsage", { usage: view.usage }) : null;
@@ -273,6 +288,18 @@ function StorageNoticeRow({
               className={`size-3 transition-transform ${detailsOpen ? "rotate-180" : ""}`}
               aria-hidden="true"
             />
+          </button>
+          <button
+            type="button"
+            aria-label={t("task:dismiss")}
+            data-testid="session-delivery-storage-dismiss"
+            onClick={onDismiss}
+            className={controlSizingClassName(
+              "icon",
+              "inline-flex shrink-0 cursor-pointer items-center justify-center rounded hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+          >
+            <IconX className="size-3" aria-hidden="true" />
           </button>
         </span>
       </div>

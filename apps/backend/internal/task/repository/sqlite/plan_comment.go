@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -100,6 +101,9 @@ func (r *Repository) CreateTaskPlanComment(
 	if err != nil {
 		return nil, fmt.Errorf("insert task plan comment: %w", err)
 	}
+	if err := r.replacePlanCommentFiles(ctx, tx, comment); err != nil {
+		return nil, err
+	}
 	if err := r.validatePlanCommentCollectionTx(ctx, tx, comment.TaskID); err != nil {
 		return nil, err
 	}
@@ -136,17 +140,18 @@ func (r *Repository) resolvePlanCommentAdmissionReplay(
 
 func planCommentCreateFingerprint(comment *models.TaskPlanComment) (string, error) {
 	return plancomments.Fingerprint(struct {
-		ID           string `json:"id"`
-		TaskID       string `json:"task_id"`
-		PlanID       string `json:"plan_id"`
-		Body         string `json:"body"`
-		SelectedText string `json:"selected_text"`
-		AnchorFrom   int    `json:"anchor_from"`
-		AnchorTo     int    `json:"anchor_to"`
+		ID            string   `json:"id"`
+		TaskID        string   `json:"task_id"`
+		PlanID        string   `json:"plan_id"`
+		Body          string   `json:"body"`
+		SelectedText  string   `json:"selected_text"`
+		AnchorFrom    int      `json:"anchor_from"`
+		AnchorTo      int      `json:"anchor_to"`
+		AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	}{
 		ID: comment.ID, TaskID: comment.TaskID, PlanID: comment.PlanID,
 		Body: comment.Body, SelectedText: comment.SelectedText,
-		AnchorFrom: comment.AnchorFrom, AnchorTo: comment.AnchorTo,
+		AnchorFrom: comment.AnchorFrom, AnchorTo: comment.AnchorTo, AttachmentIDs: comment.AttachmentIDs,
 	})
 }
 
@@ -220,6 +225,9 @@ func (r *Repository) UpdateTaskPlanComment(
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return r.commitPlanCommentConflict(ctx, tx, comment.TaskID)
 	}
+	if err := r.replacePlanCommentFiles(ctx, tx, comment); err != nil {
+		return nil, err
+	}
 	if err := r.validatePlanCommentCollectionTx(ctx, tx, comment.TaskID); err != nil {
 		return nil, err
 	}
@@ -261,6 +269,9 @@ func (r *Repository) DeleteTaskPlanComment(
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return r.commitPlanCommentConflict(ctx, tx, taskID)
+	}
+	if err := releaseDetachedPlanCommentFiles(ctx, tx, taskID); err != nil {
+		return nil, err
 	}
 	return r.incrementAndCommitPlanCommentSnapshot(ctx, tx, taskID)
 }
@@ -319,13 +330,16 @@ func getPlanCommentInTx(
 	if err != nil {
 		return nil, fmt.Errorf("read task plan comment: %w", err)
 	}
+	if err := plancommenttx.ReadAttachments(ctx, tx, db, comment.TaskID, []*models.TaskPlanComment{comment}); err != nil {
+		return nil, err
+	}
 	return comment, nil
 }
 
 func samePlanCommentCreate(a, b *models.TaskPlanComment) bool {
 	return a.ID == b.ID && a.TaskID == b.TaskID && a.PlanID == b.PlanID &&
 		a.Body == b.Body && a.SelectedText == b.SelectedText &&
-		a.AnchorFrom == b.AnchorFrom && a.AnchorTo == b.AnchorTo
+		a.AnchorFrom == b.AnchorFrom && a.AnchorTo == b.AnchorTo && slices.Equal(a.AttachmentIDs, b.AttachmentIDs)
 }
 
 func (r *Repository) incrementAndCommitPlanCommentSnapshot(
@@ -377,39 +391,5 @@ func (r *Repository) readPlanCommentSnapshot(
 	q sqlx.QueryerContext,
 	taskID string,
 ) (*models.TaskPlanCommentSnapshot, error) {
-	snapshot := &models.TaskPlanCommentSnapshot{TaskID: taskID, Comments: make([]*models.TaskPlanComment, 0)}
-	err := sqlx.GetContext(ctx, q, snapshot, r.db.Rebind(`
-		SELECT id AS plan_id, comments_revision AS revision
-		FROM task_plans WHERE task_id = ?
-	`), taskID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrTaskPlanNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read task plan comment snapshot head: %w", err)
-	}
-
-	rows, err := q.QueryContext(ctx, r.db.Rebind(`
-		SELECT `+planCommentSelectCols+`
-		FROM task_plan_comments WHERE task_id = ? AND plan_id = ?
-		ORDER BY created_at, id
-	`), taskID, snapshot.PlanID)
-	if err != nil {
-		return nil, fmt.Errorf("list task plan comments: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		comment := &models.TaskPlanComment{}
-		if err := rows.Scan(
-			&comment.ID, &comment.TaskID, &comment.PlanID, &comment.Body, &comment.SelectedText,
-			&comment.AnchorFrom, &comment.AnchorTo, &comment.Version, &comment.CreatedAt, &comment.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan task plan comment: %w", err)
-		}
-		snapshot.Comments = append(snapshot.Comments, comment)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate task plan comments: %w", err)
-	}
-	return snapshot, nil
+	return plancommenttx.ReadSnapshot(ctx, q, r.db, taskID)
 }

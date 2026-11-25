@@ -215,8 +215,7 @@ func (r *sqliteRepository) DeleteUser(ctx context.Context, id string) error {
 	return err
 }
 
-// CreateUser inserts a new user row with an empty settings blob, stamping
-// creation timestamps.
+// CreateUser inserts a new account with default preferences and timestamps.
 func (r *sqliteRepository) CreateUser(ctx context.Context, user *models.User) error {
 	now := time.Now().UTC()
 	user.CreatedAt = now
@@ -751,6 +750,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"lsp_auto_start_languages":                 lspAutoStart,
 		"lsp_auto_install_languages":               lspAutoInstall,
 		"lsp_server_configs":                       lspServerConfigs,
+		"markdown_preview_by_default":              settings.MarkdownPreviewByDefault,
 		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                            savedLayouts,
 		"sidebar_views":                            sidebarViews,
@@ -772,7 +772,6 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                     settings.GitLabSavedPresets,
-		"azure_devops_browse_preferences":          settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":                 settings.DefaultUtilityAgentID,
 		"default_utility_model":                    settings.DefaultUtilityModel,
 		"default_utility_agent_profile_id":         settings.DefaultUtilityAgentProfileID,
@@ -852,11 +851,12 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ShowTranscriptAutoScrollControl:   false,
 		ShowTodoListPanel:                 false,
 		ShowTodoListPanelOnlyWhenNotEmpty: false,
-		ShowTurnChangedFiles:              false,
+		ShowTurnChangedFiles:              true,
 		ShowReleaseNotification:           true,
 		LspAutoStartLanguages:             []string{},
 		LspAutoInstallLanguages:           []string{},
 		LspServerConfigs:                  map[string]map[string]interface{}{},
+		MarkdownPreviewByDefault:          true,
 		LspStatusLocation:                 models.LspStatusLocationToolbar,
 		SavedLayouts:                      []models.SavedLayout{},
 		SidebarLayoutsByWorkspace:         map[string]models.SidebarLayout{},
@@ -951,6 +951,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspAutoStartLanguages             []string                                `json:"lsp_auto_start_languages"`
 		LspAutoInstallLanguages           []string                                `json:"lsp_auto_install_languages"`
 		LspServerConfigs                  map[string]map[string]interface{}       `json:"lsp_server_configs"`
+		MarkdownPreviewByDefault          *bool                                   `json:"markdown_preview_by_default"`
 		LspStatusLocation                 string                                  `json:"lsp_status_location"`
 		SavedLayouts                      []models.SavedLayout                    `json:"saved_layouts"`
 		SidebarViewsByWorkspace           map[string]models.SidebarWorkspaceState `json:"sidebar_views_by_workspace"`
@@ -972,7 +973,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets"`
 		GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets"`
 		GitLabSavedPresets                json.RawMessage                         `json:"gitlab_saved_presets"`
-		AzureDevOpsBrowsePreferences      json.RawMessage                         `json:"azure_devops_browse_preferences"`
 		DefaultUtilityAgentID             string                                  `json:"default_utility_agent_id"`
 		DefaultUtilityModel               string                                  `json:"default_utility_model"`
 		DefaultUtilityAgentProfileID      string                                  `json:"default_utility_agent_profile_id"`
@@ -1087,6 +1087,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if settings.LspServerConfigs == nil {
 		settings.LspServerConfigs = map[string]map[string]interface{}{}
 	}
+	if payload.MarkdownPreviewByDefault != nil {
+		settings.MarkdownPreviewByDefault = *payload.MarkdownPreviewByDefault
+	}
 	settings.LspStatusLocation = models.NormalizeLspStatusLocation(payload.LspStatusLocation)
 	settings.SavedLayouts = payload.SavedLayouts
 	if settings.SavedLayouts == nil {
@@ -1159,7 +1162,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.GitHubSavedPresets = payload.GitHubSavedPresets
 	settings.GitHubDefaultQueryPresets = payload.GitHubDefaultQueryPresets
 	settings.GitLabSavedPresets = payload.GitLabSavedPresets
-	settings.AzureDevOpsBrowsePreferences = payload.AzureDevOpsBrowsePreferences
 	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
 	settings.DefaultUtilityModel = payload.DefaultUtilityModel
 	settings.DefaultUtilityAgentProfileID = payload.DefaultUtilityAgentProfileID

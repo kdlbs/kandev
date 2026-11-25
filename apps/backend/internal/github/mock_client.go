@@ -650,6 +650,15 @@ func (m *MockClient) ListRepoBranches(_ context.Context, owner, repo string) ([]
 	return out, nil
 }
 
+// ResolveRepoRefSHA returns the seeded ref as a stable identifier. Mock
+// repository data is immutable, so reads remain consistent for that ref.
+func (m *MockClient) ResolveRepoRefSHA(_ context.Context, _, _, ref string) (string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return "", errors.New("mock: empty repository ref")
+	}
+	return ref, nil
+}
+
 // ListRepoDirectory returns the immediate children of dir, derived from the
 // paths seeded via SeedRepoFile for owner/repo. Entries seeded with a
 // specific ref are only visible when ref matches; entries seeded with ref ""

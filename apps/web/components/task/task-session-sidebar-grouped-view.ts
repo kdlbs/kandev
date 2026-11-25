@@ -97,15 +97,23 @@ function shareGroup(
   if (
     !previous ||
     previous.label !== next.label ||
+    previous.color !== next.color ||
     previous.isContinuation !== next.isContinuation ||
     previous.matchingCount !== next.matchingCount
   )
     return next;
   const tasks = shareTaskArray(previous.tasks, next.tasks, priorById);
-  return tasks === previous.tasks ? previous : { ...next, tasks };
+  const children =
+    previous.subTasksByParentId && next.subTasksByParentId
+      ? shareSubtaskMap(previous.subTasksByParentId, next.subTasksByParentId, priorById)
+      : next.subTasksByParentId;
+  return tasks === previous.tasks && children === previous.subTasksByParentId
+    ? previous
+    : { ...next, tasks, ...(children ? { subTasksByParentId: children } : {}) };
 }
 
 function pageGroupLabel(group: GroupedSidebarList["groupKey"], key: string, label: string): string {
+  if (group && key === `${group}:unassigned`) return t("sidebar:groupUnassigned");
   if (key === "__unassigned__") return t("sidebar:groupUnassigned");
   if (key === "__all__") return t("sidebar:groupAll");
   if (key === "__multi__") return t("sidebar:groupMultiRepo");
@@ -178,19 +186,24 @@ function ensurePageGroup(params: {
   groupByKey: Map<string, SidebarGroup>;
   groupKey: GroupedSidebarList["groupKey"];
   key: string;
-  label: string;
+  label?: string;
   matchingCount?: number;
   isContinuation?: boolean;
+  color?: string;
 }): SidebarGroup {
   const { groups, groupByKey, groupKey, key, label, matchingCount, isContinuation } = params;
   const existing = groupByKey.get(key);
   if (existing) return existing;
   const group: SidebarGroup = {
     key,
-    label: pageGroupLabel(groupKey, key, label),
+    label: pageGroupLabel(groupKey, key, label ?? key),
     tasks: [],
     matchingCount,
     isContinuation,
+    ...(params.color ? { color: params.color } : {}),
+    ...(groupKey?.startsWith("plugin:")
+      ? { subTasksByParentId: new Map<string, TaskSwitcherItem[]>() }
+      : {}),
   };
   groupByKey.set(key, group);
   groups.push(group);
@@ -201,12 +214,11 @@ function appendPageTask(
   entry: SidebarTaskPageEntry,
   task: TaskSwitcherItem,
   group: SidebarGroup,
-  taskById: Map<string, TaskSwitcherItem>,
+  parentOnPage: boolean,
   subTasksByParentId: Map<string, TaskSwitcherItem[]>,
 ): void {
   task.subtaskCount = entry.subtask_count;
-  const parent = entry.parent_id ? taskById.get(entry.parent_id) : undefined;
-  if ((entry.depth ?? 0) > 0 && parent && entry.parent_id) {
+  if ((entry.depth ?? 0) > 0 && parentOnPage && entry.parent_id) {
     const children = subTasksByParentId.get(entry.parent_id) ?? [];
     children.push(task);
     subTasksByParentId.set(entry.parent_id, children);
@@ -217,6 +229,30 @@ function appendPageTask(
     task.continuationParentTitle = entry.parent_title ?? task.parentTaskTitle;
   }
   group.tasks.push(task);
+}
+
+function orderSidebarPageChildren(
+  groups: SidebarGroup[],
+  subTasksByParentId: Map<string, TaskSwitcherItem[]>,
+  subtaskOrderByParentId: Record<string, string[]>,
+  pluginGrouping: boolean,
+): void {
+  const maps = pluginGrouping
+    ? groups.map((group) => group.subTasksByParentId!)
+    : [subTasksByParentId];
+  for (const children of maps) {
+    for (const [parentId, orderedIds] of Object.entries(subtaskOrderByParentId)) {
+      const subtasks = children.get(parentId);
+      if (subtasks) children.set(parentId, applySubtaskOrder(subtasks, orderedIds));
+    }
+    if (children === subTasksByParentId) continue;
+    for (const [parentId, subtasks] of children) {
+      const unique = subTasksByParentId.get(parentId) ?? [];
+      for (const task of subtasks)
+        if (!unique.some((prior) => prior.id === task.id)) unique.push(task);
+      subTasksByParentId.set(parentId, unique);
+    }
+  }
 }
 
 /** Rebuild the display tree from the server's already-filtered and ordered page. */
@@ -230,6 +266,8 @@ export function groupSidebarTaskPage(
   const groups: SidebarGroup[] = [];
   const groupByKey = new Map<string, SidebarGroup>();
   const subTasksByParentId = new Map<string, TaskSwitcherItem[]>();
+  const membersByGroup = new Map<string, Set<string>>();
+  const pluginGrouping = groupKey?.startsWith("plugin:") === true;
   for (const entry of entries) {
     if (entry.kind === "group") {
       if (entry.group_key)
@@ -238,30 +276,38 @@ export function groupSidebarTaskPage(
           groupByKey,
           groupKey,
           key: entry.group_key,
-          label: entry.group_label ?? entry.group_key,
+          label: entry.group_label,
           matchingCount: entry.matching_count,
           isContinuation: entry.continuation,
+          color: entry.group_color,
         });
       continue;
     }
     if (entry.kind !== "task" || !entry.task_id) continue;
-    const task = taskById.get(entry.task_id);
-    if (!task) continue;
-    const groupKeyForTask = entry.group_key ?? "__all__";
+    const source = taskById.get(entry.task_id);
+    if (!source) continue;
+    const key = entry.group_key ?? "__all__";
     const group = ensurePageGroup({
       groups,
       groupByKey,
       groupKey,
-      key: groupKeyForTask,
-      label: entry.group_label ?? groupKeyForTask,
+      key,
+      label: entry.group_label,
       matchingCount: entry.matching_count,
+      color: entry.group_color,
     });
-    appendPageTask(entry, task, group, taskById, subTasksByParentId);
+    const members = membersByGroup.get(key) ?? new Set<string>();
+    membersByGroup.set(key, members);
+    appendPageTask(
+      entry,
+      pluginGrouping ? { ...source } : source,
+      group,
+      Boolean(entry.parent_id && members.has(entry.parent_id)),
+      group.subTasksByParentId ?? subTasksByParentId,
+    );
+    members.add(entry.task_id);
   }
-  for (const [parentId, orderedIds] of Object.entries(subtaskOrderByParentId)) {
-    const subtasks = subTasksByParentId.get(parentId);
-    if (subtasks) subTasksByParentId.set(parentId, applySubtaskOrder(subtasks, orderedIds));
-  }
+  orderSidebarPageChildren(groups, subTasksByParentId, subtaskOrderByParentId, pluginGrouping);
   return { groups, subTasksByParentId, groupKey };
 }
 

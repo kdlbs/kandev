@@ -190,6 +190,10 @@ const SELECTION_FAILURE_CODES = new Set([
   "permission_mode_failed",
   "permission_mode_unconfirmed",
   "permission_mode_mismatch",
+  "thinking_level_unavailable",
+  "thinking_level_failed",
+  "thinking_level_mismatch",
+  "thinking_level_unconfirmed",
 ]);
 
 export function isSelectionFailureRecoveryMetadata(value: unknown): boolean {
@@ -465,9 +469,11 @@ export function filterVisibleMessages(
   toolCallIds: Set<string>,
   subagentChildIds: Set<string>,
   scope?: PendingClarificationScope,
+  isPassthrough = false,
 ): Message[] {
   const activeClarification = findActiveClarification(messages, scope);
   const filtered = messages.filter((message) => {
+    if (isPassthrough && isEmptyTurnNotice(message)) return false;
     if (isDismissedGitPushErrorMessage(message)) return false;
     if (subagentChildIds.has(message.id) || isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {

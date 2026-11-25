@@ -24,6 +24,7 @@ import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 import { LineStat } from "@/components/diff-stat";
 import type { FileRowContentProps } from "./changes-panel-file-row";
+import { ChangesPanelFileFolder, ChangesPanelFileName } from "./changes-panel-file-name";
 
 export function TouchFileRowContent(props: FileRowContentProps) {
   const { file, treeMode, indentPx, isPending, folder, name, readOnly } = props;
@@ -43,11 +44,9 @@ export function TouchFileRowContent(props: FileRowContentProps) {
           <FileIcon fileName={name} className="size-3.5 shrink-0" />
         )}
         <span className="min-w-0 flex-1">
-          <span className="block whitespace-normal [overflow-wrap:anywhere] text-xs font-medium leading-4">
-            {name}
-          </span>
+          <ChangesPanelFileName name={name} touchMode />
           <span className="flex min-w-0 items-center gap-2 text-[11px] leading-4 text-muted-foreground">
-            {!treeMode && folder && <span className="min-w-0 truncate">{folder}</span>}
+            {!treeMode && folder && <ChangesPanelFileFolder folder={folder} touchMode />}
             <LineStat
               added={file.plus}
               removed={file.minus}

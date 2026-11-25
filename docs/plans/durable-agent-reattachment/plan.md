@@ -47,7 +47,7 @@ package and depend on PR #4380's interrupted-session recovery flow.
 ### Out of scope
 
 - Executor-specific SSH/remote Docker/Sprites redial and long-horizon reachability retry policy.
-- Detached MCP waiting, offline budgets, and richer remote-working presentation.
+- Detached MCP waiting and offline budgets (see [detached-mcp-call-wait](../detached-mcp-call-wait/plan.md)), and richer remote-working presentation.
 - Automatic resend, native conversation replacement, or treating transport failure as confirmed agentctl death.
 - Repeating completed stream repair or local-runtime replacement implementation.
 

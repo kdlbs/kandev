@@ -1,12 +1,6 @@
 import { useRef, useState } from "react";
-import {
-  centerRegion,
-  moveRegion,
-  rectFromPoints,
-  resizeRegion,
-  stageToImage,
-  type RegionRect,
-} from "@/lib/question-review/regions";
+import { centerRegion, stageToImage } from "@/lib/question-review/regions";
+import { moveRegion, rectFromPoints, resizeRegion, type RegionRect } from "@/lib/regions/geometry";
 import type { Point, ReviewView, Size } from "@/lib/question-review/viewport";
 import type { ReviewAnnotationController } from "./use-review-annotations";
 import { pointIn } from "./use-review-viewport";

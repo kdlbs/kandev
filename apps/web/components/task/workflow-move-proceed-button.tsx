@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useHoverPopover } from "@/components/integrations/use-hover-popover";
 import { WorkflowMoveOptions, WorkflowMoveOptionsForm } from "./workflow-move-options";
+import { keepMoveOpenForPromptSuggestions } from "./workflow-move-surface";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 import type { WorkflowMovePreviewTarget } from "./workflow-move-preview-footer";
@@ -252,7 +253,7 @@ function FineProceedSurface({
         align="end"
         side="top"
         sideOffset={6}
-        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+        className="max-h-(--radix-popover-content-available-height) w-80 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain p-3"
         data-testid={`${testId}-options`}
         onPointerEnter={onContentEnter}
         onPointerMove={onContentEnter}
@@ -262,6 +263,7 @@ function FineProceedSurface({
         onFocusCapture={onContentEnter}
         onBlurCapture={handleContentBlur}
         onOpenAutoFocus={(event) => event.preventDefault()}
+        onEscapeKeyDown={keepMoveOpenForPromptSuggestions}
       >
         <div className="mb-2 text-xs font-medium">
           {t("task:workflowMoveOptionsTitle", { step: nextStepName })}

@@ -175,7 +175,7 @@ export function routeGitHubSettingsHttp(
   if (path === "/api/v1/github/workspace-settings") {
     return json({
       workspace_id: DEMO_IDS.workspace,
-      repo_scope_mode: "repos",
+      repo_scope_mode: "selected",
       repo_scope_orgs: [],
       repo_scope_repos: [{ owner: "kandev-demo", name: "acme-web" }],
       saved_presets: [],

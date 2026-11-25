@@ -32,7 +32,18 @@ func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context,
 	inventory.Phase = pluginExecutorPhaseReady
 	inventory.Revision++
 	inventory.Generation++
-	client, err := r.newAgentctlClient(ctx, r.connectionResolver(state.operationContext, resource, state.inventory.InstancePort), r.logger, state.runtimeIdentity, state.token)
+	recoveryState := &pluginExecutorRecoveryState{
+		inventory: inventory, operationContext: state.operationContext, resource: resource,
+	}
+	info, err := r.readRecoveredAgentctlInstance(
+		ctx, state.record, recoveryState, state.runtimeIdentity, state.token,
+	)
+	if err != nil {
+		return nil, err
+	}
+	client, err := r.newAgentctlClient(ctx,
+		r.connectionResolver(state.operationContext, resource, state.inventory.InstancePort), r.logger,
+		info.ID, state.token, info.ScopedMCPRoutes)
 	if err != nil {
 		return nil, errors.New("plugin executor retained agentctl transport is unavailable")
 	}

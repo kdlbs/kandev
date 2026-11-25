@@ -4,7 +4,7 @@ system: integrations
 requirements:
   - REQ-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-11-23
 owners:
   - kandev
 ---
@@ -24,6 +24,8 @@ continues to own repository-qualified PR preparation.
 | `AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.2` | [Automated launch gates](#automated-launch-gates) |
 | `AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.3` | [Manual start](#manual-start) |
 | `AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.4` | [Manual PR-link creation](#manual-pr-link-creation) |
+| `AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.5` | [Identity and auto-start token](#identity-and-auto-start-token) |
+| `AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.6` | [Task open](#task-open) |
 
 ## Trust boundary
 
@@ -44,10 +46,18 @@ untracked results with `GetPR` before publishing review events. Enrichment
 must carry the full response's head and base repository identity, head and
 base revisions, mergeability details, and maintainer modification permission
 alongside the existing branch and diff fields. A PR with branch names but no
-head repository identity still needs enrichment. If the detail fetch fails or
-the provider has no head identity, the event retains incomplete identity and
-the launch decision remains fail-closed. Search-result target identity remains
-the repository used to look up the PR.
+head repository identity still needs enrichment.
+
+`enrichPRDetails` returns only the PRs that are ready to publish. A PR whose
+`GetPR` call fails or returns no PR is dropped from that poll: no event, no
+reservation, and no task. The PR stays untracked, so the next poll searches
+for it and enriches it again. Search results that already carry complete
+identity skip `GetPR` and are always published.
+
+A successful `GetPR` response without a head repository is provider data, not
+a read failure. This happens when the fork was deleted. That PR is published
+with empty head identity, and the launch decision remains fail-closed.
+Search-result target identity remains the repository used to look up the PR.
 
 `buildReviewTaskRequest` compares the PR head owner and repository name with the
 target owner and name using case-insensitive GitHub identity. If both identities
@@ -79,6 +89,25 @@ blocked by `fork_pr_requires_manual_start`, so no approval screen, setting, or
 new API field is required. The existing task state and PR association remain
 available while the task waits.
 
+## Task open
+
+`EnsureSession` is the passive task-open entry point. When it has no session to
+return and the task carries `fork_pr_requires_manual_start`, a passive
+`session_open` request without an explicit automatic start (unset or false)
+does not call `LaunchSession`, regardless of the resolved workflow intent. It
+returns a successful response with no session ID, source `awaiting_manual_start`,
+activation disposition `suppressed`, and activation reason
+`fork_pr_manual_start`. It does not fall back to a workspace-only prepare. That
+would launch the executor environment, and the setup script would run against
+fork-controlled files. Step-derived automatic starts from other sources are
+also suppressed. An explicit `auto_start: true` continues to reach the central
+`StartTask` rejection.
+
+The web client treats the response like any other session-less ensure result.
+The task page shows no error card, and the user starts the agent through the
+existing manual start actions. The central `StartTask` rejection stays in place
+for other automated callers.
+
 ## Manual PR-link creation
 
 Browser PR-link creation is a user-submitted task flow rather than a review
@@ -88,7 +117,9 @@ creation and launch behavior therefore remains unchanged for fork PR links.
 ## Verification
 
 Backend tests cover search-result enrichment through review event creation,
+deferral of PRs whose detail read failed until a later successful poll,
 same-repository auto-start tokens, fork and missing-head identity suppression,
+session-less passive task open for marked tasks in prepare and auto-start steps,
 both review-watch auto-start paths, rejection at the central automatic launch
 boundary, and successful manual start. Existing browser tests continue to
 prove manual PR-link launch from a fork head.

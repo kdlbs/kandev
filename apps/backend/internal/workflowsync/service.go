@@ -18,7 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
-	"github.com/kandev/kandev/internal/gitlab"
+	"github.com/kandev/kandev/internal/reposync"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
@@ -32,36 +32,12 @@ type Applier interface {
 }
 
 // GitHubClientProvider exposes workspace-routed GitHub repository reads.
-type GitHubClientProvider interface {
-	BindWorkspaceGitHubHost(context.Context, string, string) (context.Context, error)
-	CommitWorkspaceGitHubHost(context.Context, string, func(context.Context) error) error
-	ListRepoDirectoryForWorkspace(
-		ctx context.Context, workspaceID, owner, repo, path, ref string,
-	) ([]github.RepoContentEntry, error)
-	GetRepoFileContentForWorkspace(
-		ctx context.Context, workspaceID, owner, repo, path, ref string,
-	) ([]byte, error)
-}
+type GitHubClientProvider = reposync.GitHubClientProvider
 
 // GitLabClientProvider exposes workspace-routed GitLab repository reads.
-// Satisfied by gitlab.Service.
-type GitLabClientProvider interface {
-	ListRepoTreeForWorkspace(
-		ctx context.Context, workspaceID, projectPath, path, ref string,
-	) ([]gitlab.RepoTreeEntry, error)
-	GetRepoFileContentForWorkspace(
-		ctx context.Context, workspaceID, projectPath, path, ref string,
-	) ([]byte, error)
-}
+type GitLabClientProvider = reposync.GitLabClientProvider
 
-// Compile-time checks that both integrations' real services satisfy the
-// interfaces above, so drift in either package's workspace-routed methods
-// breaks the build rather than surfacing only at DI-wiring time.
-var (
-	_                      GitHubClientProvider = (*github.Service)(nil)
-	_                      GitLabClientProvider = (*gitlab.Service)(nil)
-	errAutomaticSyncNotDue                      = errors.New("automatic workflow sync is no longer due")
-)
+var errAutomaticSyncNotDue = errors.New("automatic workflow sync is no longer due")
 
 // CredentialFingerprintProvider optionally exposes a non-secret fingerprint
 // that changes whenever a workspace's integration credential is replaced,
@@ -79,26 +55,11 @@ type CredentialFingerprintProvider interface {
 
 var _ CredentialFingerprintProvider = (*github.Service)(nil)
 
-// errGitHubClientNotConfigured and errGitLabClientNotConfigured are the
-// sentinels wrapped by listGitHubEntries/listGitLabEntries when the
-// workspace has no usable client for the configured provider. Kept distinct
-// from other fetch failures so classifySyncErr can recognize "not
-// configured" as a config-class failure independent of error string text.
+// Automatic-job control sentinels; never surfaced to users.
 var (
-	errGitHubClientNotConfigured  = errors.New("GitHub is not authenticated; configure a GitHub token to sync workflows")
-	errGitLabClientNotConfigured  = errors.New("GitLab is not authenticated; configure a GitLab connection to sync workflows")
 	errAutomaticJobInvalidated    = errors.New("automatic workflow sync was invalidated")
 	errAutomaticCredentialChanged = errors.New("automatic workflow sync credential changed")
 )
-
-// dirEntry is a provider-neutral directory listing entry. It exists only to
-// share the file-selection and content-fetch loop in fetchFiles between the
-// two providers' native listing shapes.
-type dirEntry struct {
-	name   string
-	path   string
-	isFile bool
-}
 
 // Service owns workflow sync configuration and sync execution.
 type Service struct {
@@ -107,6 +68,9 @@ type Service struct {
 	gitlabClients GitLabClientProvider
 	applier       Applier
 	logger        *logger.Logger
+	// promptReferences, when set, reports unresolved @name references in
+	// parsed workflow and step prompts as sync warnings.
+	promptReferences PromptReferenceChecker
 	// locks serializes syncs and config mutations per workspace so a force
 	// sync cannot interleave with a config delete/replace and apply stale
 	// definitions (or re-stamp workflows that were just released). The lock
@@ -176,7 +140,7 @@ func NewService(
 		applier:           applier,
 		logger:            log.WithFields(zap.String("component", "workflowsync-service")),
 		now:               time.Now,
-		jitter:            defaultJitter,
+		jitter:            reposync.DefaultJitter,
 		automaticInFlight: make(map[string]*automaticJobState),
 		automaticWorkers:  automaticSyncWorkerLimit,
 	}
@@ -417,7 +381,7 @@ func (s *Service) refreshAutomaticFilesAfterCredentialChange(
 func (s *Service) recordFailure(ctx context.Context, workspaceID string, cfg *Config, syncErr error, mode syncMode) {
 	now := s.now().UTC()
 	directive := buildFailureDirective(cfg, syncErr, now, s.jitter)
-	incSyncFailure(cfg.Provider, directive.circuitClass)
+	incSyncFailure(cfg.Provider, directive.CircuitClass)
 	persistCtx, cancel := terminalSyncPersistenceContext(ctx, mode)
 	defer cancel()
 	if err := s.store.RecordSyncFailure(persistCtx, workspaceID, safeSyncErrorMessage(syncErr), directive, now); err != nil {
@@ -428,17 +392,17 @@ func (s *Service) recordFailure(ctx context.Context, workspaceID string, cfg *Co
 	fields := []zap.Field{
 		zap.String("workspace_id", cfg.WorkspaceID),
 		zap.String("provider", cfg.Provider),
-		zap.String("failure_class", directive.class),
-		zap.Bool("poll_suspended", directive.suspended),
-		zap.String("retry_source", string(directive.retrySource)),
+		zap.String("failure_class", directive.Class),
+		zap.Bool("poll_suspended", directive.Suspended),
+		zap.String("retry_source", string(directive.RetrySource)),
 		zap.String("error", safeSyncErrorMessage(syncErr)),
 	}
-	if directive.nextAttemptAt != nil {
-		fields = append(fields, zap.Time("next_attempt_at", *directive.nextAttemptAt))
+	if directive.NextAttemptAt != nil {
+		fields = append(fields, zap.Time("next_attempt_at", *directive.NextAttemptAt))
 	}
-	if directive.suspended && !cfg.PollSuspended {
+	if directive.Suspended && !cfg.PollSuspended {
 		incWorkflowSyncTransition(
-			"suspended", cfg.Provider, directive.class, string(directive.retrySource),
+			"suspended", cfg.Provider, directive.Class, string(directive.RetrySource),
 		)
 		s.logger.Warn("workflow sync polling suspended", fields...)
 		return
@@ -451,20 +415,24 @@ func (s *Service) recordFailure(ctx context.Context, workspaceID string, cfg *Co
 // provider. File selection, ordering, and error wrapping are shared; only
 // listing and content-fetch are provider-specific.
 func (s *Service) fetchFiles(ctx context.Context, cfg *Config) ([]fetchedFile, error) {
-	entries, get, err := s.listProviderEntries(ctx, cfg)
+	entries, err := s.listProviderEntries(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	get, err := s.fileGetterForConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
 	var files []fetchedFile
 	for _, entry := range entries {
-		if !entry.isFile || !isSyncableFile(entry.name) {
+		if !entry.IsFile || !isSyncableFile(entry.Name) {
 			continue
 		}
-		content, err := get(ctx, entry.path)
+		content, err := get(ctx, entry.Path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch %s: %w", entry.path, err)
+			return nil, fmt.Errorf("failed to fetch %s: %w", entry.Path, err)
 		}
-		files = append(files, fetchedFile{path: entry.path, content: content})
+		files = append(files, fetchedFile{path: entry.Path, content: content})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
 	return files, nil
@@ -474,7 +442,7 @@ type fetchContinuation struct {
 	configFingerprint     string
 	credentialFingerprint string
 	generation            uint64
-	entries               []dirEntry
+	entries               []reposync.Entry
 	files                 []fetchedFile
 	nextEntry             int
 	directoryLoaded       bool
@@ -572,7 +540,7 @@ func (s *Service) loadAutomaticContinuationDirectory(
 	if continuation.directoryLoaded {
 		return nil
 	}
-	entries, _, err := s.listProviderEntries(ctx, cfg)
+	entries, err := s.listProviderEntries(ctx, cfg)
 	if err != nil {
 		if validationErr := s.validateAutomaticContinuation(ctx, cfg, state); validationErr != nil {
 			return validationErr
@@ -599,18 +567,18 @@ func (s *Service) fetchAutomaticContinuationEntries(
 			return err
 		}
 		entry := continuation.entries[continuation.nextEntry]
-		if !entry.isFile || !isSyncableFile(entry.name) {
+		if !entry.IsFile || !isSyncableFile(entry.Name) {
 			continuation.nextEntry++
 			continue
 		}
-		content, err := get(ctx, entry.path)
+		content, err := get(ctx, entry.Path)
 		if err != nil {
 			if validationErr := s.validateAutomaticContinuation(ctx, cfg, state); validationErr != nil {
 				return validationErr
 			}
-			return fmt.Errorf("failed to fetch %s: %w", entry.path, err)
+			return fmt.Errorf("failed to fetch %s: %w", entry.Path, err)
 		}
-		continuation.files = append(continuation.files, fetchedFile{path: entry.path, content: content})
+		continuation.files = append(continuation.files, fetchedFile{path: entry.Path, content: content})
 		continuation.nextEntry++
 	}
 	return nil
@@ -657,78 +625,24 @@ func (s *Service) currentCredentialFingerprint(ctx context.Context, cfg *Config)
 	return fingerprint, nil
 }
 
-// fileGetter fetches one file's content once the provider and workspace are
-// already fixed, so fetchFiles can share its loop across providers.
-type fileGetter func(ctx context.Context, path string) ([]byte, error)
-
-// listProviderEntries lists the configured directory for cfg.Provider and
-// returns a fileGetter closed over the same provider and workspace.
-func (s *Service) listProviderEntries(ctx context.Context, cfg *Config) ([]dirEntry, fileGetter, error) {
-	if cfg.Provider == ProviderGitLab {
-		return s.listGitLabEntries(ctx, cfg)
-	}
-	return s.listGitHubEntries(ctx, cfg)
+func (s *Service) reader() reposync.Reader {
+	return reposync.Reader{GitHub: s.githubClients, GitLab: s.gitlabClients}
 }
 
-func (s *Service) listGitHubEntries(ctx context.Context, cfg *Config) ([]dirEntry, fileGetter, error) {
-	if s.githubClients == nil {
-		return nil, nil, errGitHubClientNotConfigured
+func sourceForConfig(cfg *Config) reposync.Source {
+	return reposync.Source{
+		WorkspaceID: cfg.WorkspaceID, Provider: cfg.Provider, RepoOwner: cfg.RepoOwner, RepoName: cfg.RepoName,
+		ProjectPath: cfg.ProjectPath, Branch: cfg.Branch, Path: cfg.Path,
 	}
-	raw, err := s.githubClients.ListRepoDirectoryForWorkspace(
-		ctx, cfg.WorkspaceID, cfg.RepoOwner, cfg.RepoName, cfg.Path, cfg.Branch,
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to list %s/%s@%s:%s: %w", cfg.RepoOwner, cfg.RepoName, cfg.Branch, cfg.Path, err)
-	}
-	entries := make([]dirEntry, len(raw))
-	for i, e := range raw {
-		entries[i] = dirEntry{name: e.Name, path: e.Path, isFile: e.Type == "file"}
-	}
-	get, err := s.fileGetterForConfig(cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	return entries, get, nil
 }
 
-func (s *Service) listGitLabEntries(ctx context.Context, cfg *Config) ([]dirEntry, fileGetter, error) {
-	if s.gitlabClients == nil {
-		return nil, nil, errGitLabClientNotConfigured
-	}
-	raw, err := s.gitlabClients.ListRepoTreeForWorkspace(ctx, cfg.WorkspaceID, cfg.ProjectPath, cfg.Path, cfg.Branch)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to list %s@%s:%s: %w", cfg.ProjectPath, cfg.Branch, cfg.Path, err)
-	}
-	entries := make([]dirEntry, len(raw))
-	for i, e := range raw {
-		entries[i] = dirEntry{name: e.Name, path: e.Path, isFile: e.Type == gitlab.TreeEntryTypeBlob}
-	}
-	get, err := s.fileGetterForConfig(cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	return entries, get, nil
+// listProviderEntries lists the configured directory for cfg.Provider.
+func (s *Service) listProviderEntries(ctx context.Context, cfg *Config) ([]reposync.Entry, error) {
+	return s.reader().List(ctx, sourceForConfig(cfg))
 }
 
-func (s *Service) fileGetterForConfig(cfg *Config) (fileGetter, error) {
-	if cfg.Provider == ProviderGitLab {
-		if s.gitlabClients == nil {
-			return nil, errGitLabClientNotConfigured
-		}
-		return func(ctx context.Context, path string) ([]byte, error) {
-			return s.gitlabClients.GetRepoFileContentForWorkspace(
-				ctx, cfg.WorkspaceID, cfg.ProjectPath, path, cfg.Branch,
-			)
-		}, nil
-	}
-	if s.githubClients == nil {
-		return nil, errGitHubClientNotConfigured
-	}
-	return func(ctx context.Context, path string) ([]byte, error) {
-		return s.githubClients.GetRepoFileContentForWorkspace(
-			ctx, cfg.WorkspaceID, cfg.RepoOwner, cfg.RepoName, path, cfg.Branch,
-		)
-	}, nil
+func (s *Service) fileGetterForConfig(cfg *Config) (reposync.FileGetter, error) {
+	return s.reader().Getter(sourceForConfig(cfg))
 }
 
 // contentHash is a stable digest of the fetched file set. It is recorded on

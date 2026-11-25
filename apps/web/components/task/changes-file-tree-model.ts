@@ -1,18 +1,25 @@
 import type { VisibleRow } from "@/hooks/use-tree";
 import type { ChangedFile } from "./changes-panel-helpers";
 
-export type ChangesTreeNode = {
+export type ChangesTreeFile = { path: string };
+
+export type ChangesTreeNode<TFile extends ChangesTreeFile = ChangedFile> = {
   name: string;
   path: string;
   isDir: boolean;
-  children?: ChangesTreeNode[];
-  file?: ChangedFile;
+  children?: ChangesTreeNode<TFile>[];
+  file?: TFile;
 };
 
 /** Build a sorted directory tree without repeatedly scanning sibling rows. */
-export function buildChangesTree(files: ChangedFile[]): ChangesTreeNode[] {
-  const root: ChangesTreeNode = { name: "", path: "", isDir: true, children: [] };
-  const directoryChildren = new WeakMap<ChangesTreeNode, Map<string, ChangesTreeNode>>();
+export function buildChangesTree<TFile extends ChangesTreeFile>(
+  files: TFile[],
+): ChangesTreeNode<TFile>[] {
+  const root: ChangesTreeNode<TFile> = { name: "", path: "", isDir: true, children: [] };
+  const directoryChildren = new WeakMap<
+    ChangesTreeNode<TFile>,
+    Map<string, ChangesTreeNode<TFile>>
+  >();
 
   for (const file of files) {
     if (!file.path) continue;
@@ -48,7 +55,9 @@ export function buildChangesTree(files: ChangedFile[]): ChangesTreeNode[] {
   return sortChangesTreeNodes(root.children ?? []);
 }
 
-function sortChangesTreeNodes(nodes: ChangesTreeNode[]): ChangesTreeNode[] {
+function sortChangesTreeNodes<TFile extends ChangesTreeFile>(
+  nodes: ChangesTreeNode<TFile>[],
+): ChangesTreeNode<TFile>[] {
   const stack = [nodes];
   while (stack.length > 0) {
     const siblings = stack.pop()!;
@@ -64,13 +73,13 @@ function sortChangesTreeNodes(nodes: ChangesTreeNode[]): ChangesTreeNode[] {
 }
 
 /** Flatten only expanded directory children in the order shown by the tree. */
-export function flattenChangesTree(
-  nodes: ChangesTreeNode[],
+export function flattenChangesTree<TFile extends ChangesTreeFile>(
+  nodes: ChangesTreeNode<TFile>[],
   isCollapsed: (path: string) => boolean,
   baseDepth = 0,
-): VisibleRow<ChangesTreeNode>[] {
-  const rows: VisibleRow<ChangesTreeNode>[] = [];
-  const stack: Array<{ node: ChangesTreeNode; depth: number }> = [];
+): VisibleRow<ChangesTreeNode<TFile>>[] {
+  const rows: VisibleRow<ChangesTreeNode<TFile>>[] = [];
+  const stack: Array<{ node: ChangesTreeNode<TFile>; depth: number }> = [];
   for (let index = nodes.length - 1; index >= 0; index--) {
     stack.push({ node: nodes[index], depth: baseDepth });
   }
@@ -80,7 +89,12 @@ export function flattenChangesTree(
     let effective = chainRoot;
     let displayName = chainRoot.name;
 
-    while (effective.isDir && effective.children?.length === 1 && effective.children[0].isDir) {
+    while (
+      effective.isDir &&
+      !isCollapsed(effective.path) &&
+      effective.children?.length === 1 &&
+      effective.children[0].isDir
+    ) {
       effective = effective.children[0];
       displayName = `${displayName}/${effective.name}`;
     }

@@ -1,6 +1,7 @@
 package streams
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/modelcatalog"
@@ -105,6 +106,10 @@ const (
 	// protocol frames, tool payloads, credentials, and full endpoints.
 	EventTypeMCPAttachment = "mcp_attachment"
 
+	// EventTypeMCPStartupWarning carries a Codex ACP MCP startup failure as
+	// session metadata rather than a work-turn tool call.
+	EventTypeMCPStartupWarning = "mcp_startup_warning"
+
 	// EventTypeTurnStarted marks the single turn boundary this feature relies
 	// on: agentctl's own session/prompt dispatch, emitted on both a human
 	// prompt and a synthetic ScheduleWakeup self-resume. It carries only the
@@ -129,6 +134,30 @@ const (
 	// EventTypeBackgroundWorkOutput carries a chunk of stdout/stderr from an active background workload.
 	EventTypeBackgroundWorkOutput = "background_work_output"
 )
+
+const (
+	AgentEventDataCopilotInterruptionNotice = "copilot_interruption_notice"
+	CopilotInterruptionClarification        = "clarification"
+	CopilotInterruptionTool                 = "tool"
+	EventTypeCopilotInterruptionNotice      = "copilot_interruption_notice"
+)
+
+// CopilotInterruptionNoticeType returns the supported classification carried by
+// an assistant event, or an empty string when the marker is absent or invalid.
+func CopilotInterruptionNoticeType(raw any) string {
+	data, ok := raw.(map[string]any)
+	if !ok {
+		return ""
+	}
+	switch data[AgentEventDataCopilotInterruptionNotice] {
+	case CopilotInterruptionClarification:
+		return CopilotInterruptionClarification
+	case CopilotInterruptionTool:
+		return CopilotInterruptionTool
+	default:
+		return ""
+	}
+}
 
 // PromptFailureDisposition identifies a host-validated outcome for a failed
 // prompt. Unknown values are invalid and must retain conservative terminal
@@ -155,6 +184,10 @@ func (d PromptFailureDisposition) Valid() bool {
 // whose provider and transport have attested that the next human prompt may
 // take ownership before the held session/prompt RPC returns.
 const AgentEventDataPromptHandoff = "prompt_handoff"
+
+// AgentEventDataConfigurationCommandResult carries a transient result for a
+// configuration command completed by this prompt generation.
+const AgentEventDataConfigurationCommandResult = "configuration_result"
 
 // Session status constants for EventTypeSessionStatus events.
 const (
@@ -214,6 +247,16 @@ type AgentEvent struct {
 	// when agentctl can establish that association.
 	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
 
+	// DetachedAtCommit is stamped on a terminal event when the instance had no
+	// live backend stream at the moment agentctl committed it, and CommittedAt
+	// is the agentctl clock at that moment.
+	DetachedAtCommit bool       `json:"detached_at_commit,omitempty"`
+	CommittedAt      *time.Time `json:"committed_at,omitempty"`
+
+	// CancelCause is "offline_budget" when the offline budget cancelled the
+	// turn; CancelDecidedAt is the time of that expiry decision.
+	CancelCause     string     `json:"cancel_cause,omitempty"`
+	CancelDecidedAt *time.Time `json:"cancel_decided_at,omitempty"`
 	// DeliveryEventID is a stable producer identity for an observation that
 	// can be retried after a lost acknowledgement. The journal stores it
 	// beside the committed event so a retry cannot project twice.
@@ -233,6 +276,10 @@ type AgentEvent struct {
 	// It travels with the completion frame so consumers do not have to infer
 	// ownership from cross-subject event ordering.
 	TurnID string `json:"turn_id,omitempty"`
+
+	// ConfigurationCommandResult is set only for the live prompt completion
+	// that observed the result of this configuration command.
+	ConfigurationCommandResult *ConfigurationCommandResult `json:"configuration_result,omitempty"`
 
 	// ControlTurnID is the control-server-assigned turn identifier
 	// (AC-EXECUTORS-SURVIVAL-004.1), stamped onto a terminal event at the
@@ -268,6 +315,10 @@ type AgentEvent struct {
 	// cursor were committed before the event was published to consumers.
 	CanonicalProjection bool `json:"canonical_projection,omitempty"`
 
+	// CanonicalConversationReceipt is attached by the host after SQL commit.
+	// It is never accepted from agent transport or persisted in the journal.
+	CanonicalConversationReceipt json.RawMessage `json:"-"`
+
 	// CanonicalMessageAppend tells lifecycle/UI consumers whether the stable
 	// canonical message already existed when this event was projected.
 	CanonicalMessageAppend bool `json:"canonical_message_append,omitempty"`
@@ -284,6 +335,9 @@ type AgentEvent struct {
 	// ProtocolMessageID identifies the source-protocol message this chunk belongs to.
 	// It is distinct from the Kandev message record ID used by downstream streaming.
 	ProtocolMessageID string `json:"protocol_message_id,omitempty"`
+
+	// ReplaceMessageContent applies this snapshot to the same protocol message.
+	ReplaceMessageContent bool `json:"replace_message_content,omitempty"`
 
 	// RetractedMessageIDs identifies Kandev transcript records owned by an
 	// abandoned response attempt. It is populated only on response-attempt resets.

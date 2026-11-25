@@ -577,44 +577,6 @@ func TestResolveTaskRepoInfoRefreshesManagedGitLabBeforeWorktree(t *testing.T) {
 	}
 }
 
-func TestResolveTaskRepoInfoRefreshesAzureDevOpsBeforeWorktree(t *testing.T) {
-	repoPath := initGitRepoWithOrigin(t, "https://dev.azure.com/acme/Platform/_git/widgets")
-	repositoryStore := newMockRepository()
-	repositoryStore.repositories["repo-1"] = &models.Repository{
-		ID: "repo-1", WorkspaceID: "workspace-1", SourceType: "provider",
-		Provider: providerAzureDevOps, ProviderHost: "https://dev.azure.com/acme",
-		ProviderOwner: "Platform", ProviderName: "widgets",
-		RemoteURL: "https://dev.azure.com/acme/Platform/_git/widgets", LocalPath: repoPath,
-		DefaultBranch: "main", PullBeforeWorktree: true,
-	}
-	cloner := &cloneTransportTestCloner{}
-	exec := newTestExecutor(t, &mockAgentManager{}, repositoryStore)
-	exec.SetRepoCloner(cloner, nil)
-	exec.secretStore = &mockSecretStore{secrets: map[string]string{
-		"azure_devops:workspace-1:pat": "azure-token",
-	}}
-
-	info, err := exec.resolveTaskRepoInfoForSession(context.Background(), "session-1", &models.TaskRepository{
-		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1", BaseBranch: "main",
-	})
-	if err != nil {
-		t.Fatalf("resolveTaskRepoInfoForSession() error = %v", err)
-	}
-	if cloner.basicRefreshCalls != 0 || info.RemoteSyncHandled || !info.PullBeforeWorktree || info.RefreshRepository == nil {
-		t.Fatalf("Azure DevOps deferred route = basic refresh calls %d, remote sync handled %v, pull before worktree %v, callback nil %v",
-			cloner.basicRefreshCalls, info.RemoteSyncHandled, info.PullBeforeWorktree, info.RefreshRepository == nil)
-	}
-	if err := info.RefreshRepository(context.Background()); err != nil {
-		t.Fatalf("Azure DevOps RefreshRepository(): %v", err)
-	}
-	if cloner.basicRefreshCalls != 1 {
-		t.Fatalf("Azure DevOps refresh calls after materialization = %d, want 1", cloner.basicRefreshCalls)
-	}
-	if cloner.basicRefreshPassword != "azure-token" || cloner.basicRefreshUsername != "kandev" {
-		t.Fatalf("Azure DevOps refresh credentials = %q/%q", cloner.basicRefreshUsername, cloner.basicRefreshPassword)
-	}
-}
-
 func TestBuildResumeRequestPreparesEachAttachedRepositoryOnce(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -714,8 +676,6 @@ func (c *countingRepoCloner) originCallCount(repositoryPath string) int {
 	defer c.mu.Unlock()
 	return c.setOriginCalls[repositoryPath]
 }
-
-var _ authenticatedRepoCloner = (*cloneTransportTestCloner)(nil)
 
 func (c *cloneTransportTestCloner) EnsureWorkspaceClonedWithCredentialRequest(
 	_ context.Context, request repoclone.GitCredentialRequest, _, _ string,

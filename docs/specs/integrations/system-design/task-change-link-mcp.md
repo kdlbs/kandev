@@ -210,6 +210,10 @@ providers. Preserve `TaskChangeLinkRequest` and dispatch to its three service me
 Return `task_id` and `links` containing the resulting canonical triples.
 This preserves the merged association response without requiring a second automation read.
 
+The tool description identifies `repository_id` as the Kandev repository ID.
+For a new association, the coordinator matches the ID against the authorized
+target task's attachments. The stored repository supplies the provider identity.
+
 Reuse `taskChangeLinkCoordinator.ReplaceTaskChange` and its compensation order.
 Validate operation and cross-provider mismatch before mutation.
 An identical old/new identity returns current links without detachment.
@@ -346,6 +350,12 @@ Manual review, sibling messages, and copied old instructions do not establish an
 
 ## Failure and recovery
 
+For `link`, the coordinator reports a missing attachment as a distinct error.
+The backend handler maps it to a validation error naming `repository_id` before
+the structured mutation error path. Both MCP protocol eras return this message
+as tool error text. Repository read failures and provider failures use the
+sanitized mutation error path.
+
 Association errors preserve committed state. Add a narrow typed result at the
 coordinator/handler seam where current joined errors cannot carry machine-readable state.
 Report `operation_error`, `rollback_error`, `links`, and `state_known` on replacement failure.
@@ -425,6 +435,7 @@ only its tool name changes through the new ADR.
 - [Explicit outcomes](../../../decisions/2026-09-06-explicit-pr-auto-fix-outcomes.md).
 - [Dual-era MCP](../../../decisions/2026-08-30-dual-era-mcp-protocol.md).
 - [Implementation package](../../../plans/provider-neutral-change-request-mcp/plan.md).
+- [Repository ID validation for MCP links](../../../plans/mcp-change-request-repository-id/plan.md).
 
 ## Implementation record
 

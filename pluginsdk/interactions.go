@@ -86,6 +86,9 @@ type Interaction struct {
 	AgentDisconnected bool
 	CreatedAt         string // RFC3339
 	UpdatedAt         string // RFC3339
+	// ResolvedBy is set on an interaction resolved through a receipt minted
+	// for a linked Kandev user: that user and the external surface.
+	ResolvedBy *InteractionActor
 }
 
 // InteractionFilter narrows ListPending. SessionIDs and TaskIDs are ORed
@@ -248,6 +251,7 @@ func (i Interaction) toProto() *pluginv1.Interaction {
 		AgentDisconnected: i.AgentDisconnected,
 		CreatedAt:         i.CreatedAt,
 		UpdatedAt:         i.UpdatedAt,
+		ResolvedBy:        interactionActorToProto(i.ResolvedBy),
 	}
 }
 
@@ -279,6 +283,7 @@ func interactionFromProto(p *pluginv1.Interaction) Interaction {
 		AgentDisconnected: p.GetAgentDisconnected(),
 		CreatedAt:         p.GetCreatedAt(),
 		UpdatedAt:         p.GetUpdatedAt(),
+		ResolvedBy:        interactionActorFromProto(p.GetResolvedBy()),
 	}
 }
 

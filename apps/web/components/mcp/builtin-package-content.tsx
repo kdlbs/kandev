@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
@@ -11,43 +12,54 @@ import type { BuiltinMCPDescriptor } from "@/lib/types/builtin-mcp";
 export function BuiltinPackageRow({
   item,
   labelKey,
-  inherited = false,
+  control,
+  children,
   dirty = false,
   testId = `builtin-mcp-package-${item.id}`,
   onSelect,
 }: {
   item: BuiltinMCPDescriptor;
   labelKey: string;
-  inherited?: boolean;
+  control?: ReactNode;
+  children?: ReactNode;
   dirty?: boolean;
   testId?: string;
   onSelect: () => void;
 }) {
   const { t } = useTranslation();
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      data-testid={testId}
+    <div
+      role="group"
+      aria-label={t(item.label_key)}
+      tabIndex={-1}
+      data-testid={`${testId}-row`}
       data-settings-dirty={dirty}
       data-settings-dirty-level="container"
-      onClick={onSelect}
-      className="h-auto max-md:h-auto [@media(pointer:coarse)]:h-auto min-h-14 w-full cursor-pointer justify-start gap-3 whitespace-normal rounded-none border border-transparent p-3 text-left"
+      className="space-y-1 p-3"
     >
-      <span className="min-w-0 flex-1">
-        <span className="block font-medium">{t(item.label_key)}</span>
-        <span className="block break-words text-xs font-normal text-muted-foreground">
-          {t(item.description_key)}
-        </span>
-        {inherited && (
-          <span className="block text-xs font-normal text-muted-foreground">
-            {t("settings:builtinMcp.choices.inherit")}
+      <div className="flex items-start gap-3">
+        <Button
+          type="button"
+          variant="ghost"
+          data-testid={testId}
+          onClick={onSelect}
+          className="h-auto min-h-7 min-w-0 flex-1 cursor-pointer justify-start gap-2 whitespace-normal rounded-md px-0 py-1 text-left max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1 font-medium">
+              {t(item.label_key)}
+              <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            </span>
+            <span className="block break-words text-xs font-normal text-muted-foreground">
+              {t(item.description_key)}
+            </span>
           </span>
-        )}
-      </span>
-      <Badge variant="secondary">{t(labelKey)}</Badge>
-      <IconChevronRight className="size-4 shrink-0" aria-hidden />
-    </Button>
+          {!control && <Badge variant="secondary">{t(labelKey)}</Badge>}
+        </Button>
+        {control && <div className="shrink-0">{control}</div>}
+      </div>
+      {children}
+    </div>
   );
 }
 

@@ -3,7 +3,10 @@ package models
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 const (
@@ -15,6 +18,8 @@ const (
 	MaxSidebarViewSortRules     = 10
 )
 
+var ErrSidebarGroupingUnavailable = errors.New("sidebar grouping unavailable")
+
 // SidebarTaskViewQuery is the complete, untrusted view description sent by a
 // sidebar client. Workspace authorization is performed by the service and is
 // never inferred from this value.
@@ -23,10 +28,13 @@ type SidebarTaskViewQuery struct {
 	Sort               SidebarTaskViewSort     `json:"sort"`
 	Group              string                  `json:"group"`
 	CollapsedGroupKeys []string                `json:"collapsed_group_keys"`
+	DisclosureViewID   string                  `json:"disclosure_view_id,omitempty"`
 	CollapsedTaskIDs   []string                `json:"collapsed_task_ids"`
 	Page               int                     `json:"page"`
 	PageSize           int                     `json:"page_size"`
 	Locale             string                  `json:"locale"`
+	GroupingRevision   string                  `json:"grouping_revision,omitempty"`
+	GroupingGeneration string                  `json:"grouping_generation,omitempty"`
 }
 
 type SidebarTaskViewSort struct {
@@ -65,10 +73,20 @@ type SidebarTaskViewClause struct {
 // SidebarTaskViewPreferences are authenticated user settings. They are
 // supplied by the settings service, not accepted from the query body.
 type SidebarTaskViewPreferences struct {
-	PinnedTaskIDs          []string                  `json:"pinned_task_ids"`
-	OrderedTaskIDs         []string                  `json:"ordered_task_ids"`
-	SubtaskOrderByParentID map[string][]string       `json:"subtask_order_by_parent_id"`
-	ColorSettings          *SidebarTaskColorSettings `json:"-"`
+	PinnedTaskIDs           []string                  `json:"pinned_task_ids"`
+	OrderedTaskIDs          []string                  `json:"ordered_task_ids"`
+	SubtaskOrderByParentID  map[string][]string       `json:"subtask_order_by_parent_id"`
+	ColorSettings           *SidebarTaskColorSettings `json:"-"`
+	PluginGrouping          *SidebarPluginGrouping    `json:"-"`
+	SavedCollapsedGroupKeys []string                  `json:"-"`
+}
+
+// SidebarPluginGrouping is verified by the host before opening the task read
+// snapshot. It cannot be supplied by a sidebar query or preference payload.
+type SidebarPluginGrouping struct {
+	Reference  string
+	Generation string
+	Snapshot   *pluginsdk.SidebarGroupingSnapshot
 }
 
 // SidebarTaskColorSettings is a read-only projection of authenticated user
@@ -83,6 +101,7 @@ type SidebarTaskPageEntry struct {
 	TaskID           string `json:"task_id,omitempty"`
 	GroupKey         string `json:"group_key,omitempty"`
 	GroupLabel       string `json:"group_label,omitempty"`
+	GroupColor       string `json:"group_color,omitempty"`
 	WorkflowName     string `json:"workflow_name,omitempty"`
 	StepName         string `json:"workflow_step_name,omitempty"`
 	StepColor        string `json:"workflow_step_color,omitempty"`
@@ -97,16 +116,19 @@ type SidebarTaskPageEntry struct {
 }
 
 type SidebarTaskPageResult struct {
-	QueryKey          string                 `json:"query_key"`
-	Page              int                    `json:"page"`
-	PageSize          int                    `json:"page_size"`
-	TotalEntries      int                    `json:"total_entries"`
-	TotalTasks        int                    `json:"total_tasks"`
-	TotalVisibleTasks int                    `json:"total_visible_tasks"`
-	HasPrevious       bool                   `json:"has_previous"`
-	HasNext           bool                   `json:"has_next"`
-	Entries           []SidebarTaskPageEntry `json:"entries"`
-	Tasks             []*Task                `json:"-"`
+	QueryKey           string                 `json:"query_key"`
+	Page               int                    `json:"page"`
+	PageSize           int                    `json:"page_size"`
+	TotalEntries       int                    `json:"total_entries"`
+	GroupingKeys       []string               `json:"grouping_keys,omitempty"`
+	TotalTasks         int                    `json:"total_tasks"`
+	TotalVisibleTasks  int                    `json:"total_visible_tasks"`
+	HasPrevious        bool                   `json:"has_previous"`
+	HasNext            bool                   `json:"has_next"`
+	Entries            []SidebarTaskPageEntry `json:"entries"`
+	GroupingRevision   string                 `json:"grouping_revision,omitempty"`
+	GroupingGeneration string                 `json:"grouping_generation,omitempty"`
+	Tasks              []*Task                `json:"-"`
 }
 
 // SidebarQueryValidationError exposes only safe query correction metadata.
@@ -142,7 +164,11 @@ func (q SidebarTaskViewQuery) Validate() error {
 	if err := validateSidebarSort(q.Sort); err != nil {
 		return err
 	}
-	if !oneOf(q.Group, "none", "repository", "workflow", "workflowStep", "executorType", "state") {
+	_, _, pluginGroup := pluginsdk.ParseSidebarGroupingReference(q.Group)
+	if q.DisclosureViewID != "" && (!pluginGroup || len(q.CollapsedGroupKeys) > 0) {
+		return sidebarValidationError("disclosure", "saved disclosure requires a plugin view without inline keys", 0)
+	}
+	if !pluginGroup && !oneOf(q.Group, "none", "repository", "workflow", "workflowStep", "executorType", "state") {
 		return sidebarValidationError("grouping", "unsupported group", 0)
 	}
 	if len(q.Filters) > MaxSidebarViewClauses {

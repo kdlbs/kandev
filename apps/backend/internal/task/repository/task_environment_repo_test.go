@@ -226,21 +226,20 @@ func TestTaskEnvironmentRepo_LegacyFlatColumnsAreGone(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
 	if _, err := sqlite.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
-	t.Cleanup(func() { _ = sqlxDB.Close() })
 
-	_, err = sqlxDB.Exec(`
-		INSERT INTO task_environments (
-			id, task_id, repository_id, executor_type, worktree_id,
-			worktree_path, worktree_branch, workspace_path,
-			created_at, updated_at
-		) VALUES ('legacy-env', 'task-env-6', 'repo-legacy', 'local_pc',
-			'wt-legacy', '/wt/legacy', 'main', '',
-			datetime('now'), datetime('now'))
-	`)
-	if err == nil {
-		t.Fatal("expected legacy flat columns to be absent from the final schema")
+	var legacyColumns []string
+	if err := sqlxDB.Select(&legacyColumns, `
+		SELECT name FROM pragma_table_info('task_environments')
+		WHERE name IN ('repository_id', 'worktree_id', 'worktree_path', 'worktree_branch')
+		ORDER BY name
+	`); err != nil {
+		t.Fatalf("inspect task environment schema: %v", err)
+	}
+	if len(legacyColumns) != 0 {
+		t.Fatalf("retired task environment columns still present: %v", legacyColumns)
 	}
 }

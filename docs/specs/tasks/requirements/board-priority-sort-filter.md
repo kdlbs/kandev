@@ -79,16 +79,15 @@ comparator.
 
 ## Prior art
 
-**Wiki leg: DID NOT RUN, vault unreadable.** Routed with `@henry`. Resolved
-`~/.obsidian-wiki/config` to `config.henry`, giving
-`OBSIDIAN_VAULT_PATH="/Users/henry/Documents/henry/wiki"` and
-`QMD_WIKI_COLLECTION="wiki"`. Every read of that path returns `Operation not
+**Wiki leg: DID NOT RUN, vault unreadable.** The author's private notes vault
+(local path omitted) could not be read. Every read returns `Operation not
 permitted`, with the tool sandbox enabled and again with it disabled, so this is
 macOS TCC protection on `~/Documents` rather than a harness restriction. No
-`qmd` or `obsidian-wiki` binary on `PATH` and no `qmd` MCP server registered, so
-there was no fallback transport and no degraded grep leg. This independently
-reproduces the failure recorded in `requirements/task-priority-visibility.md`.
-No wiki content informed this document.
+`qmd` or `obsidian-wiki` binary is on `PATH`, and no `qmd` MCP server is
+registered, so there was no fallback transport and no degraded grep leg. This
+independently reproduces the failure recorded in
+`requirements/task-priority-visibility.md`. No wiki content informed this
+document.
 
 **Vendor leg: DID NOT RUN, tool unreachable.** The `saas-kb` MCP server and its
 `search_fsm_docs` tool are not registered in this session, so the `ai_sdlc`

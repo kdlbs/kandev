@@ -45,7 +45,7 @@ func TestOpenCodePluginClaimsAreClearedOnSessionTransition(t *testing.T) {
 
 	adapter.mu.Lock()
 	adapter.sessionID = "ses-second"
-	adapter.advanceNativeGenerationLocked()
+	adapter.advanceNativeGenerationLocked("ses-second")
 	adapter.mu.Unlock()
 	require.Empty(t, adapter.OpenCodePluginClaims(), "a superseded native session must drop its claims")
 }
@@ -84,7 +84,7 @@ func TestOpenCodePluginAdmissionFenceTracksNativeGeneration(t *testing.T) {
 
 	adapter.mu.Lock()
 	adapter.sessionID = "ses-successor"
-	adapter.advanceNativeGenerationLocked()
+	adapter.advanceNativeGenerationLocked("ses-successor")
 	adapter.mu.Unlock()
 	require.False(t, adapter.ValidateOpenCodePluginAdmission(admission),
 		"a superseded native session must revoke admission synchronously")
@@ -159,7 +159,7 @@ func TestOpenCodePluginAdmissionGuardBlocksSessionTransition(t *testing.T) {
 	go func() {
 		adapter.mu.Lock()
 		adapter.sessionID = "ses-successor"
-		adapter.advanceNativeGenerationLocked()
+		adapter.advanceNativeGenerationLocked("ses-successor")
 		adapter.mu.Unlock()
 		close(transitioned)
 	}()

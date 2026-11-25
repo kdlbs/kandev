@@ -44,6 +44,8 @@ import { PluginTaskPanel } from "../plugin-task-panel";
 import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { useEffectiveMobilePanel, type MobileReviewSource } from "./mobile-plugin-panel-lifecycle";
 import { useTranslation } from "react-i18next";
+import { takeFileViewerReturn } from "@/lib/plugins/file-viewer-return";
+import { previewFileState } from "@/lib/plugins/file-viewer-selection";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { LaunchQueueStatus } from "../launch-queue-status";
@@ -710,6 +712,12 @@ export function useMobilePanelHandlers({
     },
     [handlePanelChange],
   );
+
+  useEffect(() => {
+    if (!effectiveSessionId) return;
+    const selection = takeFileViewerReturn(effectiveSessionId);
+    if (selection) handleOpenFile(previewFileState(selection.path, selection.repo));
+  }, [effectiveSessionId, handleOpenFile]);
 
   const handlePanelChangeAndClearSheet = useCallback(
     (panel: MobileSessionPanel) => {

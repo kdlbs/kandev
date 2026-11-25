@@ -266,6 +266,7 @@ func TestApplyPassthroughMCPPreparesCursorAuth(t *testing.T) {
 		ExecutorType:   string(models.ExecutorTypeWorktree),
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	_, err := mgr.applyPassthroughMCP(
 		context.Background(), execution,
 		agents.PassthroughConfig{MCPStrategy: mcpconfig.CursorStrategy{}}, nil,
@@ -315,6 +316,7 @@ func TestResumePassthroughCommandPreparesCursorAuth(t *testing.T) {
 		standalonePort:       45678,
 		metadata:             map[string]interface{}{MetadataKeyRepositoryPath: sourceRepository},
 	}
+	attachLegacyMCPRouteClient(execution)
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	resolved := &resolvedPassthrough{
 		agentConfig: terminalAgent,
@@ -355,9 +357,11 @@ func TestPrepareCursorMCPAuthFailurePolicy(t *testing.T) {
 		if !ok {
 			t.Fatal("cursor-acp agent missing from test registry")
 		}
+		execution := &AgentExecution{ID: "exec-cursor", WorkspacePath: t.TempDir()}
+		attachLegacyMCPRouteClient(execution)
 		err := mgr.materializeRuntimeProjectMCP(
 			context.Background(),
-			&AgentExecution{ID: "exec-cursor", WorkspacePath: t.TempDir()},
+			execution,
 			agentConfig,
 			&AgentProfileInfo{CursorMCPAuthEnabled: true},
 			string(models.ExecutorTypeLocal),
@@ -415,6 +419,7 @@ func TestMaterializeRuntimeProjectMCPPreparesCursorAuthWithoutServers(t *testing
 		ExecutorType:   string(models.ExecutorTypeLocal),
 		AgentProfileID: "profile-cursor-enabled",
 	}
+	attachLegacyMCPRouteClient(execution)
 	agentConfig, ok := mgr.registry.Get("cursor-acp")
 	if !ok {
 		t.Fatal("cursor-acp agent missing from test registry")

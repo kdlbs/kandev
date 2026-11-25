@@ -584,6 +584,9 @@ func TestGHClient_GetRepoFileContent_Errors(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), `unsupported encoding "none"`) {
 			t.Fatalf("err = %v, want the encoding named", err)
 		}
+		if !errors.Is(err, ErrRepoFileTooLarge) {
+			t.Fatalf("err = %v, want ErrRepoFileTooLarge for an oversized file", err)
+		}
 	})
 	t.Run("undecodable base64", func(t *testing.T) {
 		newFakeGH(t, ghResponse{

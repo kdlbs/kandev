@@ -67,7 +67,9 @@ test.describe("mobile: session open inspection contention", () => {
     expect(resumeBox?.height).toBeGreaterThanOrEqual(44);
     await resume.tap();
     await expect.poll(() => proxy.interceptedResumeCount()).toBe(1);
-    await expect(session.activeChat().getByText("Resuming...", { exact: true })).toBeVisible();
+    await expect(session.activeChat().getByTestId("recovery-progress-status")).toHaveText(
+      "Resuming session",
+    );
     const notice = session
       .activeChat()
       .getByText("This workspace is still being checked. Try resuming the session again.", {

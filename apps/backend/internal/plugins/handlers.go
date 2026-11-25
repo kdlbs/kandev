@@ -114,12 +114,23 @@ func RegisterRoutes(
 	api.GET("/settings", ctrl.getSettings)
 	api.PUT("/settings", authn.RequireAdmin(), ctrl.updateSettings)
 	api.POST("/host/interactions/response-receipts", ctrl.issueHumanInteractionResponseReceipt)
+	api.GET("/sidebar-groupings", func(ctx *gin.Context) {
+		ctx.JSON(http.StatusOK, gin.H{"groupings": svc.SidebarGroupingCatalog()})
+	})
 	api.GET("", ctrl.list)
 	api.GET("/:id", ctrl.get)
 	api.GET("/:id/config", ctrl.getConfig)
+	api.POST("/:id/file-previews", ctrl.prepareFilePreview)
+	api.POST("/:id/file-previews/:previewID/read", ctrl.readFilePreview)
+	api.DELETE("/:id/file-previews/:previewID", ctrl.cancelFilePreview)
+	api.GET("/:id/file-preview-policy", ctrl.getFilePreviewPolicy)
+	api.PUT("/:id/file-preview-policy", ctrl.setFilePreviewPolicy)
 	api.GET("/:id/capability-approvals", ctrl.getCapabilityApprovals)
 	api.PUT("/:id/capability-approvals", ctrl.updateCapabilityApprovals)
 	api.DELETE("/:id/capability-approvals", ctrl.revokeCapabilityApprovals)
+	api.GET("/:id/identity-links", ctrl.listIdentityLinks)
+	api.POST("/:id/identity-links/codes", ctrl.createIdentityLinkCode)
+	api.DELETE("/:id/identity-links/:link_id", ctrl.revokeIdentityLink)
 	api.PATCH("/:id", authn.RequireAdmin(), ctrl.updateConfig)
 	api.PUT("/:id/auto-update", authn.RequireAdmin(), ctrl.setAutoUpdate)
 	api.DELETE("/:id", authn.RequireAdmin(), ctrl.uninstall)
@@ -433,8 +444,12 @@ func (c *Controller) ui(ctx *gin.Context) {
 // this is the "path-traversal safe via http.FileServer on a rooted FS"
 // requirement. contentType, if non-empty, is set before serving so
 // FileServer's extension-based sniffing is skipped (net/http only
-// auto-detects when the header is unset).
+// auto-detects when the header is unset). The URLs carry only the plugin
+// version, so a reinstall of the same version keeps the same URL; no-cache
+// makes the browser revalidate (FileServer answers 304 from Last-Modified)
+// instead of reusing a stale copy under heuristic freshness.
 func serveInstalledFile(ctx *gin.Context, root, relPath, contentType string) {
+	ctx.Writer.Header().Set("Cache-Control", "no-cache")
 	if contentType != "" {
 		ctx.Writer.Header().Set(contentTypeHeader, contentType)
 	}

@@ -157,7 +157,7 @@ func (r *StandaloneExecutor) standaloneOwnerLiveness(
 	req *ExecutorCreateRequest,
 	info *agentctl.InstanceInfo,
 ) (reconnectOwnerLiveness, error) {
-	client := r.standaloneInstanceClient(lease, info.Port, info.ID, req.SessionID)
+	client := r.standaloneInstanceClient(lease, info.Port, info.ID, req.SessionID, info.ScopedMCPRoutes)
 	if client == nil {
 		return reconnectOwnerUnknown, fmt.Errorf("agent instance %q has no authenticated client", info.ID)
 	}
@@ -237,10 +237,11 @@ func (r *StandaloneExecutor) buildAdoptedStandaloneInstance(
 	req *ExecutorCreateRequest,
 	info *agentctl.InstanceInfo,
 ) (*ExecutorInstance, error) {
-	client := r.standaloneInstanceClient(lease, info.Port, info.ID, req.SessionID)
+	client := r.standaloneInstanceClient(lease, info.Port, info.ID, req.SessionID, info.ScopedMCPRoutes)
 	if client == nil {
 		return nil, standaloneOwnerBlocked(fmt.Errorf("agent instance %q has no authenticated client", info.ID))
 	}
+	client.SetACPProtocolVersion(info.ACPProtocolVersion)
 	metadata := buildStandaloneInstanceMetadata(req, info.Port)
 	metadata[MetadataKeyReuseExistingProcess] = true
 	if req.RetainedBuiltinBinding != nil {
@@ -286,10 +287,12 @@ func (r *StandaloneExecutor) standaloneInstanceClient(
 	lease *agentctl.RuntimeLease,
 	port int,
 	instanceID, sessionID string,
+	scopedMCPRoutes bool,
 ) *agentctl.Client {
 	if lease != nil {
 		return lease.NewBoundInstanceClient(port, r.logger,
-			agentctl.WithExecutionID(instanceID), agentctl.WithSessionID(sessionID))
+			agentctl.WithExecutionID(instanceID), agentctl.WithSessionID(sessionID),
+			agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes))
 	}
 	if r.ctl == nil {
 		return nil
@@ -297,7 +300,8 @@ func (r *StandaloneExecutor) standaloneInstanceClient(
 	return agentctl.NewClient(r.host, port, r.logger,
 		agentctl.WithExecutionID(instanceID),
 		agentctl.WithSessionID(sessionID),
-		agentctl.WithAuthToken(r.authToken))
+		agentctl.WithAuthToken(r.authToken),
+		agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes))
 }
 
 // disposeStoppedStandaloneOwner releases the retained manager's journal handle

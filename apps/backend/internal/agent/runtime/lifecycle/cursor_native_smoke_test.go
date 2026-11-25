@@ -143,6 +143,7 @@ func newCursorNativeSmokeContext(t *testing.T, binary, accountToken string) *cur
 		WorkspacePath: workspace, standalonePort: 1234,
 		metadata: map[string]interface{}{MetadataKeyRepositoryConfigured: false},
 	}
+	attachLegacyMCPRouteClient(execution)
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	execution.setRuntimeEnvironment(env)
 	profile := &AgentProfileInfo{

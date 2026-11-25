@@ -103,6 +103,7 @@ func TestWorkspaceTrackerUnchangedDirtyReplay(t *testing.T) {
 	t.Cleanup(tracker.Stop)
 	started := make(chan struct{})
 	release := make(chan struct{})
+	var startedOnce sync.Once
 	var released bool
 	defer func() {
 		if !released {
@@ -110,7 +111,7 @@ func TestWorkspaceTrackerUnchangedDirtyReplay(t *testing.T) {
 		}
 	}()
 	tracker.gitStatusBeforeEnrich = func() {
-		close(started)
+		startedOnce.Do(func() { close(started) })
 		<-release
 	}
 

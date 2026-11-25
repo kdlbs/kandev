@@ -9,6 +9,8 @@
 // Comment union
 // ---------------------------------------------------------------------------
 
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
+
 export type AnnotationSide = "additions" | "deletions";
 
 type CommentBase = {
@@ -21,6 +23,7 @@ type CommentBase = {
    */
   repositoryId?: string;
   text: string;
+  attachments?: MessageAttachment[];
   createdAt: string;
   status: "pending" | "sent";
 };

@@ -53,7 +53,7 @@ func (s *Server) BindInitialProfile(profile p.Context, port int) error {
 	s.initializeBuiltinTransports(port)
 	s.rebuildTools()
 	_ = s.httpServer.Shutdown(context.Background())
-	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer, server.WithEndpointPath("/mcp"), server.WithStateful(true), server.WithHTTPContextFunc(s.mcpHTTPContext))
+	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer, server.WithEndpointPath(s.nativeRoutePath("/mcp")), server.WithStateful(true), server.WithHTTPContextFunc(s.mcpHTTPContext))
 	return nil
 }
 

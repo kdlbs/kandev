@@ -4,8 +4,82 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { waitForLatestSessionDone } from "../../helpers/session";
+import {
+  SAVED_PROMPT_CONTENT,
+  SAVED_PROMPT_DELIVERY_RESPONSE,
+} from "../chat/quick-chat-saved-prompt-delivery-helpers";
 
 export const MOVE_INSTRUCTIONS = "Reproduce the checkout failure before editing.";
+
+export async function selectMoveSavedPrompt(
+  page: Page,
+  apiClient: ApiClient,
+  input: "keyboard" | "mouse" | "touch",
+) {
+  const prompt = await apiClient.createPrompt("move-review-checklist", SAVED_PROMPT_CONTENT);
+  try {
+    const editor = page.getByRole("textbox", { name: "One-time instructions" });
+    const prefix = `${MOVE_INSTRUCTIONS} Follow `;
+    await editor.fill(prefix);
+    const form = editor.locator(
+      'xpath=ancestor::*[@data-slot="context-menu-sub-content" or @data-slot="popover-content"][1]',
+    );
+    const initialHeight =
+      input === "touch" ? null : await form.evaluate((node) => node.offsetHeight);
+    await editor.pressSequentially("@");
+    if (initialHeight !== null) {
+      const dropdown = page.getByTestId("mention-menu");
+      await expect(dropdown.getByRole("option").first()).toBeVisible();
+      await expect
+        .poll(async () => {
+          const [menu, field, height] = await Promise.all([
+            dropdown.boundingBox(),
+            editor.boundingBox(),
+            form.evaluate((node) => node.offsetHeight),
+          ]);
+          return { height, above: Boolean(menu && field && menu.y + menu.height <= field.y) };
+        })
+        .toEqual({ height: initialHeight, above: true });
+    }
+    await editor.pressSequentially("move-review");
+    const option = page.getByRole("option", { name: prompt.name, exact: true });
+    await expect(option).toBeVisible();
+    if (input === "touch") {
+      expect((await option.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await option.tap();
+    } else if (input === "keyboard") {
+      await editor.press("Escape");
+      await expect(option).toBeHidden();
+      await editor.pressSequentially("-");
+      await expect(option).toBeVisible();
+      await editor.press("Enter");
+    } else {
+      await option.click();
+    }
+    await expect(option).toBeHidden();
+    await expect(editor.getByTestId("custom-prompt-mention")).toContainText(`@${prompt.name}`);
+    return { id: prompt.id, instructions: `${prefix}@${prompt.name}` };
+  } catch (error) {
+    await apiClient.deletePrompt(prompt.id).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function expectMoveSavedPromptDelivered(apiClient: ApiClient, sessionId: string) {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.filter(
+          (message) =>
+            message.author_type === "agent" &&
+            message.content.includes(SAVED_PROMPT_DELIVERY_RESPONSE),
+        ).length;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(1);
+}
 
 /** Durable e2e:message emitted by the target step's configured prompt. Its
  * presence proves the step prompt ran; skip_step_prompt suppresses it. */

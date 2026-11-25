@@ -33,7 +33,8 @@ The model prerequisite authorizes investigation and a decision package only.
 
 The authentication work orders (01 through 03) have started implementation.
 Task 01 is complete, Task 02 is complete, and Task 03 has its catalog, SSH unit, settings unit, and public documentation portions complete; its managed SSH/settings browser suites remain pending.
-Task 04 remains a decision prerequisite with no corrective production change.
+Task 04 completed the investigation in the separate
+[Claude model fix package](../claude-exact-model-alias/plan.md).
 
 The baseline is local HEAD and remote main `9aba7b2edd020f6ba0f92c2bfe318429723ea2ed`.
 The [evidence record](evidence.md) contains live issue evidence, dependency heads, source traces, exact diagnostic commands, and their limits.
@@ -43,11 +44,11 @@ The [evidence record](evidence.md) contains live issue evidence, dependency head
 | Issue | Confirmed finding | Confidence and disposition |
 | --- | --- | --- |
 | #5180 | Compatibility ignores authorized profile env and Claude's catalog omits API-key auth. Nonempty executor IDs are accepted without scoped reads. | High confidence from source and a disposable scoped-store probe. A corrective auth package is ready for file review. |
-| #5183 | Strict `sonnet` is absent from the runtime catalog. Full `claude-sonnet-5-5` is present and succeeds in a policy probe. The reporter verified the full-ID workaround. | High confidence in the failure mechanism. No authoritative alias-equivalence evidence exists in the inspected Kandev contracts. The intended corrective model behavior remains unresolved. |
+| #5183 | Strict `sonnet` is absent from the runtime catalog. Full `claude-sonnet-5-5` is present and succeeds in a policy probe. The reporter verified the full-ID workaround. | High confidence in the failure mechanism. The follow-up proposes a save-time error for the explicit profile pair. |
 
 The model refusal conforms to active AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.1 and .10.
 It is not evidence that strict runtime selection must accept an alias.
-Task 04 must resolve the product outcome without blocking Tasks 01 through 03.
+Task 04 tracks the product outcome independently of Tasks 01 through 03.
 
 ## Assumption check
 
@@ -59,8 +60,8 @@ The `/interview-me` check reused the user's settled decisions:
 - Planning ends at this file-review handoff.
 
 Source and disposable probes establish the auth defect and model refusal.
-The unresolved choice is model alias qualification versus an actionable repair experience under the existing strict contract.
-No question blocks the independent auth package. Task 04 makes that choice an explicit prerequisite rather than inventing a runtime patch.
+The [model decision](../../decisions/2026-11-20-claude-exact-model-alias-validation.md)
+selects an actionable settings error and retains the executor's strict check.
 
 ## Scope
 
@@ -141,8 +142,8 @@ The issue permits two directions, but their proof requirements differ.
 
 The older host-CLI design's alias discussion is corrected to defer to the active strictness contract.
 That documentation correction is not an implemented fix for #5183.
-Task 04 must establish which observable repair resolves the report before corrective model work orders are authorized.
-The pinned bridge source was also inspected. Its preference heuristics and models response do not supply the missing strict alias proof.
+The follow-up package specifies the correction at profile save time.
+The pinned bridge's catalog carries selectable IDs and the current ID.
 
 ## ASCII UI preview
 
@@ -175,7 +176,7 @@ No API-key binding on this screen is required when the agent profile already sup
 The existing profile page owns scrolling. Phone rows and picker actions retain at least 44px targets.
 Long variable names wrap inside the content region. Desktop controls retain their existing compact size.
 No new drawer or navigation is introduced. AC-AGENTS-REMOTE-AUTH-ADMISSION-001.6 maps to Task 03's rendered checks.
-No model UI preview is approved: Task 04 must produce desktop/phone previews with any proposed corrective UX package.
+The follow-up plan contains the [model settings preview](../claude-exact-model-alias/plan.md#ascii-ui-preview).
 
 ## Tests
 
@@ -233,10 +234,10 @@ Do not trust stale shared remote refs. Read remote SHAs directly.
 - [x] [Task 01: Scoped authentication evidence and catalog](task-01-scoped-auth-evidence.md) (done, no dependency).
 - [x] [Task 02: Guarded workflow integration](task-02-guarded-workflow-admission.md) (done, depends on 01).
 - [ ] [Task 03: SSH, settings parity, and operator documentation](task-03-ssh-auth-surface.md) (in progress, depends on 02).
-- [ ] [Task 04: Model identity evidence and decision prerequisite](task-04-model-identity-decision.md) (pending, independent).
+- [x] [Task 04: Model identity evidence and decision prerequisite](task-04-model-identity-decision.md) (done, independent).
 
 Default implementation order is 01, 02, 03. Task 04 is a separate investigation path and does not gate auth delivery.
-No wave authorizes delegation. Task 03's managed browser suites and the Task 04 decision remain open.
+Task 03's managed browser suites remain open.
 
 ## Public documentation
 
@@ -246,13 +247,15 @@ Use a short configuration how-to and troubleshooting section within their existi
 Explain profile-bound Global secrets, explicit executor methods, caller scope, and the distinction between API keys and OAuth.
 The existing model troubleshooting can document the manually verified full-ID workaround without claiming alias support.
 No page, navigation entry, screenshot, or new sharing instruction is required.
-Task 04 owns any later model-UX documentation changes.
+The [model work order](../claude-exact-model-alias/task-01-validate-claude-model-pair.md)
+owns the corresponding public guidance.
 
 ## Verification results
 
 Planning evidence is recorded in [evidence.md](evidence.md#diagnostic-results).
 Implementation results for Tasks 01 and 02 and the completed Task 03 portions are recorded in their work orders.
-Task 03's managed browser and real-SSH end-to-end suites have not run; Task 04 remains an evidence/decision prerequisite.
+Task 03's managed browser and real-SSH end-to-end suites are pending in this
+record. Task 04's follow-up package records its verification.
 
 Document gates passed: catalog validation, all specification lint, 36 linter tests, relative file links, and whitespace checks.
 The PR-documentation validator classified the original docs-only diff as exempt.
@@ -260,11 +263,10 @@ A separate prospective backend-trigger check validated all four work orders and 
 Implementation gates that passed: targeted Go race suites, the scoped SQLite admission matrix, the SSH provisioning regression, the settings unit suite, the task-service preview/apply integration fixture, changed-Go lint, and the full backend build. Review remediation also covers indexed Git composition, exact stored reference matching, and cancellation on literal/file routes and during resolution.
 
 Issue assignment was verified after the fresh ownership check: #5180 is assigned to `carlosflorencio` and remains open.
-#5183 remains open and unassigned because the corrective model outcome is unresolved.
+The [model fix package](../claude-exact-model-alias/plan.md) tracks #5183.
 
 ## Risks and unresolved decisions
 
-- #5183 has no proven alias policy. Its issue remains unclaimed until a corrective outcome has sufficient evidence.
 - Scoped store reads cannot detect a provider-side credential revocation. Launch must retain provider authentication failures.
 - Preview and apply have no credential lease. Deletion or ownership changes require fresh checks, including at deferred launch.
 - Mixed env/auth methods can hide a bad binding if validation short-circuits. The all-bindings and at-least-one-route tests are mandatory.
