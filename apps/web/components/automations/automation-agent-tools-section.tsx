@@ -1,16 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { IconChevronDown } from "@tabler/icons-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { Separator } from "@kandev/ui/separator";
+import { useAutomationMCPOptions } from "@/hooks/domains/settings/use-automation-mcp-options";
 import type { AutomationPluginToolGroup } from "@/lib/types/automation";
 import { canonicalMCPSelection, canonicalPluginTools, type FormState } from "./automation-payload";
 import { normalizeRepositorySelections } from "./automation-repository-selection";
-import { AutomationMCPAccess } from "./automation-mcp-access";
-import { AutomationPluginTools } from "./automation-plugin-tools";
+import { AutomationMCPAccess, effectiveMCPSelection } from "./automation-mcp-access";
+import { AutomationPluginTools, staleSelectionNames } from "./automation-plugin-tools";
+import { summarizeAgentTools } from "./agent-tools-summary";
 
 type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 
-type AgentToolsSectionProps = {
+export type AgentToolsDisclosureProps = {
   form: FormState;
   savedForm: FormState;
   workspaceId: string;
@@ -25,8 +30,26 @@ type AgentToolsSectionProps = {
   };
 };
 
-/** MCP access and plugin tools: what the agent can use during a run. */
-export function AgentToolsSection({
+function selectedRepositoryIds(form: FormState, supportsMultiRepo: boolean): string[] {
+  if (form.repositoryMode !== "selected") return [];
+  return normalizeRepositorySelections(form.repositorySelections, { supportsMultiRepo })
+    .filter((item) => item.kind === "registered")
+    .map((item) => item.id);
+}
+
+function pluginToolsNeedReview(
+  savedForm: FormState,
+  pluginTools: AgentToolsDisclosureProps["pluginTools"],
+): boolean {
+  if (pluginTools.loading || pluginTools.error) return false;
+  return staleSelectionNames(savedForm.pluginTools, pluginTools.groups).length > 0;
+}
+
+/**
+ * MCP access and plugin tools behind one summary line. It opens by itself when
+ * saved MCP choices conflict or approved plugin tools need review.
+ */
+export function AgentToolsDisclosure({
   form,
   savedForm,
   workspaceId,
@@ -34,30 +57,56 @@ export function AgentToolsSection({
   updateField,
   mcp,
   pluginTools,
-}: AgentToolsSectionProps) {
-  const { t } = useTranslation();
-  // A managed conversation runs in the plugin's own session, so neither applies.
-  if (form.taskMode === "managed_conversation") return null;
+}: AgentToolsDisclosureProps) {
+  const { t, i18n } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const optionsState = useAutomationMCPOptions(
+    workspaceId,
+    form.agentProfileId,
+    selectedRepositoryIds(form, supportsMultiRepo),
+  );
   const showPluginTools = form.taskMode === "automation_run";
-  const repositoryIds =
-    form.repositoryMode === "selected"
-      ? normalizeRepositorySelections(form.repositorySelections, { supportsMultiRepo })
-          .filter((item) => item.kind === "registered")
-          .map((item) => item.id)
-      : [];
+  const needsAttention =
+    mcp.saveFailed || (showPluginTools && pluginToolsNeedReview(savedForm, pluginTools));
+  const expanded = open || needsAttention;
+  const summary = optionsState.options
+    ? summarizeAgentTools({
+        selection: effectiveMCPSelection(form.mcpSelection, optionsState.options, form.taskMode),
+        options: optionsState.options,
+        pluginTools: showPluginTools ? form.pluginTools : [],
+        translate: t,
+        language: i18n.language,
+      })
+    : t("common:loading");
   return (
-    <section className="space-y-2" data-testid="automation-agent-tools">
-      <div>
-        <h3 className="text-base font-medium">{t("automations:agentToolsTitle")}</h3>
-        <p className="text-sm text-muted-foreground">{t("automations:agentToolsDescription")}</p>
-      </div>
-      <div className="space-y-4 rounded-lg border bg-card p-4">
+    <Collapsible
+      open={expanded}
+      onOpenChange={setOpen}
+      className="space-y-4"
+      data-testid="automation-agent-tools"
+    >
+      <CollapsibleTrigger
+        className="group flex w-full cursor-pointer items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        data-testid="automation-agent-tools-toggle"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            {t("automations:toolsTitle")}
+          </span>
+          <span className="block truncate text-sm" data-testid="automation-agent-tools-summary">
+            {summary}
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+          {t(expanded ? "automations:toolsDone" : "automations:toolsEdit")}
+          <IconChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-4">
         <AutomationMCPAccess
           saveFailed={mcp.saveFailed}
           onReloadSaved={mcp.reload}
-          workspaceId={workspaceId}
-          profileId={form.agentProfileId}
-          repositoryIds={repositoryIds}
+          optionsState={optionsState}
           taskMode={form.taskMode}
           selection={form.mcpSelection}
           onChange={(value) => updateField("mcpSelection", value)}
@@ -84,7 +133,7 @@ export function AgentToolsSection({
             />
           </>
         ) : null}
-      </div>
-    </section>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

@@ -80,7 +80,7 @@ test.describe("GitHub PR follow-up automation on mobile", () => {
 
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
     await automations.saveButton.tap();
-    await expect(automations.saveButton).toBeHidden({ timeout: 15_000 });
+    await automations.waitForSaved();
     await testPage.reload();
     await expect(automations.editor).toBeVisible({ timeout: 15_000 });
 

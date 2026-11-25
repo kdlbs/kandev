@@ -35,17 +35,21 @@ import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import { useSaveHandler, type SaveHandlerOpts } from "./automation-editor-save";
 import { AutomationDeleteConfirmDialog } from "./automation-delete-confirm-dialog";
 import { useAutomationMCPReconciliation } from "@/hooks/domains/settings/use-automation-mcp-reconciliation";
-import { AgentToolsSection } from "./automation-agent-tools-section";
 import { useAutomationPluginTools } from "@/hooks/domains/settings/use-automation-plugin-tools";
 import {
   CreatedWebhookDialogHost,
   EditorFooter,
   isAutomationFieldDirty,
-  LimitsSection,
   NameField,
-  ThenSection,
   WhenSection,
 } from "./automation-editor-sections";
+import {
+  AgentSection,
+  DestinationSection,
+  FailureSection,
+  InstructionsSection,
+  RepeatRunsSection,
+} from "./automation-editor-groups";
 
 type AutomationEditorProps = {
   workspaceId: string;
@@ -479,16 +483,26 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         isDirty={triggersDirty}
       />
       <Separator />
-      <ThenSection
+      <DestinationSection
         form={form}
+        savedForm={dirtyBaseline}
         workspaceId={workspaceId}
-        placeholders={placeholders}
-        defaultTaskTitle={defaultTaskTitle}
+        updateField={updateField}
+      />
+      <RepeatRunsSection
+        form={form}
         savedForm={dirtyBaseline}
         updateField={updateField}
         hasPRTrigger={triggerActions.allTriggers.some((trigger) => trigger.type === "github_pr")}
       />
-      <AgentToolsSection
+      <InstructionsSection
+        form={form}
+        savedForm={dirtyBaseline}
+        updateField={updateField}
+        placeholders={placeholders}
+        defaultTaskTitle={defaultTaskTitle}
+      />
+      <AgentSection
         form={form}
         savedForm={dirtyBaseline}
         workspaceId={workspaceId}
@@ -497,8 +511,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         mcp={mcpReconciliation}
         pluginTools={pluginToolOptions}
       />
-      <Separator />
-      <LimitsSection form={form} savedForm={dirtyBaseline} updateField={updateField} />
+      <FailureSection form={form} savedForm={dirtyBaseline} updateField={updateField} />
       <Separator />
       <RunsSection
         automationId={currentId}

@@ -45,7 +45,8 @@ export function selectedToolNames(
   );
 }
 
-function staleSelectionNames(
+/** Saved tool names whose plugin changed since approval, which need reselecting. */
+export function staleSelectionNames(
   savedSelection: AutomationPluginToolSelection[],
   groups: AutomationPluginToolGroup[],
 ): string[] {

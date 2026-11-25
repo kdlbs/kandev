@@ -27,6 +27,8 @@ type ScheduleSelectorProps = {
   config: Record<string, unknown> | null;
   isDirty?: boolean;
   onChange: (config: Record<string, unknown>) => void;
+  /** Removes the schedule. */
+  onClear?: () => void;
   /** Another trigger can start the automation, so an empty schedule is not "never runs". */
   hasOtherTrigger?: boolean;
 };
@@ -181,6 +183,7 @@ export function ScheduleSelector({
   config,
   isDirty = false,
   onChange,
+  onClear,
   hasOtherTrigger = false,
 }: ScheduleSelectorProps) {
   const { t } = useTranslation();
@@ -234,6 +237,7 @@ export function ScheduleSelector({
     setCustomError(null);
     if (value === "none") {
       setCustomMode(false);
+      if (hasStoredSchedule) onClear?.();
       return;
     }
     if (value === "custom") {
@@ -310,18 +314,13 @@ function FrequencySelect({
   onChange: (value: ScheduleFrequency) => void;
 }) {
   const { t } = useTranslation();
-  const options =
-    value === "none"
-      ? FREQUENCY_OPTIONS
-      : FREQUENCY_OPTIONS.filter((option) => option.value !== "none");
-
   return (
     <Select value={value} onValueChange={(next) => onChange(next as ScheduleFrequency)}>
       <SelectTrigger className="w-[170px]" data-testid="schedule-frequency">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {options.map((option) => (
+        {FREQUENCY_OPTIONS.map((option) => (
           <SelectItem key={option.value} value={option.value}>
             {t(option.labelKey)}
           </SelectItem>

@@ -92,6 +92,21 @@ export class AutomationsPage {
     await this.customScheduleInput.blur();
   }
 
+  /**
+   * Wait until an edit save finishes. The save button relabels while saving,
+   * so its absence alone does not mean the trigger updates have landed.
+   */
+  async waitForSaved() {
+    const bar = this.page.getByTestId("settings-floating-save");
+    await expect
+      .poll(
+        async () =>
+          (await bar.count()) === 0 || (await bar.getAttribute("data-status")) === "saved",
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+  }
+
   /** Select a workflow by clicking the selector and picking an item by name. */
   async selectWorkflow(name: string) {
     await this.workflowSelector.click();

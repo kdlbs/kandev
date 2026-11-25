@@ -110,6 +110,9 @@ export function TriggersSection({
           scheduleTrigger={scheduleTrigger}
           savedScheduleTrigger={savedScheduleTrigger}
           onScheduleChange={handleScheduleChange}
+          onScheduleClear={() => {
+            if (scheduleTrigger) onDeleteTrigger(scheduleTrigger.id);
+          }}
         />
       )}
       <ConditionArea
@@ -136,11 +139,13 @@ function ScheduleArea({
   scheduleTrigger,
   savedScheduleTrigger,
   onScheduleChange,
+  onScheduleClear,
 }: {
   hasOtherTrigger: boolean;
   scheduleTrigger: AutomationTrigger | undefined;
   savedScheduleTrigger: AutomationTrigger | undefined;
   onScheduleChange: (config: Record<string, unknown>) => void;
+  onScheduleClear: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -153,6 +158,7 @@ function ScheduleArea({
           JSON.stringify(savedScheduleTrigger?.config ?? null)
         }
         onChange={onScheduleChange}
+        onClear={onScheduleClear}
         hasOtherTrigger={hasOtherTrigger}
       />
     </div>

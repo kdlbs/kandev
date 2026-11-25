@@ -392,7 +392,8 @@ control uses an existing primitive.
 - The **Task for each run** `SegmentedChoice` shows the third option
   (`reuse_per_pr`) when the form has a `github_pr` trigger or the saved policy
   is `reuse_per_pr`. Selecting it does not change `maxConcurrentRuns`. The
-  choice sits in the Then card above the task title and prompts it affects.
+  choice sits in the Repeat runs card, below the workflow whose steps it lists
+  and above the prompts it affects.
 - With `reuse_per_pr`, the following appear:
   - Under the choice, two `Select`s for the end-of-PR actions, side by side
     from the `sm` breakpoint. The delete warning is shown under a select when

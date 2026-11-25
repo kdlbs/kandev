@@ -45,11 +45,61 @@ test.describe("Automation settings page", () => {
     await testPage.getByRole("radio", { name: "Managed conversation" }).click();
     await expect(testPage.locator("#automation-retry-finite")).toHaveCount(0);
     await expect(testPage.getByRole("group", { name: "Task for each run" })).toHaveCount(0);
-    await expect(testPage.getByTestId("automation-agent-tools")).toHaveCount(0);
+    await expect(testPage.getByTestId("automation-agent-section")).toHaveCount(0);
+    await expect(testPage.getByTestId("automation-failure-section")).toHaveCount(0);
+    await expect(testPage.getByText("Workflow", { exact: true })).toHaveCount(0);
     await testPage.getByRole("radio", { name: "Normal task" }).click();
     await expect(testPage.getByRole("radio", { name: "Don't retry" })).toBeChecked();
     await testPage.getByRole("radio", { name: "Automation history" }).click();
     await expect(testPage.getByRole("radio", { name: "Don't retry" })).toBeChecked();
+  });
+
+  // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.7
+  test("returns a chosen schedule to No schedule", async ({ testPage, seedData }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+    await automations.selectFrequency("every day");
+    await expect(automations.timeInput).toBeVisible();
+    await automations.selectFrequency("No schedule");
+    await expect(automations.frequencySelector).toHaveText("No schedule");
+    await expect(automations.timeInput).toHaveCount(0);
+    await expect(automations.nextRun).toHaveText(
+      "No schedule; this automation won't run on its own.",
+    );
+  });
+
+  // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.3
+  test("marks the selected option with a fill and outline in both themes", async ({
+    testPage,
+    seedData,
+  }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+    const group = testPage.getByRole("group", { name: "Run destination" });
+    const selected = group.getByRole("radio", { name: "Automation history" });
+    const other = group.getByRole("radio", { name: "Normal task" });
+    await expect(selected).toBeChecked();
+    const style = (locator: Locator) =>
+      locator.evaluate((element) => {
+        const computed = getComputedStyle(element);
+        return { background: computed.backgroundColor, shadow: computed.boxShadow };
+      });
+    for (const colorScheme of ["light", "dark"] as const) {
+      await testPage.emulateMedia({ colorScheme });
+      if (colorScheme === "dark") await expect(testPage.locator("html")).toHaveClass(/dark/);
+      else await expect(testPage.locator("html")).not.toHaveClass(/dark/);
+      await testPage.mouse.move(0, 0);
+      await waitForFiniteAnimations(group);
+      const [groupBackground, on, off] = await Promise.all([
+        group.evaluate((element) => getComputedStyle(element).backgroundColor),
+        style(selected),
+        style(other),
+      ]);
+      expect(on.background).not.toBe(groupBackground);
+      expect(on.background).not.toBe(off.background);
+      expect(on.shadow).toContain("inset");
+      expect(off.shadow).not.toContain("inset");
+    }
   });
 });
 test.describe("Automations settings page", () => {
@@ -102,16 +152,29 @@ test.describe("Automations settings page", () => {
     await expect(testPage.locator("#automation-continuation-description")).toHaveText(
       "Each run starts with its own conversation and files. Runs can overlap.",
     );
-    // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.2, AC-OFFICE-AUTOMATIONS-SETTINGS-002.6
+    // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.1, AC-OFFICE-AUTOMATIONS-SETTINGS-002.2
     // Each choice sits above the fields it changes.
     const top = async (locator: Locator) => (await locator.boundingBox())?.y ?? Number.NaN;
-    const destinationTop = await top(testPage.getByRole("group", { name: "Run destination" }));
-    const taskChoiceTop = await top(taskChoice);
-    const titleTop = await top(testPage.getByText("Task title", { exact: true }));
-    const instructionsTop = await top(testPage.getByText("Instructions", { exact: true }));
-    expect(destinationTop).toBeLessThan(taskChoiceTop);
-    expect(taskChoiceTop).toBeLessThan(titleTop);
-    expect(titleTop).toBeLessThan(instructionsTop);
+    const heading = (name: string) => testPage.getByRole("heading", { name, exact: true });
+    const order = [
+      heading("When"),
+      heading("Where runs go"),
+      testPage.getByRole("group", { name: "Run destination" }),
+      testPage.getByText("Workflow", { exact: true }),
+      heading("Repeat runs"),
+      taskChoice,
+      testPage.getByRole("spinbutton", { name: "Max concurrent runs" }),
+      heading("Instructions"),
+      testPage.getByText("Task title", { exact: true }),
+      testPage.getByTestId("automation-prompt-editor"),
+      heading("Agent"),
+      testPage.getByTestId("automation-agent-tools-toggle"),
+      heading("If a run fails"),
+    ];
+    const tops: number[] = [];
+    for (const locator of order) tops.push(await top(locator));
+    expect(tops).toEqual([...tops].sort((a, b) => a - b));
+    expect(new Set(tops).size).toBe(tops.length);
 
     const reuse = taskChoice.getByRole("radio", { name: "One shared task" });
     await expect(reuse).not.toBeChecked();

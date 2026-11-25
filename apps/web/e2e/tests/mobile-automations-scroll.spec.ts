@@ -62,6 +62,15 @@ test.describe("Automations settings on mobile", () => {
     );
     await expect(testPage.getByRole("spinbutton", { name: "Max concurrent runs" })).toBeDisabled();
 
+    // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.5
+    // The collapsed Tools row is a touch-sized target that opens the switches.
+    const tools = testPage.getByTestId("automation-agent-tools-toggle");
+    await tools.scrollIntoViewIfNeeded();
+    expect((await tools.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expect(testPage.getByTestId("automation-mcp-access")).toHaveCount(0);
+    await tools.tap();
+    await expect(testPage.getByTestId("automation-mcp-access")).toBeVisible();
+
     const addRepository = testPage.getByRole("button", { name: "Add repository" });
     const addRepositoryBox = await addRepository.boundingBox();
     expect(addRepositoryBox?.height).toBeGreaterThanOrEqual(44);

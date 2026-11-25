@@ -32,23 +32,38 @@ behavior of each control: [continuity](automation-continuity.md),
 
 ## Section order
 
-`AutomationEditor` renders:
+`AutomationEditor` renders sections whose choices come before the fields they
+change. Each section is a heading over one card, built by `EditorSection`, and
+its dirty state covers every field it renders.
 
 1. `NameField`, which carries the **Enabled** switch beside the name label.
-2. `WhenSection`.
-3. `ThenSection`: `TargetModeSection`, then `ContinuationPolicySection` (not
-   for managed conversations), the task title, `PromptSection`,
-   `FollowUpPromptField`, `PlaceholderList`, and the configuration fields.
-4. `AgentToolsSection`: one card holding `AutomationMCPAccess` and, for
-   automation-history runs, `AutomationPluginTools`. It renders nothing for
-   managed conversations.
-5. `LimitsSection`: Max concurrent runs and, except for managed
-   conversations, `RetryPolicySection`.
-6. `RunsSection` and the delete controls.
+2. `WhenSection`. Triggers come first because the per-PR option, the
+   placeholders, and the empty-schedule wording depend on them.
+3. `DestinationSection` (**Where runs go**): `TargetModeSection`, then
+   `WorkflowField` for task destinations or the conversation selector for
+   managed conversations. The workflow precedes the per-PR step picker that
+   lists its steps.
+4. `RepeatRunsSection` (**Repeat runs**): `ContinuationPolicySection` (not for
+   managed conversations), then Max concurrent runs. The shared-task lock and
+   the choice that causes it share one card.
+5. `InstructionsSection` (**Instructions**): the task title (not for managed
+   conversations), `PromptSection`, `FollowUpPromptField`, and
+   `PlaceholderList`. Both inputs to the prompts, the trigger and the
+   continuation policy, are above it.
+6. `AgentSection` (**Agent**): agent and executor profiles, repository access,
+   and `AgentToolsDisclosure`. It renders nothing for managed conversations.
+7. `FailureSection` (**If a run fails**): `RetryPolicySection`. It renders
+   nothing for managed conversations.
+8. `RunsSection` and the delete controls.
 
-The Then card's dirty state now includes the continuation policy and per-PR
-fields, because they render inside it. The name card's dirty state includes
-`enabled`.
+`AgentToolsDisclosure` is a `Collapsible`, closed by default. Its trigger shows
+`summarizeAgentTools`: the labels of enabled built-in packages in catalog
+order, the names of selected workspace servers, and a count of selected plugin
+tools, joined with `Intl.ListFormat` for the active language. It opens when an
+MCP save conflict needs a reload or an approved plugin tool needs review, so
+neither warning hides behind the summary. It owns the `useAutomationMCPOptions` request
+and passes the result to `AutomationMCPAccess`, so the summary and the
+switches read one response.
 
 ## Segmented choice
 
@@ -59,6 +74,10 @@ describes the selected option. Each other item's description is a
 controlled `Tooltip`: it never opens for the selected item, stays closed when
 the selection changes, and is disabled on coarse pointers, where a tap selects
 and the description line explains the result.
+The selected item has a primary-tinted fill and an inset primary outline, so
+it stands out from the muted group in both themes. The styles key on
+`aria-checked`, because the wrapping tooltip trigger replaces the item's
+`data-state` with its own open state.
 A single toggle group emits an empty value when the selected item is pressed
 again; the wrapper ignores it, so a choice is never cleared. Below the `sm`
 breakpoint the group stacks vertically. Items are at least 44 pixels high
@@ -72,6 +91,9 @@ as `automation-retry-finite`.
   `{{` completion is unchanged.
 - `ScheduleSelector` receives `hasOtherTrigger` from `TriggersSection`. With a
   condition trigger, an empty schedule shows `noScheduleWithTrigger`.
+- The frequency select always offers **No schedule**. Choosing it with a
+  saved or drafted schedule calls `onClear`, and `TriggersSection` deletes the
+  scheduled trigger draft.
 - `getTriggerSummary` maps saved PR event IDs through the shared `PR_EVENTS`
   label keys. An unknown ID is shown as saved.
 - The Configuration package's authority note renders in the package detail
@@ -82,7 +104,9 @@ as `automation-retry-finite`.
 ## Verification
 
 Component tests cover the segmented choice semantics, each section's options
-and descriptions, the placeholder disclosure, the schedule wording, and the
-trigger summary. Desktop and phone E2E scenarios cover section order, stacked
-options with touch-sized targets, the shared-task lock, retry details, and the
-per-PR follow-up position.
+and descriptions, the placeholder disclosure, the schedule wording and
+clearing, the tools summary, and the trigger summary. Desktop and phone E2E
+scenarios cover section order, the workflow above the step picker, the
+selected-option fill in both themes, stacked options with touch-sized targets,
+the shared-task lock, retry details, the tools disclosure, and the per-PR
+follow-up position.

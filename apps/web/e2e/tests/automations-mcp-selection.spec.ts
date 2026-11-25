@@ -4,6 +4,7 @@ import { test, expect } from "../fixtures/test-base";
 import {
   OPTIONAL_AUTOMATION_PACKAGES,
   chooseAutomationPackage,
+  openAutomationTools,
   verifyAutomationMCPDeleteWarning,
   saveAutomationMCP,
   verifyAutomationMCPRecovery,
@@ -59,6 +60,7 @@ test("saves all native packages and workspace servers, then invokes native tools
   });
   const watcher = watchWs(testPage);
   await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`);
+  await openAutomationTools(testPage);
   const section = testPage.getByTestId("automation-mcp-access");
   await expect(
     section.getByTestId("automation-mcp-package-core").locator('[data-slot="badge"]'),
@@ -93,6 +95,7 @@ test("saves all native packages and workspace servers, then invokes native tools
   expect(saved.mcp_selection?.definition_ids).toEqual([server.id]);
   expect(saved.mcp_selection?.builtin_packages).toEqual(["core", ...OPTIONAL_AUTOMATION_PACKAGES]);
   await testPage.reload();
+  await openAutomationTools(testPage);
   await expect(serverRow.getByRole("checkbox")).toBeChecked();
   for (const id of OPTIONAL_AUTOMATION_PACKAGES)
     await expect(
@@ -181,6 +184,7 @@ test("retains an MCP draft after a stale save and reconciles only after reload",
   });
   const watcher = watchWs(testPage);
   await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/automations/${a.id}`);
+  await openAutomationTools(testPage);
   await chooseAutomationPackage(testPage, "configuration", true);
   await apiClient.wsRequest("automation.update", {
     id: a.id,

@@ -23,11 +23,13 @@ type SegmentedChoiceProps<V extends string> = {
 };
 
 // Phones stack the options so long labels stay readable; coarse pointers get
-// 44 px targets.
+// 44 px targets. The selected option carries a primary fill and outline, which
+// stays visible against the muted group in both themes. It is styled through
+// aria-checked because the tooltip trigger replaces the item's data-state.
 const GROUP_CLASS_NAME =
   "w-full rounded-md border bg-muted p-0.5 max-sm:flex-col max-sm:items-stretch";
 const ITEM_CLASS_NAME =
-  "min-w-0 flex-1 cursor-pointer whitespace-normal rounded-[5px] px-3 text-sm text-muted-foreground data-[state=on]:bg-card data-[state=on]:font-medium data-[state=on]:text-foreground data-[state=on]:shadow-sm max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
+  "min-w-0 flex-1 cursor-pointer whitespace-normal rounded-[5px] px-3 text-sm text-muted-foreground aria-checked:bg-primary/15 aria-checked:font-medium aria-checked:text-foreground aria-checked:shadow-[inset_0_0_0_1px_var(--primary)] aria-checked:hover:bg-primary/20 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
 
 /**
  * A compact single choice: short option labels side by side, one line that

@@ -33,11 +33,20 @@ the choice, often off screen. Move every choice above the fields it affects,
 replace stacked radio cards with compact single choices, show placeholders
 once, group agent tools, and correct copy that was untrue in some setups.
 
+The second round, after manual testing, regroups the page by decision order:
+**Where runs go** (destination and workflow), **Repeat runs** (task for each
+run and concurrency), **Instructions**, **Agent** (profiles, repositories, and
+a collapsed **Tools** row), and **If a run fails**. It also keeps **No
+schedule** available after a schedule is chosen and gives the selected option
+a fill and outline that read in both themes.
+
 ## In scope
 
-- `SegmentedChoice`, `TargetModeSection`, and the new Then, Agent tools, and
-  Limits and retries composition.
-- Continuation, retry, prompt, schedule, and trigger-summary changes.
+- `SegmentedChoice`, `TargetModeSection`, `WorkflowField`,
+  `AgentToolsDisclosure`, and the section composition in
+  `automation-editor-groups.tsx`.
+- Continuation, retry, prompt, schedule (including clearing), and
+  trigger-summary changes.
 - Renamed labels in every catalog, the specs, and the public guide.
 - Desktop and phone E2E updates.
 
@@ -50,16 +59,18 @@ once, group agent tools, and correct copy that was untrue in some setups.
 
 1. Component tests cover the choice semantics, section options and
    descriptions, the placeholder disclosure, schedule wording, and summaries.
-2. Desktop and phone E2E scenarios cover section order, stacked touch-sized
-   options, the shared-task lock, retry details, and the follow-up position.
+2. Desktop and phone E2E scenarios cover section order, the workflow above the
+   step picker, the selected-option fill in both themes, schedule clearing,
+   stacked touch-sized options, the shared-task lock, retry details, the Tools
+   disclosure, and the follow-up position.
 
 ## Verification
 
 ```bash
 (cd apps/web && pnpm exec vitest run components/automations)
 (cd apps/web && pnpm run i18n:check && pnpm run lint)
-(cd apps/web && pnpm e2e:run --host --project chromium tests/automations-settings.spec.ts tests/automations-pr-follow-up.spec.ts tests/automations-mcp-selection.spec.ts)
-(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/mobile-automations-scroll.spec.ts tests/settings/mobile-automations-settings.spec.ts tests/mobile-automations-pr-follow-up.spec.ts tests/plugins/mobile-managed-automation.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project chromium tests/automations-settings.spec.ts tests/automations-pr-follow-up.spec.ts tests/automations-mcp-selection.spec.ts tests/automations-plugin-tools.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/mobile-automations-scroll.spec.ts tests/settings/mobile-automations-settings.spec.ts tests/mobile-automations-pr-follow-up.spec.ts tests/plugins/mobile-managed-automation.spec.ts tests/settings/mobile-automations-mcp-selection.spec.ts tests/settings/mobile-automation-plugin-tools.spec.ts)
 ```
 
 ## Parallelism
@@ -73,6 +84,18 @@ Done on 2026-11-25.
 - Desktop automation E2E (8 specs, chromium): 61 passed.
 - Phone automation E2E (6 specs, mobile-chrome): 14 passed.
 - `pnpm run i18n:check`, `pnpm run lint:i18n`, and `pnpm run i18n:ratchet`: clean.
+
+Second round, done on 2026-11-25:
+
+- Desktop automation E2E (8 specs, chromium): 63 passed.
+- Phone automation E2E (7 specs, mobile-chrome): 15 passed.
+- Full web Vitest: 32097 passed; the 3 failures are the known host-environment
+  cases in `e2e/helpers/seed-repository-origin.test.ts`.
+- The selected-option style keys on `aria-checked`: the tooltip trigger
+  replaces the item's `data-state`, which is why the first round's selected
+  style never showed.
+- The PR follow-up save helpers waited for the relabelled save button to
+  disappear and could reload mid-save. They now wait for the saved status.
 
 Deviation: the mockup's lowercase trigger summary uses the localized event
 labels as written ("PR: Opened, New commits, Review requested"), because

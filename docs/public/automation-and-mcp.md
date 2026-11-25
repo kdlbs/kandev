@@ -101,20 +101,22 @@ Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace
 The editor reads top to bottom, and each choice sits above the fields it changes.
 
 1. Enter a required name. The **Enabled** switch sits beside it.
-2. Under **When**, choose a schedule and optional GitHub condition, or switch to webhook mode.
-3. Under **Then**, choose the **Run destination**. One line describes the selected option. With a mouse or keyboard, hover or focus another option to read what it does.
-   - **Automation history** keeps each generated task out of Kanban and the sidebar. Workflow selection is optional.
-   - **Normal task** creates ordinary workflow work that appears in Kanban and the sidebar. A workflow is required; an empty starting step uses that workflow's configured starting step.
-   - **Managed conversation** delivers each firing to a retained plugin conversation. Select the plugin installation and conversation instance in this workspace. This destination does not create a task, and task-only repository, workflow, task-for-each-run, agent-tool, and retry settings are hidden. Selecting it resets the unsaved retry draft to disabled; switching back to another destination does not restore discarded settings. For an existing automation with a previously saved enabled retry policy, the saved value remains unchanged until you explicitly save the reset. Generic retry admission can still use that saved policy before the reset is saved.
-4. Choose the **Task for each run**:
+2. Under **When**, choose a schedule and optional GitHub condition, or switch to webhook mode. **No schedule** stays available after you pick a schedule, so you can remove it again.
+3. Under **Where runs go**, choose the **Run destination**. One line describes the selected option. With a mouse or keyboard, hover or focus another option to read what it does.
+   - **Automation history** keeps each generated task out of Kanban and the sidebar. The **Workflow** below it is optional.
+   - **Normal task** creates ordinary workflow work that appears in Kanban and the sidebar. The **Workflow** below it is required; an empty starting step uses that workflow's configured starting step.
+   - **Managed conversation** delivers each firing to a retained plugin conversation. Select the plugin installation and conversation instance in this workspace. This destination does not create a task, so the workflow, task-for-each-run, task title, **Agent**, and **If a run fails** settings are hidden. Selecting it resets the unsaved retry draft to disabled; switching back to another destination does not restore discarded settings. For an existing automation with a previously saved enabled retry policy, the saved value remains unchanged until you explicitly save the reset. Generic retry admission can still use that saved policy before the reset is saved.
+4. Under **Repeat runs**, choose the **Task for each run**:
    - **New task each run** creates a separate task, conversation, and task environment for each firing. Runs can overlap.
    - **One shared task** reuses one task, primary session, conversation, and worktree across every firing, whatever triggered it. With a GitHub PR condition, different pull requests share that task. The destination and exact repository/base-branch pairs remain part of continuation compatibility.
    - **One task per pull request** appears when the automation has a GitHub PR condition. Each pull request keeps its own task, so different pull requests never share one and can run in parallel. See [Following up on a pull request](#following-up-on-a-pull-request).
-5. Enter an optional task-title template and the instructions. **Show placeholders** lists the trigger's placeholders; typing `{{` in a prompt also offers them.
-6. Select an agent profile and executor profile. Passthrough profiles are not offered. Worktree and Local-compatible profiles can run without a repository in a task-owned scratch workspace.
+
+   **Max concurrent runs** follows in the same card. Keep the default of 1 unless parallel work is safe. **One shared task** locks it to 1.
+5. Under **Instructions**, enter an optional task-title template and the instructions. **Show placeholders** lists the trigger's placeholders; typing `{{` in a prompt also offers them.
+6. Under **Agent**, select an agent profile and executor profile. Passthrough profiles are not offered. Worktree and Local-compatible profiles can run without a repository in a task-owned scratch workspace.
 7. Add one or more repository and base-branch pairs, or leave the list empty. The selector is the same searchable paired-chip control used by New Task. A discovered repository is registered in the workspace when the automation is saved. An empty list uses a task-scoped scratch workspace and does not create a Git worktree. Kandev never selects the workspace's first repository for you.
-8. Under **Agent tools**, choose [MCP access](#choose-mcp-access) and, for automation-history runs, [plugin tools](#opt-in-plugin-tools).
-9. Under **Limits and retries**, keep the default maximum concurrency of 1 unless parallel work is safe. **One shared task** always uses one active run. Choose [automatic retries](#automatic-retries).
+8. The **Tools** row names the enabled tools. Select it to choose [MCP access](#choose-mcp-access) and, for automation-history runs, [plugin tools](#opt-in-plugin-tools). It opens by itself when saved MCP choices conflict or approved plugin tools need review.
+9. Under **If a run fails**, choose [automatic retries](#automatic-retries).
 10. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
 
 ![Automation editor showing repository access, run destination, context between runs, concurrency, and Save changes.](../screenshots/automation-editor.png)
@@ -372,7 +374,7 @@ Private automation sessions receive required, workspace-scoped Core tools for co
 ### Choose MCP access
 
 1. Open **Settings > Workspaces > your workspace > Automations** and select an automation.
-2. Under **Agent tools > MCP access**, use the **On** or **Off** switch in each package row. Select a package name to read its details, including what Configuration can change. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
+2. Under **Agent**, select the **Tools** row. Under **MCP access**, use the **On** or **Off** switch in each package row. Select a package name to read its details, including what Configuration can change. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
 3. Select additional **Workspace MCP servers** from that workspace's saved catalog. Repository and agent-profile inheritance remains additive.
 4. Use **Save changes**. Use **Reset** to remove unsaved edits.
 
@@ -390,7 +392,7 @@ An unavailable definition remains visible for removal. Selecting a server does n
 
 ### Opt-in plugin tools
 
-A private automation can also use exact plugin tools that its owner selected in the editor. The `Plugin tools (optional)` section under **Agent tools** lists active, configured plugins whose manifests declare `automation` tools. Only those plugins appear; third-party plugins remain unsupported until their authors add and accept the surface. Select individual tools and use the editor's existing **Save** action; that save is the approval. Saving an unrelated field leaves the stored selection unchanged.
+A private automation can also use exact plugin tools that its owner selected in the editor. The `Plugin tools (optional)` section under **Agent > Tools** lists active, configured plugins whose manifests declare `automation` tools. Only those plugins appear; third-party plugins remain unsupported until their authors add and accept the surface. Select individual tools and use the editor's existing **Save** action; that save is the approval. Saving an unrelated field leaves the stored selection unchanged.
 
 Access is bounded to the automation, workspace, plugin installation, and plugin policy version shown at save time. Reinstalling a plugin or saving its configuration, including a secret-only change, requires review and reselection. Previously selected tools stay visible for reference but grant nothing until the owner selects current tools again. Clearing a plugin's selection removes its access.
 

@@ -37,9 +37,7 @@ async function openEditor(page: Page, workspaceId: string, automationId: string)
 async function saveAndReload(page: Page, automations: AutomationsPage) {
   await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
   await automations.saveButton.click();
-  // Saving an existing automation stays on the editor; the floating save bar
-  // closes once the save is persisted.
-  await expect(automations.saveButton).toBeHidden({ timeout: 15_000 });
+  await automations.waitForSaved();
   await page.reload();
   await expect(automations.editor).toBeVisible({ timeout: 15_000 });
 }
@@ -124,6 +122,10 @@ test.describe("automations — GitHub PR follow-up", () => {
 
     const step = testPage.getByTestId("pr-continuation-step");
     await expect(step).toHaveText("Stay in current step");
+    // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.2
+    // The workflow whose steps the picker lists is chosen above it.
+    const workflowBox = await testPage.getByText("Workflow", { exact: true }).boundingBox();
+    expect(workflowBox!.y).toBeLessThan((await step.boundingBox())!.y);
     await step.click();
     await testPage.getByRole("option", { name: reviewStep.name, exact: true }).click();
 
