@@ -1074,6 +1074,7 @@ type httpCreateTaskRequest struct {
 	ExecutionGrade         string                                `json:"execution_grade,omitempty"`
 	State                  *v1.TaskState                         `json:"state,omitempty"`
 	Repositories           []httpTaskRepositoryInput             `json:"repositories,omitempty"`
+	RepositoryIDs          []string                              `json:"repository_ids,omitempty"`
 	Position               int                                   `json:"position,omitempty"`
 	Metadata               map[string]interface{}                `json:"metadata,omitempty"`
 	MCPServerIDs           []string                              `json:"mcp_server_ids,omitempty"`
@@ -1214,6 +1215,16 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, rejectedCreateMessage("invalid payload"))
 		return
+	}
+	if body.Repositories != nil && body.RepositoryIDs != nil {
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage("repositories and repository_ids cannot both be provided"))
+		return
+	}
+	if body.RepositoryIDs != nil {
+		body.Repositories = make([]httpTaskRepositoryInput, len(body.RepositoryIDs))
+		for index, repositoryID := range body.RepositoryIDs {
+			body.Repositories[index].RepositoryID = repositoryID
+		}
 	}
 	labels, err := encodeTaskLabels(body.Labels)
 	if err != nil {
