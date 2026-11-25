@@ -110,6 +110,7 @@ func validateGitHubPRConfig(raw json.RawMessage) error {
 	var cfg struct {
 		QuietPeriodMinutes int      `json:"quiet_period_minutes"`
 		Reviewers          []string `json:"reviewers"`
+		IncludeExistingPRs bool     `json:"include_existing_prs"`
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return fmt.Errorf("invalid github_pr trigger config: %w", err)

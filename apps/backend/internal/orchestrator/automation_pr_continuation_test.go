@@ -69,6 +69,7 @@ type recordingPRLifecycle struct {
 	moves         []string
 	moveOptions   []taskservice.MoveTaskOptions
 	moveErr       error
+	moveResult    *taskservice.MoveTaskResult
 	archived      []string
 	deleted       []string
 	deleteReasons []string
@@ -82,6 +83,9 @@ func (l *recordingPRLifecycle) MoveTaskWithOptions(
 		return nil, l.moveErr
 	}
 	l.moves = append(l.moves, stepID)
+	if l.moveResult != nil {
+		return l.moveResult, nil
+	}
 	return &taskservice.MoveTaskResult{}, nil
 }
 

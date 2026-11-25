@@ -295,6 +295,9 @@ export type GitHubPRTriggerConfig = {
   authors?: string[];
   labels?: string[];
   exclude_draft?: boolean;
+  quiet_period_minutes?: number;
+  reviewers?: string[];
+  include_existing_prs?: boolean;
 };
 
 export type GitHubPushTriggerConfig = {

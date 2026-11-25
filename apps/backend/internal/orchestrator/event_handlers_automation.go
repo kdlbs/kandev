@@ -720,6 +720,12 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 			s.recordFailedRun(ctx, evt, stepErr.Error())
 			return
 		}
+		if refreshedSession, reason := s.continuationSession(ctx, task.ID); refreshedSession != nil {
+			continuationSession = refreshedSession
+		} else if reason != "" {
+			s.recordFailedRun(ctx, evt, reason)
+			return
+		}
 		prompt = prContinuationPrompt(a, evt, retrySnapshot, retrySnapshot != nil && !retryInitialTriggerData, prompt)
 		if s.dispatchAutomationContinuation(ctx, a, task, continuationSession, prompt, metadata, evt.RunID, action, reasons.Thread, retryOperation) && retryRun != nil {
 			s.acknowledgeRetryEventAfterBinding(ctx, evt)

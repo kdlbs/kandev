@@ -148,3 +148,26 @@ func TestFollowUpEventReaddedAfterOpenedOnlyStartsFromCurrentHead(t *testing.T) 
 	f.evaluate()
 	require.Len(t, f.runs(t), 1, "later commits fire again")
 }
+
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-001.9
+func TestOpenedOnlyPrunesClosedPRsOnCompleteListing(t *testing.T) {
+	f := newPRFollowUpFixture(t, followUpPR{Number: 5, Head: "e1"})
+	trigger := f.addTrigger(t, newCommitsEvents)
+	f.evaluate()
+	require.NotNil(t, f.observation(t, trigger, 5))
+
+	update := func(events string) {
+		enabled := true
+		config := json.RawMessage(`{` + eventSelectionRepo + events + `}`)
+		require.NoError(t, f.svc.UpdateTrigger(context.Background(), trigger.ID, &UpdateTriggerRequest{
+			Enabled: &enabled, Config: &config,
+		}))
+	}
+	update(openedEvents)
+	f.evaluate()
+	require.NotNil(t, f.observation(t, trigger, 5))
+
+	f.setPRs()
+	f.evaluate()
+	require.Nil(t, f.observation(t, trigger, 5), "closed PR observation is pruned even when trigger is opened-only")
+}

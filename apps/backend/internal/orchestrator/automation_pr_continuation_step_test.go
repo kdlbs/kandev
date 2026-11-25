@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-005.3
@@ -64,6 +65,31 @@ func TestPRContinuationStepMoveFailureFailsRun(t *testing.T) {
 	require.Contains(t, f.auto.terminal["run-17"], "continuation step unavailable")
 	require.Contains(t, f.auto.terminal["run-17"], string(automation.RunStatusFailed))
 	require.Equal(t, "pr-task", f.auto.mappings[prTestSubject], "the mapping is kept")
+}
+
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-005.4
+func TestPRContinuationStepMoveWIPLimitFailsRun(t *testing.T) {
+	a := perPRAutomation()
+	a.PRContinuationStepID = "step-full"
+	f := newPRFixture(t, a)
+	seedPRTask(t, f.repo, "pr-task", "step-done", models.TaskSessionStateWaitingForInput)
+	f.auto.mappings[prTestSubject] = "pr-task"
+	evt := perPREvent(prTestSubject)
+	evt.RunID = "run-wip"
+
+	f.lifecycle.moveResult = &taskservice.MoveTaskResult{
+		Task: &models.Task{
+			ID:              "pr-task",
+			WorkflowStepID:  "step-done",
+			QueuedForStepID: "step-full",
+			WIPAdmitted:     false,
+		},
+	}
+
+	f.svc.createAutomationTask(context.Background(), evt)
+
+	require.Contains(t, f.auto.terminal["run-wip"], "continuation step unavailable: target step \"step-full\" is full (WIP limit reached)")
+	require.Contains(t, f.auto.terminal["run-wip"], string(automation.RunStatusFailed))
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-005.5

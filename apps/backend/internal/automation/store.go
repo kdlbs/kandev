@@ -998,6 +998,11 @@ func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *U
 	if err := writeAutomationUpdateRow(ctx, tx, id, a, automationUpdateCondition{previousMCPRevision, previousTaskMode}); err != nil {
 		return nil, err
 	}
+	if a.ContinuationPolicy != ContinuationPolicyReusePerPR {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_continuations WHERE automation_id = ?`), id); err != nil {
+			return nil, err
+		}
+	}
 	if err := writePRContinuationSettings(ctx, tx, id, a.PRContinuationSettings); err != nil {
 		return nil, err
 	}
@@ -1280,6 +1285,12 @@ func (s *Store) DeleteAutomation(ctx context.Context, id string) error {
 	if err := requireResolvedRetryLaunches(ctx, tx, "automation_id", id); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_observations WHERE trigger_id IN (SELECT id FROM automation_triggers WHERE automation_id = ?)`), id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_continuations WHERE automation_id = ?`), id); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automations WHERE id = ?`), id); err != nil {
 		return err
 	}
@@ -1393,6 +1404,12 @@ func (s *Store) DeleteAutomationWithCleanup(ctx context.Context, id string, clea
 	if err != nil {
 		return nil, err
 	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_observations WHERE trigger_id IN (SELECT id FROM automation_triggers WHERE automation_id = ?)`), id); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_continuations WHERE automation_id = ?`), id); err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automations WHERE id = ?`), id); err != nil {
 		return nil, err
 	}
@@ -1414,8 +1431,10 @@ func (s *Store) ListAutomationTaskIDs(ctx context.Context, id string) ([]string,
 		 FROM automation_run_operations o
 		 JOIN automation_runs ar ON ar.id = o.run_id
 		 WHERE ar.automation_id = ? AND o.operation_kind = ?
-			AND o.state IN (?, ?) AND o.external_task_id != ''`), id, id,
-		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous); err != nil {
+			AND o.state IN (?, ?) AND o.external_task_id != ''
+		 UNION
+		 SELECT DISTINCT task_id FROM automation_pr_continuations WHERE automation_id = ? AND task_id != ''`), id, id,
+		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous, id); err != nil {
 		return nil, err
 	}
 	var continuationTaskID string
@@ -1446,8 +1465,10 @@ func listAutomationCleanupTaskIDs(ctx context.Context, tx *sqlx.Tx, id, continua
 		 FROM automation_run_operations o
 		 JOIN automation_runs ar ON ar.id = o.run_id
 		 WHERE ar.automation_id = ? AND o.operation_kind = ?
-			AND o.state IN (?, ?) AND o.external_task_id != ''`), id, id,
-		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous); err != nil {
+			AND o.state IN (?, ?) AND o.external_task_id != ''
+		 UNION
+		 SELECT DISTINCT task_id FROM automation_pr_continuations WHERE automation_id = ? AND task_id != ''`), id, id,
+		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous, id); err != nil {
 		return nil, err
 	}
 	if continuationTaskID != "" {
@@ -2834,6 +2855,10 @@ func (s *Store) ClearContinuationAndDeleteAllRuns(ctx context.Context, automatio
 		`UPDATE automations SET continuation_task_id = '', updated_at = ? WHERE id = ?`), time.Now().UTC(), automationID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM automation_pr_continuations WHERE automation_id = ?`), automationID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM automation_retry_event_receipts
 		WHERE run_id IN (SELECT id FROM automation_runs WHERE automation_id = ?)`), automationID); err != nil {
@@ -2884,7 +2909,12 @@ func (s *Store) DeleteAutomationsByWorkspace(ctx context.Context, workspaceID st
 		if err := requireResolvedRetryLaunches(ctx, tx, "automation_id", id); err != nil {
 			return 0, err
 		}
-		for _, query := range []string{`DELETE FROM automation_triggers WHERE automation_id = ?`, `DELETE FROM automation_runs WHERE automation_id = ?`} {
+		for _, query := range []string{
+			`DELETE FROM automation_pr_observations WHERE trigger_id IN (SELECT id FROM automation_triggers WHERE automation_id = ?)`,
+			`DELETE FROM automation_pr_continuations WHERE automation_id = ?`,
+			`DELETE FROM automation_triggers WHERE automation_id = ?`,
+			`DELETE FROM automation_runs WHERE automation_id = ?`,
+		} {
 			if _, err := tx.ExecContext(ctx, tx.Rebind(query), id); err != nil {
 				return 0, err
 			}

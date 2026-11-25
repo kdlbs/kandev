@@ -45,7 +45,7 @@ func (e *GitHubEvaluator) evaluatePRRepo(
 	if !complete {
 		return
 	}
-	if sel.observes() {
+	if len(observations) > 0 {
 		e.pruneObservations(ctx, t.ID, repo, observations, seen)
 	}
 	if cycle.claim(automation.ID, repo) {

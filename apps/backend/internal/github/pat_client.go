@@ -253,7 +253,7 @@ func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]
 		return nil, err
 	}
 	var raw []patPR
-	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&per_page=100", owner, repo)
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&per_page=100", url.PathEscape(owner), url.PathEscape(repo))
 	if err := c.get(ctx, endpoint, &raw); err != nil {
 		return nil, fmt.Errorf("list PRs: %w", err)
 	}
@@ -268,7 +268,7 @@ func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]
 
 func (c *PATClient) ListOpenPRs(ctx context.Context, owner, repo string) ([]*PR, bool, error) {
 	var result []*PR
-	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&per_page=100", owner, repo)
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&per_page=100", url.PathEscape(owner), url.PathEscape(repo))
 	for endpoint != "" {
 		var page []patPR
 		next, err := c.getPaginated(ctx, endpoint, &page)

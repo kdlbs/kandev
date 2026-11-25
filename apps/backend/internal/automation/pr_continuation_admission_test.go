@@ -212,3 +212,35 @@ func TestReusePerPRRespectsMaxConcurrentRuns(t *testing.T) {
 	require.True(t, second.Skipped)
 	require.False(t, second.Deferred, "the automation-wide cap skips rather than defers")
 }
+
+func TestListAutomationTaskIDsAndCleanupIncludesPRContinuations(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	a := &Automation{
+		ID:                 "a-pr-clean",
+		WorkspaceID:        "ws-1",
+		Name:               "PR Clean",
+		Enabled:            true,
+		ContinuationPolicy: ContinuationPolicyReusePerPR,
+	}
+	require.NoError(t, store.CreateAutomation(ctx, a))
+	c := &PRContinuation{
+		AutomationID: a.ID,
+		PRSubject:    "owner/repo#42",
+		RepoOwner:    "owner",
+		RepoName:     "repo",
+		PRNumber:     42,
+		TaskID:       "task-pr-42",
+	}
+	require.NoError(t, store.UpsertPRContinuation(ctx, c))
+
+	taskIDs, err := store.ListAutomationTaskIDs(ctx, a.ID)
+	require.NoError(t, err)
+	require.Contains(t, taskIDs, "task-pr-42")
+
+	// Verify ClearContinuationAndDeleteAllRuns removes the continuation
+	require.NoError(t, store.ClearContinuationAndDeleteAllRuns(ctx, a.ID))
+	taskID, err := store.GetPRContinuationTaskID(ctx, a.ID, "owner/repo#42")
+	require.NoError(t, err)
+	require.Empty(t, taskID, "ClearContinuationAndDeleteAllRuns must clear PR continuations")
+}

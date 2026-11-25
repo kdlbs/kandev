@@ -216,14 +216,26 @@ func (s *Service) movePRTaskToContinuationStep(ctx context.Context, a *automatio
 	if s.prTaskLifecycle == nil {
 		return errors.New("continuation step unavailable: task lifecycle is unavailable")
 	}
-	_, err := s.prTaskLifecycle.MoveTaskWithOptions(ctx, task.ID, task.WorkflowID, a.PRContinuationStepID, 0,
+	res, err := s.prTaskLifecycle.MoveTaskWithOptions(ctx, task.ID, task.WorkflowID, a.PRContinuationStepID, 0,
 		taskservice.MoveTaskOptions{EntryOptions: &workflowmove.EntryOptions{SkipStepPrompt: true}})
 	if err != nil {
 		return fmt.Errorf("continuation step unavailable: %w", err)
+	}
+	if res != nil && res.Task != nil && (!res.Task.WIPAdmitted || res.Task.QueuedForStepID != "") {
+		return fmt.Errorf("continuation step unavailable: target step %q is full (WIP limit reached)", a.PRContinuationStepID)
 	}
 	s.logger.Info("moved PR task to its continuation step",
 		zap.String("automation_id", a.ID), zap.String("task_id", task.ID),
 		zap.String("step_id", a.PRContinuationStepID))
 	task.WorkflowStepID = a.PRContinuationStepID
+
+	// Synchronize with the move lifecycle so any on_enter actions (such as
+	// context reset or profile switch) finish before the continuation prompt dispatches.
+	if s.repo != nil {
+		latest, err := s.repo.GetTask(ctx, task.ID)
+		if err == nil && latest != nil && manualMoveLifecyclePending(latest) {
+			s.recoverManualMoveLifecycle(ctx, latest)
+		}
+	}
 	return nil
 }
