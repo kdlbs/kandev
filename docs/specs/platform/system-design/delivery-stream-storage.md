@@ -112,6 +112,13 @@ events without independent proof, malformed/user-role payloads and pending or
 unknown effects remain protected. Terminals and prompts keep their full settlement
 requirements. Do not add a blanket nonterminal allowlist or age-based authority.
 
+### Foreground idle notifications
+
+`foreground_idle` qualifies as a nonterminal control when its projection and
+retention proofs pass. It updates live activity or releases the waiter for
+its prompt generation. The original submission requires its actual terminal
+event for settlement. [Handoff recovery design](session-recovery-convergence.md#foreground-handoff-and-unproven-sql-completion).
+
 ## Replay and checkpoints
 
 Once a proved control payload is compacted, retain its format-1 normalized hash
@@ -177,3 +184,11 @@ describe periodic live shell snapshots, replay preservation and physical reclama
 ## Implementation plan
 
 [Single-PR delivery stream storage repair](../../../plans/delivery-stream-storage/plan.md).
+[Foreground idle receipt retirement](../../../plans/delivery-foreground-idle-retention/plan.md).
+
+## Incremental delivery extension
+
+The [incremental shell delivery design](incremental-shell-delivery.md) extends
+these cadence bounds with lifetime byte-volume bounds and versioned readers.
+This document remains the version-1 admission contract and the shared logical
+coalescing rule; version 2 adds compact accepted output and canonical chunks.

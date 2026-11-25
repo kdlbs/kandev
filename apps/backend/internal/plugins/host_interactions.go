@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -48,6 +48,9 @@ type PluginPermissionResponse struct {
 	PendingID string
 	OptionID  string
 	Cancelled bool
+	// LinkedUser marks a response that a linked Kandev user authorized
+	// through the plugin; the context acts as that user.
+	LinkedUser bool
 }
 
 // PluginClarificationAnswer is the plugins-local answer a responder adapter
@@ -126,8 +129,7 @@ func (r interactionReader) Get(ctx context.Context, id string) (*pluginsdk.Inter
 	if err != nil {
 		return nil, err
 	}
-	dto := interactionModelToDTO(interaction)
-	return &dto, nil
+	return r.host.attributedInteraction(ctx, interaction), nil
 }
 
 func (r interactionReader) RespondToPermission(

@@ -49,12 +49,20 @@ func TestCalls_RecordedInOrderWithoutArguments(t *testing.T) {
 
 func TestCalls_HundredCapDropsTheHundredAndFirst(t *testing.T) {
 	f := newFixture(t)
-	f.startWriter()
 	f.start("st-1", f.at(0))
 	for i := 0; i < 101; i++ {
 		f.l.Call(testSession, fmt.Sprintf("a%d", i), "", true)
 	}
-	f.l.drainCalls(t.Context())
+	for range 101 {
+		select {
+		case entry := <-f.l.calls.ch:
+			if parked := f.l.writeOrPark(entry, nil); len(parked) != 0 {
+				t.Fatal("call for the open turn was parked")
+			}
+		default:
+			t.Fatal("queued call missing")
+		}
+	}
 	if n := len(f.callRows()); n != 100 {
 		t.Fatalf("call rows = %d, want 100", n)
 	}

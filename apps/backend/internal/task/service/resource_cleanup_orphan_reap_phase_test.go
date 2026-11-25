@@ -311,8 +311,10 @@ func TestRunOrphanReapPhaseDoesNotReportCapForTrailingPreSignalSkips(t *testing.
 		snap := make([]hostProcess, 0, total)
 		verifier := newFakeOrphanReapVerifier()
 		signaler := newFakeOrphanReapSignaler()
+		// Ownership checks protect the test process, so fake candidates exclude its PID.
+		firstPID := os.Getpid() + 1
 		for i := 0; i < total; i++ {
-			pid := 2000 + i
+			pid := firstPID + i
 			cwd := filepath.Join(root, strconv.Itoa(i))
 			snap = append(snap, hostProcess{PID: pid, PPID: 1, Cwd: cwd, Command: "sh"})
 			if i < orphanReapMaxCandidates {

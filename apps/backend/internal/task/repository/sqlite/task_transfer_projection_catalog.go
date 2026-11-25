@@ -9,12 +9,12 @@ type transferWorkspaceProjection struct {
 }
 
 var transferWorkspaceProjections = []transferWorkspaceProjection{
+	{table: "task_builtin_mcp_preferences", taskColumn: "task_id"},
 	{table: "task_status_summaries", taskColumn: "task_id"},
 	{table: "task_message_attachments", taskColumn: "task_id"},
 	{table: "github_pr_watches", taskColumn: "task_id"},
 	{table: "github_task_prs", taskColumn: "task_id"},
 	{table: "task_delivery_ledger", taskColumn: "task_id"},
-	{table: "azure_devops_task_work_items", taskColumn: "task_id"},
 	{table: "automation_task_cleanup_jobs", taskColumn: "task_id"},
 	{table: "storage_quarantine_entries", taskColumn: "task_id"},
 	{table: "office_channels", taskColumn: "task_id"},
@@ -49,8 +49,6 @@ var transferPreservationTables = []transferWorkspaceProjection{
 	{table: "github_pr_watches", taskColumn: "task_id", identityColumn: "id"},
 	{table: "github_task_prs", taskColumn: "task_id", identityColumn: "id"},
 	{table: "task_delivery_ledger", taskColumn: "task_id", identityColumn: "id"},
-	{table: "azure_devops_task_prs", taskColumn: "task_id", identityColumn: "id"},
-	{table: "azure_devops_task_work_items", taskColumn: "task_id", identityColumn: "id"},
 	{table: "task_usage_events", taskColumn: "task_id", identityColumn: "id"},
 	{table: "office_cost_events", taskColumn: "task_id", identityColumn: "id"},
 	{table: "task_comments", taskColumn: "task_id", identityColumn: "id"},

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import type { DockviewApi } from "dockview-react";
 
 // Dedicated file for `applyLayoutFixups` pinned-target capture. Mocks
@@ -43,39 +43,53 @@ import { applyLayoutFixups } from "./dockview-layout-builders";
 import {
   getRootSplitview,
   setPinnedTarget,
-  computeSidebarMaxPx,
-  computeRightMaxPx,
   getPinnedWidth,
   RIGHT_TOP_GROUP,
 } from "./layout-manager";
 import { getGlobalSidebarWidth } from "@/lib/local-storage";
+import { clearReusableRightTarget, setReusableRightTarget } from "./layout-manager/pinned-targets";
 
 const SIDEBAR_GROUP = "group-sidebar";
 const CENTER_GROUP = "group-center";
 const RIGHT_BOTTOM_GROUP = "group-right-bottom";
 
-let mockResizeView: ReturnType<typeof vi.fn>;
+let mockResizeView: Mock<(index: number, size: number) => void>;
+let mockRootSplitview: NonNullable<ReturnType<typeof getRootSplitview>>;
 
 function mockSplitview(sizesByIndex: number[]): void {
-  mockResizeView = vi.fn();
-  vi.mocked(getRootSplitview).mockReturnValue({
+  mockResizeView = vi.fn<(index: number, size: number) => void>();
+  mockRootSplitview = {
     length: sizesByIndex.length,
     getViewSize: (idx: number) => sizesByIndex[idx],
     resizeView: mockResizeView,
-  } as unknown as NonNullable<ReturnType<typeof getRootSplitview>>);
+  };
+  vi.mocked(getRootSplitview).mockReturnValue(mockRootSplitview);
 }
 
 function makeApi(groupIds: string[]): DockviewApi {
-  const sidebarGroup = {
+  const groups = groupIds.map((id) => ({
+    id,
+    panels: [{ id: id === SIDEBAR_GROUP ? "sidebar" : id }],
     locked: undefined as unknown,
     header: { hidden: true },
     width: 0,
     api: { setConstraints: vi.fn() },
-  };
+  }));
+  const right = groups.filter((group) => [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP].includes(group.id));
+  const rightNode =
+    right.length > 1
+      ? { children: right.map((group) => ({ view: group })), splitview: { getViewSize: () => 350 } }
+      : { view: right[0] };
+  const children = [
+    ...groups.filter((group) => !right.includes(group)).map((group) => ({ view: group })),
+    ...(right.length ? [rightNode] : []),
+  ];
+  const sidebarGroup = groups.find((group) => group.id === SIDEBAR_GROUP);
   return {
     width: 1470,
-    groups: groupIds.map((id) => ({ id, api: { setConstraints: vi.fn() } })),
-    getPanel: (id: string) => (id === "sidebar" ? { group: sidebarGroup } : null),
+    groups,
+    component: { gridview: { root: { splitview: mockRootSplitview, children } } },
+    getPanel: (id: string) => (id === "sidebar" && sidebarGroup ? { group: sidebarGroup } : null),
   } as unknown as DockviewApi;
 }
 
@@ -151,19 +165,6 @@ describe("applyLayoutFixups — pinned target capture", () => {
     expect(mockResizeView).toHaveBeenCalledWith(2, 441);
   });
 
-  it("derives the caps from api.width, not the window.innerWidth fallback", () => {
-    // Regression: caps computed without the measured width fall back to
-    // window.innerWidth, which can be transiently stale and clamp the captured
-    // target too narrow. They must be derived from api.width (1470 here).
-    mockSplitview([350, 720, 400]);
-    const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP]);
-
-    applyLayoutFixups(api);
-
-    expect(computeSidebarMaxPx).toHaveBeenCalledWith(1470);
-    expect(computeRightMaxPx).toHaveBeenCalledWith(1470, 350);
-  });
-
   it("records the side-column target for a 3-column preset without RIGHT_TOP_GROUP", () => {
     // Regression: vscode/preview/plan presets put their side column in a group
     // with a generated id (not RIGHT_TOP_GROUP). The target must still be
@@ -209,5 +210,64 @@ describe("applyLayoutFixups — pinned target capture", () => {
 
     expect(setPinnedTarget).toHaveBeenCalledWith("right", 441); // responsive default
     expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 400); // not live
+  });
+});
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-001.9, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe("applyLayoutFixups — reusable right width and root orientation", () => {
+  const FOUR_COLUMNS = [SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearReusableRightTarget();
+    vi.mocked(getGlobalSidebarWidth).mockReturnValue(null);
+    vi.mocked(getPinnedWidth).mockReturnValue(350);
+    // A 20% share of the 1470px workbench is 294px: in cap, and not the stock 441px.
+    setReusableRightTarget("env-a", {
+      columns: [
+        { id: "center", width: 1176, groups: [] },
+        { id: "right", pinned: true, width: 294, groups: [] },
+      ],
+    });
+  });
+
+  it("keeps the owning environment's reusable right width instead of the stock ratio", () => {
+    mockSplitview([350, 720, 400]);
+
+    applyLayoutFixups(makeApi(FOUR_COLUMNS), undefined, null, "env-a");
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 294);
+    expect(mockResizeView).toHaveBeenCalledWith(2, 294);
+    expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 441);
+  });
+
+  it("lets an actual manual width win over the reusable right width", () => {
+    mockSplitview([350, 720, 400]);
+
+    applyLayoutFixups(makeApi(FOUR_COLUMNS), undefined, 333, "env-a");
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 333);
+  });
+
+  it.each([
+    ["another environment's build", "env-b"],
+    ["a restore that names no owner", undefined],
+  ])("ignores the reusable width for %s", (_name, ownerEnvId) => {
+    mockSplitview([350, 720, 400]);
+
+    applyLayoutFixups(makeApi(FOUR_COLUMNS), undefined, null, ownerEnvId);
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 441);
+  });
+
+  it("records no sidebar or right target for a VERTICAL root", () => {
+    mockSplitview([350, 720, 400]);
+    const api = makeApi(FOUR_COLUMNS) as unknown as Record<string, unknown>;
+    api.component = { gridview: { root: { orientation: "VERTICAL" } } };
+
+    applyLayoutFixups(api as unknown as DockviewApi, undefined, null, "env-a");
+
+    expect(setPinnedTarget).not.toHaveBeenCalled();
+    expect(mockResizeView).not.toHaveBeenCalled();
   });
 });

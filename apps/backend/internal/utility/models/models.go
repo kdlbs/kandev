@@ -8,6 +8,11 @@ const (
 	ProfileBindingUnconfigured = "unconfigured"
 )
 
+// CallStatusCancelled marks a call the client abandoned before a result was
+// produced. It is terminal, like "failed", so the call history never shows a
+// cancelled invocation as pending.
+const CallStatusCancelled = "cancelled"
+
 // UtilityAgent represents a configured utility agent for quick one-shot tasks.
 // It references an inference-capable agent (like claude-acp, amp) by ID.
 type UtilityAgent struct {
@@ -47,7 +52,7 @@ type UtilityAgentCall struct {
 	PromptTokens       int        `json:"prompt_tokens" db:"prompt_tokens"`
 	ResponseTokens     int        `json:"response_tokens" db:"response_tokens"`
 	DurationMs         int        `json:"duration_ms" db:"duration_ms"`
-	Status             string     `json:"status" db:"status"` // "pending", "completed", "failed"
+	Status             string     `json:"status" db:"status"` // "pending", "completed", "failed", "cancelled"
 	ErrorMessage       string     `json:"error_message" db:"error_message"`
 	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
 	CompletedAt        *time.Time `json:"completed_at" db:"completed_at"`

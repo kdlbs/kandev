@@ -20,6 +20,27 @@ import (
 // to distinguish an already-stopped agent from a live transport failure.
 var ErrAgentStreamNotConnected = errors.New("agent stream not connected")
 
+// registerPendingRequest only registers requests on the active agent stream.
+func (c *Client) registerPendingRequest(reqID string, respCh chan *ws.Message, conn *websocket.Conn) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if conn == nil || c.agentStreamConn != conn {
+		return false
+	}
+
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	if c.pendingRequests == nil {
+		c.pendingRequests = make(map[string]chan *ws.Message)
+	}
+	if c.pendingRequestConns == nil {
+		c.pendingRequestConns = make(map[string]*websocket.Conn)
+	}
+	c.pendingRequests[reqID] = respCh
+	c.pendingRequestConns[reqID] = conn
+	return true
+}
+
 // sendStreamRequest sends a request over the agent WebSocket stream and waits for a response.
 // It creates a ws.Message with a UUID, registers a pending response channel,
 // writes the message to the stream, and blocks until a response arrives or context is cancelled.
@@ -29,7 +50,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	c.mu.RUnlock()
 
 	if conn == nil {
-		return nil, ErrAgentStreamNotConnected
+		return nil, &RequestNotSentError{Err: ErrAgentStreamNotConnected}
 	}
 
 	reqID := uuid.New().String()
@@ -41,7 +62,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	msg, err := ws.NewRequest(reqID, action, payload)
 	if err != nil {
 		tracing.TraceWSResponse(span, "", err)
-		return nil, fmt.Errorf("failed to create request message: %w", err)
+		return nil, &RequestNotSentError{Err: fmt.Errorf("failed to create request message: %w", err)}
 	}
 
 	// Inject trace context (traceparent) into WS message metadata for cross-process propagation
@@ -49,16 +70,10 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 
 	// Register pending request
 	respCh := make(chan *ws.Message, 1)
-	c.pendingMu.Lock()
-	if c.pendingRequests == nil {
-		c.pendingRequests = make(map[string]chan *ws.Message)
+	if !c.registerPendingRequest(reqID, respCh, conn) {
+		tracing.TraceWSResponse(span, "", ErrAgentStreamNotConnected)
+		return nil, &RequestNotSentError{Err: ErrAgentStreamNotConnected}
 	}
-	if c.pendingRequestConns == nil {
-		c.pendingRequestConns = make(map[string]*websocket.Conn)
-	}
-	c.pendingRequests[reqID] = respCh
-	c.pendingRequestConns[reqID] = conn
-	c.pendingMu.Unlock()
 
 	// Clean up on exit
 	defer func() {
@@ -72,7 +87,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	data, err := json.Marshal(msg)
 	if err != nil {
 		tracing.TraceWSResponse(span, "", err)
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, &RequestNotSentError{Err: fmt.Errorf("failed to marshal request: %w", err)}
 	}
 
 	c.streamWriteMu.Lock()

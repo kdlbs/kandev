@@ -18,6 +18,9 @@ func (s *Service) resumeLegacyNativeRestart(ctx context.Context, session *models
 	if session == nil || session.State != models.TaskSessionStateWaitingForInput || !silentRestoreSessionRouteEligible(session) {
 		return false, nil
 	}
+	if _, exists := models.LoadAgentDeliveryRecovery(session.Metadata); exists {
+		return false, nil
+	}
 	source, err := s.legacyNativeRestartSource(ctx, session)
 	if err != nil || source == nil {
 		return false, err
@@ -29,6 +32,9 @@ func (s *Service) resumeLegacyNativeRestart(ctx context.Context, session *models
 	}
 	if !legacyNativeRestartEvidenceMatches(latest, selected, block) || !sameRestartDescriptor(evidence.Descriptor, latest.Descriptor) || *evidence.ControlIdentity != *latest.ControlIdentity {
 		return false, errors.New("legacy native restart evidence changed")
+	}
+	if err := s.pauseSilentRestoreQueue(ctx, session.TaskID, session.ID); err != nil {
+		return false, err
 	}
 	response, err := s.RecoverSession(ctx, session.TaskID, session.ID, "resume")
 	return err == nil && response != nil && response.Success, err
@@ -138,5 +144,5 @@ func legacyNativeOwnerMatches(identity *agentruntime.AgentDeliveryRecoveryIdenti
 }
 
 func legacyNativeDescriptorIdle(d journal.RecoveryDescriptor) bool {
-	return d.Durable && d.Version == journal.CurrentVersion && !d.SubmissionsTruncated && d.SubmissionCount == 0 && len(d.Submissions) == 0 && !d.Unresolved
+	return d.Durable && journal.SupportsDeliveryVersion(d.Version) && !d.SubmissionsTruncated && d.SubmissionCount == 0 && len(d.Submissions) == 0 && !d.Unresolved
 }

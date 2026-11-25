@@ -57,6 +57,9 @@ export function transport() {
   const fetch = (path: string, options?: ApiRequestOptions) => {
     const url = new URL(path, "http://localhost");
     if (url.pathname === "/api/v1/system/logs/frontend-errors") return Promise.resolve();
+    if (url.pathname === "/api/v1/github/status") {
+      return Promise.resolve({ authenticated: false, github_host: "github.com" });
+    }
     const method = options?.init?.method ?? "GET";
     const workspace = url.searchParams.get("workspace_id") ?? "";
     requests.push({ workspace, method, path: url.pathname, body: options?.init?.body as string });

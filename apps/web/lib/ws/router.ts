@@ -9,8 +9,10 @@ import { registerAgentCapabilitiesHandlers } from "@/lib/ws/handlers/agent-capab
 import { registerSessionModelsHandlers } from "@/lib/ws/handlers/session-models";
 import { registerSessionMCPStatusHandlers } from "@/lib/ws/handlers/session-mcp-status";
 import { registerSessionInfoHandlers } from "@/lib/ws/handlers/session-info";
+import { registerPromptSuggestionHandlers } from "@/lib/ws/handlers/prompt-suggestions";
 import { registerSessionPendingActionHandlers } from "@/lib/ws/handlers/session-pending-action";
 import { registerSessionWorkspaceRecoveryHandlers } from "@/lib/ws/handlers/session-workspace-recovery";
+import { registerSessionDeliveryStorageHandlers } from "@/lib/ws/handlers/session-delivery-storage";
 import { registerSessionTodosHandlers } from "@/lib/ws/handlers/session-todos";
 import { registerPromptUsageHandlers } from "@/lib/ws/handlers/prompt-usage";
 import { registerBackgroundWorkHandlers } from "@/lib/ws/handlers/background-work";
@@ -34,6 +36,7 @@ import { registerWalkthroughsHandlers } from "@/lib/ws/handlers/walkthroughs";
 import { registerReviewHandlers } from "@/lib/ws/handlers/review";
 import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
 import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
+import { registerTurnChangesHandlers } from "@/lib/ws/handlers/turn-changes";
 import { registerSecretsHandlers } from "@/lib/ws/handlers/secrets";
 import { registerPromptsHandlers } from "@/lib/ws/handlers/prompts";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
@@ -46,6 +49,7 @@ import { registerGitLabHandlers } from "@/lib/ws/handlers/gitlab";
 import { registerOfficeHandlers } from "@/lib/ws/handlers/office";
 import { registerRunHandlers } from "@/lib/ws/handlers/run";
 import { registerCanvasesHandlers } from "@/lib/ws/handlers/canvases";
+import { registerSidebarGroupingHandlers } from "@/lib/ws/handlers/sidebar-grouping";
 
 export function registerWsHandlers(store: StoreApi<AppState>) {
   const messages = createMessagesHandlerRegistration(store);
@@ -75,8 +79,10 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerSessionModelsHandlers(store),
     ...registerSessionMCPStatusHandlers(store),
     ...registerSessionInfoHandlers(store),
+    ...registerPromptSuggestionHandlers(store),
     ...registerSessionPendingActionHandlers(store),
     ...registerSessionWorkspaceRecoveryHandlers(store),
+    ...registerSessionDeliveryStorageHandlers(store),
     ...registerSessionTodosHandlers(store),
     ...registerPromptUsageHandlers(store),
     ...registerBackgroundWorkHandlers(store),
@@ -91,11 +97,13 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerGitStatusHandlers(store),
     ...registerSystemEventsHandlers(store),
     ...registerTurnsHandlers(store, messages.scheduler),
+    ...registerTurnChangesHandlers(store),
     ...registerGitHubHandlers(store),
     ...registerGitLabHandlers(store),
     ...registerOfficeHandlers(store),
     ...registerRunHandlers(),
     ...registerCanvasesHandlers(store),
+    ...registerSidebarGroupingHandlers(store),
   };
   return { handlers, dispose: messages.dispose };
 }

@@ -25,6 +25,7 @@ type nativeUpdateInstall struct {
 	LauncherPath string `json:"launcher_path"`
 	Port         int    `json:"port,omitempty"`
 	NoBootStart  bool   `json:"no_boot_start,omitempty"`
+	Shell        string `json:"shell,omitempty"`
 }
 
 type nativeUpdateCommand struct {
@@ -175,6 +176,17 @@ func validateNativeUpdateInstall(install nativeUpdateInstall) error {
 	if !filepath.IsAbs(install.LauncherPath) {
 		return errors.New("service metadata launcher_path must be absolute")
 	}
+	if install.Shell != "" {
+		if install.Manager != nativeServiceManagerLaunchd || install.Mode != nativeServiceModeUser {
+			return errors.New("service shell metadata is supported only for launchd user services")
+		}
+		if !filepath.IsAbs(install.Shell) || hasServiceShellControl(install.Shell) {
+			return errors.New("service metadata shell must be an absolute executable path")
+		}
+		if base := filepath.Base(install.Shell); base != serviceShellBash && base != serviceShellZsh {
+			return fmt.Errorf("unsupported service metadata shell %q", install.Shell)
+		}
+	}
 	return nil
 }
 
@@ -186,6 +198,13 @@ func nativeServiceInstallArgs(install nativeUpdateInstall) []string {
 	args = append(args, "--home-dir", install.HomeDir)
 	if install.Port != 0 {
 		args = append(args, "--port", strconv.Itoa(install.Port))
+	}
+	if install.Manager == nativeServiceManagerLaunchd && install.Mode == nativeServiceModeUser {
+		if install.Shell == "" {
+			args = append(args, "--shell=none")
+		} else {
+			args = append(args, "--shell", install.Shell)
+		}
 	}
 	if install.NoBootStart {
 		args = append(args, "--no-boot-start")

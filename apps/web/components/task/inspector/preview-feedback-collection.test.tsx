@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskPreviewFeedback, TaskPreviewFeedbackSnapshot } from "@/lib/types/http";
 
@@ -73,7 +73,8 @@ vi.mock("react-i18next", () => ({
         "task:previewDeleteFeedback": "Delete feedback",
         "task:previewEditFeedback": "Edit feedback",
         "task:previewEditComment": editCommentLabel,
-        "task:previewSaveChanges": "Save changes",
+        "task:update": "Update",
+        "task:deleteComment": "Delete comment",
         "task:previewPendingEmpty": "No pending preview feedback.",
         "task:previewFeedbackTitle": "Preview feedback",
         "task:previewScreenshotAlt": "Screenshot preview",
@@ -89,15 +90,19 @@ vi.mock("react-i18next", () => ({
 }));
 
 const editCommentLabel = "Edit comment";
+const EDIT_FEEDBACK = "Edit feedback";
+const ITEM_ID = "feedback-1";
+const EDIT_SURFACE = "preview-feedback-edit";
 
 import {
   PreviewFeedbackCollection,
   PreviewFeedbackCollectionSurface,
+  type PreviewCommentList,
   type PreviewFeedbackCollectionController,
 } from "./preview-feedback-collection";
 
 const item: TaskPreviewFeedback = {
-  id: "feedback-1",
+  id: ITEM_ID,
   task_id: "task-1",
   kind: "element",
   comment: "Align this with the price",
@@ -151,16 +156,19 @@ describe("PreviewFeedbackCollection", () => {
     const collection = controller();
     render(<PreviewFeedbackCollection collection={collection} touch={false} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit feedback" }));
+    fireEvent.click(screen.getByRole("button", { name: EDIT_FEEDBACK }));
     const editor = screen.getByRole("textbox", { name: editCommentLabel });
+    expect(screen.getByTestId(EDIT_SURFACE)).toBeTruthy();
+    expect((editor as HTMLTextAreaElement).value).toBe(item.comment);
     fireEvent.change(editor, { target: { value: "Use a stronger contrast" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
     await waitFor(() =>
-      expect(collection.update).toHaveBeenCalledWith("feedback-1", "Use a stronger contrast", 2),
+      expect(collection.update).toHaveBeenCalledWith(ITEM_ID, "Use a stronger contrast", 2),
     );
+    await waitFor(() => expect(screen.queryByTestId(EDIT_SURFACE)).toBeNull());
 
     fireEvent.click(screen.getByRole("button", { name: "Delete feedback" }));
-    expect(collection.remove).toHaveBeenCalledWith("feedback-1", 2);
+    expect(collection.remove).toHaveBeenCalledWith(ITEM_ID, 2);
 
     fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
     expect(screen.getByText("Remove all pending preview feedback from this task?")).toBeTruthy();
@@ -175,16 +183,31 @@ describe("PreviewFeedbackCollection", () => {
     });
     render(<PreviewFeedbackCollection collection={collection} touch={false} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit feedback" }));
+    fireEvent.click(screen.getByRole("button", { name: EDIT_FEEDBACK }));
     const editor = screen.getByRole("textbox", { name: editCommentLabel });
     fireEvent.change(editor, { target: { value: "Keep my typed change" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
 
     await waitFor(() => expect(collection.update).toHaveBeenCalled());
     expect(
       (screen.getByRole("textbox", { name: editCommentLabel }) as HTMLTextAreaElement).value,
     ).toBe("Keep my typed change");
-    expect(screen.getByRole("alert").textContent).toContain("The feedback could not be saved.");
+    expect(within(screen.getByTestId(EDIT_SURFACE)).getByRole("alert").textContent).toContain(
+      "The feedback could not be saved.",
+    );
+  });
+
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-004.6
+  it("edits in the shared comment surface, which can also delete the item", async () => {
+    const collection = controller();
+    render(<PreviewFeedbackCollection collection={collection} touch={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: EDIT_FEEDBACK }));
+    const surface = screen.getByTestId(EDIT_SURFACE);
+    expect(surface.textContent).toContain(item.page_route);
+    expect(screen.queryByRole("button", { name: /Run/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Delete comment" }));
+    await waitFor(() => expect(collection.remove).toHaveBeenCalledWith(ITEM_ID, 2));
   });
 
   it("renders the authorized screenshot content for a persisted item", () => {
@@ -261,5 +284,34 @@ describe("PreviewFeedbackCollectionSurface", () => {
     const trigger = screen.getByRole("button", { name: "1 preview feedback items" });
     expect(trigger.className).toContain("h-11");
     expect(screen.getByTestId("preview-feedback-collection-drawer")).toBeTruthy();
+  });
+
+  it("keeps annotation numbering, reveal, and editor actions in the touch drawer", () => {
+    touchState.enabled = true;
+    const collection = controller();
+    const list: PreviewCommentList = {
+      numbers: new Map([[ITEM_ID, 7]]),
+      activeId: null,
+      selectedId: ITEM_ID,
+      onOpen: vi.fn(),
+      onSelect: vi.fn(),
+    };
+    render(
+      <PreviewFeedbackCollectionSurface
+        taskId="task-1"
+        collection={collection}
+        open
+        onOpenChange={vi.fn()}
+        list={list}
+      />,
+    );
+
+    const entry = screen.getByTestId("preview-feedback-item");
+    expect(entry.getAttribute("data-selected")).toBe("true");
+    expect(entry.querySelector('[data-testid="preview-capture-number"]')?.textContent).toBe("7");
+    fireEvent.click(entry);
+    expect(list.onSelect).toHaveBeenCalledWith(ITEM_ID);
+    fireEvent.click(screen.getByRole("button", { name: EDIT_FEEDBACK }));
+    expect(list.onOpen).toHaveBeenCalledWith(ITEM_ID);
   });
 });

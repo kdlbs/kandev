@@ -6,6 +6,7 @@ import { StateProvider } from "@/components/state-provider";
 import {
   AgentProfileDeleteConfirmation,
   AgentProfileDeleteConflictDialog,
+  AgentProfileDisableConflictDialog,
 } from "./agent-profile-delete-dialog";
 import type { AgentProfileDeleteConflict } from "./agent-profile-delete-dialog";
 
@@ -95,9 +96,49 @@ describe("AgentProfileDeleteConfirmation", () => {
   });
 });
 
+const DYNAMIC_PROFILE_REFERENCE = { id: "dyn-1", name: "Balanced selector" };
+
+describe("AgentProfileDisableConflictDialog", () => {
+  it("lists dynamic profiles that block disabling and confirms", () => {
+    const onConfirm = vi.fn();
+    render(
+      <AgentProfileDisableConflictDialog
+        agents={[]}
+        dynamicProfiles={[DYNAMIC_PROFILE_REFERENCE]}
+        onCancel={() => {}}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    const section = screen.getByTestId("disable-conflict-dynamic-profiles");
+    expect(within(section).getByText(DYNAMIC_PROFILE_REFERENCE.name)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Disable profile" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists utility agents and dynamic profiles together before confirmation", () => {
+    render(
+      <AgentProfileDisableConflictDialog
+        agents={[{ id: "utility-1", name: "Commit message" }]}
+        dynamicProfiles={[DYNAMIC_PROFILE_REFERENCE]}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText("Commit message")).toBeTruthy();
+    expect(within(dialog).getByText(DYNAMIC_PROFILE_REFERENCE.name)).toBeTruthy();
+  });
+});
+
 const FIXTURE_TIMESTAMP = "2026-01-01T00:00:00.000Z";
 
-function renderConflictDialog(conflict: AgentProfileDeleteConflict | null) {
+function renderConflictDialog(
+  conflict: AgentProfileDeleteConflict | null,
+  extraWorkspaces: Array<{ id: string; name: string }> = [],
+  onConfirm: () => void = () => {},
+) {
   return render(
     <StateProvider
       initialState={{
@@ -111,6 +152,13 @@ function renderConflictDialog(conflict: AgentProfileDeleteConflict | null) {
               created_at: FIXTURE_TIMESTAMP,
               updated_at: FIXTURE_TIMESTAMP,
             },
+            ...extraWorkspaces.map((workspace) => ({
+              id: workspace.id,
+              name: workspace.name,
+              owner_id: "user-1",
+              created_at: FIXTURE_TIMESTAMP,
+              updated_at: FIXTURE_TIMESTAMP,
+            })),
           ],
         },
         settingsAgents: {
@@ -130,7 +178,7 @@ function renderConflictDialog(conflict: AgentProfileDeleteConflict | null) {
       <AgentProfileDeleteConflictDialog
         conflict={conflict}
         onOpenChange={() => {}}
-        onConfirm={() => {}}
+        onConfirm={onConfirm}
       />
     </StateProvider>,
   );
@@ -257,6 +305,124 @@ describe("AgentProfileDeleteConflictDialog", () => {
     renderConflictDialog(null);
 
     expect(screen.queryByText(/Delete agent profile/i)).toBeNull();
+  });
+});
+
+describe("AgentProfileDeleteConflictDialog dynamic profiles", () => {
+  it("names live dynamic profiles and offers Delete Anyway", () => {
+    const onConfirm = vi.fn();
+    renderConflictDialog(
+      {
+        activeSessions: [],
+        watchers: [],
+        routingTiers: [],
+        automations: [],
+        dynamicProfiles: [DYNAMIC_PROFILE_REFERENCE],
+      },
+      [],
+      onConfirm,
+    );
+
+    const section = screen.getByTestId("profile-conflict-dynamic-profiles");
+    expect(within(section).getByText(DYNAMIC_PROFILE_REFERENCE.name)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Anyway" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("AgentProfileDeleteConflictDialog workspace groups", () => {
+  it("groups tasks and quick chats under workspace headings", () => {
+    renderConflictDialog({
+      activeSessions: [
+        {
+          task_id: "t1",
+          task_title: "Fix login",
+          is_ephemeral: false,
+          workspace_id: "ws-b",
+          workspace_name: "Backend",
+        },
+        {
+          task_id: "t2",
+          task_title: "Billing page",
+          is_ephemeral: false,
+          workspace_id: "ws-f",
+          workspace_name: "Frontend",
+        },
+        {
+          task_id: "q1",
+          task_title: "Quick question",
+          is_ephemeral: true,
+          workspace_id: "ws-b",
+          workspace_name: "Backend",
+        },
+      ],
+      watchers: [],
+      routingTiers: [],
+      automations: [],
+    });
+
+    const groups = screen.getAllByTestId("profile-conflict-workspace-group");
+    expect(
+      groups.map((g) => [
+        within(g).getByRole("heading", { level: 3 }).textContent,
+        within(g)
+          .getAllByRole("listitem")
+          .map((li) => li.textContent),
+      ]),
+    ).toEqual([
+      ["Backend", ["Fix login"]],
+      ["Frontend", ["Billing page"]],
+      ["Backend", ["Quick question"]],
+    ]);
+  });
+
+  it("sorts groups by the workspace name shown, not the raw response name", () => {
+    renderConflictDialog(
+      {
+        activeSessions: [
+          // ws-z has no response name, so its label resolves from the store
+          // ("Backend") before ordering; ws-f carries its own name.
+          { task_id: "t1", task_title: "Zeta task", is_ephemeral: false, workspace_id: "ws-z" },
+          {
+            task_id: "t2",
+            task_title: "Frontend task",
+            is_ephemeral: false,
+            workspace_id: "ws-f",
+            workspace_name: "Frontend",
+          },
+        ],
+        watchers: [],
+        routingTiers: [],
+        automations: [],
+      },
+      [{ id: "ws-z", name: "Backend" }],
+    );
+
+    const names = screen.getAllByRole("heading", { level: 3 }).map((el) => el.textContent);
+    expect(names).toEqual(["Backend", "Frontend"]);
+  });
+
+  it("falls back to the store workspace name, then Unknown workspace", () => {
+    renderConflictDialog({
+      activeSessions: [
+        { task_id: "t1", task_title: "Known by store", is_ephemeral: false, workspace_id: "ws-1" },
+        {
+          task_id: "t2",
+          task_title: "Orphan",
+          is_ephemeral: false,
+          workspace_id: "ws-gone",
+          workspace_name: "",
+        },
+      ],
+      watchers: [],
+      routingTiers: [],
+      automations: [],
+    });
+
+    const names = screen
+      .getAllByTestId("profile-conflict-workspace-name")
+      .map((el) => el.textContent);
+    expect(names).toEqual(["Office Workspace", "Unknown workspace"]);
   });
 });
 

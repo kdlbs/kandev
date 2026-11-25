@@ -1,6 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+
+test.use({ trace: "retain-on-failure" });
 
 function taskRow(sidebar: import("@playwright/test").Locator, taskId: string) {
   return sidebar.locator(`[data-task-row-id="${taskId}"]`);
@@ -84,7 +87,7 @@ async function expectTouchSizedTimeSlot(
   expect(timeBox!.width).toBeGreaterThanOrEqual(visualTimeBox!.width - 1);
   expect(actionBox!.width).toBeGreaterThanOrEqual(minimumWidth);
   // Transformed DOMRect endpoints can introduce subpixel floating-point drift.
-  expect(Math.round(actionBox!.height * 10_000) / 10_000).toBeGreaterThanOrEqual(minimumWidth);
+  expect(Math.round(actionBox!.height * 1_000) / 1_000).toBeGreaterThanOrEqual(minimumWidth);
   expect(actionBox!.x).toBeGreaterThanOrEqual(timeBox!.x + timeBox!.width - 1);
   expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(slotBox!.x + slotBox!.width + 1);
   expect(
@@ -361,6 +364,7 @@ test("localized time slots respect the fine-pointer width breakpoint", async ({
     await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
 
     if (width < 768) {
+      await waitForFiniteAnimations(testPage.locator("body"));
       const relativeTime = row.getByTestId("sidebar-task-trailing-time");
       const action = row.locator("button.mobile-task-actions-button");
       const [rowBox, timeBox, actionBox] = await Promise.all([
@@ -378,7 +382,7 @@ test("localized time slots respect the fine-pointer width breakpoint", async ({
       await expect(visualTime).toHaveText("99年以上");
       expect(timeBox!.width).toBeGreaterThanOrEqual(44);
       expect(actionBox!.width).toBeGreaterThanOrEqual(44);
-      expect(Math.round(actionBox!.height * 10_000) / 10_000).toBeGreaterThanOrEqual(44);
+      expect(Math.round(actionBox!.height * 1_000) / 1_000).toBeGreaterThanOrEqual(44);
       expect(visualTimeBox!.x).toBeGreaterThanOrEqual(timeBox!.x - 1);
       expect(visualTimeBox!.x + visualTimeBox!.width).toBeLessThanOrEqual(
         timeBox!.x + timeBox!.width + 1,

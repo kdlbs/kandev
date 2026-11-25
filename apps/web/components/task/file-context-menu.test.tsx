@@ -42,6 +42,7 @@ const BULK_TREE: FileTreeNode = {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   responsive.isFinePointer = true;
   responsive.isMobile = false;
   vi.useRealTimers();
@@ -258,7 +259,7 @@ describe("FileContextMenu rename", () => {
 
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "renamed.md" } });
-    fireEvent.blur(input);
+    fireEvent.blur(input, { relatedTarget: document.body });
 
     expect(onRenameFile).toHaveBeenCalledExactlyOnceWith(FILE_NODE.path, "renamed.md");
   });
@@ -542,4 +543,22 @@ describe("FileContextMenu upload guard", () => {
     await waitFor(() => expect(screen.queryAllByRole("menuitem").length).toBeGreaterThan(0));
     expect(screen.queryByRole("menuitem", { name: UPLOAD_LABEL })).toBeNull();
   });
+});
+
+// @covers AC-UI-EDIT-FOCUS-001.1
+it("keeps a file rename open when the document loses focus", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(document, "hasFocus").mockReturnValue(false);
+  const onRenameFile = vi.fn().mockResolvedValue(true);
+  render(<RenameHarness onRenameFile={onRenameFile} />);
+  openMenu(RENAME_ROW);
+  fireEvent.click(screen.getByText("Rename"));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const input = screen.getByRole("textbox") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "unfinished.md" } });
+  fireEvent.blur(input);
+  expect(onRenameFile).not.toHaveBeenCalled();
+  expect(input.isConnected).toBe(true);
 });

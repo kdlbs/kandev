@@ -12,7 +12,6 @@ import (
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
@@ -36,6 +35,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/marketplace"
 	pluginstate "github.com/kandev/kandev/internal/plugins/state"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
+	"github.com/kandev/kandev/internal/promptsync"
 	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
@@ -84,48 +84,49 @@ func adapterFor(descriptor requiredstores.Descriptor) testconformance.Adapter {
 }
 
 var schemaInitializers = map[string]testconformance.Scenario{
-	"schema-meta":           schemaMeta,
-	"task":                  taskSchema,
-	"workflow":              workflowSchema,
-	"analytics":             analyticsSchema,
-	"agent-settings":        agentSettingsSchema,
-	"user":                  userSchema,
-	"notification":          notificationSchema,
-	"editor":                editorSchema,
-	"prompts":               promptSchema,
-	"utility":               utilitySchema,
-	"office":                officeSchema,
-	"terminal":              terminalSchema,
-	"quick-terminal":        quickTerminalSchema,
-	"runtime-flags":         runtimeFlagsSchema,
-	"auth":                  authSchema,
-	"secrets":               secretsSchema,
-	"system-settings":       systemSettingsSchema,
-	"auth-hostnames":        hostnameSchema,
-	"organizations":         organizationSchema,
-	"organization-units":    organizationUnitSchema,
-	"message-queue":         messageQueueSchema,
-	"task-share":            shareSchema,
-	"telemetry-contract":    telemetrySchema,
-	"delivery":              deliverySchema,
-	"storage":               storageSchema,
-	"plugin-instances":      pluginInstancesSchema,
-	"plugin-marketplace":    pluginMarketplaceSchema,
-	"plugin-settings":       pluginSettingsSchema,
-	"plugin-state":          pluginStateSchema,
-	"plugin-instance-state": pluginInstanceStateSchema,
-	"plugin-user-state":     pluginUserStateSchema,
-	"canvas":                canvasSchema,
-	"github":                githubSchema,
-	"gitlab":                gitlabSchema,
-	"jira":                  jiraSchema,
-	"linear":                linearSchema,
-	"sentry":                sentrySchema,
-	"azure-devops":          azureDevOpsSchema,
-	"workflow-sync":         workflowSyncSchema,
-	"office-config-sync":    officeConfigSyncSchema,
-	"automation":            automationSchema,
-	"coordinator":           coordinatorSchema,
+	"schema-meta":             schemaMeta,
+	"task":                    taskSchema,
+	"workflow":                workflowSchema,
+	"analytics":               analyticsSchema,
+	"agent-settings":          agentSettingsSchema,
+	"user":                    userSchema,
+	"notification":            notificationSchema,
+	"editor":                  editorSchema,
+	"prompts":                 promptSchema,
+	"utility":                 utilitySchema,
+	"office":                  officeSchema,
+	"terminal":                terminalSchema,
+	"quick-terminal":          quickTerminalSchema,
+	"runtime-flags":           runtimeFlagsSchema,
+	"auth":                    authSchema,
+	"secrets":                 secretsSchema,
+	"system-settings":         systemSettingsSchema,
+	"auth-hostnames":          hostnameSchema,
+	"organizations":           organizationSchema,
+	"organization-units":      organizationUnitSchema,
+	"message-queue":           messageQueueSchema,
+	"task-share":              shareSchema,
+	"telemetry-contract":      telemetrySchema,
+	"delivery":                deliverySchema,
+	"storage":                 storageSchema,
+	"plugin-instances":        pluginInstancesSchema,
+	"plugin-marketplace":      pluginMarketplaceSchema,
+	"plugin-settings":         pluginSettingsSchema,
+	"plugin-state":            pluginStateSchema,
+	"plugin-instance-state":   pluginInstanceStateSchema,
+	"plugin-user-state":       pluginUserStateSchema,
+	"plugin-command-receipts": pluginCommandReceiptsSchema,
+	"canvas":                  canvasSchema,
+	"github":                  githubSchema,
+	"gitlab":                  gitlabSchema,
+	"jira":                    jiraSchema,
+	"linear":                  linearSchema,
+	"sentry":                  sentrySchema,
+	"workflow-sync":           workflowSyncSchema,
+	"prompt-sync":             promptSyncSchema,
+	"office-config-sync":      officeConfigSyncSchema,
+	"automation":              automationSchema,
+	"coordinator":             coordinatorSchema,
 }
 
 func schemaInitializerFor(descriptor requiredstores.Descriptor) testconformance.Scenario {
@@ -379,6 +380,13 @@ func pluginInstanceStateSchema(s testconformance.ScenarioContext) error {
 	return nil
 }
 
+func pluginCommandReceiptsSchema(s testconformance.ScenarioContext) error {
+	if _, err := pluginstate.NewCommandStore(pluginPool(s)); err != nil {
+		return fmt.Errorf("plugin command receipts schema: %w", err)
+	}
+	return nil
+}
+
 func pluginUserStateSchema(s testconformance.ScenarioContext) error {
 	if err := userSchema(s); err != nil {
 		return err
@@ -456,22 +464,19 @@ func sentrySchema(s testconformance.ScenarioContext) error {
 	return nil
 }
 
-func azureDevOpsSchema(s testconformance.ScenarioContext) error {
-	if err := providerDependencies(s); err != nil {
-		return err
-	}
-	if _, err := azuredevops.NewStore(s.DB, s.DB); err != nil {
-		return fmt.Errorf("azure devops schema: %w", err)
-	}
-	return nil
-}
-
 func workflowSyncSchema(s testconformance.ScenarioContext) error {
 	if err := workflowSchema(s); err != nil {
 		return err
 	}
 	if _, err := workflowsync.NewStore(s.DB, s.DB); err != nil {
 		return fmt.Errorf("workflow sync schema: %w", err)
+	}
+	return nil
+}
+
+func promptSyncSchema(s testconformance.ScenarioContext) error {
+	if _, err := promptsync.NewStore(s.DB, s.DB); err != nil {
+		return fmt.Errorf("prompt sync schema: %w", err)
 	}
 	return nil
 }

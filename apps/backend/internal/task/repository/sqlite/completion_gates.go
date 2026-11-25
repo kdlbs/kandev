@@ -315,33 +315,42 @@ func (r *Repository) ListTaskCompletionGateHistory(ctx context.Context, taskID s
 	return history, rows.Err()
 }
 
-//nolint:cyclop // The transaction checks completion gates before allowing a terminal state transition.
-func (r *Repository) guardTaskCompletionTransitionTx(ctx context.Context, tx *sql.Tx, taskID string, currentState, nextState v1.TaskState, currentWorkflowID, currentStepID, targetWorkflowID, targetStepID string) error {
-	if nextState != v1.TaskStateCompleted || currentState == v1.TaskStateCompleted {
+func (r *Repository) guardTaskCompletionStateTx(
+	ctx context.Context, tx *sql.Tx, taskID string, currentState, nextState v1.TaskState, workflowID, stepID string,
+) error {
+	current := models.Task{ID: taskID, State: currentState, WorkflowID: workflowID, WorkflowStepID: stepID}
+	candidate := current
+	candidate.State = nextState
+	return r.guardTaskCompletionTransitionTx(ctx, tx, &current, &candidate)
+}
+
+func (r *Repository) guardTaskCompletionTransitionTx(ctx context.Context, tx *sql.Tx, current, candidate *models.Task) error {
+	if err := r.guardRequiredSubtaskAssignmentsTx(ctx, tx, current.ID, current.State, candidate.State,
+		candidate.WorkflowID, candidate.WorkflowStepID); err != nil {
+		return err
+	}
+	if !needsTaskCompletionGate(current, candidate) {
 		return nil
 	}
-	snapshot, err := r.readTaskCompletionGateTx(ctx, tx, taskID, true)
+	completing, err := r.isCompletingTaskMoveTx(ctx, tx, current, candidate)
+	if err != nil || !completing {
+		return err
+	}
+	snapshot, err := r.readTaskCompletionGateTx(ctx, tx, current.ID, true)
 	if err != nil {
 		return err
 	}
 	if len(snapshot.Criteria) == 0 || len(snapshot.Blockers) == 0 {
 		return nil
 	}
-	override, ok := models.TaskCompletionMoveOverrideFromContext(ctx)
-	if !ok {
-		return repoerrors.ErrTaskCompletionGateBlocked
-	}
-	if override.TaskID != taskID || override.WorkspaceID != snapshot.WorkspaceID ||
-		override.ExpectedRevision != snapshot.Revision ||
-		override.SourceWorkflowID != currentWorkflowID || override.SourceStepID != currentStepID ||
-		override.TargetWorkflowID != targetWorkflowID || override.TargetStepID != targetStepID ||
-		strings.TrimSpace(override.ActorID) == "" || strings.TrimSpace(override.Reason) == "" {
-		return repoerrors.ErrTaskCompletionCriteriaConflict
+	override, err := validateTaskCompletionMoveOverride(ctx, current, candidate, snapshot)
+	if err != nil {
+		return err
 	}
 	now := r.nowUTC()
 	details, _ := json.Marshal(snapshot.Blockers)
 	return insertCompletionHistoryTx(ctx, tx, r.db.Rebind, models.TaskCompletionGateHistory{
-		ID: uuid.NewString(), TaskID: taskID, WorkspaceID: snapshot.WorkspaceID,
+		ID: uuid.NewString(), TaskID: current.ID, WorkspaceID: snapshot.WorkspaceID,
 		Revision: snapshot.Revision, Action: "completion_overridden", ActorKind: completionGateActorHuman,
 		ActorID: override.ActorID, Reason: strings.TrimSpace(override.Reason),
 		Details: string(details), CreatedAt: now,
@@ -413,7 +422,14 @@ func (r *Repository) readTaskCompletionGateTx(ctx context.Context, tx *sql.Tx, t
 			snapshot.Blockers = append(snapshot.Blockers, models.TaskCompletionBlocker{CriterionID: criterion.ID, Reason: reason})
 		}
 	}
-	snapshot.Blocked = len(snapshot.Criteria) > 0 && len(snapshot.Blockers) > 0
+	required, assigned, err := r.readRequiredSubtaskAssignmentsTx(ctx, tx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if required > assigned {
+		snapshot.Blockers = append(snapshot.Blockers, models.TaskCompletionBlocker{CriterionID: "required-subtask-assignments", Reason: "required_assignments_incomplete"})
+	}
+	snapshot.Blocked = len(snapshot.Blockers) > 0
 	return snapshot, nil
 }
 

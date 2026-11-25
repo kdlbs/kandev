@@ -290,3 +290,27 @@ under `/tmp/kandev-move-selected-folder-design-20261013-6stsdtfv/`. Its
 commands, and observed owned-process/root cleanup. The final actual-path
 documentation preflight and diff/status receipts are saved there before commit.
 No passing check is replayed for reassurance and no general local suite is run.
+
+## CI fixture observation correction (2026-10-27)
+
+SDK integration head `d62c643512a` exposed a post-move observation race in the
+real-backend desktop scenario. The failed attempt's captured command succeeded,
+all filesystem/byte checks passed, and exactly one directory rename was issued.
+The destination tree node then detached; the failure snapshot shows Changes
+active with the four move-related paths. Only the successful retry has a trace,
+so the original activation ordering is not retained.
+
+A controlled probe holds the actual status notifications and Git-refresh
+responses after the initial status/commit baseline is loaded. The real rename
+and existing filesystem assertions complete while the new Changes rows remain
+absent. Selecting Files before releasing those frames lets the subsequent Git
+update activate Changes, and the original destination-tree assertion fails.
+Waiting for both destination Changes rows before selecting Files passes that
+control and preserves every original command, byte, hierarchy, and absence
+assertion. This follows the adjacent single-file move scenario. No production
+move, selection, or tab-activation behavior changes. First-failure tracing is
+retained. The full repeated spec and fresh CI remain delivery checks.
+
+Local validation: all nine cases in three full-spec repetitions passed with
+retries disabled. Scoped lint/format, full docs/spec checks, and linked-delivery
+validation passed. Independent read-only review found no actionable findings.

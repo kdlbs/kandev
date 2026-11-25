@@ -100,18 +100,25 @@ when a genuine new lookup occurs and that retired replies cannot poison later
 reuse. If actual generic popup lifecycle needs a separate correction, checkpoint
 ROOT with causal evidence before expanding beyond this file/glue.
 
+Task and file reads start together for the same lookup. Pass its AbortSignal
+through `fetchFileResults` and `searchWorkspaceFiles` to `WebSocketClient.request`.
+A new query, session change, or unmount retires the pending client request and
+clears its timeout. This does not cancel backend work already sent over the
+socket. The owner and lookup checks remain authoritative for late replies.
+Callers without a signal retain their existing request behavior.
+
 ## Current fallback and compatibility
 
 Preserve the initial no-client check, ignored current search rejection, empty
 results fallback, non-file assembly order, text filtering, ranking/recency and
-Plan position. Do not introduce logging, aborts, retries, error UI, loading UI,
+Plan position. Do not introduce logging, retries, error UI, loading UI,
 cache persistence or a public helper export. Current empty success is reusable;
 failed search is not a completed successful entry. File path identities for
 recency remain workspace-owned, independently of session-owned search reuse.
 
 ## Regression seam
 
-The 21-case `apps/web/components/task/chat/tiptap-input-file-search-ownership.test.tsx`
+The `apps/web/components/task/chat/tiptap-input-file-search-ownership.test.tsx`
 suite renders exported `TipTapInput` under actual `StateProvider` (which creates the
 actual app store), with loaded prompts and genuine shared editor/suggestion/menu.
 Install a real `WebSocketClient` through the existing connection seam and replace

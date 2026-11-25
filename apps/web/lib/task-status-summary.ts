@@ -1,5 +1,11 @@
 import type { TaskStatusSummary } from "./types/task-status-summary";
 
+/** Bounds the retained per-task sidebar summary cache so it cannot grow with
+ * every task a long-lived browser ever observed. */
+export const MAX_SIDEBAR_STATUS_SUMMARIES = 200;
+/** Bounds the number of workspaces whose per-task cache is retained. */
+export const MAX_SIDEBAR_SUMMARY_WORKSPACES = 8;
+
 /**
  * True when `next` is a strictly newer reading of the same task's status
  * summary than `current`.
@@ -58,6 +64,14 @@ export function selectTaskStatusSummary(
   return live.reduce((current, candidate) => pickFreshestStatusSummary(candidate, current), detail);
 }
 
+/** The backend's unread sessions; setting and open-task rules apply in the row. */
+export function statusSummaryUnreadSessionIds(
+  summary: TaskStatusSummary | null | undefined,
+): string[] | undefined {
+  const ids = summary?.unread_session_ids;
+  return ids && ids.length > 0 ? ids : undefined;
+}
+
 /**
  * Returns the current task-level error only when it has not already been
  * acknowledged or dismissed for the same session and stamp. Task-owned
@@ -78,6 +92,43 @@ export function statusSummaryActiveErrorPreview(
     return null;
   }
   return error.preview;
+}
+
+/** Returns the current failed-turn attention, or null when it was acknowledged
+ * or never existed. Unlike session errors it has no local acknowledgement map:
+ * the backend projection is the single source of truth. */
+export function statusSummaryTurnError(
+  summary: TaskStatusSummary | null | undefined,
+): TaskStatusSummary["turn_error"] {
+  const value = summary?.turn_error;
+  if (!value?.stamp || !value.preview) return null;
+  return value;
+}
+
+/** The stamp a client may attach when submitting manual input to this session.
+ * Only attention sourced from that same session is acknowledged; a missing or
+ * foreign record yields undefined and never blocks the prompt. */
+export function observedTurnErrorStampForSession(
+  summary: TaskStatusSummary | null | undefined,
+  sessionId: string | null | undefined,
+): string | undefined {
+  const value = statusSummaryTurnError(summary);
+  if (!value || !sessionId || value.session_id !== sessionId) return undefined;
+  return value.stamp;
+}
+
+/** Task-row error decoration: blocking runtime errors first, then the durable
+ * failed-turn attention. */
+export function statusSummaryRowErrorPreview(
+  summary: TaskStatusSummary | null | undefined,
+  acknowledgedAgentErrors?: Record<string, string>,
+  dismissedAgentErrors?: Record<string, string>,
+): string | null {
+  return (
+    statusSummaryActiveErrorPreview(summary, acknowledgedAgentErrors, dismissedAgentErrors) ??
+    statusSummaryTurnError(summary)?.preview ??
+    null
+  );
 }
 
 /** Returns the task-owned error while preserving compatibility with older

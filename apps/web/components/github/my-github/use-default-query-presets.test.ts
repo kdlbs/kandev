@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 import {
   fetchGitHubWorkspaceSettings,
@@ -133,4 +133,17 @@ describe("useDefaultQueryPresets workspace sync", () => {
 
     expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
+});
+
+it("saves default-query drafts against the host loaded with the settings", async () => {
+  vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue({
+    ...workspaceSettings(),
+    github_host: "git.company.example",
+  });
+  const { result } = renderHook(() => useDefaultQueryPresets(WORKSPACE_ID));
+  await waitFor(() => expect(result.current.isReady).toBe(true));
+  await act(async () => result.current.save({ pr: [preset], issue: [] }));
+  expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ expected_host: "git.company.example" }),
+  );
 });

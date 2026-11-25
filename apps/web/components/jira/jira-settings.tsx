@@ -49,6 +49,7 @@ import {
   secretPlaceholder,
 } from "@/components/jira/jira-secret-help";
 import { OAuthFields } from "@/components/jira/jira-oauth-fields";
+import { useJiraConfigPublication } from "./use-jira-config-publication";
 import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 // Cloud sites live under this domain; shown as an example, not as prose, so it
@@ -290,24 +291,36 @@ function configToHealth(config: JiraConfig | null): IntegrationAuthHealth | null
   };
 }
 
-function useJiraConfigRefresh(workspaceId: string, setConfig: (cfg: JiraConfig | null) => void) {
+type JiraConfigPublication = ReturnType<typeof useJiraConfigPublication>;
+
+function useJiraConfigRefresh(
+  workspaceId: string,
+  setConfig: (cfg: JiraConfig | null) => void,
+  beginRead: JiraConfigPublication["beginRead"],
+  loading: boolean,
+) {
   // Background refresh so the auth-health banner picks up new probe results
   // from the backend poller without requiring a page reload. We re-fetch the
   // config rather than the loud full `load()` to avoid flashing the form.
   useEffect(() => {
+    if (loading) return;
     const id = setInterval(() => {
+      const request = beginRead();
       getJiraConfig({ workspaceId })
-        .then((cfg) => setConfig(cfg))
+        .then((cfg) => {
+          if (request.isCurrent()) setConfig(cfg);
+        })
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
     return () => clearInterval(id);
-  }, [workspaceId, setConfig]);
+  }, [workspaceId, setConfig, beginRead, loading]);
 }
 
 type JiraConfigMutationDeps = {
   workspaceId: string;
+  beginWrite: JiraConfigPublication["beginWrite"];
   form: FormState;
   setConfig: Dispatch<SetStateAction<JiraConfig | null>>;
   setForm: Dispatch<SetStateAction<FormState>>;
@@ -319,6 +332,7 @@ type JiraConfigMutationDeps = {
 // useJiraSettings to keep each hook inside the function-length limit.
 function useJiraConfigMutations({
   workspaceId,
+  beginWrite,
   form,
   setConfig,
   setForm,
@@ -330,6 +344,7 @@ function useJiraConfigMutations({
 
   const handleSave = useCallback(async () => {
     const submitted = form;
+    const accept = beginWrite();
     setSaving(true);
     try {
       const saved = await setJiraConfig(
@@ -344,13 +359,13 @@ function useJiraConfigMutations({
         },
         { workspaceId },
       );
-      setConfig(saved);
-      setForm((current) =>
-        JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
-      );
-      // Clear any inline test result from the previous credentials so the
-      // alert reflects only the currently-saved state.
-      setTestResult(null);
+      if (accept()) {
+        setConfig(saved);
+        setForm((current) =>
+          JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
+        );
+        setTestResult(null);
+      }
       toast({ description: t("jira:jiraConfigurationSaved"), variant: "success" });
     } catch (err) {
       toast({ description: t("jira:saveFailed", { error: String(err) }), variant: "error" });
@@ -358,19 +373,22 @@ function useJiraConfigMutations({
     } finally {
       setSaving(false);
     }
-  }, [workspaceId, form, setConfig, setForm, setTestResult, setSaving, t, toast]);
+  }, [workspaceId, beginWrite, form, setConfig, setForm, setTestResult, setSaving, t, toast]);
 
   const handleDelete = useCallback(async () => {
+    const accept = beginWrite();
     try {
       await deleteJiraConfig({ workspaceId });
-      setConfig(null);
-      setForm(emptyForm);
-      setTestResult(null);
+      if (accept()) {
+        setConfig(null);
+        setForm(emptyForm);
+        setTestResult(null);
+      }
       toast({ description: t("jira:jiraConfigurationRemoved"), variant: "success" });
     } catch (err) {
       toast({ description: t("jira:deleteFailed", { error: String(err) }), variant: "error" });
     }
-  }, [workspaceId, setConfig, setForm, setTestResult, t, toast]);
+  }, [workspaceId, beginWrite, setConfig, setForm, setTestResult, t, toast]);
 
   return { handleSave, handleDelete };
 }
@@ -385,28 +403,32 @@ function useJiraSettings(workspaceId: string) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestJiraConnectionResult | null>(null);
   const health = configToHealth(config);
+  const { beginRead, beginWrite } = useJiraConfigPublication(workspaceId);
 
   const load = useCallback(async () => {
+    const request = beginRead();
     setLoading(true);
     try {
       const cfg = await getJiraConfig({ workspaceId });
+      if (!request.isCurrent()) return;
       setConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
+      if (!request.isCurrent()) return;
       toast({
         description: t("jira:failedToLoadJiraConfig", { error: String(err) }),
         variant: "error",
       });
     } finally {
-      setLoading(false);
+      if (request.isActive()) setLoading(false);
     }
-  }, [workspaceId, t, toast]);
+  }, [workspaceId, beginRead, t, toast]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  useJiraConfigRefresh(workspaceId, setConfig);
+  useJiraConfigRefresh(workspaceId, setConfig, beginRead, loading);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -429,6 +451,7 @@ function useJiraSettings(workspaceId: string) {
 
   const { handleSave, handleDelete } = useJiraConfigMutations({
     workspaceId,
+    beginWrite,
     form,
     setConfig,
     setForm,

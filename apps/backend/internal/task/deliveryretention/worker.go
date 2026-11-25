@@ -108,6 +108,8 @@ type Worker struct {
 	wg           sync.WaitGroup
 	suspended    bool
 	retryAttempt int
+	discovery    discoveryProgress
+	batchRows    map[string]int
 }
 
 func New(repo Repository, pool *db.Pool, options Options) *Worker {
@@ -184,6 +186,7 @@ func (w *Worker) Stop() {
 
 func (w *Worker) loop(ctx context.Context) {
 	defer w.wg.Done()
+	defer func() { w.discovery = discoveryProgress{} }()
 	for ctx.Err() == nil {
 		if w.suspended {
 			readiness := w.checkReadiness(ctx)
@@ -217,6 +220,7 @@ func (w *Worker) loop(ctx context.Context) {
 				continue
 			}
 		}
+		w.discovery = discoveryProgress{}
 		if !wait(ctx, w.opts.After, delay) {
 			return
 		}
@@ -312,6 +316,7 @@ func (w *Worker) runPassBatch(ctx context.Context, phase string, remaining time.
 		snapshot.FailedBatches++
 		reason := classifyError(err)
 		snapshot.FailureReason = reason
+		w.recordBatchFailure(ctx, phase, reason, err)
 		if reason != failureDeadline {
 			errorsTotal.Add(reason, 1)
 		}
@@ -330,6 +335,7 @@ func (w *Worker) runPassBatch(ctx context.Context, phase string, remaining time.
 		snapshot.CommittedBatches++
 		batchesTotal.Add("committed", 1)
 		lastSuccess.Set(w.opts.Now().Unix())
+		w.recordBatchSuccess(phase)
 	}
 	return true
 }
@@ -344,9 +350,9 @@ func (w *Worker) runBatch(ctx context.Context, phase string, snapshot *Snapshot)
 			workTimeout = remaining
 		}
 	}
+	batchRows := w.batchRowLimit(phase)
 	switch phase {
 	case "retention":
-		batchRows := min(w.opts.BatchRows, BackgroundBatchRows)
 		result, err := w.repo.RunAgentDeliveryRetentionBatch(ctx, models.AgentDeliveryRetentionBatchOptions{
 			MaxCandidates: batchRows, MaxPayloadBytes: w.opts.BatchBytes, WorkTimeout: workTimeout,
 			PayloadGrace: w.opts.PayloadGrace, ReplayAge: w.opts.ReplayAge, ReplayEvents: w.opts.ReplayEvents,
@@ -354,7 +360,7 @@ func (w *Worker) runBatch(ctx context.Context, phase string, snapshot *Snapshot)
 		if err != nil {
 			return false, err
 		}
-		if result.DiscoveryAdvanced {
+		if w.discovery.advance(result.DiscoveryBefore, result.DiscoveryAfter) {
 			snapshot.DiscoveryBatches++
 		}
 		snapshot.Candidates += result.Candidates
@@ -378,7 +384,7 @@ func (w *Worker) runBatch(ctx context.Context, phase string, snapshot *Snapshot)
 		bytesTotal.Add("prompt", result.PromptPayloadBytesPruned)
 	case "orphans":
 		result, err := w.repo.RunAgentDeliveryOrphanBatch(ctx, models.AgentDeliveryOrphanBatchOptions{
-			MaxCandidates: w.opts.BatchRows, WorkTimeout: workTimeout,
+			MaxCandidates: batchRows, WorkTimeout: workTimeout,
 		})
 		if err != nil {
 			return false, err
@@ -392,7 +398,7 @@ func (w *Worker) runBatch(ctx context.Context, phase string, snapshot *Snapshot)
 		}
 	case "retirements":
 		result, err := w.repo.RunAgentDeliveryRetirementBatch(ctx, models.AgentDeliveryRetirementBatchOptions{
-			MaxCandidates: w.opts.BatchRows, WorkTimeout: workTimeout,
+			MaxCandidates: batchRows, WorkTimeout: workTimeout,
 		})
 		if err != nil {
 			return false, err

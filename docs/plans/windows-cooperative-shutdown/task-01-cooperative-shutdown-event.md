@@ -8,7 +8,7 @@ plan: "plan.md"
 requirements:
   - REQ-DESKTOP-DESKTOP-TAURI-APP-001
 acceptance_criteria:
-  - AC-DESKTOP-DESKTOP-TAURI-APP-001.18
+  - AC-DESKTOP-DESKTOP-TAURI-APP-001.21
 system_design:
   - ../../specs/desktop/system-design/windows-cooperative-shutdown.md
 ---

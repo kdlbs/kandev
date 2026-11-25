@@ -27,7 +27,7 @@ func (m *legacyNativeTestManager) ReadDeliveryRecordSubmission(context.Context, 
 }
 
 func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
-	for _, condition := range []string{"dead owner", "queue", "retired history", "generic history", "unprojected output", "live owner", "hash mismatch", "retained terminal", "changed owner", "independent work"} {
+	for _, condition := range []string{"dead owner", "backlog", "queue", "retired history", "generic history", "unprojected output", "live owner", "hash mismatch", "retained terminal", "changed owner", "independent work"} {
 		t.Run(condition, func(t *testing.T) {
 			ctx := context.Background()
 			service, manager, block, row, launched, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
@@ -119,6 +119,11 @@ func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
 				return proof, nil
 			}
 			service.agentManager = wrapper
+			if condition == "backlog" {
+				_, err = service.messageQueue.QueueMessage(ctx, row.SessionID, "task1", "queued instruction", "", "user", false, nil)
+				require.NoError(t, err)
+				require.NoError(t, service.messageQueue.SetAutoRun(ctx, row.SessionID, true))
+			}
 			session, err := repo.GetTaskSession(ctx, row.SessionID)
 			require.NoError(t, err)
 			restored, err := service.resumeLegacyNativeRestart(ctx, session)
@@ -127,7 +132,7 @@ func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			want := condition == "dead owner" || condition == "queue" || condition == "retired history" || condition == "generic history"
+			want := condition == "dead owner" || condition == "backlog" || condition == "queue" || condition == "retired history" || condition == "generic history"
 			require.Equal(t, want, restored)
 			if restored {
 				require.NotNil(t, *launched)
@@ -141,7 +146,38 @@ func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
 			} else {
 				require.Nil(t, *launched)
 			}
+			if condition == "backlog" {
+				status := service.messageQueue.GetStatus(ctx, row.SessionID)
+				require.False(t, status.AutoRun, "native restoration must not release queued instructions")
+				require.Len(t, status.Entries, 1)
+			}
 			require.Empty(t, manager.capturedPromptCalls)
 		})
 	}
+}
+
+func TestLegacyNativeRestartSkipsPersistedRecovery(t *testing.T) {
+	ctx := context.Background()
+	service, manager, _, submission, _, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
+	repo := service.repo.(*sqliterepo.Repository)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, submission.SessionID, models.TaskSessionStateWaitingForInput, ""))
+	session, err := repo.GetTaskSession(ctx, submission.SessionID)
+	require.NoError(t, err)
+	_, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
+	require.True(t, exists)
+
+	var inspectCalls int
+	wrapper := &legacyNativeTestManager{
+		nativeProofTestManager: &nativeProofTestManager{nativeResumeTestManager: manager},
+		inspect: func(context.Context, agentruntime.DeliveryRecordEvidenceRequest) (*agentruntime.DeliveryRecordEvidence, error) {
+			inspectCalls++
+			return nil, errors.New("durable adoption evidence unavailable")
+		},
+	}
+	service.agentManager = wrapper
+
+	restored, err := service.resumeLegacyNativeRestart(ctx, session)
+	require.NoError(t, err)
+	require.False(t, restored)
+	require.Zero(t, inspectCalls, "persisted recovery must use the restart worker instead of the legacy probe")
 }

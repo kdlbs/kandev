@@ -153,6 +153,9 @@ An MCP strategy must:
 
 When investigating a structured agent's MCP behavior, run `acpdbg mcp-probe <agent>`. It injects a temporary HTTP sentinel in `session/new` and reports delivery, initialize, and `tools/list` separately. A sentinel that is not contacted during the bounded probe window is **unobserved**, not proof that the agent cannot use MCP. New passthrough strategies must report an unavailable or explicit materialization failure rather than silently omitting MCP configuration.
 
+To probe the Preview wire format, pass `--protocol-version 2` before the
+agent name. The capture records the handshake and the result of session setup.
+
 ### Add assets and registration
 
 Optional logos live at:

@@ -56,6 +56,33 @@ func TestAskUserQuestion_ToolSchema_RequiresQuestionsArray(t *testing.T) {
 	assert.True(t, requiredSet["questions"], "questions should be required")
 }
 
+func TestAskUserQuestion_ConciseContextGuidance(t *testing.T) {
+	server := newTaskModeServer(t, &testBackend{}, "task-current")
+	tool := server.mcpServer.ListTools()["ask_user_question_kandev"].Tool
+
+	for _, expected := range []string{
+		"1-3 short sentences or brief bullets",
+		"about 100 words or fewer",
+		"full reports, logs, and repeated conversation outside this call, before it",
+		"questions and options self-contained",
+	} {
+		assert.Contains(t, tool.Description, expected)
+	}
+
+	schema, err := json.Marshal(tool.InputSchema)
+	require.NoError(t, err)
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(schema, &parsed))
+	props := parsed["properties"].(map[string]interface{})
+	for _, fieldName := range []string{"context", "context_paragraphs"} {
+		field := props[fieldName].(map[string]interface{})
+		description, ok := field["description"].(string)
+		require.True(t, ok, "%s needs a description", fieldName)
+		assert.Contains(t, description, "1-3 short sentences or brief bullets", fieldName)
+		assert.Contains(t, description, "about 100 words or fewer", fieldName)
+	}
+}
+
 // TestAskUserQuestion_RejectsLegacyPromptShape ensures payloads using the old
 // flat shape return a validation error rather than silently dropping the call.
 func TestAskUserQuestion_RejectsLegacyPromptShape(t *testing.T) {
@@ -169,6 +196,32 @@ func TestAskUserQuestion_JoinsContextParagraphs(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", payload["context"])
+}
+
+func TestAskUserQuestion_ContextParagraphsOverrideLegacy(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	server := newTaskModeServer(t, backend, "task-current")
+	args := clarificationArgsWithParagraphs()
+	args["context"] = "Legacy context should be overridden."
+
+	result := callTool(t, server, "ask_user_question_kandev", args)
+	require.False(t, result.IsError)
+	payload := backend.lastPayload.(map[string]interface{})
+	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", payload["context"])
+}
+
+func TestAskUserQuestion_EmptyContextParagraphsUsesLegacyContextVerbatim(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	server := newTaskModeServer(t, backend, "task-current")
+	legacyContext := strings.Repeat("full report line\n", 80)
+	args := clarificationArgsWithParagraphs()
+	args["context"] = legacyContext
+	args["context_paragraphs"] = []string{}
+
+	result := callTool(t, server, "ask_user_question_kandev", args)
+	require.False(t, result.IsError)
+	payload := backend.lastPayload.(map[string]interface{})
+	assert.Equal(t, legacyContext, payload["context"])
 }
 
 func TestAskParentQuestion_JoinsContextParagraphs(t *testing.T) {
@@ -416,9 +469,9 @@ func (b *blockingAskBackend) RequestPayload(ctx context.Context, action string, 
 // result. This is the regression guard for the agent's MCP client aborting the
 // call with "fetch failed" after its idle timeout.
 func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
-	prev := askQuestionKeepAliveInterval
-	askQuestionKeepAliveInterval = 5 * time.Millisecond
-	t.Cleanup(func() { askQuestionKeepAliveInterval = prev })
+	prev := toolKeepAliveInterval
+	toolKeepAliveInterval = 5 * time.Millisecond
+	t.Cleanup(func() { toolKeepAliveInterval = prev })
 
 	release := make(chan struct{})
 	backend := &blockingAskBackend{
@@ -585,6 +638,6 @@ func TestStampTransportRequestID_PreservesExistingMeta(t *testing.T) {
 // documented configuration edge. TestAskUserQuestion_StreamsKeepAliveDuringWait
 // cannot catch a default-value regression because it overrides the interval.
 func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline(t *testing.T) {
-	assert.Greater(t, askQuestionKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
-	assert.LessOrEqual(t, askQuestionKeepAliveInterval, 60*time.Second)
+	assert.Greater(t, toolKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
+	assert.LessOrEqual(t, toolKeepAliveInterval, 20*time.Second)
 }

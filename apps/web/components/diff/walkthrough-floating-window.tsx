@@ -68,11 +68,31 @@ function useDraggableWindow(cardRef: RefObject<HTMLDivElement | null>, isDesktop
     setPosition((current) => current ?? defaultDesktopPosition());
   }, [isDesktop]);
 
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!isDesktop || !card) return;
+    const contain = () => {
+      const { width, height } = card.getBoundingClientRect();
+      setPosition((current) => {
+        if (!current) return current;
+        const next = clampPosition(current, width, height);
+        return next.x === current.x && next.y === current.y ? current : next;
+      });
+    };
+    const observer = new ResizeObserver(contain);
+    observer.observe(card);
+    window.addEventListener("resize", contain);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", contain);
+    };
+  }, [cardRef, isDesktop]);
+
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!isDesktop) return;
     const target = event.target as HTMLElement;
     if (!target.closest("[data-walkthrough-drag-handle]")) return;
-    if (target.closest("button,input,textarea,a")) return;
+    if (target.closest("button,input,textarea,select,option,a")) return;
     const card = cardRef.current;
     if (!card) return;
     event.preventDefault();

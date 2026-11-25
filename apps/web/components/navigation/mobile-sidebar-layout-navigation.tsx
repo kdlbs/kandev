@@ -19,10 +19,7 @@ import type { ResolvedDestination } from "@/lib/navigation/types";
 import type { ShortcutCatalogEntry } from "@/lib/sidebar/shortcut-catalog";
 import type { ShortcutActivityReader } from "@/hooks/domains/sidebar/use-shortcut-activity";
 import { ShortcutSection } from "@/components/app-sidebar/shortcut-section";
-import {
-  ShortcutRows,
-  type ShortcutActivation,
-} from "@/components/app-sidebar/shortcut-section-actions";
+import type { ShortcutActivation } from "@/components/app-sidebar/shortcut-section-actions";
 import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
 import {
   selectNeedsYouInboxCount,
@@ -34,9 +31,15 @@ import { MobileSidebarCustomization } from "./mobile-sidebar-customization";
 import { MobileNewTaskRow } from "./mobile-new-task-row";
 import { DestinationRows } from "./destination-rows";
 import { MobileAutomationsSection } from "./mobile-automations-section";
+import { MobileAutomationRow } from "./mobile-automation-row";
 import { MobileCoordinatorsSection } from "./mobile-coordinators-section";
 import { MobileCanvasesSection } from "./mobile-canvases-section";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
+
+import {
+  integrationPluginLayout,
+  integrationPluginDestinations,
+} from "@/lib/sidebar/integration-plugin-layout";
 
 type MobileSidebarLayoutNavigationProps = {
   quickActions?: ReactNode;
@@ -50,6 +53,7 @@ type MobileLayoutNodeProps = {
   quickActions?: ReactNode;
   homeCoversListings?: boolean;
   node: ProjectedSidebarNode;
+  integrationPlugins: ResolvedDestination[];
   homeDestination?: ResolvedDestination;
   destinationHrefs: Map<string, string | undefined>;
   workspaceId?: string;
@@ -243,12 +247,16 @@ function SavedMobileAutomationRows({
         </div>
       )}
       {!catalog.loading && !catalog.error && (
-        <ShortcutRows
-          shortcuts={resourceShortcuts(node, entries, []).shortcuts}
-          activity={getActivity}
-          mobile
-          onNavigate={onNavigate}
-        />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          {resourceShortcuts(node, entries, []).shortcuts.map((shortcut) => (
+            <MobileAutomationRow
+              key={shortcut.id}
+              shortcut={shortcut}
+              activity={getActivity(shortcut.target.id)}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
       )}
       <Button asChild variant="outline" className="h-11 w-full cursor-pointer justify-start px-3">
         <Link href={workspaceSettingsHref(workspaceId!, "automations")} onClick={onNavigate}>
@@ -259,7 +267,7 @@ function SavedMobileAutomationRows({
   );
 }
 
-function MobilePhoneResource(props: MobileLayoutNodeProps) {
+function MobileResource(props: MobileLayoutNodeProps) {
   const { node, workspaceId, canvasEntries, catalog, omitDestinations, onNavigate } = props;
   switch (node.destinationId) {
     case "automations":
@@ -284,8 +292,8 @@ function MobilePhoneResource(props: MobileLayoutNodeProps) {
         <MobileIntegrationsSection
           onNavigate={onNavigate}
           showSetup
-          collapsible
-          includePlugins={false}
+          collapsible={!!props.homeCoversListings}
+          pluginDestinations={props.integrationPlugins}
           omitDestinations={omitDestinations}
         />
       );
@@ -336,17 +344,12 @@ function MobileBuiltinNodeContent(props: MobileLayoutNodeProps) {
     );
   if (node.destinationId === "coordinators")
     return <MobileCoordinatorsSection onNavigate={onNavigate} />;
-  if (node.destinationId === "integrations" && omitSections.has("integrations")) return null;
-  if (homeCoversListings) return <MobilePhoneResource {...props} />;
+  if (homeCoversListings) return <MobileResource {...props} />;
 
   const entries = catalog.catalog.filter((entry) => {
     if (node.destinationId === "automations") return entry.target.kind === "automation";
     if (node.destinationId === "canvases") return entry.target.kind === "canvas";
-    return (
-      node.destinationId === "integrations" &&
-      entry.section === "integrations" &&
-      entry.source !== "plugin"
-    );
+    return false;
   });
   return (
     <ShortcutSection
@@ -360,6 +363,8 @@ function MobileBuiltinNodeContent(props: MobileLayoutNodeProps) {
 }
 
 function MobileBuiltinNode(props: MobileLayoutNodeProps) {
+  if (props.node.destinationId === "integrations")
+    return props.omitSections.has("integrations") ? null : <MobileResource {...props} />;
   return <MobileBuiltinNodeContent {...props} />;
 }
 
@@ -423,7 +428,11 @@ export function MobileSidebarLayoutNavigation({
     [onNavigate, openQuickChat, openQuickTerminal],
   );
   // The phone projection keeps saved tools in order without rewriting desktop preferences.
-  const visibleNodes = projection.nodes.filter((node) => node.visible);
+  const grouped = integrationPluginLayout(projection.nodes);
+  const integrationPlugins = integrationPluginDestinations(projection.nodes, catalog.catalog);
+  const visibleNodes = (workspaceMode === "office" ? projection.nodes : grouped.topLevel).filter(
+    (node) => node.visible,
+  );
   const hasVisibleHome =
     !omitSections.has("primary") &&
     !omitDestinations.includes("home") &&
@@ -444,6 +453,7 @@ export function MobileSidebarLayoutNavigation({
     <MobileLayoutNode
       key={node.id}
       node={node}
+      integrationPlugins={integrationPlugins}
       homeDestination={homeDestination}
       homeCoversListings={homeCoversListings}
       quickActions={quickActions}

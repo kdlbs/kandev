@@ -215,6 +215,37 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	return nil
 }
 
+// sendNowClaimOwnsEntryTx reports whether the session's open Send Now claim
+// owns the given queue row. The claim, not the row's delivery lease, governs
+// reservation: the replacement prompt may outlive DeliveryReservationTTL, and
+// FIFO must not take the row while the claim still owns it.
+func (r *sqliteRepository) sendNowClaimOwnsEntryTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, entryID string,
+) (bool, error) {
+	var claimJSON string
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT claim_json FROM queue_send_now_claims WHERE session_id = ?
+	`), sessionID).Scan(&claimJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read Send Now claim ownership: %w", err)
+	}
+	var claim SendNowClaim
+	if err := json.Unmarshal([]byte(claimJSON), &claim); err != nil {
+		return false, fmt.Errorf("decode Send Now claim ownership: %w", err)
+	}
+	for i := range claim.Sources {
+		if claim.Sources[i].ID == entryID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *sqliteRepository) ListPendingSendNowClaims(ctx context.Context) ([]PendingSendNowClaim, error) {
 	if err := r.ensureSendNowClaimRecoverySchema(ctx); err != nil {
 		return nil, err
@@ -339,6 +370,179 @@ func (r *sqliteRepository) SetPendingSendNowClaimDelivery(
 	}
 	claim.setDeliverySubmission(protocol, submissionID, payloadHash)
 	return tx.Commit()
+}
+
+// CanReleaseSendNowClaim reports whether this exact claim still owns its
+// session and no successor owns a surviving source.
+func (r *sqliteRepository) CanReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error) {
+	if claim == nil || len(claim.Sources) == 0 {
+		return false, ErrSendNowEmpty
+	}
+	sessionID := claim.Sources[0].SessionID
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin inspect Send Now claim tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return false, err
+	}
+	currentClaimID, found, err := r.sendNowClaimIDTx(ctx, tx, sessionID)
+	if err != nil || !found || currentClaimID != claim.ClaimID {
+		return false, err
+	}
+	return r.sendNowClaimSourcesReleaseableTx(ctx, tx, sessionID, claim)
+}
+
+func (r *sqliteRepository) sendNowClaimSourcesReleaseableTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	claim *SendNowClaim,
+) (bool, error) {
+	stored, err := r.listStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	for _, source := range claim.Sources {
+		entry, ok := stored[source.ID]
+		if !ok {
+			continue
+		}
+		if !entry.message.IsReservedInFlight() && !sameQueuedMessageContent(entry.message, &source) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// ReleaseSendNowClaim removes an unrestorable claim and the source rows it
+// still owns.
+func (r *sqliteRepository) ReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error) {
+	if claim == nil || len(claim.Sources) == 0 {
+		return false, ErrSendNowEmpty
+	}
+	sessionID := claim.Sources[0].SessionID
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin release Send Now claim tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return false, err
+	}
+	currentClaimID, found, err := r.sendNowClaimIDTx(ctx, tx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return r.sendNowReleaseWithoutClaim(ctx, tx, sessionID, claim)
+	}
+	if currentClaimID != claim.ClaimID {
+		// A successor claim owns this session. Leave its rows alone.
+		return false, nil
+	}
+	settled, err := r.releaseStoredSendNowSourcesTx(ctx, tx, sessionID, claim)
+	if err != nil {
+		return false, err
+	}
+	if err := r.deleteExactSendNowClaimTx(ctx, tx, sessionID, claim.ClaimID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return settled, nil
+}
+
+func (r *sqliteRepository) sendNowClaimIDTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+) (string, bool, error) {
+	var claimID string
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT claim_id FROM queue_send_now_claims WHERE session_id = ?
+	`), sessionID).Scan(&claimID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read Send Now claim for release: %w", err)
+	}
+	return claimID, true, nil
+}
+
+func (r *sqliteRepository) releaseStoredSendNowSourcesTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	claim *SendNowClaim,
+) (bool, error) {
+	stored, err := r.listStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	settled := true
+	for _, source := range claim.Sources {
+		entry, ok := stored[source.ID]
+		if !ok {
+			continue
+		}
+		if !entry.message.IsReservedInFlight() && !sameQueuedMessageContent(entry.message, &source) {
+			settled = false
+			continue
+		}
+		if err := r.deleteStoredSendNowSourceTx(ctx, tx, sessionID, source.ID, entry.raw); err != nil {
+			return false, err
+		}
+	}
+	return settled, nil
+}
+
+func (r *sqliteRepository) deleteStoredSendNowSourceTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, entryID, rawMetadata string,
+) error {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages WHERE id = ? AND session_id = ? AND metadata_json = ?
+	`), entryID, sessionID, rawMetadata)
+	if err != nil {
+		return fmt.Errorf("release Send Now source: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrQueueChanged
+	}
+	return nil
+}
+
+func (r *sqliteRepository) sendNowReleaseWithoutClaim(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	claim *SendNowClaim,
+) (bool, error) {
+	stored, err := r.listStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	for _, source := range claim.Sources {
+		if _, ok := stored[source.ID]; ok {
+			// Without our claim row the surviving row may belong to a
+			// successor or FIFO, so it is not ours to remove.
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (r *sqliteRepository) DeletePendingSendNowClaim(ctx context.Context, claim *SendNowClaim) error {

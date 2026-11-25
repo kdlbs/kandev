@@ -166,7 +166,7 @@ workspace's saved default or pick another machine.
 
 ## Admission and execution
 
-Legacy Office `local_pc` selections resolve to the built-in local executor for
+Legacy `local` and `local_pc` selections resolve to the built-in local executor for
 ownership admission only when no actual executor row has that ID. Existing
 rows (including retired rows), inaccessible profiles, unknown IDs, and repository failures never fall
 back through this compatibility alias. Session and inherited-environment checks
@@ -222,9 +222,16 @@ A scheduled/poller trigger uses the creator. Any editor changing prompt,
 repository, triggers, workflow steps, or executor selection on a source targeting
 private compute must be eligible for that resource; otherwise shared-workspace
 edit access could turn the creator into a deputy. Validate the resulting source,
-not only a changed executor field. A later editor never becomes creator
-implicitly. Persist a separate trusted executor actor on tasks created before a
-session exists, and on admitted sessions. WIP queues and recovery restore that
+not only a changed executor field. A retained task or active-session binding that
+admission refuses for every caller (a deleted profile, a retired executor, or a
+missing environment) confers no compute and does not block content edits; every
+binding that still resolves, and every newly written executor selection, keeps
+the strict check, and lookup failures fail closed. A later editor never becomes creator
+implicitly. If a configured workspace default executor no longer resolves,
+workflow edits remain blocked. HTTP returns 409, and WebSocket returns
+`CONFLICT`. Both return `workspace_default_executor_unavailable` without an
+executor ID or ownership details. Persist a separate trusted executor actor on
+tasks created before a session exists, and on admitted sessions. WIP queues and recovery restore that
 actor without reading caller-writable metadata. Preserve it in both the task
 repository and Office legacy table rebuilds. Unknown task actors cannot borrow
 a workspace or workflow owner. Check run authorization before starting a task/session runtime;

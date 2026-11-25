@@ -191,3 +191,60 @@ describe("useStartupProgress validation and cleanup", () => {
     expect(signal?.aborted).toBe(true);
   });
 });
+
+it("retains completed timings after polling stops and clears them for a new restart", async () => {
+  mocks.fetchJson.mockResolvedValue({
+    startup: snapshot({
+      completed_steps: [
+        {
+          id: "database.backup",
+          label_key: "startup.step.database_backup",
+          phase: "backing_up_database",
+          activation_seq: 1,
+          elapsed_ms: 82,
+          completed: true,
+        },
+      ],
+    }),
+  });
+  const { result, rerender } = renderHook(
+    ({ enabled, retain }) => useStartupProgress(enabled, retain),
+    { initialProps: { enabled: true, retain: false } },
+  );
+  await waitFor(() => expect(result.current.snapshot?.completed_steps).toHaveLength(1));
+  rerender({ enabled: false, retain: true });
+  expect(result.current.snapshot?.completed_steps).toHaveLength(1);
+  rerender({ enabled: false, retain: false });
+  await waitFor(() => expect(result.current.snapshot).toBeNull());
+});
+
+// @covers AC-PLATFORM-STARTUP-HOUSEKEEPING-003.3
+it("fetches and freezes the final snapshot when restart completion overtakes progress polling", async () => {
+  vi.useFakeTimers();
+  let resolveFinal!: (value: { startup: StartupSnapshot }) => void;
+  mocks.fetchJson.mockResolvedValueOnce({ startup: snapshot() }).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveFinal = resolve;
+      }),
+  );
+  const { result, rerender } = renderHook(({ retain }) => useStartupProgress(true, retain), {
+    initialProps: { retain: false },
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(result.current.snapshot?.phase).toBe("applying_migrations");
+  rerender({ retain: true });
+  expect(mocks.fetchJson).toHaveBeenCalledTimes(2);
+  const final = snapshot({ phase: "ready", seq: 9, elapsed_ms: 4321 });
+  await act(async () => {
+    resolveFinal({ startup: final });
+    await Promise.resolve();
+  });
+  expect(result.current.snapshot).toEqual(final);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  expect(mocks.fetchJson).toHaveBeenCalledTimes(2);
+});

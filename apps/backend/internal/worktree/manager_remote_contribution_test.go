@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -80,6 +81,45 @@ func TestCreateWorktree_RemoteContributionUsesSourceRemoteAndExactHead(t *testin
 	}
 	if got := strings.TrimSpace(runGit(t, second.Path, "rev-parse", "HEAD")); got != sourceSHA {
 		t.Fatalf("collision worktree HEAD = %q, want source SHA %q", got, sourceSHA)
+	}
+}
+
+func TestCreateWorktree_RemoteContributionKeepsNestedWorkspaceExclusion(t *testing.T) {
+	contributionURL := "https://github.com/contributor/widget.git"
+	sourceBare, sourceSHA := initContributionSource(t)
+	repoPath := initContributionTarget(t)
+	runGit(t, repoPath, "config", "url.file://"+sourceBare+".insteadOf", contributionURL)
+	binding := testRemoteContribution(sourceSHA, contributionURL)
+	cfg := newTestConfig(t)
+	cfg.TasksBasePath = repoPath
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:                "task-contribution-nested",
+		SessionID:             "session-contribution-nested",
+		RepositoryID:          "repo-target",
+		RepositoryPath:        repoPath,
+		BaseBranch:            binding.BaseBranch,
+		CheckoutBranch:        binding.HeadBranch,
+		RemoteContribution:    &binding,
+		TaskDirName:           "task-contribution-nested",
+		RepoName:              "widget",
+		WorkspaceRelativePath: "widget",
+	})
+	if err != nil {
+		t.Fatalf("Create() failed: %v", err)
+	}
+
+	probe := filepath.ToSlash(filepath.Join("task-contribution-nested", "widget", "file.txt"))
+	check := exec.Command("git", "-C", repoPath, "check-ignore", "--no-index", probe)
+	if output, err := check.CombinedOutput(); err != nil {
+		t.Fatalf("nested contribution workspace is not ignored after successful create: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, ".git")); err != nil {
+		t.Fatalf("created contribution worktree is missing: %v", err)
 	}
 }
 

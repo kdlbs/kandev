@@ -197,7 +197,7 @@ func matchDeliveryRecordInstance(instances []*agentctl.InstanceInfo, request Del
 }
 
 func validateDeliveryRecordDescriptor(descriptor journal.RecoveryDescriptor, request DeliveryRecordEvidenceRequest) error {
-	if !descriptor.Durable || descriptor.Version != journal.CurrentVersion {
+	if !descriptor.Durable || !journal.SupportsDeliveryVersion(descriptor.Version) {
 		return ErrDeliveryRecoveryBlocked
 	}
 	if descriptor.SessionID != request.SessionID || descriptor.IncarnationID != request.IncarnationID ||
@@ -263,14 +263,14 @@ func deliveryEvidenceReadError(lease *agentctl.RuntimeLease, err error) error {
 }
 
 func historicalProcessTermination(request DeliveryRecordEvidenceRequest, liveExecutionID string) *bool {
-	if request.ExecutionID != "" && request.ExecutionID == liveExecutionID {
-		terminated := false
-		return &terminated
-	}
 	if request.OriginalRuntime == nil || request.OriginalRuntime.Validate() != nil {
+		if request.ExecutionID != "" && request.ExecutionID == liveExecutionID {
+			terminated := false
+			return &terminated
+		}
 		return nil
 	}
-	terminated, err := processidentity.OwnedSessionTerminated(*request.OriginalRuntime)
+	terminated, err := processidentity.OriginalOwnerTerminated(*request.OriginalRuntime)
 	if err != nil {
 		return nil
 	}

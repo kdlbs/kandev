@@ -1,7 +1,6 @@
 {
   "stats:summaryGit": "The only word is the tool name Git; the rest of the line is the interpolated value.",
   "canvases:releaseOption": "Nothing but interpolated values and punctuation; there is no prose to translate.",
-  "azuredevops:pullRequestStatusAria": "Only the brand acronym and interpolated values; there is no prose to translate.",
   "executors:kubernetesRequestCpu": "Nothing but an interpolated value and the CPU unit; there is no prose to translate.",
   "github:appId": "GitHub's own field name; the Korean catalog keeps GitHub App terms in English, as in the numeric App ID prompt.",
   "github:githubApp": "GitHub product name; the Korean catalog keeps it in English in every GitHub App string.",

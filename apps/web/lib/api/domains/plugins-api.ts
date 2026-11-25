@@ -3,6 +3,8 @@ import { getBackendConfig } from "@/lib/config";
 import type {
   PluginCapabilityApproval,
   PluginCapabilityApprovalContext,
+  PluginIdentityLink,
+  PluginIdentityLinkCode,
   PluginRecord,
   PluginSettings,
   RevokePluginCapabilityApprovalInput,
@@ -10,6 +12,8 @@ import type {
   UpdatePluginCapabilityApprovalInput,
 } from "@/lib/types/plugins";
 import type { ManagedConversationDestinationOption } from "@/lib/types/automation";
+import type { SidebarGroupingProvider } from "@kdlbs/plugin-sdk";
+import { readSidebarGroupingProviders } from "@/lib/plugins/sidebar-grouping-metadata";
 
 const BASE = "/api/plugins";
 
@@ -28,6 +32,13 @@ export async function listManagedConversationDestinations(
 export async function listPlugins(options?: ApiRequestOptions) {
   const res = await fetchJson<{ plugins?: PluginRecord[] }>(BASE, options);
   return res.plugins ?? [];
+}
+
+export async function listSidebarGroupingProviders(): Promise<readonly SidebarGroupingProvider[]> {
+  const response = await fetchJson<{ groupings?: unknown }>(`${BASE}/sidebar-groupings`, {
+    cache: "no-store",
+  });
+  return readSidebarGroupingProviders(response.groupings) ?? [];
 }
 
 // getPlugin fetches a single plugin record by id. Rejects with a 404
@@ -255,6 +266,44 @@ export async function revokePluginCapabilityApproval(
         body: JSON.stringify(input),
       },
     },
+  );
+}
+
+// listPluginIdentityLinks returns the caller's external accounts linked
+// through this plugin; scope "all" returns every link and requires an admin.
+export async function listPluginIdentityLinks(
+  pluginId: string,
+  scope: "own" | "all",
+  options?: ApiRequestOptions,
+): Promise<PluginIdentityLink[]> {
+  const query = scope === "all" ? "?scope=all" : "";
+  const response = await fetchJson<{ links?: PluginIdentityLink[] }>(
+    `${BASE}/${encodeURIComponent(pluginId)}/identity-links${query}`,
+    options,
+  );
+  return response.links ?? [];
+}
+
+// createPluginIdentityLinkCode issues a single-use code that links the
+// external account presenting it, through this plugin, to the caller.
+export async function createPluginIdentityLinkCode(
+  pluginId: string,
+  options?: ApiRequestOptions,
+): Promise<PluginIdentityLinkCode> {
+  return fetchJson<PluginIdentityLinkCode>(
+    `${BASE}/${encodeURIComponent(pluginId)}/identity-links/codes`,
+    { ...options, init: { ...(options?.init ?? {}), method: "POST" } },
+  );
+}
+
+export async function revokePluginIdentityLink(
+  pluginId: string,
+  linkId: string,
+  options?: ApiRequestOptions,
+): Promise<void> {
+  await fetchJson<void>(
+    `${BASE}/${encodeURIComponent(pluginId)}/identity-links/${encodeURIComponent(linkId)}`,
+    { ...options, init: { ...(options?.init ?? {}), method: "DELETE" } },
   );
 }
 

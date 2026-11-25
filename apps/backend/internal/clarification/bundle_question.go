@@ -1,6 +1,8 @@
 package clarification
 
 import (
+	"encoding/json"
+	"github.com/kandev/kandev/internal/clarification/protocol"
 	"sort"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -30,9 +32,8 @@ func orderBundleMessages(msgs []*taskmodels.Message) []*taskmodels.Message {
 
 // bundleQuestions builds the D2/L5-ordered Question list for a bundle,
 // parsing each message's full question metadata (id, title, prompt and
-// options). Unlike questionsFromMessages (handlers.go), used only for the
-// resume-summary path, this parses options too: N8 needs them to validate
-// selected_options membership and N3a rule 2 needs their order.
+// options). Validation, answer application, and resume summaries use this
+// representation; N8 checks option membership and N3a rule 2 needs option order.
 //
 // A message with unparseable `question` metadata (L15) yields a Question
 // carrying only its question_id, with empty title/prompt and no options. A
@@ -52,12 +53,13 @@ func bundleQuestions(msgs []*taskmodels.Message) []Question {
 // question_id (not id, which list_pending_questions_kandev callers never
 // see), plus the question's D3 effective status. Options is never nil (L4a).
 type QuestionStatus struct {
-	QuestionID      string   `json:"question_id"`
-	Title           string   `json:"title"`
-	Prompt          string   `json:"prompt"`
-	Status          string   `json:"status"`
-	Options         []Option `json:"options"`
-	AllowCustomText *bool    `json:"allow_custom_text,omitempty"`
+	QuestionID      string                  `json:"question_id"`
+	Title           string                  `json:"title"`
+	Prompt          string                  `json:"prompt"`
+	Status          string                  `json:"status"`
+	Options         []Option                `json:"options"`
+	AllowCustomText *bool                   `json:"allow_custom_text,omitempty"`
+	Images          protocol.QuestionImages `json:"images,omitempty"`
 }
 
 // BundleQuestionStatuses builds the D2/L5-ordered, L4-shaped question list
@@ -82,6 +84,7 @@ func BundleQuestionStatuses(msgs []*taskmodels.Message) []QuestionStatus {
 			Status:          effectiveMessageStatus(m),
 			Options:         options,
 			AllowCustomText: q.AllowCustomText,
+			Images:          q.Images,
 		})
 	}
 	return out
@@ -116,6 +119,12 @@ func questionFromMessageMetadataFull(meta map[string]any) Question {
 		q.AllowCustomText = &v
 	}
 	q.Options = optionsFromQuestionData(qData)
+	if raw, ok := qData["images"]; ok {
+		data, err := json.Marshal(raw)
+		if err == nil {
+			_ = json.Unmarshal(data, &q.Images)
+		}
+	}
 	return q
 }
 
@@ -165,6 +174,11 @@ func optionsFromQuestionData(qData map[string]any) []Option {
 		}
 		if v, ok := om["description"].(string); ok {
 			opt.Description = v
+		}
+		if raw, ok := om["images"]; ok {
+			if data, err := json.Marshal(raw); err == nil {
+				_ = json.Unmarshal(data, &opt.Images)
+			}
 		}
 		out = append(out, opt)
 	}

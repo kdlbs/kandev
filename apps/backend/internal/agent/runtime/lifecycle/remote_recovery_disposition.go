@@ -1,0 +1,211 @@
+package lifecycle
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+func (m *Manager) settleRemoteRecoveryAbsence(
+	ctx context.Context,
+	entry *remoteRecoveryRetry,
+	attemptRecord *models.ExecutorRunning,
+	rowPresent bool,
+	outcome RecoveryCandidateOutcome,
+) (bool, error) {
+	if !remoteRecoveryAbsenceEligible(entry, outcome) {
+		return false, nil
+	}
+	if remoteRecoveryAbsenceNeedsStoppedAgentProof(entry.snapshot, outcome) {
+		return false, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := validateRemoteRecoveryAbsenceAttempt(entry, attemptRecord); err != nil {
+		return false, err
+	}
+	writer, absentWriter, err := remoteRecoveryAbsencePersistence(m.runningWriter)
+	if err != nil {
+		return false, err
+	}
+	if !m.remoteRecoveryAbsenceDispositionAllowed(ctx, entry) {
+		return false, nil
+	}
+	ownerLocks := remoteRecoveryOwnerLockIDs(entry.snapshot)
+	validateOwner := func(ownerCtx context.Context) error {
+		if !m.remoteRecoveryAbsenceDispositionAllowed(ownerCtx, entry) {
+			return errRemoteRecoveryFenced
+		}
+		return m.validateRemoteRecoveryAbsenceCurrentOwner(ownerCtx, entry, attemptRecord, rowPresent)
+	}
+	if rowPresent {
+		if err := writer.RepairExecutorRunningDeadIfOwnerCurrent(
+			ctx, entry.record.SessionID, attemptRecord.AgentExecutionID, attemptRecord.UpdatedAt,
+			ownerLocks, validateOwner,
+		); err != nil {
+			return false, fmt.Errorf("repair confirmed absent remote executor row: %w", err)
+		}
+	} else if err := absentWriter.ConfirmExecutorRunningAbsentIfOwnerCurrent(
+		ctx, entry.record.SessionID, ownerLocks, validateOwner,
+	); err != nil {
+		return false, fmt.Errorf("confirm absent remote executor row: %w", err)
+	}
+
+	m.completeRemoteRecoveryAbsence(entry, ctx)
+	return true, nil
+}
+
+func remoteRecoveryAbsenceNeedsStoppedAgentProof(snapshot *RemoteRecoverySnapshot, outcome RecoveryCandidateOutcome) bool {
+	if !remoteRecoveryNeedsStoppedAgentProof(snapshot) {
+		return false
+	}
+	return snapshot.Runtime != string(agentruntime.RuntimeRemoteDocker) || outcome != RecoveryOutcomeRecordedResourceAbsent
+}
+
+func remoteRecoveryAbsenceEligible(entry *remoteRecoveryRetry, outcome RecoveryCandidateOutcome) bool {
+	if entry == nil || entry.record == nil || !remoteRecoveryOutcomeProvesAbsence(entry.record.Runtime, outcome) ||
+		!remoteRecoveryNoMatchProvesStopped(entry.record.Runtime) || remoteRecoveryOwnerUnsupported(entry.record) {
+		return false
+	}
+	if entry.record.Runtime == agentruntime.RuntimeRemoteDocker && outcome == RecoveryOutcomeRecordedResourceAbsent {
+		_, containerID, ok := remoteDockerRecoveryRequest(entry.record)
+		return ok && containerID != ""
+	}
+	return true
+}
+
+func remoteRecoveryOutcomeProvesAbsence(runtime agentruntime.Runtime, outcome RecoveryCandidateOutcome) bool {
+	if outcome == RecoveryOutcomeNoMatchingInstance {
+		return true
+	}
+	return runtime == agentruntime.RuntimeRemoteDocker && outcome == RecoveryOutcomeRecordedResourceAbsent
+}
+
+func validateRemoteRecoveryAbsenceAttempt(entry *remoteRecoveryRetry, attemptRecord *models.ExecutorRunning) error {
+	if !sameRemoteRecoveryRecordOwner(entry.record, attemptRecord) || attemptRecord.UpdatedAt.IsZero() {
+		return errors.New("remote recovery attempt did not retain its observed runtime row")
+	}
+	return nil
+}
+
+func remoteRecoveryAbsencePersistence(writer ExecutorRunningWriter) (executorRunningOwnerCASWriter, executorRunningOwnerAbsentWriter, error) {
+	casWriter, hasWriter := writer.(executorRunningOwnerCASWriter)
+	absentWriter, hasAbsentWriter := writer.(executorRunningOwnerAbsentWriter)
+	if !hasWriter || !hasAbsentWriter {
+		return nil, nil, errors.New("remote recovery absence repair requires owner-locked runtime row compare-and-set support")
+	}
+	return casWriter, absentWriter, nil
+}
+
+func (m *Manager) validateRemoteRecoveryAbsenceCurrentOwner(
+	ctx context.Context,
+	entry *remoteRecoveryRetry,
+	attemptRecord *models.ExecutorRunning,
+	rowPresent bool,
+) error {
+	var owner *RemoteRecoverySnapshot
+	var err error
+	if rowPresent {
+		owner, err = m.remoteRecoverySnapshot(ctx, entry.record.SessionID)
+	} else {
+		provider, ok := m.workspaceInfoProvider.(RemoteRecoveryAbsenceSnapshotProvider)
+		if !ok || provider == nil {
+			return errors.New("remote recovery absence owner snapshot provider is unavailable")
+		}
+		owner, err = provider.GetRemoteRecoveryAbsenceSnapshot(ctx, attemptRecord)
+	}
+	if err != nil {
+		return fmt.Errorf("re-read remote recovery owner before absence repair: %w", err)
+	}
+	if !sameRemoteRecoveryOwner(entry.snapshot, owner, entry.record) {
+		return errRemoteRecoveryFenced
+	}
+	if err := validateRemoteRecoverySnapshot(owner, entry.record); err != nil || remoteRecoverySnapshotFences(owner) {
+		if err != nil {
+			return fmt.Errorf("remote recovery owner is no longer eligible for absence repair: %w", err)
+		}
+		return errors.New("remote recovery owner is fenced from absence repair")
+	}
+	return nil
+}
+
+func remoteRecoveryOwnerLockIDs(snapshot *RemoteRecoverySnapshot) models.RemoteRecoveryOwnerLockIDs {
+	if snapshot == nil {
+		return models.RemoteRecoveryOwnerLockIDs{}
+	}
+	return models.RemoteRecoveryOwnerLockIDs{
+		TaskID: snapshot.TaskID, SessionID: snapshot.SessionID, WorkspaceID: snapshot.TaskWorkspaceID,
+		EnvironmentID: snapshot.TaskEnvironmentID, EnvironmentOwnerTaskID: snapshot.EnvironmentOwnerTaskID,
+	}
+}
+
+func (m *Manager) completeRemoteRecoveryAbsence(entry *remoteRecoveryRetry, ctx context.Context) {
+	m.remoteRecoveryMu.Lock()
+	defer m.remoteRecoveryMu.Unlock()
+	if !m.completeRemoteRecoveryDispositionLocked(entry, ctx) {
+		return
+	}
+	delete(m.remoteRecoveryPending, entry.record.SessionID)
+	m.recoveryGuard.Release(entry.record.SessionID)
+}
+
+func (m *Manager) completeStoppedRemoteRecovery(entry *remoteRecoveryRetry, ctx context.Context) bool {
+	if entry == nil || entry.record == nil {
+		return false
+	}
+	m.remoteRecoveryMu.Lock()
+	defer m.remoteRecoveryMu.Unlock()
+	if !m.completeRemoteRecoveryDispositionLocked(entry, ctx) {
+		return false
+	}
+	delete(m.remoteRecoveryPending, entry.record.SessionID)
+	m.recoveryGuard.Release(entry.record.SessionID)
+	return true
+}
+
+func (m *Manager) completeRemoteRecoveryDispositionLocked(entry *remoteRecoveryRetry, ctx context.Context) bool {
+	if entry == nil || entry.record == nil || m.remoteRecoveryPending[entry.record.SessionID] != entry ||
+		!entry.inProgress || entry.stopRequested || m.shuttingDown.Load() || ctx == nil || ctx.Err() != nil ||
+		m.remoteRecoverySessionTracked(entry) {
+		return false
+	}
+	select {
+	case <-m.stopCh:
+		return false
+	default:
+	}
+	return true
+}
+
+func (m *Manager) remoteRecoveryAbsenceAttemptCurrent(entry *remoteRecoveryRetry) bool {
+	if entry == nil || entry.record == nil {
+		return false
+	}
+	m.remoteRecoveryMu.Lock()
+	defer m.remoteRecoveryMu.Unlock()
+	if m.remoteRecoveryPending[entry.record.SessionID] != entry || !entry.inProgress || entry.stopRequested || m.shuttingDown.Load() {
+		return false
+	}
+	select {
+	case <-m.stopCh:
+		return false
+	default:
+		return true
+	}
+}
+
+func (m *Manager) remoteRecoveryAbsenceDispositionAllowed(ctx context.Context, entry *remoteRecoveryRetry) bool {
+	return ctx.Err() == nil && m.remoteRecoveryAbsenceAttemptCurrent(entry) && !m.remoteRecoverySessionTracked(entry)
+}
+
+func (m *Manager) remoteRecoverySessionTracked(entry *remoteRecoveryRetry) bool {
+	if entry == nil || entry.record == nil {
+		return false
+	}
+	_, tracked := m.executionStore.GetBySessionID(entry.record.SessionID)
+	return tracked
+}

@@ -8,11 +8,15 @@ describe("getWorkspaceSettingsTabs", () => {
     expect(tabs.map((entry) => entry.tab)).not.toContain("coordinators");
   });
 
-  it("includes coordinators, after secrets, when the coordinator flag is on", () => {
+  it("keeps MCP servers between secrets and coordinators when the flag is on", () => {
     const tabs = getWorkspaceSettingsTabs(true, true);
     const tabNames = tabs.map((entry) => entry.tab);
     expect(tabNames).toContain("coordinators");
-    expect(tabNames.indexOf("coordinators")).toBe(tabNames.indexOf("secrets") + 1);
+    expect(tabNames.slice(tabNames.indexOf("secrets"))).toEqual([
+      "secrets",
+      "mcp-servers",
+      "coordinators",
+    ]);
   });
 });
 

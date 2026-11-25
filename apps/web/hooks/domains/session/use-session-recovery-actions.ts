@@ -1,10 +1,15 @@
 import { claimSessionRecovery, usePendingSessionRecovery } from "./session-recovery-pending";
-import { useCallback, useEffect, useState } from "react";
-import type { TFunction } from "i18next";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
 import { isProviderRestoredResumeEligible } from "./session-recovery-eligibility";
+import {
+  beginSessionRecoveryGuidanceOperation,
+  clearSessionRecoveryGuidance,
+  matchesContinuationDetailsToIdentity,
+  publishSessionRecoveryGuidance,
+} from "@/lib/session/session-recovery-guidance";
 import {
   deliveryRecoveryRequestIdentity,
   canResumeDeliveryBlock,
@@ -12,10 +17,7 @@ import {
   persistedDeliveryRecoveryNotice,
 } from "./session-delivery-recovery-view";
 import {
-  asRecoveryError,
-  runtimeCleanupFailureCauses,
-  runtimeCleanupFailureDetails,
-  resolveRequestErrorMessage,
+  recoveryFailureCauses,
   branchRecoveryDetails,
   contextContinuationDetails,
   getWorkspaceRecoveryStatus,
@@ -25,14 +27,14 @@ import {
   restoreSessionWorkspace,
   sessionDeliveryRecoveryMessage,
   sessionRecoveryGuardDetails,
-  sessionRecoveryGuardMessage,
   type BranchRecoveryDetails,
-  type ContextContinuationDetails,
   type SessionRecoveryAction,
   type SessionDeliveryRecoveryResponse,
   type SessionRecoveryGuardDetails,
 } from "@/lib/services/session-recovery-service";
+import { combineRecoveryErrors, guardOrFallbackError } from "./session-recovery-action-errors";
 import type { SessionRecoveryNoticeKind } from "./use-session-resumption";
+import { useSessionRecoveryGuidance } from "./use-session-recovery-guidance";
 import {
   useRecoveryOperationFence,
   recoveryFailureAssociation,
@@ -59,39 +61,13 @@ type SessionRecoveryActionsOptions = {
   onDeliveryReconciled?: () => void;
 };
 
-function combineRecoveryErrors(
-  resumeError: Error | null,
-  restoreError: Error | null,
-  translate: TFunction,
-): Error | null {
-  if (!resumeError || !restoreError) return restoreError ?? resumeError;
-  return new Error(
-    translate("task:resumeAndRestoreFailed", {
-      resumeError: resumeError.message,
-      restoreError: restoreError.message,
-    }),
-  );
-}
-
-function guardOrFallbackError(
-  cause: unknown,
-  guard: SessionRecoveryGuardDetails | null,
-  translate: TFunction,
-  fallback: string,
-): Error {
-  if (guard) return new Error(sessionRecoveryGuardMessage(guard, translate));
-  if (runtimeCleanupFailureDetails(cause))
-    return new Error(resolveRequestErrorMessage(cause, translate, fallback));
-  return asRecoveryError(cause, fallback);
-}
-
 type WorkspaceRecoveryStatusRead = {
   resolved: boolean;
   projection: import("@/lib/types/http").WorkspaceRecoveryProjection | null;
 };
 
 /** Owns shared manual recovery state while a failed session remains visible. */
-// eslint-disable-next-line max-lines-per-function -- the hook owns one coherent recovery state machine.
+// eslint-disable-next-line complexity, max-lines-per-function -- The mounted session owns one operation-fenced recovery state machine.
 export function useSessionRecoveryActions({
   taskId,
   sessionId,
@@ -148,6 +124,13 @@ export function useSessionRecoveryActions({
     deliveryRecoveryBlock,
   );
   const requestKey = `${taskId}\u0000${sessionId}\u0000${deliveryRecoveryKey ?? errorStamp ?? ""}`;
+  const requestKeyRef = useRef(requestKey);
+  requestKeyRef.current = requestKey;
+  const {
+    owner,
+    identityRef: guidanceIdentityRef,
+    entry: continuationGuidance,
+  } = useSessionRecoveryGuidance(taskId, sessionId, selectedSession, errorStamp);
   const { beginOperation, isCurrentOperation, isCurrentSession, matchesLatestErrorStamp } =
     useRecoveryOperationFence(requestKey, sessionKey, errorStamp);
   const [busyAction, setBusyAction] = useState<SessionRecoveryBusyAction>(null);
@@ -155,9 +138,6 @@ export function useSessionRecoveryActions({
   const [restoreError, setRestoreError] = useState<Error | null>(null);
   const [branchDetails, setBranchDetails] = useState<BranchRecoveryDetails | null>(null);
   const [guardDetails, setGuardDetails] = useState<SessionRecoveryGuardDetails | null>(null);
-  const [continuationDetails, setContinuationDetails] = useState<ContextContinuationDetails | null>(
-    null,
-  );
   const [managedCloneRecoveryStamp, setManagedCloneRecoveryStamp] = useState<string | null>(null);
   const [lastFailedAction, setLastFailedAction] = useState<SessionRecoveryAction | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
@@ -179,7 +159,6 @@ export function useSessionRecoveryActions({
     setRestoreError(null);
     setBranchDetails(null);
     setGuardDetails(null);
-    setContinuationDetails(null);
     setManagedCloneRecoveryStamp(null);
     setLastFailedAction(null);
     setRecoveryNotice(null);
@@ -258,9 +237,27 @@ export function useSessionRecoveryActions({
   }, [beginOperation, reconcileWorkspaceRecoveryStatus]);
 
   const handleRecoveryFailure = useCallback(
-    (cause: unknown, operation: RecoveryOperation, action: SessionRecoveryAction) => {
+    (
+      cause: unknown,
+      operation: RecoveryOperation,
+      action: SessionRecoveryAction,
+      guidanceOperation: ReturnType<typeof beginSessionRecoveryGuidanceOperation>,
+    ) => {
+      const currentIdentity = guidanceIdentityRef.current;
+      const continuationDetails = contextContinuationDetails(cause, {
+        sessionId,
+        generation: currentIdentity.generation,
+        blockId: currentIdentity.blockId,
+        incarnationId: currentIdentity.incarnationId,
+      });
+      const continuationMatchesCurrent = matchesContinuationDetailsToIdentity(
+        continuationDetails,
+        currentIdentity,
+      );
       const association = recoveryFailureAssociation({
         cause,
+        continuationMatchesCurrent,
+        continuationRequestKey: requestKeyRef.current,
         operation,
         errorStamp,
         taskId,
@@ -294,13 +291,15 @@ export function useSessionRecoveryActions({
       setRestoreError(null);
       setBranchDetails(guard ? null : branchRecoveryDetails(cause));
       setGuardDetails(guard);
-      setContinuationDetails(contextContinuationDetails(cause));
+      if (continuationDetails) {
+        publishSessionRecoveryGuidance(owner, guidanceOperation, cause, currentIdentity);
+      }
       setLastFailedAction(action);
       setRecoveryNotice(null);
       setRecoveryNoticeKind(null);
       setManualRecoveryFailure({
         operation: "resume",
-        causes: runtimeCleanupFailureCauses(cause, sessionId),
+        causes: recoveryFailureCauses(cause, sessionId),
         sessionId,
         errorStamp: associatedStamp,
         requestKey,
@@ -312,6 +311,7 @@ export function useSessionRecoveryActions({
       isCurrentOperation,
       isCurrentSession,
       matchesLatestErrorStamp,
+      owner,
       sessionId,
       taskId,
       t,
@@ -340,19 +340,25 @@ export function useSessionRecoveryActions({
     [errorStamp, managedCloneRecoveryStamp, providerRestoredResumeEligible, sessionId, taskId, t],
   );
 
-  const clearRecoveryResult = useCallback((operation: RecoveryOperation) => {
-    setLocalResultRequestKey(operation.requestKey);
-    setResumeError(null);
-    setRestoreError(null);
-    setBranchDetails(null);
-    setGuardDetails(null);
-    setContinuationDetails(null);
-    setManagedCloneRecoveryStamp(null);
-    setLastFailedAction(null);
-    setRecoveryNotice(null);
-    setRecoveryNoticeKind(null);
-    setManualRecoveryFailure(null);
-  }, []);
+  const clearRecoveryResult = useCallback(
+    (
+      operation: RecoveryOperation,
+      guidanceOperation: ReturnType<typeof beginSessionRecoveryGuidanceOperation>,
+    ) => {
+      setLocalResultRequestKey(operation.requestKey);
+      setResumeError(null);
+      setRestoreError(null);
+      setBranchDetails(null);
+      setGuardDetails(null);
+      setManagedCloneRecoveryStamp(null);
+      setLastFailedAction(null);
+      setRecoveryNotice(null);
+      setRecoveryNoticeKind(null);
+      setManualRecoveryFailure(null);
+      clearSessionRecoveryGuidance(owner, guidanceOperation, guidanceIdentityRef.current);
+    },
+    [owner],
+  );
 
   const clearInspectionContentionNotice = useCallback(() => {
     if (recoveryNoticeKind !== "inspection_busy") return;
@@ -363,7 +369,10 @@ export function useSessionRecoveryActions({
   }, [recoveryNoticeKind, requestKey]);
 
   const reconcileFailedRelocation = useCallback(
-    async (operation: RecoveryOperation): Promise<boolean> => {
+    async (
+      operation: RecoveryOperation,
+      guidanceOperation: ReturnType<typeof beginSessionRecoveryGuidanceOperation>,
+    ): Promise<boolean> => {
       const status = await reconcileWorkspaceRecoveryStatus(operation);
       if (!status.resolved) return true;
       const projection = status.projection;
@@ -379,7 +388,7 @@ export function useSessionRecoveryActions({
       ) {
         return false;
       }
-      if (isCurrentOperation(operation)) clearRecoveryResult(operation);
+      if (isCurrentOperation(operation)) clearRecoveryResult(operation, guidanceOperation);
       return true;
     },
     [
@@ -397,10 +406,21 @@ export function useSessionRecoveryActions({
       const release = claimSessionRecovery(pendingKey, action);
       if (!release) return false;
       const operation = beginOperation();
+      const guidanceOperation = beginSessionRecoveryGuidanceOperation(
+        owner,
+        guidanceIdentityRef.current,
+      );
       setWorkspaceRecoveryStatusCheck("idle");
       setBusyAction(action);
       try {
         const result = await requestRecovery(action);
+        if (
+          action !== "retry_connection" ||
+          !result ||
+          ["attached", "settled", "continued"].includes(result.outcome)
+        ) {
+          clearSessionRecoveryGuidance(owner, guidanceOperation);
+        }
         if (!isCurrentOperation(operation)) return false;
         if (action === "retry_connection" && result) {
           setLocalResultRequestKey(operation.requestKey);
@@ -410,12 +430,15 @@ export function useSessionRecoveryActions({
         } else {
           setDeliveryRecoveryNotice(null);
           setDeliveryRecoveryResult(null);
-          clearRecoveryResult(operation);
+          clearRecoveryResult(operation, guidanceOperation);
         }
       } catch (cause) {
-        if (action === "relocate_and_resume" && (await reconcileFailedRelocation(operation)))
+        if (
+          action === "relocate_and_resume" &&
+          (await reconcileFailedRelocation(operation, guidanceOperation))
+        )
           return false;
-        handleRecoveryFailure(cause, operation, action);
+        handleRecoveryFailure(cause, operation, action, guidanceOperation);
         return false;
       } finally {
         release();
@@ -428,6 +451,7 @@ export function useSessionRecoveryActions({
       clearRecoveryResult,
       handleRecoveryFailure,
       isCurrentOperation,
+      owner,
       pendingKey,
       reconcileFailedRelocation,
       requestRecovery,
@@ -440,6 +464,10 @@ export function useSessionRecoveryActions({
     const release = claimSessionRecovery(pendingKey, "restore");
     if (!release) return;
     const operation = beginOperation();
+    const guidanceOperation = beginSessionRecoveryGuidanceOperation(
+      owner,
+      guidanceIdentityRef.current,
+    );
     setBusyAction("restore");
     setRestoreError(null);
     try {
@@ -451,7 +479,7 @@ export function useSessionRecoveryActions({
       setRestoreError(null);
       setBranchDetails(null);
       setGuardDetails(null);
-      setContinuationDetails(null);
+      clearSessionRecoveryGuidance(owner, guidanceOperation, guidanceIdentityRef.current);
       setManagedCloneRecoveryStamp(null);
       setLastFailedAction(null);
       setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly"));
@@ -510,6 +538,7 @@ export function useSessionRecoveryActions({
     isCurrentOperation,
     isCurrentSession,
     matchesLatestErrorStamp,
+    owner,
     pendingKey,
     sessionId,
     taskId,
@@ -550,7 +579,7 @@ export function useSessionRecoveryActions({
       localResultIsCurrent,
       managedCloneRecoveryStamp,
     ),
-    continuationDetails: currentRecoveryValue(localResultIsCurrent, continuationDetails),
+    continuationDetails: continuationGuidance?.details ?? null,
     workspaceRecovery,
     workspaceRecoveryMatchesCurrentFailure: workspaceRecoveryMatchesFailure(
       workspaceRecovery,

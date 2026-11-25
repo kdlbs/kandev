@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { materializeReusableChatPanel, normalizeReusableSessionPanels } from "./session-panels";
 import type { LayoutGroup, LayoutPanel, LayoutState } from "./types";
@@ -219,4 +219,46 @@ it("removes groups that become empty only after duplicate session tabs are disca
   );
 
   expect(materialized.columns[0]?.groups.map((group) => group.id)).toEqual([CENTER_GROUP_ID]);
+});
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe("root orientation through Agent rewrites", () => {
+  function orientedLayout(rootOrientation?: "VERTICAL" | "HORIZONTAL"): LayoutState {
+    return {
+      ...(rootOrientation ? { rootOrientation } : {}),
+      columns: [
+        {
+          id: "center",
+          width: 500,
+          groups: [
+            {
+              id: CENTER_GROUP_ID,
+              activePanel: OLD_SESSION_PANEL_ID,
+              panels: [oldSessionPanel(), panel("changes")],
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it.each(["VERTICAL", "HORIZONTAL"] as const)(
+    "keeps an explicit %s orientation when normalizing and materializing the Agent",
+    (rootOrientation) => {
+      const input = orientedLayout(rootOrientation);
+
+      const normalized = normalizeReusableSessionPanels(input);
+      const materialized = materializeReusableChatPanel(input, NEW_SESSION_ID);
+
+      expect(normalized.rootOrientation).toBe(rootOrientation);
+      expect(materialized.rootOrientation).toBe(rootOrientation);
+      expect(normalized.columns[0]?.width).toBe(500);
+    },
+  );
+
+  it("leaves a legacy layout without an orientation unspecified", () => {
+    const normalized = normalizeReusableSessionPanels(orientedLayout());
+
+    expect("rootOrientation" in normalized).toBe(false);
+  });
 });

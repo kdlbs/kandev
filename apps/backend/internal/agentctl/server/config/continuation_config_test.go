@@ -22,7 +22,10 @@ func TestLegacyContinuationStartupSettingIsIgnored(t *testing.T) {
 	managed, err := LoadWithStartup(startup)
 	require.NoError(t, err)
 	standalone := Load()
-	instance := managed.NewInstanceConfig(41001, nil)
+	instance, err := managed.NewInstanceConfig(41001, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, typ := range []reflect.Type{reflect.TypeOf(startup), reflect.TypeOf(managed).Elem(), reflect.TypeOf(standalone).Elem(), reflect.TypeOf(instance).Elem()} {
 		_, exists := typ.FieldByName("ProviderInterruptionContinuation")
 		require.False(t, exists, "%s must not carry the retired setting", typ)

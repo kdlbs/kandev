@@ -4,6 +4,20 @@ for (const width of [390, 767, 768, 900]) {
   test(`touch help preserves the draft and returns focus at ${width}px`, async ({ testPage }) => {
     await testPage.setViewportSize({ width, height: 844 });
     await testPage.goto("/settings/preferences/task-behavior");
+    const description = (await testPage.locator("#mcp-task-profile-description").boundingBox())!;
+    const choices = testPage.locator('label[for^="mcp-task-profile-"]');
+    await expect(choices).toHaveCount(2);
+    const first = (await choices.nth(0).boundingBox())!;
+    const second = (await choices.nth(1).boundingBox())!;
+    expect(first.y).toBeGreaterThanOrEqual(description.y + description.height);
+    expect(Math.abs(first.x - description.x)).toBeLessThanOrEqual(1);
+    expect(first.height).toBeGreaterThanOrEqual(44);
+    expect(second.height).toBeGreaterThanOrEqual(44);
+    if (width < 768) {
+      expect(second.y).toBeGreaterThanOrEqual(first.y + first.height);
+    } else {
+      expect(Math.abs(first.y - second.y)).toBeLessThanOrEqual(1);
+    }
     const toggle = testPage.locator("#creation-auto-focus");
     await toggle.tap();
     const draft = await toggle.getAttribute("aria-checked");

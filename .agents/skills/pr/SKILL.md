@@ -58,7 +58,8 @@ explicitly requests task tracking.
    writes a shared registry, and verify the target tag/digest exists.
 
 4. **Screenshots — capture and validate before publication.** For GitHub UI
-   changes, verify the attachment prerequisites in step 7 before capture. For
+   changes, choose the publication route in step 7 before capture. Check native
+   attachment prerequisites only when using native uploads. For
    every host, capture fresh screenshots for every affected viewport of a
    UI-visible change before creating the PR. For repository UI, use
    `/playwright-cli` with an isolated headless
@@ -67,9 +68,17 @@ explicitly requests task tracking.
    on another viewport, record that rationale instead of capturing an unrelated
    screen.
    Use synthetic or redacted data, validate the assets, and compress PNGs using
-   the recipe in step 7. If capture is impossible, report the concrete blocker
-   and stop before PR publication. For non-UI changes, record that screenshots
-   are not required and continue.
+   the recipe in step 7. If capture is impossible, document the concrete
+   blocker in the PR description and continue publication. The screenshot check
+   will fail until evidence is added or a maintainer applies
+   `no-screenshots-allow`. UI candidate PRs should include a fresh HTTPS
+   Markdown image with descriptive alt text in `## Screenshots` when capture is
+   possible.
+   The `UI screenshots` status applies to fork PRs too and checks presence;
+   reviewers assess freshness, visibility, relevance, and affected viewport
+   coverage. Only a maintainer can apply the exact `no-screenshots-allow` label
+   for a false positive or explained capture limitation. For non-UI changes,
+   record that screenshots are not required and continue.
 
 5. **Create the PR.** Before creating, check open PRs for the current branch and
    inspect task-linked PR metadata. Reuse an existing PR; create a duplicate only
@@ -102,7 +111,7 @@ explicitly requests task tracking.
    - Remove all HTML comments/placeholders from the final body.
    - Do NOT add tool attribution footers.
    - Before creating the PR, self-check that the final body has no `<!--`, no empty required sections, and no placeholder text.
-   - If the diff touches user-visible UI, append the already captured assets in a `## Screenshots` section after the PR is created (step 7) — don't add a placeholder for it here.
+   - If the diff touches user-visible UI, add the already captured assets under the template's `## Screenshots` heading after the PR is created (step 7).
    ```bash
    test -f .github/pull_request_template.md
    # Build /tmp/pr-body.md from the template, using comments as instructions
@@ -153,6 +162,12 @@ required screenshot embedding in step 7 is complete.
    - For disposable capture specs, prefer the existing `prCapture` fixture from
      `apps/web/e2e/fixtures/test-base.ts`; it writes the expected filenames and
      manifest for PR assets.
+   - Keep captures for one spec file in a single test and use that test's one
+     shared `prCapture` instance. Each test fixture flushes, and
+     `PrAssetCapture.flush()` replaces manifest entries with the same capture
+     key, so multiple tests or default-key instances leave only the last
+     flush's assets. If multiple instances are necessary, give them distinct
+     `captureKey` values or use separate spec files.
    - `apps/web/e2e/scripts/run-e2e.sh` clears `.pr-assets` at the start of each
      managed-runner invocation. Capture desktop and mobile assets in one
      invocation when possible; if separate runs are necessary, preserve/merge
@@ -196,18 +211,27 @@ required screenshot embedding in step 7 is complete.
      fi
      ```
 
-   **Embed (GitHub only):** Upload screenshots with native `gh --attach`.
-   Require GitHub CLI **2.99.0 or newer**, confirm `gh pr comment --help` lists
-   `--attach`, and verify authenticated repository push access. Determine the
-   target hostname from `git remote get-url origin` before capture. For a
-   custom GitHub hostname, establish its deployment type and attachment support
-   first; GitHub Enterprise Server is unsupported. If support cannot be
-   established, report the host blocker. Report missing CLI or authentication
-   prerequisites before publication. See [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
+   **Choose the GitHub publishing route before capture.** Use native attachments
+   when the authenticated actor can upload to the base repository and the host
+   supports them. Otherwise, use the fork fallback below when a suitable public
+   fork is available. The fallback does not require `gh --attach`. See
+   [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
    and [the release announcement](https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/).
 
-   Keep assets in ignored `apps/web/.pr-assets`; do not commit them or create
-   media branches. Images must be within GitHub's 10 MB upload limit. Add a
+   **Native attachments (GitHub only):** Require GitHub CLI **2.99.0 or newer**,
+   confirm `gh pr comment --help` lists `--attach`, and check authenticated
+   repository push access. Determine the target hostname from
+   `git remote get-url origin`. For a custom GitHub hostname, establish its
+   deployment type and attachment support first; GitHub Enterprise Server is
+   unsupported. If support cannot be established, use the fork fallback when
+   available. If installed `gh` is older than 2.99.0, download a current official
+   release to a temporary directory, verify its published checksum, and use
+   that binary for upload without replacing the system install. If native upload
+   prerequisites are unavailable, use the fork fallback when available or
+   report the blocker.
+
+   Keep assets in ignored `apps/web/.pr-assets` for native uploads. Images must
+   be within GitHub's 10 MB upload limit. Add a
    `## Screenshots` section to a PR-scoped upload comment body using Markdown
    image embeds with descriptive alt text and matching local paths:
    ```markdown
@@ -231,7 +255,7 @@ required screenshot embedding in step 7 is complete.
    embed to contain an uploaded HTTPS URL with its alt text intact. On a
    nonzero exit or lost response, inspect the PR's comments before retrying;
    do not assume the upload or comment creation failed. Recover verified URLs
-   and retry only missing assets. Keep the upload comment as capture evidence.
+   and retry only missing assets. Treat the upload comment as temporary.
 
    Only after all uploads finish, fetch the live PR body and merge the
    verified uploaded embeds into its owned screenshot section using the
@@ -245,7 +269,7 @@ required screenshot embedding in step 7 is complete.
    read-back as authoritative. If the intended section is absent, re-fetch
    and merge the already uploaded URLs before falling back to REST. Never
    REST PATCH local image paths: REST does not upload attachments. If upload
-   fails, report the blocker instead of reviving the media-branch workaround.
+   fails, use the fork fallback below when available, or report the blocker.
    For REST, build the payload with
    `jq --rawfile`, never by hand-escaping shell strings:
    ```bash
@@ -260,6 +284,23 @@ required screenshot embedding in step 7 is complete.
    does not prevent a truncated or empty JSON response from making `gh` report
    an error after the mutation succeeds. Read the resource back with a
    separate GET and verify the intended change.
+
+   After the PR body is verified, delete the temporary upload comment, then
+   check that every image still loads in an unauthenticated session. If removal
+   breaks an image, post a replacement comment with the embeds and report that
+   the duplication remains necessary for anonymous access.
+   Never leave a duplicate screenshot comment as routine capture evidence.
+
+   **Fork fallback:** If the actor cannot upload against the base repository,
+   use a public fork where the actor has push access. Publish the validated
+   images on a dedicated media branch in that fork and embed immutable,
+   commit-pinned raw image URLs in the PR body. Do not add assets to the PR
+   branch. Verify each URL anonymously and verify the final PR body. If no
+   suitable public fork is available, report the concrete blocker. Fork-scoped
+   attachment uploads may be used when available, but verify anonymous image
+   access after publication; do not assume private or unpublished assets are
+   accessible to reviewers.
+
    **JSON payloads:** Use `jq` (or an equivalent JSON tool) to build and
    validate payloads without interpolating untrusted Markdown into shell
    syntax. When command output is redirected, piped, or consumed by `jq` or

@@ -1,11 +1,14 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type {
   Automation,
+  AutomationMCPOptions,
   AutomationRun,
   AutomationRunsPage,
   AutomationSummary,
   CreateAutomationRequest,
   CreateAutomationResponse,
+  AutomationPluginToolGroup,
+  AutomationPluginToolOptionsResponse,
   RevealWebhookSecretResponse,
   UpdateAutomationRequest,
   AddTriggerRequest,
@@ -59,6 +62,16 @@ export async function updateAutomation(
 
 export async function deleteAutomation(id: string): Promise<void> {
   await requireClient().request("automation.delete", { id });
+}
+
+export async function getAutomationPluginToolOptions(
+  workspaceId: string,
+): Promise<AutomationPluginToolGroup[]> {
+  const response = await requireClient().request<AutomationPluginToolOptionsResponse>(
+    "automation.plugin_tool_options",
+    { workspace_id: workspaceId },
+  );
+  return response?.groups ?? [];
 }
 
 export async function enableAutomation(id: string): Promise<Automation> {
@@ -245,5 +258,17 @@ export function listPluginWebhookReceipts(automationId: string) {
   return requireClient().request<PluginWebhookReceipt[]>("automation.webhook_binding", {
     automation_id: automationId,
     operation: "receipts",
+  });
+}
+
+export async function getAutomationMCPOptions(
+  workspaceId: string,
+  profileId: string,
+  repositoryIds: string[],
+): Promise<AutomationMCPOptions> {
+  return requireClient().request<AutomationMCPOptions>("automation.mcp_options", {
+    workspace_id: workspaceId,
+    agent_profile_id: profileId,
+    repository_ids: repositoryIds,
   });
 }

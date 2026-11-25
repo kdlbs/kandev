@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
 	"time"
 
@@ -31,11 +30,17 @@ type AgentDeliveryRepository interface {
 // that owns task messages. It must persist the canonical message and advance
 // the inbox cursor in one transaction before returning.
 type canonicalAgentDeliveryProjector interface {
-	ProjectCanonicalAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (bool, error)
+	ProjectCanonicalAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (models.CanonicalAgentDeliveryProjectionResult, error)
 }
 
 type canonicalAgentDeliveryBatchProjector interface {
-	ProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]bool, error)
+	ProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]models.CanonicalAgentDeliveryProjectionResult, error)
+}
+
+// canonicalAgentDeliveryBatchReceiver is implemented by the repository that
+// can admit and project one compatible output batch in one writer transaction.
+type canonicalAgentDeliveryBatchReceiver interface {
+	ReceiveAndProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect, remoteHighWater int64) ([]models.CanonicalAgentDeliveryProjectionResult, error)
 }
 
 type agentDeliveryAcknowledger interface {
@@ -103,11 +108,13 @@ func (sm *StreamManager) replayRecoveredDelivery(
 	if after > target {
 		return fmt.Errorf("durable recovery cursor %d is ahead of captured high-water %d", after, target)
 	}
+	// Capture the client identity. Each synchronous replay request takes its
+	// own lease so SQL operations and lifecycle callbacks can run without it.
 	client, releaseClient := execution.AcquireAgentCtlClient()
+	releaseClient()
 	if client == nil {
 		return errors.New("durable recovery agentctl client is unavailable")
 	}
-	defer releaseClient()
 	if after > 0 && !suppressLifecycleCallbacks {
 		sm.scheduleDurableDeliveryAck(execution, client, agentctl.AgentEvent{DeliveryStreamID: streamID, DeliverySequence: after})
 	}
@@ -139,10 +146,16 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 ) (uint64, error) {
 	remaining := target - after
 	limit := durableDeliveryReplayPageSize
+	if execution.DeliveryDescriptor != nil && execution.DeliveryDescriptor.ReplayBytes > 0 {
+		limit = durableDeliveryReplayPageSize
+	} else {
+		limit = client.DeliveryReplayPageLimit(durableDeliveryReplayPageSize)
+	}
 	if remaining < uint64(limit) {
 		limit = int(remaining)
 	}
-	page, stream, err := client.ReplayDelivery(ctx, streamID, after, limit)
+	peer := recoveredReplayClient{execution: execution, client: client}
+	page, stream, err := peer.replayPage(ctx, streamID, after, limit)
 	if err != nil {
 		return after, fmt.Errorf("replay durable delivery after sequence %d: %w", after, err)
 	}
@@ -183,6 +196,49 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 	return after, nil
 }
 
+// recoveredReplayClient keeps synchronous requests on the client that started
+// the replay. Each method takes a lease only for its request.
+type recoveredReplayClient struct {
+	execution *AgentExecution
+	client    *agentctl.Client
+}
+
+func (p recoveredReplayClient) acquire() (func(), error) {
+	current, release := p.execution.AcquireAgentCtlClient()
+	if current == nil || current != p.client {
+		release()
+		return nil, errors.New("durable recovery agentctl client changed during replay")
+	}
+	if current.IsClosed() {
+		release()
+		return nil, errors.New("durable recovery agentctl client closed during replay")
+	}
+	return release, nil
+}
+
+func (p recoveredReplayClient) replayPage(
+	ctx context.Context,
+	streamID string,
+	after uint64,
+	limit int,
+) ([]journal.Event, journal.Stream, error) {
+	release, err := p.acquire()
+	if err != nil {
+		return nil, journal.Stream{}, err
+	}
+	defer release()
+	return p.client.ReplayDelivery(ctx, streamID, after, limit)
+}
+
+func (p recoveredReplayClient) GetDeliveryStatus(ctx context.Context, streamID string) (*agentctl.DeliveryStatus, error) {
+	release, err := p.acquire()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return p.client.GetDeliveryStatus(ctx, streamID)
+}
+
 func validateRecoveredReplayStream(
 	stream journal.Stream,
 	execution *AgentExecution,
@@ -221,7 +277,8 @@ func (sm *StreamManager) processRecoveredDeliveryEvent(
 	event.DeliverySubmissionID = committed.SubmissionID
 	event.Recovered = true
 	event.RecoveredActivityAt = &committed.CreatedAt
-	prepared, err := sm.prepareAgentEvent(ctx, execution, client, delivery, event)
+	peer := recoveredReplayClient{execution: execution, client: client}
+	prepared, err := sm.prepareAgentEvent(ctx, execution, peer, delivery, event)
 	if err != nil {
 		return fmt.Errorf("durable replay event ownership check: %w", err)
 	}
@@ -318,18 +375,6 @@ func (sm *StreamManager) deliveryReplayCursor(ctx context.Context, repository Ag
 	return uint64(cursor.ProjectedSequence), nil
 }
 
-func (sm *StreamManager) receiveDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-) (bool, error) {
-	if event.DeliverySequence > math.MaxInt64 {
-		return false, fmt.Errorf("delivery sequence %d exceeds backend range", event.DeliverySequence)
-	}
-	return sm.receiveDurableAgentDeliveryEvent(ctx, durableAgentEvent(execution, event), repository)
-}
-
 func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 	ctx context.Context,
 	deliveryEvent *models.AgentDeliveryEvent,
@@ -356,27 +401,6 @@ func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 		return false, err
 	}
 	return cursor == nil || cursor.ProjectedSequence < deliveryEvent.Sequence, nil
-}
-
-func (sm *StreamManager) projectDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-) error {
-	return sm.projectDurableAgentEventWithEffect(ctx, execution, event, repository, deliveryEffectForEvent(event))
-}
-
-func (sm *StreamManager) projectDurableAgentEventWithEffect(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	effect *models.AgentDeliveryEffect,
-) error {
-	return sm.projectDurableAgentDeliveryEventWithEffect(
-		ctx, durableAgentEvent(execution, event), repository, effect,
-	)
 }
 
 func (sm *StreamManager) projectDurableAgentDeliveryEventWithEffect(
@@ -423,47 +447,6 @@ func projectedDeliveryTerminalOutcome(event *models.AgentDeliveryEvent) models.D
 	default:
 		return ""
 	}
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-) error {
-	return sm.projectAndAcknowledgeDurableAgentEventWithEffect(
-		ctx, execution, event, repository, acknowledger, deliveryEffectForEvent(event),
-	)
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentEventWithEffect(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-	effect *models.AgentDeliveryEffect,
-) error {
-	deliveryEvent := durableAgentEvent(execution, event)
-	if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, deliveryEvent, repository, effect); err != nil {
-		return err
-	}
-	return acknowledgeDurableAgentEvent(ctx, event, acknowledger)
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentDeliveryEventWithEffect(
-	ctx context.Context,
-	deliveryEvent *models.AgentDeliveryEvent,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-	effect *models.AgentDeliveryEffect,
-) error {
-	if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, deliveryEvent, repository, effect); err != nil {
-		return err
-	}
-	return acknowledgeDurableAgentEvent(ctx, event, acknowledger)
 }
 
 func deliveryEffectForEvent(event agentctl.AgentEvent) *models.AgentDeliveryEffect {
@@ -531,6 +514,7 @@ func deliveryEventIsStale(
 	execution *AgentExecution,
 	event *models.AgentDeliveryEvent,
 	repository AgentDeliveryRepository,
+	attempt *deliveryStartupAttempt,
 ) (bool, error) {
 	if event == nil || event.HarnessGeneration == 0 || event.IncarnationID == "" {
 		return false, nil
@@ -544,7 +528,7 @@ func deliveryEventIsStale(
 	if execution != nil && execution.SessionID != "" {
 		sessionID = execution.SessionID
 	}
-	current, err := deliveryHarnessGeneration(ctx, execution, reader, sessionID, event.IncarnationID)
+	current, err := deliveryHarnessGeneration(ctx, execution, attempt, reader, sessionID, event.IncarnationID)
 	if errors.Is(err, models.ErrTaskSessionNotFound) {
 		if authenticated {
 			return false, ErrDurableAdoptionIdentityMismatch
@@ -563,40 +547,120 @@ func deliveryEventIsStale(
 }
 
 func deliveryHarnessGeneration(
-	ctx context.Context, execution *AgentExecution, reader harnessGenerationReader, sessionID, incarnationID string,
+	ctx context.Context,
+	execution *AgentExecution,
+	attempt *deliveryStartupAttempt,
+	reader harnessGenerationReader,
+	sessionID, incarnationID string,
 ) (*models.HarnessSessionGeneration, error) {
 	if execution == nil || !execution.deliveryBootstrap.Load() {
 		return awaitSilentRestoreGeneration(ctx, execution, reader, sessionID, incarnationID)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	if attempt == nil {
+		attempt = execution.deliveryStartupSnapshot()
+	}
+	if attempt == nil {
+		return awaitBootstrapGeneration(ctx, execution, nil, reader, sessionID, incarnationID, time.Time{})
+	}
+	// Native initialization must finish before a missing SQL generation means
+	// anything. Its result owns the wait; no event timer can expire first.
+	if err := attempt.awaitNative(ctx); err != nil {
+		return nil, err
+	}
+	return awaitBootstrapGeneration(ctx, execution, attempt, reader, sessionID, incarnationID, attempt.nativeCompletedAt())
+}
+
+// bootstrapAuthorityContext bounds one authority query. Within the remaining
+// native-anchored budget the query shares that deadline; an already-expired
+// attempt gets a separate short probe so a late event can observe a commit
+// without restarting the budget.
+func bootstrapAuthorityContext(ctx context.Context, deadline time.Time) (context.Context, context.CancelFunc) {
+	if time.Now().Before(deadline) {
+		return context.WithDeadline(ctx, deadline)
+	}
+	return context.WithTimeout(ctx, deliveryStartupAuthorityProbe)
+}
+
+// awaitBootstrapGeneration waits for the generation-one SQL authority after
+// native success. A captured attempt anchors the single budget at its native
+// completion; later events cannot restart it. The connected stream owns the
+// wait, so routine startup-context cleanup cannot cancel a commit.
+func awaitBootstrapGeneration(
+	ctx context.Context,
+	execution *AgentExecution,
+	attempt *deliveryStartupAttempt,
+	reader harnessGenerationReader,
+	sessionID, incarnationID string,
+	anchoredAt time.Time,
+) (*models.HarnessSessionGeneration, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	deadline := time.Now().Add(deliveryStartupAuthorityBudget)
+	if !anchoredAt.IsZero() {
+		deadline = anchoredAt.Add(deliveryStartupAuthorityBudget)
+	}
+	// An event can arrive after the budget ended with authority already
+	// committed. Probe once with its own short bound instead of the stream
+	// lifetime, and never restart the native-anchored budget.
+	readCtx, cancelRead := bootstrapAuthorityContext(ctx, deadline)
+	current, err := reader.GetCurrentHarnessSessionGeneration(readCtx, sessionID, incarnationID)
+	cancelRead()
+	if err == nil {
+		execution.clearDeliveryBootstrapForAttempt(attempt)
+		return current, nil
+	}
+	if !errors.Is(err, models.ErrTaskSessionNotFound) {
+		// A transient read failure does not prove that authority is absent.
+		// Keep bootstrap admission so a reattached stream can retry the wait.
+		return nil, err
+	}
+	waitCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	for {
-		current, err := reader.GetCurrentHarnessSessionGeneration(ctx, sessionID, incarnationID)
-		if !errors.Is(err, models.ErrTaskSessionNotFound) {
-			execution.deliveryBootstrap.Store(false)
-			return current, err
-		}
-		timer := time.NewTimer(25 * time.Millisecond)
+		timer := time.NewTimer(deliveryStartupPollInterval)
 		select {
-		case <-ctx.Done():
+		case <-waitCtx.Done():
 			timer.Stop()
-			return nil, ctx.Err()
+			return finalBootstrapAuthorityRead(ctx, execution, attempt, reader, sessionID, incarnationID, waitCtx.Err())
 		case <-timer.C:
+		}
+		if waitCtx.Err() != nil {
+			return finalBootstrapAuthorityRead(ctx, execution, attempt, reader, sessionID, incarnationID, waitCtx.Err())
+		}
+		current, err = reader.GetCurrentHarnessSessionGeneration(waitCtx, sessionID, incarnationID)
+		if err == nil {
+			execution.clearDeliveryBootstrapForAttempt(attempt)
+			return current, nil
+		}
+		if !errors.Is(err, models.ErrTaskSessionNotFound) {
+			if waitCtx.Err() != nil {
+				return finalBootstrapAuthorityRead(ctx, execution, attempt, reader, sessionID, incarnationID, waitCtx.Err())
+			}
+			return nil, err
 		}
 	}
 }
 
-func acknowledgeDurableAgentEvent(ctx context.Context, event agentctl.AgentEvent, acknowledger agentDeliveryAcknowledger) error {
-	if event.DeliveryStreamID == "" || event.DeliverySequence == 0 {
-		return nil
+// finalBootstrapAuthorityRead gives a commit that landed in the last poll
+// interval one bounded chance before the expired wait is reported. The
+// connected stream still owns the read; stream cancellation ends it promptly.
+func finalBootstrapAuthorityRead(
+	ctx context.Context,
+	execution *AgentExecution,
+	attempt *deliveryStartupAttempt,
+	reader harnessGenerationReader,
+	sessionID, incarnationID string,
+	waitErr error,
+) (*models.HarnessSessionGeneration, error) {
+	readCtx, cancel := context.WithTimeout(ctx, deliveryStartupAuthorityProbe)
+	defer cancel()
+	current, err := reader.GetCurrentHarnessSessionGeneration(readCtx, sessionID, incarnationID)
+	if err != nil {
+		return nil, waitErr
 	}
-	if acknowledger == nil {
-		return errors.New("agent delivery acknowledger is unavailable")
-	}
-	if err := acknowledger.AcknowledgeDelivery(ctx, event.DeliveryStreamID, event.DeliverySequence); err != nil {
-		return fmt.Errorf("acknowledge durable agent event: %w", err)
-	}
-	return nil
+	execution.clearDeliveryBootstrapForAttempt(attempt)
+	return current, nil
 }
 
 func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *models.AgentDeliveryEvent {
@@ -623,9 +687,14 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 	}
 	payloadEvent := event
 	if payloadEvent.TurnID == "" && execution != nil {
-		payloadEvent.TurnID = execution.promptTurnIDForEvent(event)
+		if streams.CopilotInterruptionNoticeType(event.Data) != "" {
+			payloadEvent.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
+		} else {
+			payloadEvent.TurnID = execution.promptTurnIDForEvent(event)
+		}
 	}
-	payloadEvent.CanonicalMessageID = canonicalAgentMessageID(execution, event)
+	payloadEvent.CanonicalMessageBaseID = canonicalAgentMessageID(execution, payloadEvent)
+	payloadEvent.CanonicalMessageID = payloadEvent.CanonicalMessageBaseID
 	payloadEvent.CanonicalProjection = false
 	payloadEvent.CanonicalMessageAppend = false
 	payloadEvent.DeliveryStreamID = ""
@@ -680,10 +749,13 @@ func durableEventExpectedStreamID(execution *AgentExecution) string {
 }
 
 func canonicalAgentDeliveryEvent(event agentctl.AgentEvent) bool {
-	return event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning
+	return event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning || event.Type == streams.EventTypeShellOutputUpdate || canonicalShellStartEvent(event) || event.Type == streams.EventTypeContextCompactionObservation
 }
 
 func canonicalMessageType(event agentctl.AgentEvent) string {
+	if event.TurnID != "" && streams.CopilotInterruptionNoticeType(event.Data) != "" {
+		return string(models.MessageTypeStatus)
+	}
 	if event.Type == streams.EventTypeReasoning {
 		return "thinking"
 	}
@@ -691,7 +763,20 @@ func canonicalMessageType(event agentctl.AgentEvent) string {
 }
 
 func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEvent) string {
+	noticeType := ""
+	if event.TurnID != "" {
+		noticeType = streams.CopilotInterruptionNoticeType(event.Data)
+	}
+	if event.CanonicalMessageBaseID != "" {
+		if noticeType != "" {
+			return copilotInterruptionCanonicalMessageID(event.CanonicalMessageBaseID, noticeType)
+		}
+		return event.CanonicalMessageBaseID
+	}
 	if event.CanonicalMessageID != "" {
+		if noticeType != "" {
+			return copilotInterruptionCanonicalMessageID(event.CanonicalMessageID, noticeType)
+		}
 		return event.CanonicalMessageID
 	}
 	streamID := event.DeliveryStreamID
@@ -727,6 +812,15 @@ func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEven
 		// merging unrelated native replies into one stream-wide transcript row.
 		scope = "sequence:" + strconv.FormatUint(event.DeliverySequence, 10)
 	}
-	digest := sha256.Sum256([]byte(streamID + ":" + event.Type + ":" + scope))
+	eventKind := event.Type
+	if noticeType := streams.CopilotInterruptionNoticeType(event.Data); event.TurnID != "" && noticeType != "" {
+		eventKind += ":copilot-interruption:" + noticeType
+	}
+	digest := sha256.Sum256([]byte(streamID + ":" + eventKind + ":" + scope))
 	return "agent-delivery-" + fmt.Sprintf("%x", digest[:16])
+}
+
+func copilotInterruptionCanonicalMessageID(baseID, classification string) string {
+	digest := sha256.Sum256([]byte(baseID + ":copilot-interruption:" + classification))
+	return "copilot-interruption-" + fmt.Sprintf("%x", digest[:16])
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -26,44 +27,67 @@ type initialDeliveryAdmissionStore interface {
 	TransitionAgentDeliverySubmission(context.Context, string, models.DeliverySubmissionState, models.DeliverySubmissionState, string, time.Time) (bool, error)
 }
 
-func (sm *SessionManager) persistInitialDeliveryBeforeDispatch(ctx context.Context, execution *AgentExecution, prompt string, attachments []v1.MessageAttachment, submissionID string) error {
+func (sm *SessionManager) persistInitialDeliveryBeforeDispatch(ctx context.Context, execution *AgentExecution, prompt string, attachments []v1.MessageAttachment, submissionID string) (*models.AgentDeliverySubmission, error) {
 	initialID := initialPromptDeliverySubmissionID(execution)
 	if initialID == "" || submissionID == "" || deliverySubmissionIdentityForPrompt(submissionID, "") != deliverySubmissionIdentityForPrompt(initialID, "") {
-		return nil
+		return nil, nil
 	}
 	if sm.streamManager == nil {
-		return errors.New("initial durable delivery repository is unavailable")
+		return nil, errors.New("initial durable delivery repository is unavailable")
 	}
 	store, ok := sm.streamManager.deliveryRepository().(initialDeliveryAdmissionStore)
 	if !ok {
-		return errors.New("initial durable delivery admission is unavailable")
+		return nil, errors.New("initial durable delivery admission is unavailable")
 	}
 	payload, err := json.Marshal(struct {
 		Text        string                 `json:"text"`
 		Attachments []v1.MessageAttachment `json:"attachments,omitempty"`
 	}{Text: prompt, Attachments: attachments})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	id := deliverySubmissionIdentityForPrompt(submissionID, "")
 	now := time.Now().UTC()
-	created, err := store.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
+	submission := &models.AgentDeliverySubmission{
 		ID: id, SessionID: execution.SessionID, IncarnationID: execution.DeliveryIncarnationID,
 		HarnessGeneration: int64(execution.DeliveryHarnessGeneration), OwnerGeneration: int64(execution.DeliveryHarnessGeneration),
 		DispatchAttemptID: execution.ID, PayloadHash: journal.SubmissionHash(payload), Payload: payload,
 		State: models.DeliverySubmissionDispatching, CreatedAt: now, UpdatedAt: now,
-	})
+	}
+	created, err := store.PrepareAgentDeliverySubmission(ctx, submission)
 	if err != nil {
-		return fmt.Errorf("persist initial durable submission: %w", err)
+		return nil, fmt.Errorf("persist initial durable submission: %w", err)
 	}
 	if !created {
 		stored, readErr := store.GetAgentDeliverySubmission(ctx, id)
 		if readErr != nil || !callerAdmittedInitialSubmissionMatches(stored, execution, id, payload) {
-			return errors.New("initial durable submission admission identity changed")
+			return nil, errors.New("initial durable submission admission identity changed")
 		}
+		submission = stored
 	}
 	execution.setMetadataValue(initialDeliverySubmissionIDMetadataKey, id)
-	return nil
+	return submission, nil
+}
+
+func (sm *SessionManager) settleUnsentInitialDelivery(ctx context.Context, submission *models.AgentDeliverySubmission, cause error) error {
+	var notSent *agentctl.RequestNotSentError
+	if submission == nil || !errors.As(cause, &notSent) {
+		return cause
+	}
+	writer, ok := sm.streamManager.deliveryRepository().(interface {
+		FailUnsentAgentDeliverySubmission(context.Context, *models.AgentDeliverySubmission, time.Time) (bool, error)
+	})
+	if !ok {
+		return errors.Join(cause, errors.New("initial unsent delivery settlement is unavailable"))
+	}
+	changed, err := writer.FailUnsentAgentDeliverySubmission(context.WithoutCancel(ctx), submission, time.Now().UTC())
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	if !changed {
+		return errors.Join(cause, errors.New("initial unsent delivery reservation changed"))
+	}
+	return cause
 }
 
 func callerAdmittedInitialSubmissionMatches(stored *models.AgentDeliverySubmission, execution *AgentExecution, id string, payload []byte) bool {

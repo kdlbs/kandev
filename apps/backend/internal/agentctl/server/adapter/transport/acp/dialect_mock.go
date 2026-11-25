@@ -8,24 +8,28 @@ import (
 )
 
 func newMockACPDialect() acpDialect {
-	return acpDialect{responseAttemptReset: mockResponseAttemptResetMeta,
+	return acpDialect{subagentControl: claudeSubagentControl,
+		responseAttemptReset:        mockResponseAttemptResetMeta,
 		continuationSupport:         streams.ContinuationNativeSavedHistoryV2,
-		capacityContinuationSupport: streams.CapacityContinuationMockLiveSessionV1,
-		continuationError:           mockContinuationError,
-		retainedApplicationErr:      mockRetainedApplicationError}
+		continuationSupportForError: mockContinuationSupportForError,
+		capacityContinuationSupport: streams.CapacityContinuationMockLiveSessionV2,
+		continuationError:           mockContinuationError}
 }
 
-func mockRetainedApplicationError(err error) bool {
+func mockContinuationSupportForError(err error) streams.ContinuationSupport {
 	var request *sdk.RequestError
 	if !errors.As(err, &request) || request.Code != -32603 {
-		return false
+		return ""
 	}
 	data, ok := request.Data.(map[string]any)
 	if !ok {
-		return false
+		return ""
 	}
 	meta, ok := nestedMap(data, "kandevMock")
-	return ok && meta["retainedProviderCapacity"] == true
+	if !ok || meta["agentManagedPendingTools"] != true {
+		return ""
+	}
+	return streams.ContinuationAgentManagedToolsV3
 }
 
 func mockContinuationError(err error) bool {

@@ -361,6 +361,12 @@ func missingCheckoutNameUnderTaskRoot(tasksBase, path, taskDirName string) (stri
 		return "", false, nil
 	}
 	parts := strings.Split(relative, string(filepath.Separator))
+	// Only direct children of the task root are recreatable placements. A
+	// deeper descendant of the same task root (an adopted agent worktree) is
+	// contained but unmanaged: it is validated in place and never recreated.
+	if len(parts) > 2 && parts[0] == taskDirName {
+		return "", false, nil
+	}
 	wantRoot := filepath.Join(tasksBase, taskDirName)
 	if len(parts) != 2 || parts[0] != taskDirName || filepath.Dir(path) != wantRoot {
 		return "", true, fmt.Errorf("persisted checkout path does not match its managed task-root identity")

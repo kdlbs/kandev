@@ -2,17 +2,25 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
+	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest/observer"
-
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agent/planinjection"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // newTestServiceWithObservedLogger builds a minimal Service — just the repo
@@ -268,5 +276,212 @@ func TestAddDynamicPlanEmitsNoRecordWhenNotReduced(t *testing.T) {
 
 	if got := logs.Len(); got != 0 {
 		t.Fatalf("log entries = %d, want 0 (dynamic site emits no record when not reduced); all=%v", got, logs.All())
+	}
+}
+
+type queuedTranscriptDispatchRepository interface {
+	ListPendingQueueDispatches(context.Context) ([]messagequeue.PendingQueueDispatch, error)
+	MarkPendingQueueDispatchAccepted(context.Context, *messagequeue.QueuedMessage) error
+	DeletePendingQueueDispatch(context.Context, *messagequeue.QueuedMessage) error
+}
+
+type queuedTranscriptRaceRepository struct {
+	messagequeue.Repository
+	dispatches queuedTranscriptDispatchRepository
+	sessionID  string
+	armed      atomic.Bool
+
+	snapshotRead    chan struct{}
+	releaseSnapshot chan struct{}
+	claimsRead      chan struct{}
+	releaseClaims   chan struct{}
+	restoreApplied  chan struct{}
+
+	snapshotOnce sync.Once
+	claimsOnce   sync.Once
+	restoreOnce  sync.Once
+}
+
+func (r *queuedTranscriptRaceRepository) ListBySession(ctx context.Context, sessionID string) ([]messagequeue.QueuedMessage, error) {
+	entries, err := r.Repository.ListBySession(ctx, sessionID)
+	if err == nil && r.armed.Load() && sessionID == r.sessionID {
+		r.snapshotOnce.Do(func() {
+			close(r.snapshotRead)
+			<-r.releaseSnapshot
+		})
+	}
+	return entries, err
+}
+
+func (r *queuedTranscriptRaceRepository) ListPendingQueueDispatches(ctx context.Context) ([]messagequeue.PendingQueueDispatch, error) {
+	if r.armed.Load() {
+		r.claimsOnce.Do(func() {
+			close(r.claimsRead)
+			select {
+			case <-r.restoreApplied:
+			case <-r.releaseClaims:
+			}
+		})
+	}
+	return r.dispatches.ListPendingQueueDispatches(ctx)
+}
+
+func (r *queuedTranscriptRaceRepository) MarkPendingQueueDispatchAccepted(ctx context.Context, msg *messagequeue.QueuedMessage) error {
+	return r.dispatches.MarkPendingQueueDispatchAccepted(ctx, msg)
+}
+
+func (r *queuedTranscriptRaceRepository) DeletePendingQueueDispatch(ctx context.Context, msg *messagequeue.QueuedMessage) error {
+	return r.dispatches.DeletePendingQueueDispatch(ctx, msg)
+}
+
+func (r *queuedTranscriptRaceRepository) Restore(ctx context.Context, msg *messagequeue.QueuedMessage, maxPerSession int) error {
+	if err := r.Repository.Restore(ctx, msg, maxPerSession); err != nil {
+		return err
+	}
+	if r.armed.Load() && msg.SessionID == r.sessionID {
+		r.restoreOnce.Do(func() { close(r.restoreApplied) })
+	}
+	return nil
+}
+
+func TestDynamicContinuationInventorySerializesConcurrentRestore(t *testing.T) {
+	for _, consumer := range []string{"conversation", "relaunch"} {
+		t.Run(consumer, func(t *testing.T) {
+			assertQueuedTranscriptRestoreCannotSplitInventory(t, consumer)
+		})
+	}
+}
+
+func assertQueuedTranscriptRestoreCannotSplitInventory(t *testing.T, consumer string) {
+	ctx := context.Background()
+	taskID, sessionID, transcriptID := "race-task", "race-session", "race-transcript"
+	repo := setupTestRepo(t)
+	seedSession(t, repo, taskID, sessionID, "step-1")
+	queue, claim, raceRepo := newQueuedTranscriptRaceQueue(t, taskID, sessionID, transcriptID)
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "race-turn", TaskID: taskID, TaskSessionID: sessionID, StartedAt: now}))
+	require.NoError(t, repo.CreateMessage(ctx, &models.Message{
+		ID: transcriptID, TaskID: taskID, TaskSessionID: sessionID, TurnID: "race-turn",
+		AuthorType: models.MessageAuthorUser, Content: "queued request", CreatedAt: now,
+	}))
+	svc := &Service{repo: repo, messageQueue: queue, logger: testLogger()}
+	raceRepo.armed.Store(true)
+	result := make(chan queuedTranscriptConsumerResult, 1)
+	go func() { result <- runQueuedTranscriptConsumer(ctx, svc, consumer, sessionID) }()
+	awaitQueueBarrier(t, raceRepo.snapshotRead)
+
+	restoreResult := make(chan error, 1)
+	restoreStarted := make(chan struct{})
+	go func() {
+		close(restoreStarted)
+		_, err := queue.RestoreMessage(ctx, claim)
+		restoreResult <- err
+	}()
+	awaitQueueBarrier(t, restoreStarted)
+	assertQueueBarrierStaysClosed(t, raceRepo.restoreApplied, "restore reached storage during queue snapshot")
+	close(raceRepo.releaseSnapshot)
+	awaitQueueBarrier(t, raceRepo.claimsRead)
+
+	select {
+	case <-raceRepo.restoreApplied:
+	case <-time.After(time.Second):
+		close(raceRepo.releaseClaims)
+	}
+	got := awaitQueuedTranscriptResult(t, result)
+	require.NoError(t, got.err)
+	require.NoError(t, awaitQueuedTranscriptRestore(t, restoreResult))
+	entries, _, err := queue.SnapshotSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "the concurrent restore must retain queue ownership")
+	if consumer == "conversation" {
+		require.Empty(t, got.userMessages, "a restored but undelivered transcript must not enter continuation context")
+		return
+	}
+	require.False(t, got.promptOK, "a restored but undelivered transcript must not become a relaunch prompt")
+}
+
+type queuedTranscriptConsumerResult struct {
+	userMessages []string
+	promptOK     bool
+	err          error
+}
+
+func runQueuedTranscriptConsumer(ctx context.Context, svc *Service, consumer, sessionID string) queuedTranscriptConsumerResult {
+	if consumer == "conversation" {
+		input := &dynamicruntime.ContinuationInput{}
+		err := svc.addDynamicConversation(ctx, sessionID, input)
+		return queuedTranscriptConsumerResult{userMessages: input.UserMessages, err: err}
+	}
+	_, promptOK := svc.dynamicRelaunchPrompt(ctx, sessionID)
+	return queuedTranscriptConsumerResult{promptOK: promptOK}
+}
+
+func newQueuedTranscriptRaceQueue(
+	t *testing.T,
+	taskID, sessionID, transcriptID string,
+) (*messagequeue.Service, *messagequeue.QueuedMessage, *queuedTranscriptRaceRepository) {
+	t.Helper()
+	rawDB, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "queue.db"))
+	require.NoError(t, err)
+	rawDB.SetMaxOpenConns(1)
+	queueDB := sqlx.NewDb(rawDB, "sqlite3")
+	t.Cleanup(func() { _ = queueDB.Close() })
+	baseRepo, err := messagequeue.NewSQLiteRepository(queueDB, queueDB)
+	require.NoError(t, err)
+	dispatches, ok := baseRepo.(queuedTranscriptDispatchRepository)
+	require.True(t, ok)
+	raceRepo := &queuedTranscriptRaceRepository{
+		Repository: baseRepo, dispatches: dispatches, sessionID: sessionID,
+		snapshotRead: make(chan struct{}), releaseSnapshot: make(chan struct{}),
+		claimsRead: make(chan struct{}), releaseClaims: make(chan struct{}), restoreApplied: make(chan struct{}),
+	}
+	queue := messagequeue.NewService(raceRepo, messagequeue.DefaultMaxPerSession, testLogger())
+	queued, err := queue.QueueMessageWithMetadata(context.Background(), sessionID, taskID, "queued request", "", "", false, nil, map[string]interface{}{
+		messagequeue.MetadataDurableTranscriptMessageID: transcriptID,
+	})
+	require.NoError(t, err)
+	claim, ok := queue.ReserveQueued(context.Background(), sessionID)
+	require.True(t, ok)
+	require.Equal(t, queued.ID, claim.ID)
+	return queue, claim, raceRepo
+}
+
+func awaitQueueBarrier(t *testing.T, barrier <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-barrier:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for queue concurrency barrier")
+	}
+}
+
+func assertQueueBarrierStaysClosed(t *testing.T, barrier <-chan struct{}, message string) {
+	t.Helper()
+	select {
+	case <-barrier:
+		t.Fatal(message)
+	case <-time.After(time.Second):
+	}
+}
+
+func awaitQueuedTranscriptResult(t *testing.T, result <-chan queuedTranscriptConsumerResult) queuedTranscriptConsumerResult {
+	t.Helper()
+	select {
+	case got := <-result:
+		return got
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for continuation consumer")
+		return queuedTranscriptConsumerResult{}
+	}
+}
+
+func awaitQueuedTranscriptRestore(t *testing.T, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for queued message restore")
+		return context.DeadlineExceeded
 	}
 }

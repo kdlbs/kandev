@@ -64,9 +64,10 @@ The task service classifies each selection before persistence:
 - An existing `repository_id` or an internal trusted descriptor uses its
   existing server-owned path.
 - A remote URL with a non-built-in provider uses the plugin resolver.
-- A remote URL with a blank or built-in provider is parsed through the existing
-  built-in path. An unsupported, malformed, or provider-mismatched URL fails
-  closed before any task or repository write.
+- A remote URL with an explicit built-in provider uses the existing built-in path.
+- A blank-provider URL uses the task service's shared admission, including
+  [provider discovery](repository-url-discovery.md) for URLs outside the public built-in path.
+  An unsupported, malformed, ambiguous, or provider-mismatched URL fails before writes.
 
 The resolver returns the existing internal repository input shape with a
 complete descriptor and `TrustedProviderDescriptor` set by server code. It
@@ -322,6 +323,7 @@ outcome counters without changing this contract.
 
 ## Related decisions
 
+- [Provider-owned bare URL discovery](../../../decisions/2026-10-29-provider-owned-repository-url-discovery.md)
 - [Resolve First-Use Plugin Repositories on the Server](../../../decisions/2026-08-26-server-owned-plugin-repository-task-resolution.md)
 - [Plugin Repository Provider Extensions](../../../decisions/2026-07-31-plugin-repository-provider-extensions.md)
 - [Authenticated Plugin Actions](../../../decisions/2026-07-31-authenticated-plugin-actions.md)

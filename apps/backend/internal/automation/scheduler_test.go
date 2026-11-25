@@ -230,7 +230,14 @@ func TestCronScheduler_DailyTrigger_DoesNotRefireNextTick(t *testing.T) {
 	}
 
 	cfg, _ := json.Marshal(ScheduledTriggerConfig{CronExpression: "@daily"})
-	trig := &AutomationTrigger{AutomationID: a.ID, Type: TriggerTypeScheduled, Config: cfg, Enabled: true}
+	yesterday := time.Now().UTC().Add(-24 * time.Hour)
+	trig := &AutomationTrigger{
+		AutomationID:    a.ID,
+		Type:            TriggerTypeScheduled,
+		Config:          cfg,
+		Enabled:         true,
+		LastEvaluatedAt: &yesterday,
+	}
 	if err := svc.store.CreateTrigger(ctx, trig); err != nil {
 		t.Fatal(err)
 	}

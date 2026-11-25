@@ -2,6 +2,7 @@
 // missing/empty/failure states (docs/specs/coordinator/requirements/needs-you.md,
 // #routes-and-sidebar, #failure-and-recovery).
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { linkToCoordinator, linkToCoordinatorNeedsYou } from "../../../lib/coordinator/links";
 
 test.describe("Coordinator missing/empty/failure states", () => {
@@ -26,36 +27,41 @@ test.describe("Coordinator missing/empty/failure states", () => {
   // is not usable here either: it is a worker-scoped fixture shared across
   // every test in the run, and other specs create coordinators on it, so it
   // is not reliably coordinator-free by the time this test executes.
-  test("with no coordinator the sidebar Inbox row is unchanged and the Coordinators section shows its set-up row (task-04 Acceptance)", async ({
-    testPage,
-    apiClient,
-  }) => {
-    const workspace = await apiClient.createWorkspace(`Coordinator Empty Sidebar ${Date.now()}`);
-    try {
-      await testPage.goto("/");
-      await testPage.getByTestId("sidebar-workspace-trigger").click();
-      await testPage.getByTestId(`sidebar-workspace-item-${workspace.id}`).click();
+  for (const fastActions of [false, true]) {
+    test(`with no coordinator the sidebar Inbox row is unchanged and the Coordinators section shows its set-up row (fast actions: ${fastActions})`, async ({
+      testPage,
+      apiClient,
+    }) => {
+      const previousFastActions =
+        (await apiClient.getUserSettings()).settings.sidebar_fast_actions_enabled ?? false;
+      await apiClient.saveUserSettings({ sidebar_fast_actions_enabled: fastActions });
+      const workspace = await apiClient.createWorkspace(`Coordinator Empty Sidebar ${Date.now()}`);
+      try {
+        await testPage.goto("/");
+        await testPage.getByTestId("sidebar-workspace-trigger").click();
+        await testPage.getByTestId(`sidebar-workspace-item-${workspace.id}`).click();
 
-      await testPage.goto(linkToCoordinator(workspace.id));
-      await expect(testPage.getByTestId("no-coordinator-state")).toBeVisible();
-      await expect(testPage.getByTestId("coordinator-count-strip")).toHaveCount(0);
+        await testPage.goto(linkToCoordinator(workspace.id));
+        await expect(testPage.getByTestId("no-coordinator-state")).toBeVisible();
+        await expect(testPage.getByTestId("coordinator-count-strip")).toHaveCount(0);
 
-      await expect(testPage.getByTestId("sidebar-needs-you-inbox")).toBeVisible();
-      const emptyRow = testPage.getByTestId("sidebar-coordinators-empty");
-      await expect(emptyRow).toBeVisible();
-      await expect(emptyRow).toHaveText("Set up a coordinator");
-      await expect(emptyRow).toHaveAttribute(
-        "href",
-        `/settings/workspaces/${workspace.id}/coordinators`,
-      );
-      await expect(testPage.getByTestId("coordinators-open-list-body")).toHaveAttribute(
-        "href",
-        linkToCoordinator(workspace.id),
-      );
-    } finally {
-      await apiClient.deleteWorkspace(workspace.id, workspace.name);
-    }
-  });
+        await expect(testPage.getByTestId("sidebar-needs-you-inbox")).toBeVisible();
+        const emptyRow = testPage.getByTestId("sidebar-coordinators-empty");
+        await expect(emptyRow).toBeVisible();
+        await expect(emptyRow).toHaveText("Set up a coordinator");
+        await expect(emptyRow).toHaveAttribute(
+          "href",
+          `/settings/workspaces/${workspace.id}/coordinators`,
+        );
+        await expect(
+          testPage.getByRole("link", { name: "Open coordinators", exact: true }),
+        ).toHaveAttribute("href", linkToCoordinator(workspace.id));
+      } finally {
+        await apiClient.deleteWorkspace(workspace.id, workspace.name);
+        await apiClient.saveUserSettings({ sidebar_fast_actions_enabled: previousFastActions });
+      }
+    });
+  }
 
   test("an id not in this workspace shows the unknown-coordinator state, not a 404 (AC .006.4)", async ({
     testPage,
@@ -92,13 +98,29 @@ test.describe("Coordinator missing/empty/failure states", () => {
       task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
-    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    watchWs(testPage);
+    const [goalResponse] = await Promise.all([
+      waitForHttp(testPage, "GET", new RegExp(`/coordinators/${coordinator.id}/goal$`)),
+      testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id)),
+    ]);
+    expect(goalResponse.ok()).toBe(true);
 
     const empty = testPage.getByTestId("empty-needs-you-state");
     await expect(empty).toBeVisible();
     await expect(empty).toContainText("Nothing needs you. That is the working state.");
     await expect(empty).toContainText("0 cards are running.");
     await expect(empty.getByRole("link", { name: "See what is running" })).toBeVisible();
+
+    const goal = testPage.getByTestId("goal-note");
+    await expect(goal).toBeVisible();
+    const strip = await testPage.getByTestId("coordinator-count-strip").boundingBox();
+    expect(strip).not.toBeNull();
+    for (const section of [goal, empty]) {
+      const box = await section.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeCloseTo(strip!.x, 0);
+      expect(box!.width).toBeCloseTo(strip!.width, 0);
+    }
   });
 
   test("a failed stalls read shows the per-input banner and recovers on Try again (AC .007.3, .007.5)", async ({

@@ -237,6 +237,7 @@ func testPreparedKubernetesLaunchCarriesConnectionConfig(
 	orchestrator := orchestratorexecutor.NewExecutor(
 		adapter, repo, log, orchestratorexecutor.ExecutorConfig{},
 	)
+	orchestrator.SetCapabilities(adapter)
 
 	_, err = orchestrator.LaunchPreparedSession(ctx, &v1.Task{
 		ID: "task-1", WorkspaceID: "workspace-1", Title: "Kubernetes launch",

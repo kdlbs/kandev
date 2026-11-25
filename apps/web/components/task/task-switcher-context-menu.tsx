@@ -52,7 +52,6 @@ type ContextMenuProps = TaskLinkHandlers & {
   isPinned?: boolean;
   pinnedTaskIds?: string[];
   isDeleting?: boolean;
-  isArchiving?: boolean;
   /** Active multi-selection; when this task is part of it, actions apply to the whole set. */
   selectedTaskIds?: Set<string>;
   onBulkArchive?: (taskIds: string[]) => void;
@@ -178,6 +177,27 @@ function useTaskRowMoveMenu(
   };
 }
 
+function useRenameAfterMenuClose(
+  onRenameTask: ContextMenuProps["onRenameTask"],
+  onCloseAutoFocus: (event: Event) => void,
+) {
+  const pending = useRef<(() => void) | null>(null);
+  return {
+    request: onRenameTask
+      ? (taskId: string, title: string) => {
+          pending.current = () => onRenameTask(taskId, title);
+        }
+      : undefined,
+    close: (event: Event) => {
+      const rename = pending.current;
+      if (!rename) return onCloseAutoFocus(event);
+      pending.current = null;
+      event.preventDefault();
+      queueMicrotask(rename);
+    },
+  };
+}
+
 // This component coordinates the context menu and drag cancellation. Archive
 // state lives in its focused adapter so unavailable actions stay unavailable.
 export function TaskItemWithContextMenu(props: ContextMenuProps) {
@@ -197,12 +217,16 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
     prUnlinkMenu.onOpenChange(open);
   });
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  // The row's own accepted removal is the busy boundary for its menu and its
+  // inline confirmation, so another archive settling cannot enable this row.
+  const isArchiving = menuProps.task.isPendingRemoval === true;
   const archive = useTaskSwitcherArchiveConfirmation({
     task: menuProps.task,
     onArchiveTask: menuProps.onArchiveTask,
-    isArchiving: menuProps.isArchiving,
+    isArchiving,
     closeMenu,
   });
+  const rename = useRenameAfterMenuClose(props.onRenameTask, archive.handleMenuCloseAutoFocus);
   const changeWorkflowTriggerRef = archive.archiveAnchorRef;
   const archiveConfirmation = archive.archiveOpen ? archive.archiveConfirmation : undefined;
   const inlineArchiveConfirmation = isMobile || isFinePointer ? undefined : archiveConfirmation;
@@ -227,7 +251,7 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent
-          onCloseAutoFocus={archive.handleMenuCloseAutoFocus}
+          onCloseAutoFocus={rename.close}
           className="w-48"
           onInteractOutside={keepWorkflowMoveOpen}
           onMouseDown={stopMenuEvent}
@@ -237,6 +261,7 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
         >
           <TaskContextMenuItems
             {...contextMenuProps}
+            onRenameTask={rename.request}
             nativeUnlinkEntries={nativeUnlinkEntries}
             onArchiveTask={archive.requestArchive}
             onChangeWorkflow={createChangeWorkflowOpenHandler(
@@ -273,6 +298,8 @@ export type TaskContextMenuItemsProps = Omit<
   | "getNestCandidateTasks"
   | "getNestHierarchyTasks"
 > & {
+  /** Derived once from the row's own accepted removal membership. */
+  isArchiving: boolean;
   nativeUnlinkEntries?: KanbanCardMenuEntry[];
   onChangeWorkflow?: () => void;
   closeMenu: () => void;
@@ -309,6 +336,7 @@ function buildTaskContextMenuItemsProps(
   } = props;
   return {
     ...rest,
+    isArchiving: props.task.isPendingRemoval === true,
     nestCandidateTasks: nestSources.candidates ?? rest.nestCandidateTasks,
     nestHierarchyTasks: nestSources.hierarchy ?? rest.nestHierarchyTasks,
     onMoveToStepWithOptions: moveOptions.onMoveToStepWithOptions,

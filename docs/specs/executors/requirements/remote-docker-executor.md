@@ -125,6 +125,12 @@ image build loop, and lifecycle semantics of the Local Docker executor.
   remote Docker profile grants effective root on the remote host, because the
   SSH user must reach the Docker socket and Dockerfile instructions execute with
   the daemon's authority.
+- **AC-EXECUTORS-REMOTE-DOCKER-001.18:** Backend restart and startup
+  reconciliation shall preserve the established container and its recorded
+  attachment information. A failed, completed, cancelled, or missing session
+  or an unusable resume token shall not authorize removal. A later session
+  launch that reuses the workspace shall reach the original container and its
+  existing work.
 
 ## System design
 

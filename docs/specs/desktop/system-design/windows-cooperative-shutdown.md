@@ -12,7 +12,7 @@ owners:
 
 ## Purpose and boundaries
 
-This design covers `AC-DESKTOP-DESKTOP-TAURI-APP-001.18`: how the desktop shell
+This design covers `AC-DESKTOP-DESKTOP-TAURI-APP-001.21`: how the desktop shell
 and the launcher stop a console-less Windows child through its normal teardown.
 The [desktop app design](desktop-tauri-app.md) keeps ownership of the backend
 process lifetime, startup failure, and update restart.

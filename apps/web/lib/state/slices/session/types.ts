@@ -12,6 +12,7 @@ import type {
 } from "@/lib/types/http";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { ObservedPrompts } from "@/lib/session-last-prompt";
+import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
 
 export type ActiveTurnWindowObservation = {
   activeTurnId: string | null;
@@ -50,6 +51,8 @@ export type PromptsState = MessagesState & {
 export type TurnsState = {
   bySession: Record<string, Turn[]>;
   activeBySession: Record<string, string | null>; // sessionId -> active turnId
+  /** Completed-turn IDs whose empty-turn notice was already emitted. */
+  emptyTurnNoticeTurnIdsBySession?: Record<string, Record<string, true>>;
   /** Message IDs whose matching turn rows were read with the same message window. */
   windowCoverageBySession?: Record<string, { messageIds: string[]; activeTurnObserved: boolean }>;
   /**
@@ -76,6 +79,12 @@ export type TurnsState = {
    * Turns started after the boundary (genuine resumes) are unaffected.
    */
   settledBoundaryBySession: Record<string, string>;
+};
+
+export type TurnChangesState = {
+  bySession: Record<string, TurnChangeSetSummary[]>;
+  nextOffsetBySession: Record<string, number | null>;
+  loadedBySession: Record<string, boolean>;
 };
 
 export type TaskSessionsState = {
@@ -228,10 +237,13 @@ export type QueuedMessage = {
     name?: string;
     size_bytes?: number;
     delivery_mode?: "prompt" | "path";
+    comment_id?: string;
   }>;
   metadata?: QueuedMessageMetadata;
   queued_at: string;
   queued_by?: string;
+  /** Response-only: the accepted prompt could not retire the observed turn-error badge. */
+  turn_error_acknowledgement_failed?: boolean;
 };
 
 /** Capacity info kept alongside the entry list. */
@@ -291,6 +303,7 @@ export type SessionSliceState = {
   messages: MessagesState;
   messagePrompts: PromptsState;
   turns: TurnsState;
+  turnChanges: TurnChangesState;
   taskSessions: TaskSessionsState;
   taskSessionsByTask: TaskSessionsByTaskState;
   pendingActionProjectionsBySessionId: Record<string, PendingActionOrphanProjection>;
@@ -373,6 +386,8 @@ export type SessionSliceActions = {
   setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
+  /** Claims the one live empty-turn notice for a completed turn identity. */
+  claimEmptyTurnNotice: (sessionId: string, turnId: string) => boolean;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
   mergeTurnsSnapshot: (
     sessionId: string,
@@ -407,6 +422,13 @@ export type SessionSliceActions = {
   reconcileActiveTurnAfterHydration: (sessionId: string, hydrationEpoch: number) => void;
   /** Records that the session's full persisted turn history is in the store. */
   markTurnsLoaded: (sessionId: string) => void;
+  mergeTurnChangePage: (
+    sessionId: string,
+    summaries: TurnChangeSetSummary[],
+    page: { offset: number; nextOffset?: number },
+  ) => void;
+  mergeTurnChangeSummary: (sessionId: string, summary: TurnChangeSetSummary) => void;
+  markTurnChangesLoaded: (sessionId: string, nextOffset: number | undefined) => void;
   /**
    * Source adoption is an authoritative idle boundary for the listed
    * sessions. `boundaryTimestamp` MUST be server-issued (the WS envelope
@@ -457,6 +479,8 @@ export type SessionSliceActions = {
   setActiveModel: (sessionId: string, modelId: string) => void;
   clearActiveModel: (sessionId: string) => void;
   // Task plan actions
+  beginTaskPlanRead: (taskId: string) => symbol;
+  finishTaskPlanRead: (taskId: string, token: symbol, plan?: TaskPlan | null) => boolean;
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;

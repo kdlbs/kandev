@@ -1,9 +1,15 @@
+import { attachCommentFile } from "../../helpers/comment-attachment";
 import { assertCommentSurvivesForeground } from "./plan-comment-foreground-helpers";
 // Filename starts with "mobile-" so this runs under the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { planScript } from "../../helpers/seed-session-messages";
 import { SessionPage } from "../../pages/session-page";
+import {
+  getSessionState,
+  readSessionMessageIdsContaining,
+  waitForNewSessionMessage,
+} from "../../helpers/session-resume-prompt-queue";
 import {
   assertPlainSendDuringRecovery,
   assertLegacyRecoveryPreservesDraft,
@@ -156,6 +162,8 @@ test.describe("mobile: task-owned plan comments", () => {
     await pill.tap();
     await testPage.getByTestId(`mobile-session-row-${secondary.id}`).tap();
     await expect(session.activeChat().getByText("2 plan comments", { exact: true })).toBeVisible();
+    const sendComment = "migrated mobile feedback";
+    const beforeSend = await readSessionMessageIdsContaining(apiClient, secondary.id, sendComment);
     await session.sendMessageViaButton("Handle the migrated feedback in this session");
     await expect
       .poll(
@@ -174,6 +182,12 @@ test.describe("mobile: task-owned plan comments", () => {
         message.content.includes("migrated mobile feedback"),
       ),
     ).toBe(false);
+    await waitForNewSessionMessage(apiClient, secondary.id, beforeSend, sendComment);
+    await expect
+      .poll(async () =>
+        DONE_STATES.includes((await getSessionState(apiClient, task.id, secondary.id)) ?? ""),
+      )
+      .toBe(true);
     await session.waitForChatIdle({ timeout: 45_000 });
     // A completed seed turn can auto-promote the secondary. Pin the intended
     // primary so this flow isolates selected-session Send from primary Run.
@@ -205,6 +219,7 @@ test.describe("mobile: task-owned plan comments", () => {
     await expect(drawer).toBeVisible({ timeout: 5_000 });
     const runComment = "Run this mobile feedback in primary";
     await drawer.locator("textarea").fill(runComment);
+    const attachmentId = await attachCommentFile(testPage, drawer, "mobile-plan.txt");
     const actionButtons = drawer.getByRole("button");
     const sizes = await actionButtons.evaluateAll((buttons) =>
       buttons.map((button) => button.getBoundingClientRect().height),
@@ -213,13 +228,18 @@ test.describe("mobile: task-owned plan comments", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "mobile plan comment drawer");
     const run = drawer.getByRole("button", { name: "Run", exact: true });
     await expect(run).toBeEnabled();
+    const beforeRun = await readSessionMessageIdsContaining(apiClient, primary.id, runComment);
     await run.tap();
 
     await expect
       .poll(
         async () =>
           (await apiClient.listSessionMessages(primary.id)).messages.some(
-            (message) => message.author_type === "user" && message.content.includes(runComment),
+            (message) =>
+              message.author_type === "user" &&
+              message.content.includes(runComment) &&
+              Array.isArray(message.metadata?.attachments) &&
+              message.metadata.attachments.some((file) => file.attachment_id === attachmentId),
           ),
         { timeout: 30_000 },
       )
@@ -229,6 +249,23 @@ test.describe("mobile: task-owned plan comments", () => {
         message.content.includes(runComment),
       ),
     ).toBe(false);
+    await waitForNewSessionMessage(apiClient, primary.id, beforeRun, runComment);
+    await expect
+      .poll(async () =>
+        DONE_STATES.includes((await getSessionState(apiClient, task.id, primary.id)) ?? ""),
+      )
+      .toBe(true);
+    for (const [target, comment] of [
+      [secondary.id, sendComment],
+      [primary.id, runComment],
+    ]) {
+      const { messages } = await apiClient.listSessionMessages(target);
+      expect(
+        messages.filter(
+          (message) => message.author_type === "user" && message.content.includes(comment),
+        ),
+      ).toHaveLength(1);
+    }
   });
 });
 

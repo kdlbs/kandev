@@ -257,6 +257,7 @@ func newContainerInventoryDatabase(t *testing.T) *sqlx.DB {
 	database.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = database.Close() })
 	const schema = `
+ CREATE TABLE task_resource_cleanup_jobs (task_id TEXT, state TEXT, resource_snapshot TEXT, workspace_protection TEXT DEFAULT 'unclassified');
 		CREATE TABLE tasks (
 			id TEXT PRIMARY KEY,
 			state TEXT NOT NULL,
@@ -341,5 +342,37 @@ func insertContainerInventoryExecutor(
 		"executor-"+taskID, taskID, status, "docker",
 	); err != nil {
 		t.Fatalf("insert executor handle for %q: %v", taskID, err)
+	}
+}
+
+// @covers AC-TASKS-DELETE-RECOVERY-001.3
+func TestStorageInventoryProtectsRetainedDeletedTask(t *testing.T) {
+	database := newContainerInventoryDatabase(t)
+	path := filepath.Join(t.TempDir(), "retained", "repo")
+	payload := `{"workspace_cleanup":"retain","retention_inventory_captured":true,"worktrees":[{"id":"wt","path":"` + filepath.ToSlash(path) + `"}]}`
+	for _, state := range []string{"prepared", "succeeded", "failed", "cancelled"} {
+		if _, err := database.Exec(`INSERT INTO task_resource_cleanup_jobs (task_id,state,resource_snapshot) VALUES (?, ?, ?)`, "deleted-retained", state, payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removable, err := (&containerInventory{reader: database}).ContainerTaskRemovable(context.Background(), "deleted-retained")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removable {
+		t.Fatal("retained task container is removable after task deletion")
+	}
+	paths, err := (&storageInventory{reader: database}).activeWorktreePaths(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range paths {
+		if p == path {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("retained worktree missing from protected inventory: %v", paths)
 	}
 }

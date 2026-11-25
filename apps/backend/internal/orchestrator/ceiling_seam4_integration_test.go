@@ -39,7 +39,7 @@ func newSeam4TestService(t *testing.T, taskID, sessionID string) *Service {
 		onStartCalled:    &started,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	return svc
 }
 
@@ -134,7 +134,7 @@ func TestResumeTaskSessionWithOptions_ManualLaunchOverCeilingIsAuditedEvenWhenTh
 		},
 	}
 	svcB := createTestServiceWithAgent(repoB, newMockStepGetter(), taskRepoB, agentMgrB)
-	svcB.executor = executor.NewExecutor(agentMgrB, repoB, testLogger(), executor.ExecutorConfig{})
+	svcB.executor = withTestCapabilities(executor.NewExecutor(agentMgrB, repoB, testLogger(), executor.ExecutorConfig{}))
 	svcB.sessionCeiling = svcA.sessionCeiling
 
 	_, err = svcB.ResumeTaskSessionWithOptions(ctx, "seam4-it-fail-b", "seam4-it-fail-session-b", executor.ResumeOptions{

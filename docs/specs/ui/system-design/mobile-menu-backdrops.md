@@ -33,8 +33,13 @@ that existing contract, including non-task consumers of the same primitives.
   scoped to the generated positioning wrapper immediately containing that
   marked root content.
 - `apps/packages/ui/src/drawer.tsx` is the visual reference for the backdrop:
-  `bg-black/80` and supported `backdrop-blur-xs`. Its implementation stays
-  unchanged.
+  `bg-black/80` and supported `backdrop-blur-xs`. Its root provides the modal
+  mode to content through React context. Content provides that mode to nested
+  shared dropdowns across portals, so an implicit dropdown inside modal Drawer
+  content defers outside-pointer ownership to the Drawer. An explicit dropdown
+  `modal` prop takes precedence; standalone dropdown defaults and dropdowns in
+  nonmodal Drawer content retain their existing behavior. `DrawerNested`
+  provides its own modal mode at the same boundary.
 - Existing Radix roots own open state, presence, accessibility, dismissal,
   focus, and outside interaction. Consumer components retain their handlers.
 
@@ -87,6 +92,23 @@ Radix continues to handle modal and non-modal menus. In particular,
 the Home drawer; the backdrop does not change that interaction contract.
 Radix's submenu close key returns to the parent menu, while Escape closes the
 whole menu hierarchy. Neither operation closes an enclosing Drawer.
+
+### Native Sessions opening gesture
+
+`components/task/mobile/mobile-sessions-section.tsx` owns the native Sessions
+row action trigger. For touch input, it suppresses Radix's pointerdown opening
+and opens from the completed trigger click instead, using local controlled open
+state. Menu content is therefore absent during the opening touch sequence and
+cannot receive that gesture as an item selection. Cancelled touches do not open
+the menu. Mouse, pen, and keyboard retain Radix trigger behavior; keyboard events
+for Enter, Space, and ArrowDown do not select the surrounding session row. Other
+trigger keys retain propagation to surrounding keyboard handlers.
+
+This coordination stays local to the consumer. Item callbacks, pending and
+disabled rules, delete confirmation handoff, and captured session identity keep
+their existing owners. The Sessions action menu explicitly retains modal
+behavior so an outside tap dismisses the menu and preserves the picker.
+The gesture handler requires no timer or lifecycle/API change.
 
 ## Mobile composition and compatibility
 

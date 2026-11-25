@@ -128,7 +128,8 @@ test.describe("Large file tree virtualization", () => {
 
     await folder.click();
     const firstFile = largeFileTreePath(0);
-    await session.fileTree.waitForFileTreeNode(firstFile);
+    // The top row must mount without a search sweep changing the viewport.
+    await expect(session.fileTreeNode(firstFile)).toBeVisible({ timeout: 30_000 });
     await expectContiguousVisibleFileTreeRows(viewport);
     const expandedTopPaths = await visibleFileTreePaths(viewport);
 
@@ -136,7 +137,7 @@ test.describe("Large file tree virtualization", () => {
     await expect(session.files).toBeHidden();
     await waitForFileTreeLayoutSettle(testPage);
     await session.clickTab("Files");
-    await session.fileTree.waitForFileTreeNode(firstFile);
+    await expect(session.fileTreeNode(firstFile)).toBeVisible({ timeout: 30_000 });
     await expectContiguousVisibleFileTreeRows(viewport);
     await expectVisibleFileTreePaths(viewport, expandedTopPaths);
 

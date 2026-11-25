@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { closeQuickTerminalTab } from "./terminal-test-helpers";
 
 async function readQuickTerminalBuffer(page: Page): Promise<string> {
@@ -62,6 +63,7 @@ async function closeSurvivingQuickTerminals(page: Page) {
 
 test.describe("mobile quick terminal tabs", () => {
   // @covers AC-UI-QUICK-TERMINAL-001.8, AC-UI-QUICK-TERMINAL-001.13
+  // @covers AC-CLI-MOBILE-PASSTHROUGH-NAV-001.11
   test("shortcuts interrupt the selected shell and retain keyboard focus", async ({
     testPage,
     prCapture,
@@ -77,6 +79,7 @@ test.describe("mobile quick terminal tabs", () => {
       const bar = dialog.getByTestId("mobile-terminal-keybar");
       await expect(dialog.getByRole("button", { name: "Control", exact: true })).toBeVisible();
       await expect(bar).toHaveCount(1);
+      await expect(bar.getByTestId("keybar-scroll-cue")).toBeVisible();
       for (const id of [
         "ctrl",
         "shift",
@@ -88,6 +91,7 @@ test.describe("mobile quick terminal tabs", () => {
         "down",
         "left",
         "right",
+        "enter",
         "home",
         "end",
         "pageup",
@@ -106,7 +110,8 @@ test.describe("mobile quick terminal tabs", () => {
       }
       await bar.getByTestId("keybar-key-ctrl").scrollIntoViewIfNeeded();
       await testPage.getByTestId("quick-terminal-terminal").tap();
-      await testPage.keyboard.type("printf 'FIRST%s\\n' '_SHELL_READY'\n");
+      await testPage.keyboard.type("printf 'FIRST%s\\n' '_SHELL_READY'");
+      await bar.getByTestId("keybar-key-enter").tap();
       await expect
         .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)))
         .toContain("FIRST_SHELL_READY");
@@ -223,6 +228,7 @@ test.describe("mobile quick terminal tabs", () => {
       await menuButton.tap();
       await expect(terminalButton).toBeVisible();
       await expect(quickChatButton).toBeVisible();
+      await waitForFiniteAnimations(testPage.getByTestId("app-nav-sheet"));
       for (const button of [terminalButton, quickChatButton]) {
         const buttonBox = await button.boundingBox();
         expect(buttonBox).not.toBeNull();

@@ -127,6 +127,10 @@ type GitCommitRequest struct {
 type GitRenameBranchRequest struct {
 	NewName string `json:"new_name"`
 	Repo    string `json:"repo,omitempty"`
+	// ExpectedGeneratedBranch carries the verified old generated branch for
+	// Kandev's title-driven rename. Ordinary rename callers omit it and keep
+	// the existing payload and behavior.
+	ExpectedGeneratedBranch string `json:"expected_generated_branch,omitempty"`
 }
 
 // GitStageRequest for POST /api/v1/git/stage
@@ -520,7 +524,13 @@ func (s *Server) handleGitRenameBranch(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.RenameBranch(c.Request.Context(), req.NewName)
+	var result *process.GitOperationResult
+	var err error
+	if req.ExpectedGeneratedBranch != "" {
+		result, err = gitOp.RenameGeneratedBranch(c.Request.Context(), req.ExpectedGeneratedBranch, req.NewName)
+	} else {
+		result, err = gitOp.RenameBranch(c.Request.Context(), req.NewName)
+	}
 	if err != nil {
 		s.handleGitError(c, "rename_branch", err)
 		return
@@ -1587,7 +1597,7 @@ func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh, de
 		status, err = wt.GetGitStatus(ctx, fresh)
 	}
 	if err != nil {
-		s.logGitStatusCaptureFailure(err)
+		s.logGitStatusFailure(err)
 		result := unavailableGitStatusResult(err)
 		if status.StatusState == gitStatusReadyState && status.FilesComplete {
 			markGitStatusDetailsUnavailable(&status)
@@ -1615,11 +1625,28 @@ func unavailableGitStatusResult(err error) GitStatusResult {
 	return GitStatusResult{Success: false, StatusState: gitStatusUnavailableState, DetailState: gitStatusUnavailableState, ErrorCode: code, Error: message}
 }
 
-func (s *Server) logGitStatusCaptureFailure(err error) {
+// logGitStatusFailure records one bounded diagnostic for a failed status read.
+// Changing repository evidence keeps its own warning; every other failure uses
+// the generic error record. Both carry the operation, class, and identity.
+func (s *Server) logGitStatusFailure(err error) {
 	if process.IsGitStatusEvidenceChanged(err) {
-		s.logger.Warn("git status capture failed due to changing repository evidence",
-			zap.String("error_class", "evidence_changed"))
+		s.logGitStatusCaptureFailure(err)
+		return
 	}
+	s.logger.Error("git status failed",
+		append(s.gitInspectionFailureFields(err), zap.Error(err))...)
+}
+
+func (s *Server) logGitStatusCaptureFailure(err error) {
+	if !process.IsGitStatusEvidenceChanged(err) {
+		return
+	}
+	fields := []zap.Field{
+		zap.String("operation", diagnosticOperationGitInspection),
+		zap.String("error_class", diagnosticClassEvidenceChanged),
+	}
+	fields = append(fields, s.diagnosticIdentityFields()...)
+	s.logger.Warn("git status capture failed due to changing repository evidence", fields...)
 }
 
 func gitStatusResult(status types.GitStatusUpdate, repositoryName string) GitStatusResult {
@@ -1720,11 +1747,7 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		status, err = wt.GetGitStatus(c.Request.Context(), fresh)
 	}
 	if err != nil {
-		if process.IsGitStatusEvidenceChanged(err) {
-			s.logGitStatusCaptureFailure(err)
-		} else {
-			s.logger.Error("git status failed", zap.Error(err))
-		}
+		s.logGitStatusFailure(err)
 		result := unavailableGitStatusResult(err)
 		if status.StatusState == gitStatusReadyState && status.FilesComplete {
 			markGitStatusDetailsUnavailable(&status)

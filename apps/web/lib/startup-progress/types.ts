@@ -30,6 +30,15 @@ export type StartupStepSnapshot = {
   stalled: boolean;
 };
 
+export type StartupCompletedStep = {
+  id: string;
+  label_key: string;
+  activation_seq: number;
+  phase: StartupPhase;
+  elapsed_ms: number;
+  completed: boolean;
+};
+
 export type StartupSnapshot = {
   phase: StartupPhase;
   boot: number;
@@ -37,6 +46,7 @@ export type StartupSnapshot = {
   elapsed_ms: number;
   phase_elapsed_ms: number;
   step?: StartupStepSnapshot;
+  completed_steps?: StartupCompletedStep[];
 };
 
 const STARTUP_PHASES = new Set<StartupPhase>([
@@ -119,5 +129,30 @@ export function parseStartupSnapshot(value: unknown): StartupSnapshot | null {
     const step = parseStartupStep(value.step);
     if (!step) return null;
   }
+  if (value.completed_steps !== undefined && !validCompletedSteps(value.completed_steps)) {
+    const { completed_steps: _history, ...snapshot } = value;
+    return snapshot as StartupSnapshot;
+  }
   return value as StartupSnapshot;
+}
+
+function validCompletedSteps(value: unknown): value is StartupCompletedStep[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= 32 &&
+    value.every(
+      (step: unknown) =>
+        isRecord(step) &&
+        typeof step.id === "string" &&
+        step.id.length > 0 &&
+        typeof step.label_key === "string" &&
+        step.label_key.startsWith("startup.step.") &&
+        isNonNegativeInteger(step.activation_seq) &&
+        step.activation_seq > 0 &&
+        typeof step.phase === "string" &&
+        STARTUP_PHASES.has(step.phase as StartupPhase) &&
+        isNonNegativeInteger(step.elapsed_ms) &&
+        typeof step.completed === "boolean",
+    )
+  );
 }

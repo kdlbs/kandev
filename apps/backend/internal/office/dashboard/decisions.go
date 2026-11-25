@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,10 +12,12 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/office/completionpolicy"
 	officeenginedispatcher "github.com/kandev/kandev/internal/office/engine_dispatcher"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	workflowengine "github.com/kandev/kandev/internal/workflow/engine"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -290,10 +293,6 @@ func (s *DashboardService) recordTaskDecision(
 	if !ok {
 		return nil, fmt.Errorf("%s", decisionStoreNotWiredErr)
 	}
-	role, err := s.resolveDeciderRole(ctx, in.callerType, in.callerID, in.taskID)
-	if err != nil {
-		return nil, err
-	}
 	stepID, err := s.repo.GetTaskWorkflowStepID(ctx, in.taskID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve task workflow_step_id: %w", err)
@@ -301,7 +300,10 @@ func (s *DashboardService) recordTaskDecision(
 	if stepID == "" {
 		return nil, fmt.Errorf("task %s has no workflow step bound", in.taskID)
 	}
-	participantID := s.resolveParticipantID(ctx, stepID, in.taskID, role, in.callerType, in.callerID)
+	role, participantID, err := s.resolveTaskDecisionSeat(ctx, stepID, in)
+	if err != nil {
+		return nil, err
+	}
 
 	result, err := dispatcher.RecordDecision(ctx, officeenginedispatcher.RecordDecisionInput{
 		TaskID:        in.taskID,
@@ -339,6 +341,37 @@ func (s *DashboardService) recordTaskDecision(
 	s.logDecisionActivity(ctx, rec)
 	s.runReactivityForDecision(ctx, rec)
 	return rec, nil
+}
+
+func (s *DashboardService) resolveTaskDecisionSeat(
+	ctx context.Context, stepID string, in decisionInput,
+) (role, participantID string, err error) {
+	if in.callerType == models.DeciderTypeAgent {
+		return s.resolveAgentDecisionSeat(ctx, stepID, in.taskID, in.callerID)
+	}
+	role, err = s.resolveDeciderRole(ctx, in.callerType, in.callerID, in.taskID)
+	if err != nil {
+		return "", "", err
+	}
+	participantID = s.resolveParticipantID(ctx, stepID, in.taskID, role, in.callerType, in.callerID)
+	return role, participantID, nil
+}
+
+func (s *DashboardService) resolveAgentDecisionSeat(
+	ctx context.Context, stepID, taskID, agentID string,
+) (role, participantID string, err error) {
+	roleDispatcher, ok := s.engineDispatcher.(roleResolvingDispatcher)
+	if !ok {
+		return "", "", fmt.Errorf("%s", decisionStoreNotWiredErr)
+	}
+	role, participantID, err = roleDispatcher.ResolveParticipantRole(ctx, taskID, stepID, agentID)
+	if errors.Is(err, workflowengine.ErrParticipantNotFound) {
+		return "", "", shared.ErrForbidden
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("resolve participant role: %w", err)
+	}
+	return role, participantID, nil
 }
 
 // resolveParticipantID looks up the workflow_step_participants row for
@@ -574,10 +607,31 @@ func (s *DashboardService) allApproversApproved(ctx context.Context, taskID stri
 	return true
 }
 
+// PendingApproversForCompletion returns the approvers, with display names,
+// whose missing approval blocks the task from completing on stepID (empty
+// means its current step). Consulted by the task service before a human move
+// completes an Office task, so the destination step's template approvers
+// count.
+func (s *DashboardService) PendingApproversForCompletion(
+	ctx context.Context, taskID, stepID string,
+) ([]PendingApproverDTO, error) {
+	pending, err := s.pendingApproversAtStep(ctx, taskID, stepID)
+	if err != nil || len(pending) == 0 {
+		return nil, err
+	}
+	return s.resolvePendingApprovers(ctx, pending), nil
+}
+
 // pendingApprovers returns the agent IDs of approvers without a
 // current approved decision. An empty result means the gate is clear.
 func (s *DashboardService) pendingApprovers(ctx context.Context, taskID string) ([]string, error) {
-	approvers, err := s.repo.ListTaskParticipants(ctx, taskID, models.ParticipantRoleApprover)
+	return s.pendingApproversAtStep(ctx, taskID, "")
+}
+
+// pendingApproversAtStep is pendingApprovers with the task's seats read as if
+// it stood at stepID; an empty stepID reads the current step.
+func (s *DashboardService) pendingApproversAtStep(ctx context.Context, taskID, stepID string) ([]string, error) {
+	approvers, err := s.repo.ListTaskParticipantsAtStep(ctx, taskID, stepID, models.ParticipantRoleApprover)
 	if err != nil {
 		return nil, err
 	}
@@ -591,19 +645,7 @@ func (s *DashboardService) pendingApprovers(ctx context.Context, taskID string) 
 	if err != nil {
 		return nil, err
 	}
-	approvedBy := make(map[string]struct{}, len(decisions))
-	for _, dec := range decisions {
-		if dec.Decision == models.DecisionApproved {
-			approvedBy[dec.DeciderID] = struct{}{}
-		}
-	}
-	pending := make([]string, 0, len(approvers))
-	for _, ap := range approvers {
-		if _, ok := approvedBy[ap.AgentProfileID]; !ok {
-			pending = append(pending, ap.AgentProfileID)
-		}
-	}
-	return pending, nil
+	return PendingApproverIDs(approvers, decisions), nil
 }
 
 // supersedeAndLog clears all active decisions for a task and emits an
@@ -657,4 +699,14 @@ func (s *DashboardService) resolveDeciderName(
 		return ""
 	}
 	return agent.Name
+}
+
+// PendingApproverIDs compares the canonical slate with active approvals.
+func PendingApproverIDs(approvers []sqlite.Participant, decisions []*workflowmodels.WorkflowStepDecision) []string {
+	return completionpolicy.PendingApproverIDs(approvers, decisions)
+}
+
+// ResolvePendingApproverNames resolves only display data after admission rollback.
+func (s *DashboardService) ResolvePendingApproverNames(ctx context.Context, ids []string) []PendingApproverDTO {
+	return s.resolvePendingApprovers(ctx, ids)
 }

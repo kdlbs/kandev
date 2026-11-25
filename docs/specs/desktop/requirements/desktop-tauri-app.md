@@ -2,7 +2,7 @@
 status: active
 system: desktop
 created: 2026-06-23
-updated: 2026-10-20
+updated: 2026-11-24
 owners:
   - tbd
 ---
@@ -69,7 +69,15 @@ Kandev's installed desktop app should behave like a native application without d
   shall be a distinct app-scoped test occurrence, so a previous successful test
   does not suppress a later activation. Testing shall not represent an agent
   session or release event, change provider configuration, or require a task.
-- **AC-DESKTOP-DESKTOP-TAURI-APP-001.18:** On Windows, when the desktop app
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.18:** With a sparse PATH and only nvm-managed
+  Node.js, the macOS app shall find `node`, `npm`, and `npx` for local agent
+  discovery and execution. This applies to a usable `node` or numeric default
+  under `~/.nvm`.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.19:** Executables in the inherited and
+  common desktop PATH entries shall take precedence over the nvm fallback.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.20:** When the nvm selection is absent,
+  invalid, or incomplete, Kandev shall start with its ordinary desktop PATH.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.21:** On Windows, when the desktop app
   stops its owned backend for quit, startup failure, or update restart, the
   console-less launcher and backend shall receive the stop as their normal
   first shutdown signal and run their ordered teardown before any forced

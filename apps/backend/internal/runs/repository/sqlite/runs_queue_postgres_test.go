@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -47,7 +48,7 @@ func TestPostgresCoalesceRun_DoesNotMergeDifferentTaskRuns(t *testing.T) {
 
 	for _, reason := range []string{"task_assigned", "task_blockers_resolved"} {
 		t.Run(reason, func(t *testing.T) {
-			queued := mustCreateRun(t, repo, &models.Run{
+			queued := mustCreateRun(t, repo, &runsmodels.Run{
 				ID: "pg-task-a-" + reason, AgentProfileID: "a1", Reason: reason,
 				Payload: `{"task_id":"pg-task-a"}`, Status: "queued", CoalescedCount: 1,
 			})
@@ -76,7 +77,7 @@ func TestPostgresCoalesceRun_DoesNotMergeTasklessIntoTaskCarryingRun(t *testing.
 	repo := newTestRepoPostgres(t)
 	ctx := context.Background()
 
-	queued := mustCreateRun(t, repo, &models.Run{
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "pg-task-c", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"pg-task-c"}`, Status: "queued", CoalescedCount: 1,
 	})
@@ -116,7 +117,7 @@ func TestPostgresCoalesceRun_MergesTasklessIntoTasklessRun(t *testing.T) {
 			repo := newTestRepoPostgres(t)
 			ctx := context.Background()
 
-			queued := mustCreateRun(t, repo, &models.Run{
+			queued := mustCreateRun(t, repo, &runsmodels.Run{
 				ID: "pg-taskless", AgentProfileID: "a1", Reason: "heartbeat",
 				Payload: tc.payload, Status: "queued", CoalescedCount: 1,
 			})
@@ -145,7 +146,7 @@ func TestPostgresCoalesceRun_DoesNotMergeNonStringTaskIDIntoTasklessRun(t *testi
 	repo := newTestRepoPostgres(t)
 	ctx := context.Background()
 
-	queued := mustCreateRun(t, repo, &models.Run{
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "pg-taskless-real", AgentProfileID: "a1", Reason: "custom_reason",
 		Payload: `{"note":"real taskless launch"}`, Status: "queued", CoalescedCount: 1,
 	})
@@ -174,7 +175,7 @@ func TestPostgresCoalesceRun_DoesNotMergeIntoNonStringQueuedTaskID(t *testing.T)
 	repo := newTestRepoPostgres(t)
 	ctx := context.Background()
 
-	queued := mustCreateRun(t, repo, &models.Run{
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "pg-malformed", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":42}`, Status: "queued", CoalescedCount: 1,
 	})
@@ -201,7 +202,7 @@ func TestPostgresCoalesceRun_MergesSameTask(t *testing.T) {
 	repo := newTestRepoPostgres(t)
 	ctx := context.Background()
 
-	queued := mustCreateRun(t, repo, &models.Run{
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "pg-merge-task", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"pg-merge-task"}`, Status: "queued", CoalescedCount: 1,
 	})

@@ -31,11 +31,16 @@ When an agent is in a long-running turn, an urgent correction can sit in the que
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.9:** A running turn started by ordinary FIFO delivery shall be interruptible by a new Send Now request after its prompt handoff completes. This applies to fixed and dynamic profiles, including Cursor. The selected pending entry runs once; the interrupted input is not restored or repeated, and other pending entries retain FIFO order.
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.10:** A request that observes an older turn shall not cancel a newer successor. Overlapping cancellation requests remain conflicts. Late completion from an interrupted turn shall not settle the replacement or release its pending queue work.
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.11:** Desktop and phone Send Now actions shall show the existing localized conflict feedback for a genuine handoff conflict and refresh the authoritative queue. They shall allow a later request after handoff without a page reload.
+- **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.12:** When an accepted Send Now cannot deliver its prompt and restores its entries, a promptable session with Auto-run ON shall deliver them through ordinary FIFO without another user action. Each entry shall run once, and a failed FIFO attempt shall not start another Send Now. Entries restored by recovery after a backend restart shall stay pending instead.
+- **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.13:** While an accepted Send Now claim owns an entry, FIFO shall not reserve or remove it, even after its lease expires. An undelivered claim restores the entry once.
+- **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.14:** When an accepted Send Now claim can neither deliver nor restore, the backend shall release the claim and its surviving owned source rows, then mark the message not delivered on desktop and phone (adding it if absent) unless a successor owns a source. Task or session deletion and replacement keep their behavior.
 
 ## Design and delivery
 
 - [System design](../system-design/message-queue-send-now.md)
 - [FIFO interruption repair package](../../../plans/queue-send-now-live-fifo/plan.md)
+- [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md)
+- [Send Now claim loss repair](../../../plans/send-now-claim-loss/plan.md)
 
 ## Migrated source detail
 
@@ -232,12 +237,12 @@ not undo that explicit resume instruction.
   prompt but has not completed the handoff, Send Now returns
   `send_now_conflict`. After handoff, a new request may replace that running
   successor without restoring or duplicating its already accepted input.
-- **Prompt admission fails after claim:** the backend restores the original
-  entries and their FIFO positions before publishing status. Auto-run stays ON
-  because the operation was already accepted as a resume. Existing ordinary
-  queue delivery retains its current process-crash window after a destructive
-  claim; durable lifecycle rows retain their accepted-until-acknowledged
-  guarantee.
+- **Prompt admission fails after claim:** a successful restore returns the
+  original entries and positions. A restore that still fails after its retry
+  budget releases the claim, settles owned rows, and marks the message not
+  delivered (`.14`). Auto-run stays ON for the resume. Ordinary
+  rows keep their process-crash window; durable rows keep
+  accepted-until-acknowledged (`.13`).
 - **Successor turn appears:** the operation fails with `turn_changed`, leaves
   the successor running, and does not claim queue entries.
 - **Conflicting explicit Cancel:** the already accepted operation wins. Send Now

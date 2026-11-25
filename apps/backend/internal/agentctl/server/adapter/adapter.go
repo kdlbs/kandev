@@ -13,6 +13,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -24,15 +25,16 @@ import (
 // This allows users of the adapter package to access these types without
 // importing the types package directly.
 type (
-	PermissionRequest  = types.PermissionRequest
-	PermissionResponse = types.PermissionResponse
-	PermissionOption   = streams.PermissionOption
-	PermissionHandler  = types.PermissionHandler
-	UserInputOption    = types.UserInputOption
-	UserInputQuestion  = types.UserInputQuestion
-	UserInputRequest   = types.UserInputRequest
-	UserInputAnswer    = types.UserInputAnswer
-	UserInputResponse  = types.UserInputResponse
+	PermissionRequest   = types.PermissionRequest
+	PermissionResponse  = types.PermissionResponse
+	PermissionOption    = streams.PermissionOption
+	PermissionHandler   = types.PermissionHandler
+	UserInputOption     = types.UserInputOption
+	UserInputQuestion   = types.UserInputQuestion
+	UserInputRequest    = types.UserInputRequest
+	UserInputAnswer     = types.UserInputAnswer
+	UserInputAttachment = types.UserInputAttachment
+	UserInputResponse   = types.UserInputResponse
 )
 
 // UserInputRequestHandler creates a clarification request and waits for its
@@ -122,6 +124,28 @@ type StderrLineSanitizer interface {
 	SanitizeStderrLine(line string) (safeLine string, keep bool)
 }
 
+// SessionCapabilityProvider exposes capabilities negotiated by ACP initialize.
+// It is optional so adapters and focused tests that do not expose capability
+// details retain the existing AgentAdapter contract.
+type SessionCapabilityProvider interface {
+	SupportsSessionResume() bool
+	SupportsSessionLoad() bool
+}
+
+// ACPProtocolVersion returns the adapter's reported ACP version, or zero if unavailable.
+func ACPProtocolVersion(adpt AgentAdapter) uint16 {
+	if reporter, ok := adpt.(interface{ ACPProtocolVersion() uint16 }); ok {
+		return reporter.ACPProtocolVersion()
+	}
+	return 0
+}
+
+// SessionOperationAuthMethodsProvider exposes the initialize method snapshot
+// for a typed session-operation failure response.
+type SessionOperationAuthMethodsProvider interface {
+	GetSessionOperationAuthMethods() []streams.AuthMethodInfo
+}
+
 // StderrProviderSetter is an optional interface implemented by adapters that can use
 // stderr output for error context. The process manager checks for this interface
 // and calls SetStderrProvider if available.
@@ -141,6 +165,13 @@ type ModelSettableAdapter interface {
 	SetModel(ctx context.Context, modelID string) error
 }
 
+// ModelConfigurationResultAdapter reports only values read from the response
+// to the model change request. Session update notifications remain useful for
+// selector state, but are not evidence for the request that caused them.
+type ModelConfigurationResultAdapter interface {
+	SetModelWithResult(ctx context.Context, modelID string) (streams.ConfigurationResult, error)
+}
+
 // SessionModelStateProvider exposes the model catalog returned by the most
 // recent session creation or load. The agent stream still emits the same
 // session_models event, but this synchronous snapshot prevents lifecycle
@@ -153,6 +184,12 @@ type SessionModelStateProvider interface {
 // support ACP authentication (session/authenticate).
 type AuthenticatableAdapter interface {
 	Authenticate(ctx context.Context, methodID string) error
+}
+
+// AuthStatusProvider exposes a transient provider authentication snapshot for
+// the dedicated operator sign-in instance.
+type AuthStatusProvider interface {
+	AuthStatus() streams.AuthStatus
 }
 
 // ProviderErrorContextProvider exposes the adapter state a generic ACP
@@ -170,6 +207,12 @@ type ProviderErrorContextProvider interface {
 // aren't covered by mode/model.
 type ConfigOptionSettableAdapter interface {
 	SetConfigOption(ctx context.Context, key, value string) error
+}
+
+// ConfigOptionResultAdapter exposes the value returned by the correlated ACP
+// set_config_option response when the provider includes it.
+type ConfigOptionResultAdapter interface {
+	SetConfigOptionWithResult(ctx context.Context, key, value string) (streams.ConfigurationResult, error)
 }
 
 // SessionResettableAdapter is an optional interface implemented by adapters that
@@ -287,6 +330,18 @@ type AgentAdapter interface {
 	RequiresProcessKill() bool
 }
 
+// MCPAttachmentEventPublisher routes best-effort attachment diagnostics through
+// the adapter's ordered event queue when one is available.
+type MCPAttachmentEventPublisher interface {
+	TryPublishMCPAttachmentEvent(AgentEvent, func(AgentEvent) (AgentEvent, error)) (bool, error)
+}
+
+// MCPAttachmentEventPersisterSetter lets an adapter commit its own attachment
+// events through the same ordered journal path used for observations.
+type MCPAttachmentEventPersisterSetter interface {
+	SetMCPAttachmentEventPersister(func(AgentEvent) (AgentEvent, error))
+}
+
 // McpServerConfig holds configuration for an MCP server.
 type McpServerConfig struct {
 	// Name is the human-readable name of the MCP server
@@ -303,18 +358,37 @@ type McpServerConfig struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Headers holds HTTP headers for SSE/HTTP transport
 	Headers map[string]string `json:"headers,omitempty"`
+	// DefinitionID, DefinitionRevision, and Origins are sanitized backend
+	// provenance carried through adapter construction for attachment evidence.
+	DefinitionID       string                  `json:"definition_id,omitempty"`
+	DefinitionRevision int64                   `json:"definition_revision,omitempty"`
+	Origins            []types.McpServerOrigin `json:"origins,omitempty"`
 }
 
 // Config holds configuration for creating adapters
 type Config struct {
+	// ACPProtocolVersion requests a specific wire version for an ACP launch.
+	// Zero uses the legacy v1 transport.
+	ACPProtocolVersion uint16
+
 	// WorkDir is the working directory for the agent
 	WorkDir string
+
+	// ClaudeConfigDir is the effective Claude Code data root from the launch
+	// environment. The ACP transport uses it only for qualified Monitor
+	// completion evidence.
+	ClaudeConfigDir string
 
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
 
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
+
+	// ProjectMCPDelivery is execution-bound evidence that the host materialized
+	// the bound built-in packages into a project configuration file. It is
+	// accepted only from the authenticated configure request.
+	ProjectMCPDelivery *types.ProjectMCPDelivery
 
 	// AgentID is the agent identifier from the registry (e.g., "auggie", "amp", "claude-code").
 	// Used for logging and debug capture. Adapters should use this instead of hardcoded names.
@@ -354,12 +428,29 @@ type Config struct {
 	// NotificationQueueCapacity is the server-resolved ACP inbound queue size.
 	NotificationQueueCapacity int
 
+	// AgentBackgroundWorkEnabled is the effective shared background-work
+	// feature value resolved by the backend for this launch. Adapters use it
+	// to gate provider background attestation; false preserves the existing
+	// provider-neutral behavior.
+	AgentBackgroundWorkEnabled bool
+
 	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
 	PromptCancelJoinTimeout time.Duration
 
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
+
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize. It is an internal child-process contract.
+	AuthPolicy *acpcompat.AuthPolicy
+
+	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
+	PromptSuggestions bool
+
+	// CopilotNativeSessionEvents enables Copilot's opt-in native compaction and
+	// attributed usage notifications for this launch.
+	CopilotNativeSessionEvents bool
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -367,32 +458,40 @@ func (c *Config) ToSharedConfig() *shared.Config {
 	mcpServers := make([]shared.McpServerConfig, len(c.McpServers))
 	for i, srv := range c.McpServers {
 		mcpServers[i] = shared.McpServerConfig{
-			Name:    srv.Name,
-			URL:     srv.URL,
-			Type:    srv.Type,
-			Command: srv.Command,
-			Args:    srv.Args,
-			Env:     srv.Env,
-			Headers: srv.Headers,
+			Name:         srv.Name,
+			URL:          srv.URL,
+			Type:         srv.Type,
+			Command:      srv.Command,
+			Args:         srv.Args,
+			Env:          srv.Env,
+			Headers:      srv.Headers,
+			DefinitionID: srv.DefinitionID, DefinitionRevision: srv.DefinitionRevision,
+			Origins: append([]types.McpServerOrigin(nil), srv.Origins...),
 		}
 	}
 	return &shared.Config{
-		WorkDir:                   c.WorkDir,
-		AutoApprove:               c.AutoApprove,
-		McpServers:                mcpServers,
-		AgentID:                   c.AgentID,
-		AgentName:                 c.AgentName,
-		BaseURL:                   c.BaseURL,
-		AuthHeader:                c.AuthHeader,
-		AuthValue:                 c.AuthValue,
-		Headers:                   c.Headers,
-		Extra:                     c.Extra,
-		AssumeMcpSse:              c.AssumeMcpSse,
-		AssumeMcpHttp:             c.AssumeMcpHttp,
-		RequiresProcessKill:       c.RequiresProcessKill,
-		NotificationQueueCapacity: c.NotificationQueueCapacity,
-		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
-		ProviderGatewayAuth:       c.ProviderGatewayAuth,
+		WorkDir:                    c.WorkDir,
+		ClaudeConfigDir:            c.ClaudeConfigDir,
+		AutoApprove:                c.AutoApprove,
+		McpServers:                 mcpServers,
+		ProjectMCPDelivery:         c.ProjectMCPDelivery.Clone(),
+		AgentID:                    c.AgentID,
+		AgentName:                  c.AgentName,
+		BaseURL:                    c.BaseURL,
+		AuthHeader:                 c.AuthHeader,
+		AuthValue:                  c.AuthValue,
+		Headers:                    c.Headers,
+		Extra:                      c.Extra,
+		AssumeMcpSse:               c.AssumeMcpSse,
+		AssumeMcpHttp:              c.AssumeMcpHttp,
+		RequiresProcessKill:        c.RequiresProcessKill,
+		NotificationQueueCapacity:  c.NotificationQueueCapacity,
+		AgentBackgroundWorkEnabled: c.AgentBackgroundWorkEnabled,
+		PromptCancelJoinTimeout:    c.PromptCancelJoinTimeout,
+		ProviderGatewayAuth:        c.ProviderGatewayAuth,
+		AuthPolicy:                 c.AuthPolicy,
+		PromptSuggestions:          c.PromptSuggestions,
+		CopilotNativeSessionEvents: c.CopilotNativeSessionEvents,
 	}
 }
 

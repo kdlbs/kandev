@@ -47,11 +47,7 @@ export function RepositorySourceMenu({
           setOpen((value) => !value);
         }}
       >
-        <Button
-          type="button"
-          variant="outline"
-          className={cn("cursor-pointer", isMobile ? "min-h-11" : "h-9 px-3")}
-        >
+        <Button type="button" variant="outline" className="cursor-pointer">
           <IconPlus className="h-4 w-4" />
           {t("task:addRepository")}
           <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground" />

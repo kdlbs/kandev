@@ -121,7 +121,7 @@ func TestCancelAgentStopsUnacceptedResumeStartupWithoutWaitingForAgentCancel(t *
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
 	if err != nil || !owner {
 		t.Fatalf("begin resume attempt: owner=%v err=%v", owner, err)
@@ -183,7 +183,7 @@ func TestCancelAgentSettlesSessionStateChangedDuringStartupStop(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
 	if err != nil || !owner {
 		t.Fatalf("begin resume attempt: owner=%v err=%v", owner, err)
@@ -344,7 +344,7 @@ func TestResumeTaskSessionAndPrompt_CancelAtContinuationBarrierDoesNotDispatchPr
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	continuationReached := make(chan struct{})
 	allowPrompt := make(chan struct{})
@@ -435,7 +435,7 @@ func TestPromptTask_ResumeAttemptKeepsCancellationOutOfAcceptanceCallback(t *tes
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
 	if err != nil || !owner {
@@ -550,7 +550,7 @@ func TestResumeTaskSession_CancelDuringReadyWaitReturnsTypedCancellation(t *test
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resumeDone := make(chan error, 1)
 	go func() {

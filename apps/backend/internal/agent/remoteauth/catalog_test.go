@@ -1,12 +1,30 @@
 package remoteauth
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
+
+type openCodeV2Selection struct{}
+
+func (openCodeV2Selection) GetOpenCodeSelection(context.Context) (managedruntime.OpenCodeSelection, bool, error) {
+	return managedruntime.OpenCodeSelection{Family: managedruntime.OpenCodeFamilyV2, SelectedVersion: "2.1.2"}, true, nil
+}
+
+func TestBuildCatalogOpenCodeV2PreservesSelectionWithoutCopyingLegacyFiles(t *testing.T) {
+	ag := agents.NewOpenCodeACP()
+	ag.SetOpenCodeSelectionReader(openCodeV2Selection{})
+	catalog := BuildCatalogForHost([]agents.Agent{ag}, "linux", t.TempDir())
+	method, found := catalog.FindMethod("agent:opencode-acp:files:0")
+	if !found || !method.HasLocalFiles || len(method.SourceFiles) != 0 {
+		t.Fatalf("V2 must remain selectable without legacy credential copies: %+v", method)
+	}
+}
 
 // Agents that declare RemoteAuth with no Methods (e.g. mock) must still
 // serialize "methods": [] rather than "methods": null — the frontend reads
@@ -35,6 +53,34 @@ func TestBuildCatalog_MockSpecSerializesEmptyMethodsAsArray(t *testing.T) {
 	}
 	if !strings.Contains(string(out), `"methods":[]`) {
 		t.Errorf("expected `\"methods\":[]` in JSON, got: %s", out)
+	}
+}
+
+func TestBuildCatalogClaudeAPIKeyAndOAuth(t *testing.T) {
+	cat := BuildCatalogForHost([]agents.Agent{agents.NewClaudeACP()}, "linux", "")
+
+	apiKeyID := "agent:claude-acp:env:ANTHROPIC_API_KEY"
+	apiKey, ok := cat.FindMethod(apiKeyID)
+	if !ok {
+		t.Fatalf("Claude API-key method %q missing from catalog", apiKeyID)
+	}
+	if apiKey.Type != "env" || apiKey.EnvVar != "ANTHROPIC_API_KEY" {
+		t.Fatalf("Claude API-key method = %+v, want env ANTHROPIC_API_KEY", apiKey)
+	}
+	if apiKey.SetupScript != "" || apiKey.SetupHint != "" || apiKey.Label != "" {
+		t.Fatalf("Claude API-key method must not carry setup script, hint, or label: %+v", apiKey)
+	}
+
+	oauthID := "agent:claude-acp:env:CLAUDE_CODE_OAUTH_TOKEN"
+	oauth, ok := cat.FindMethod(oauthID)
+	if !ok {
+		t.Fatalf("Claude OAuth method %q missing from catalog", oauthID)
+	}
+	if oauth.SetupScript == "" {
+		t.Fatal("Claude OAuth method lost its setup script")
+	}
+	if apiKey.MethodID == oauth.MethodID {
+		t.Fatal("Claude API-key and OAuth methods must keep distinct identities")
 	}
 }
 

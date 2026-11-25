@@ -219,7 +219,7 @@ Budgets apply to candidate scanning as well as changed rows:
 | Idle / productive cadence | 60 s / immediate | [Continuation rules](backend-agent-delivery-retention-throughput.md) |
 
 Use one 250 ms batch context for BEGIN and SQL; admit only when it fits remaining pass time. Never reset it after entry. SQLite native BEGIN can outlast cancellation up to its 5-second busy timeout plus scheduling overhead. Check cancellation before predicates; join entry/rollback before Stop or reuse. Measure admission separately.
-The byte budget fits 1 MiB events.
+The byte budget fits 2 MiB events.
 Skip over-budget legacy payloads with diagnostics rather than loading them repeatedly.
 Persist fair scan progress; select retirement jobs by indexed oldest `updated_at`, then identity. Committed phase progress rotates jobs.
 No OFFSET, per-tick global COUNT, full JSON scan or entire-session submission reload.

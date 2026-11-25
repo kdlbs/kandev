@@ -13,6 +13,7 @@ func TestExecutorOwnershipSourceCreatorIsAuthenticated(t *testing.T) {
 	ctx := authn.WithIdentity(t.Context(), authn.Identity{UserID: "alice", Role: authn.RoleMember})
 	watch := &IssueWatch{WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Prompt: "Investigate", Enabled: true}
 	watch.CreatedByUserID = "forged-creator"
+	watch.GitHubHost = "git.company.example"
 	require.NoError(t, store.CreateIssueWatch(ctx, watch))
 	var creator string
 	require.NoError(t, store.db.QueryRowContext(ctx, store.db.Rebind("SELECT created_by_user_id FROM github_issue_watches WHERE id = ?"), watch.ID).Scan(&creator))
@@ -21,6 +22,7 @@ func TestExecutorOwnershipSourceCreatorIsAuthenticated(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, loaded)
 	require.Equal(t, "alice", loaded.CreatedByUserID)
+	require.Equal(t, watch.GitHubHost, loaded.GitHubHost)
 }
 
 func TestExecutorOwnershipSourceAdmissionPropagatesDenial(t *testing.T) {

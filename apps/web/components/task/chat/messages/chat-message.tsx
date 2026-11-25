@@ -29,6 +29,7 @@ import { formatBytes } from "@/lib/utils/format-bytes";
 import { renderUserMessageBody } from "./user-message-body";
 import { useMessageTaskOrigin } from "./message-task-origin-context";
 import { WokenByEntry, wakeTurnIdOf } from "./woken-by-entry";
+import { taskMentionReferences } from "@/lib/tasks/task-mention-references";
 
 type ChatMessageProps = {
   comment: Message;
@@ -139,6 +140,7 @@ function userMessageMetadataFlags(
     hasContent,
     hasAttachments,
     deliveryBlocked: metadata?.delivery_status === "blocked",
+    deliveryNotDelivered: metadata?.delivery_status === "not_delivered",
   };
 }
 
@@ -151,6 +153,7 @@ function parseUserMessageMetadata(comment: Message) {
   return {
     imageAttachments,
     fileAttachments,
+    attachments: metadata?.attachments,
     contextFiles: metadata?.context_files || [],
     ...userMessageMetadataFlags(metadata, hasContent, hasAttachments),
     senderTask: userMessageSenderTask(metadata),
@@ -166,6 +169,7 @@ function UserContextBadges({
   senderTask,
   workflowMessage,
   deliveryBlocked,
+  deliveryNotDelivered,
 }: {
   destinationTaskId: string;
   hasPlanMode: boolean;
@@ -174,6 +178,7 @@ function UserContextBadges({
   senderTask: SenderTaskInfo | null;
   workflowMessage: WorkflowStepMessageInfo | null;
   deliveryBlocked: boolean;
+  deliveryNotDelivered: boolean;
 }) {
   const { t } = useTranslation();
   if (
@@ -182,7 +187,8 @@ function UserContextBadges({
     contextFiles.length === 0 &&
     !senderTask &&
     !workflowMessage &&
-    !deliveryBlocked
+    !deliveryBlocked &&
+    !deliveryNotDelivered
   )
     return null;
   return (
@@ -195,6 +201,15 @@ function UserContextBadges({
           className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-700 dark:text-amber-300"
         >
           {t("task:deliveryMessageBlocked")}
+        </span>
+      )}
+      {deliveryNotDelivered && (
+        <span
+          role="status"
+          data-testid="user-message-delivery-not-delivered"
+          className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-700 dark:text-amber-300"
+        >
+          {t("task:deliveryMessageNotDelivered")}
         </span>
       )}
       {senderTask && <SenderTaskBadge sender={senderTask} destinationTaskId={destinationTaskId} />}
@@ -231,6 +246,7 @@ type UserMessageAttachment = {
   type: string;
   data?: string;
   attachment_id?: string;
+  comment_id?: string;
   mime_type: string;
   name?: string;
   size_bytes?: number;
@@ -294,6 +310,20 @@ function UserMessageAttachments({
   );
 }
 
+function useUserMentionComponents(comment: Message) {
+  const promptNames = usePromptMentionNames();
+  const entityReferences = useMemo(
+    () => entityReferencesFromMetadata(comment.metadata),
+    [comment.metadata],
+  );
+  const taskMentions = useMemo(
+    () => taskMentionReferences(comment.raw_content || comment.content),
+    [comment.raw_content, comment.content],
+  );
+  const components = usePromptMentionMarkdownComponents(promptNames, entityReferences);
+  return { components, taskMentions };
+}
+
 function UserMessageContent({
   comment,
   showRaw,
@@ -305,16 +335,12 @@ function UserMessageContent({
 }: UserMessageProps) {
   const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
   const taskOrigin = useMessageTaskOrigin();
-  const promptNames = usePromptMentionNames();
+  const { components: promptMentionComponents, taskMentions } = useUserMentionComponents(comment);
   const { isFavorite, toggleFavorite } = useMessageFavorite(comment.session_id, comment.id);
-  const entityReferences = useMemo(
-    () => entityReferencesFromMetadata(comment.metadata),
-    [comment.metadata],
-  );
-  const promptMentionComponents = usePromptMentionMarkdownComponents(promptNames, entityReferences);
   const {
     imageAttachments,
     fileAttachments,
+    attachments,
     contextFiles,
     hasPlanMode,
     hasReviewComments,
@@ -324,6 +350,7 @@ function UserMessageContent({
     senderTask,
     workflowMessage,
     deliveryBlocked,
+    deliveryNotDelivered,
   } = parseUserMessageMetadata(comment);
 
   return (
@@ -337,6 +364,7 @@ function UserMessageContent({
           senderTask={senderTask}
           workflowMessage={workflowMessage}
           deliveryBlocked={deliveryBlocked}
+          deliveryNotDelivered={deliveryNotDelivered}
         />
         <div
           data-testid="user-message-bubble"
@@ -357,8 +385,10 @@ function UserMessageContent({
             showRaw,
             hasAttachments,
             content: comment.content,
+            attachments,
             rawContent: comment.raw_content,
             promptMentionComponents,
+            taskMentions,
             taskId: comment.task_id,
             worktreePath,
             onOpenFile,

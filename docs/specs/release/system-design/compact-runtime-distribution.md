@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: release
 requirements:
   - REQ-RELEASE-COMPACT-RUNTIME-001
@@ -144,6 +144,45 @@ GitHub Release is written. An existing release helper asset with the same
 name must have the same digest; a retry or backfill refuses to overwrite
 different bytes. The existing Stable SemVer and archive names for default
 packages remain unchanged.
+
+### Published immutable release recovery
+
+For `AC-RELEASE-COMPACT-RUNTIME-003.7`, `publish-release` first classifies the
+selected GitHub release. A confirmed absence uses normal publication. Existing
+mutable releases retain their reconciliation path. An existing published
+immutable release uses verification only. API failures and malformed metadata
+are not absence.
+
+A current-workflow helper verifies the signed release source and expected
+artifact inventory. It downloads the existing assets into a separate directory.
+It verifies their non-empty bodies, sizes, digests, and checksum sidecars.
+Reuse the expected inventory and validators from staged publication instead of
+maintaining a second platform list. Verify standard and full archives, Windows
+ZIPs, canonical helpers, desktop installers, the runtime size report, and the
+browser demo when required by the selected source. Validate any updater set
+and its feed with the existing signature verifier. A partial signed updater
+set fails; an originally unsigned release does not acquire an updater feed
+because current signing credentials differ.
+
+Published assets are the authority for this path. Rebuilt desktop installers
+can differ for reasons such as signing timestamps; their new bytes do not
+authorize replacing immutable assets. Preserve canonical-helper equality
+checks, source-version checks, and release-bound manifest validation. Reject a
+missing, duplicated, malformed, mismatched, or unreadable required asset before
+reporting publication success.
+
+After verification, skip release-note edits, regenerated updater uploads, and
+`softprops/action-gh-release` for that immutable release. Return the ordinary
+successful `publish-release` result so SDK, npm, Homebrew, and Scoop dependencies
+continue through their existing gates. Record the reused release ID, tag,
+source commit, and verified asset digests. Load the helper and its validation
+dependencies from `github.workflow_sha`, while application inputs remain at the
+selected tag. Never weaken required channel or asset checks to make a backfill
+green.
+
+SDK evidence has its own release lifecycle under the
+[plugin design](../../plugins/system-design/sdk-distribution.md#sdk-release-lifecycle-and-storage-selection).
+This host path never adds SDK assets to an already published host release.
 
 ## Channel consumption
 
@@ -319,3 +358,4 @@ the redirect and verifies the installed manifest digest regardless of host.
 
 - [Compact runtime distribution](../../../plans/compact-runtime-distribution/plan.md)
 - [Canonical helper artifact permissions](../../../plans/release-helper-permissions/plan.md)
+- [Immutable release recovery](../../../plans/immutable-release-sdk-recovery/plan.md)

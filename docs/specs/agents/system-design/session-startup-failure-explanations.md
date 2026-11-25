@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-09-30
-updated: 2026-10-06
+updated: 2026-10-21
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006
 owners:
@@ -32,6 +32,10 @@ records the implementation sequence and verification results. This design
 documents the delivered behavior and remains the authority for its boundaries.
 
 ## Verified baseline and failure path
+
+[Session setting semantics](session-setting-semantics.md) adds proposed thinking-specific
+causes for qualified Pi sessions. Existing historical permission causes retain
+their stored meaning; the extension does not weaken permission confirmation.
 
 The planning checkout starts at `ff917a370ac9127fee6f8d7cee80b6b7b9b6175b`.
 `git merge-base --is-ancestor fa729f2d7653f4480c107c6a6d50a5452eb3dd0e HEAD`
@@ -97,6 +101,15 @@ cases within that code. Existing timeout, authentication, and cancellation
 handling retains its precedence. Context cancellation and terminal-session
 sentinels remain outside bootstrap error conversion; a deadline must retain
 its timeout meaning instead of being relabelled an application rejection.
+Fail-closed model branches return caller cancellation, deadlines, and errors
+wrapping `agentctl.ErrAgentStreamNotConnected` unchanged. These errors retain
+transport/context identity rather than acquiring model application evidence.
+Do not reuse session/load's transport phrase matcher here: provider replies may
+mention a closed connection, and the ACP SDK also flattens some local write
+failures into the same `RequestError` envelope as a provider reply. Opaque ACP
+errors remain model application failures until their origin can be attested.
+The generic bootstrap cause therefore covers proven host-stream loss; this
+change does not claim to distinguish all remote ACP transport failures.
 
 Produce typed evidence at the decision branch. Keep `Cause` for `errors.Is` and
 `errors.As`; no persistence consumer uses its `Error()` as user detail.

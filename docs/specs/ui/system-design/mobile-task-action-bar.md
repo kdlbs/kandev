@@ -81,6 +81,45 @@ navigation recovery remain owned by Tasks.
 
 ## Controls and responsive sizing
 
+### Narrow desktop notice allocation
+
+`ThreadConversation` embeds `TaskChatPanel` in a tile whose width can be 360px
+while the browser uses desktop breakpoints. The phone-only `basis-full` rule
+does not protect this host. A zero flex basis and `min-w-0` let the shared
+notice collapse around its nonshrinking buttons. The message's
+`overflow-wrap:anywhere` then permits single-character lines.
+
+Give `ArchiveDismissBanner` an intrinsic allocation before sibling controls
+consume the row. Use a 20rem preferred flex basis and a minimum width bounded
+by the smaller of 20rem and the available parent width. Retain flex growth and
+cap the banner at the parent width. The wrapping host then moves complete
+utility/action groups to another row when necessary. Retain the full-width
+phone override, phone ordering, and existing pointer-specific hit sizes.
+Keep emergency wrapping for long unbroken text; removing it alone does not
+repair the allocation.
+
+The passthrough host must allocate this minimum through its nested action
+wrapper. If its intrinsic wrapper constrains the notice, give that wrapper the
+same bounded flex allocation while a terminal notice is present. Do not reserve
+notice space when the banner is absent. No Threads-specific state or duplicate
+banner is required. Archive and dismissal owners remain unchanged.
+
+Use the existing inline phone notice as the mobile exemplar. The change adds
+no navigation, overlay, motion, or scroll owner. The Threads footer allocation
+continues to preserve its transcript floor. Preserve the wide desktop inline
+contract in [composer action wrapping](composer-action-wrapping.md).
+
+Prove allocation with browser geometry in a desktop viewport containing narrow
+tiles. Measure the message span as well as banner and button bounds. A visible
+notice or a class assertion cannot detect a one-character text column.
+Include merged and closed notices, Columns and Grid, and a long translation.
+Keep the existing phone, coarse-pointer, archive, and dismissal regressions.
+
+Implementation and verification are recorded in the
+[narrow notice repair plan](../../../plans/threads-pr-notice-layout/plan.md).
+
+### Existing control behavior
+
 Retain existing feature components and callbacks. Make both right controls and
 the transcript-navigation subgroup able to wrap complete controls. Keep Proceed
 at the right content edge, apply the linked normal-chat phone row contract,

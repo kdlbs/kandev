@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { RecoveryActions, type RecoveryChoice } from "@/components/task/recovery-actions";
 import { SessionErrorDetails } from "@/components/task/session-error-details";
@@ -189,8 +190,33 @@ function preferredBootstrapRecoveryAction(
   return undefined;
 }
 
+function recoveryCauseDetails(error: TaskStatusSummaryActiveError, model: RecoveryCardModel) {
+  if (model.hasTypedSelectionCause || model.hasTypedPluginCause || model.hasTypedCleanupCause) {
+    return "";
+  }
+  return error.details ?? "";
+}
+
+function RecoveryCardHeading({
+  title,
+  attention,
+  readOnly,
+}: {
+  title: string;
+  attention: string;
+  readOnly: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <span className="text-sm font-medium">{title}</span>
+      {!readOnly ? <span className="text-xs text-muted-foreground">{attention}</span> : null}
+    </div>
+  );
+}
+
 export function RecoveryCardContent({
   model,
+  children,
   error,
   profileExists,
   providerRestoredResumeEligible,
@@ -213,6 +239,7 @@ export function RecoveryCardContent({
   t,
 }: {
   model: RecoveryCardModel;
+  children?: ReactNode;
   error: TaskStatusSummaryActiveError;
   profileExists: boolean;
   providerRestoredResumeEligible: boolean;
@@ -240,16 +267,13 @@ export function RecoveryCardContent({
   const summary = needsManagedCloneRelocation
     ? t("task:managedCloneRelocationBody")
     : model.summary;
-  const details =
-    model.hasTypedSelectionCause || model.hasTypedCleanupCause ? "" : (error.details ?? "");
   return (
     <div className="min-w-0 flex-1">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="text-sm font-medium">{title}</span>
-        {!model.isReadOnly ? (
-          <span className="text-xs text-muted-foreground">{copy.launchNeedsAttention}</span>
-        ) : null}
-      </div>
+      <RecoveryCardHeading
+        title={title}
+        attention={copy.launchNeedsAttention}
+        readOnly={model.isReadOnly}
+      />
       {summary &&
       (model.showSummary || needsManagedCloneRelocation) &&
       !workspaceRecovery &&
@@ -257,6 +281,7 @@ export function RecoveryCardContent({
         <p className="mt-1 max-w-prose break-words text-sm text-muted-foreground">{summary}</p>
       ) : null}
       <RecoveryCardNotices model={model} profileExists={profileExists} copy={copy} t={t} />
+      {children}
       <BootstrapRecoveryActions
         profileExists={profileExists}
         providerRestoredResumeEligible={providerRestoredResumeEligible}
@@ -283,7 +308,7 @@ export function RecoveryCardContent({
           label={copy.sessionRecoveryDetails}
           structuredFields={model.detailFields}
         >
-          {details}
+          {recoveryCauseDetails(error, model)}
         </SessionErrorDetails>
       ) : null}
     </div>

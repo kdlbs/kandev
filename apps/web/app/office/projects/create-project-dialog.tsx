@@ -62,11 +62,13 @@ function ReposField({
   repos,
   onAddRepo,
   onRemoveRepo,
+  portalContainer,
 }: {
   workspaceId: string;
   repos: string[];
   onAddRepo: (repo: string) => void;
   onRemoveRepo: (r: string) => void;
+  portalContainer: HTMLElement | null;
 }) {
   const { t } = useTranslation();
   const { repositories } = useRepositories(workspaceId);
@@ -88,6 +90,7 @@ function ReposField({
           repositories={repositories}
           exclude={repos}
           onSelect={onAddRepo}
+          portalContainer={portalContainer}
         />
       </div>
     </div>
@@ -231,6 +234,7 @@ function ProjectFormBody({
   onUpdate,
   onAddRepo,
   onRemoveRepo,
+  portalContainer,
 }: {
   form: ProjectFormState;
   agents: AgentProfile[];
@@ -239,6 +243,7 @@ function ProjectFormBody({
   onUpdate: (patch: Partial<ProjectFormState>) => void;
   onAddRepo: (repo: string) => void;
   onRemoveRepo: (r: string) => void;
+  portalContainer: HTMLElement | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -269,6 +274,7 @@ function ProjectFormBody({
         repos={form.repos}
         onAddRepo={onAddRepo}
         onRemoveRepo={onRemoveRepo}
+        portalContainer={portalContainer}
       />
       <div className="space-y-2">
         <Label>{t("office:leadAgent")}</Label>
@@ -304,6 +310,7 @@ function ProjectFormBody({
 
 export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateProjectDialogProps) {
   const { t } = useTranslation();
+  const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   const agents = useAppStore(selectOfficeAgentProfiles);
   const meta = useAppStore((s) => s.office.meta);
   const executorTypes =
@@ -312,14 +319,15 @@ export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateP
   const { form, update, submitting, handleAddRepo, handleRemoveRepo, handleCreate } =
     useProjectForm(workspaceId, () => onOpenChange(false));
 
-  // ProjectRepositoryPicker renders its popover inline. Paint clipping keeps
-  // that wide popover from creating a horizontal scroll range on the dialog.
+  // The shell stays unclipped so the picker can paint outside it. The scrolling
+  // form body keeps its own horizontal and vertical containment.
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        ref={setPopoverContainer}
         data-testid="create-project-dialog"
         data-layout="contained"
-        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-clip sm:max-w-lg"
+        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-visible sm:max-w-lg"
       >
         <DialogHeader>
           <DialogTitle>{t("office:newProject")}</DialogTitle>
@@ -337,6 +345,7 @@ export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateP
             onUpdate={update}
             onAddRepo={handleAddRepo}
             onRemoveRepo={handleRemoveRepo}
+            portalContainer={popoverContainer}
           />
         </div>
         <div

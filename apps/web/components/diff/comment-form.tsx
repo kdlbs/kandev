@@ -5,13 +5,25 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPlayerPlay, IconSend, IconX } from "@tabler/icons-react";
+import { cn } from "@kandev/ui/lib/utils";
 import { useTranslation } from "react-i18next";
+
+import type { CommentAttachmentOptions } from "@/components/shared/selection-comment/use-comment-attachments";
+import { useCommentAttachments } from "@/components/shared/selection-comment/use-comment-attachments";
+import { CommentAttachmentControl } from "@/components/shared/selection-comment/comment-attachment-control";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
+
+export type CommentFormSubmit = (content: string, attachments?: MessageAttachment[]) => unknown;
 
 interface CommentFormProps {
   initialContent?: string;
-  onSubmit: (content: string) => void;
+  value?: string;
+  onChange?: (content: string) => void;
+  className?: string;
+  onSubmit: CommentFormSubmit;
+  attachmentOptions?: CommentAttachmentOptions;
   onCancel?: () => void;
-  onSubmitAndRun?: (content: string) => void;
+  onSubmitAndRun?: CommentFormSubmit;
   isEditing?: boolean;
   autoFocus?: boolean;
   submitDisabled?: boolean;
@@ -21,7 +33,6 @@ function ActionButtons({
   disabled,
   modKey,
   isEditing,
-  showRunButton,
   onCancel,
   onSubmit,
   onSubmitAndRun,
@@ -29,12 +40,12 @@ function ActionButtons({
   disabled: boolean;
   modKey: string;
   isEditing: boolean;
-  showRunButton: boolean;
   onCancel?: () => void;
   onSubmit: () => void;
   onSubmitAndRun?: () => void;
 }) {
   const { t } = useTranslation();
+  const showRunButton = !!onSubmitAndRun && !isEditing;
   return (
     <TooltipProvider delayDuration={400}>
       <div className="flex gap-1">
@@ -43,7 +54,7 @@ function ActionButtons({
             size="sm"
             variant="ghost"
             onClick={onCancel}
-            className="h-6 cursor-pointer px-2 text-xs"
+            className="h-6 cursor-pointer px-2 text-xs max-md:h-11 pointer-coarse:h-11"
           >
             <IconX className="mr-1 h-3 w-3" />
             {t("common:cancel")}
@@ -57,7 +68,7 @@ function ActionButtons({
                 variant={showRunButton ? "outline" : "default"}
                 onClick={onSubmit}
                 disabled={disabled}
-                className={`h-6 cursor-pointer px-2 text-xs ${showRunButton ? "rounded-r-none border-r-0" : ""}`}
+                className={`h-6 cursor-pointer px-2 text-xs max-md:h-11 pointer-coarse:h-11 ${showRunButton ? "rounded-r-none border-r-0" : ""}`}
               >
                 <IconSend className="mr-1 h-3 w-3" />
                 {isEditing ? t("diff:update") : t("diff:add")}
@@ -74,7 +85,7 @@ function ActionButtons({
                   size="sm"
                   onClick={onSubmitAndRun}
                   disabled={disabled}
-                  className="h-6 cursor-pointer gap-1 rounded-l-none px-2 text-xs"
+                  className="h-6 cursor-pointer gap-1 rounded-l-none px-2 text-xs max-md:h-11 pointer-coarse:h-11"
                 >
                   <IconPlayerPlay className="h-3 w-3" />
                   {t("diff:run")}
@@ -93,36 +104,41 @@ function ActionButtons({
 
 export function CommentForm({
   initialContent = "",
+  value,
+  onChange,
+  className,
   onSubmit,
   onCancel,
   onSubmitAndRun,
   isEditing = false,
   autoFocus = true,
   submitDisabled = false,
+  attachmentOptions,
 }: CommentFormProps) {
   const { t } = useTranslation();
-  const [content, setContent] = useState(initialContent);
+  const attachments = useCommentAttachments(attachmentOptions);
+  const [localContent, setLocalContent] = useState(initialContent);
+  const content = value ?? localContent;
+  const setContent = (next: string) => {
+    if (value === undefined) setLocalContent(next);
+    onChange?.(next);
+  };
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (autoFocus && textareaRef.current) textareaRef.current.focus();
   }, [autoFocus]);
 
-  const handleSubmit = () => {
+  const submit = (callback?: CommentFormSubmit) => {
     const trimmed = content.trim();
-    if (trimmed && !submitDisabled) {
-      onSubmit(trimmed);
-      setContent("");
-    }
+    if (!callback || !trimmed || submitDisabled || !attachments.canSubmit()) return;
+    const result = attachmentOptions
+      ? callback(trimmed, attachments.descriptors)
+      : callback(trimmed);
+    if (result !== false) setContent("");
   };
-
-  const handleSubmitAndRun = () => {
-    const trimmed = content.trim();
-    if (trimmed && onSubmitAndRun && !submitDisabled) {
-      onSubmitAndRun(trimmed);
-      setContent("");
-    }
-  };
+  const handleSubmit = () => submit(onSubmit);
+  const handleSubmitAndRun = () => submit(isEditing ? undefined : onSubmitAndRun);
 
   const isMac = typeof navigator !== "undefined" && navigator.platform?.includes("Mac");
   const modKey = isMac ? "⌘" : "Ctrl";
@@ -134,40 +150,54 @@ export function CommentForm({
       else handleSubmit();
     } else if (e.key === "Escape" && onCancel) {
       e.preventDefault();
+      e.stopPropagation();
       onCancel();
     }
   };
 
-  const disabled = !content.trim() || submitDisabled;
-  const showRunButton = !!onSubmitAndRun && !isEditing;
-
+  const disabled = !content.trim() || submitDisabled || !attachments.ready;
+  const actions = (
+    <div data-comment-actions className="flex flex-wrap items-center justify-end gap-2">
+      <span
+        data-comment-shortcuts
+        className={cn("mr-auto text-[10px] text-muted-foreground", attachmentOptions && "hidden")}
+      >
+        {onSubmitAndRun
+          ? t("diff:enterToAddShiftEnterToRun", { modKey })
+          : t("diff:enterToAdd", { modKey })}
+      </span>
+      <ActionButtons
+        disabled={disabled}
+        modKey={modKey}
+        isEditing={isEditing}
+        onCancel={onCancel}
+        onSubmit={handleSubmit}
+        onSubmitAndRun={onSubmitAndRun ? handleSubmitAndRun : undefined}
+      />
+    </div>
+  );
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-2 shadow-md">
+    <div
+      className={cn(
+        "flex flex-col gap-2 rounded-md border border-border bg-card p-2 shadow-md",
+        className,
+      )}
+    >
       <Textarea
         ref={textareaRef}
         value={content}
         onChange={(e) => setContent(e.target.value)}
+        onPaste={attachments.handlePaste}
         onKeyDown={handleKeyDown}
         placeholder={t("diff:addAComment")}
         className="min-h-[60px] resize-none text-xs"
         rows={2}
       />
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] text-muted-foreground">
-          {onSubmitAndRun
-            ? t("diff:enterToAddShiftEnterToRun", { modKey })
-            : t("diff:enterToAdd", { modKey })}
-        </span>
-        <ActionButtons
-          disabled={disabled}
-          modKey={modKey}
-          isEditing={isEditing}
-          showRunButton={showRunButton}
-          onCancel={onCancel}
-          onSubmit={handleSubmit}
-          onSubmitAndRun={showRunButton ? handleSubmitAndRun : undefined}
-        />
-      </div>
+      {attachmentOptions ? (
+        <CommentAttachmentControl controller={attachments}>{actions}</CommentAttachmentControl>
+      ) : (
+        actions
+      )}
     </div>
   );
 }

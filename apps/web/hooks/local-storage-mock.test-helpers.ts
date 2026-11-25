@@ -1,7 +1,7 @@
 /**
  * Shared in-memory localStorage mock for the hook test suites that read
  * `localStorage`-backed preferences: the per-integration "enabled" hooks
- * (azure-devops, github, gitlab, jira, linear, sentry), the two nav-visibility
+ * (github, gitlab, jira, linear, sentry), the two nav-visibility
  * toggles (hide-disabled integrations / agent profiles), and the shared
  * `useLocalStorageBoolean` primitive. Lives at the top level of the hooks tree
  * because it is not owned by any one domain. Each test file calls this factory

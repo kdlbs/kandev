@@ -37,6 +37,8 @@ type runtimeFlagIdentity struct {
 }
 
 const (
+	keyACPV2                                      = "features.acpV2"
+	envACPV2                                      = "KANDEV_FEATURES_ACP_V2"
 	keyCodexAppServer                             = "features.codexAppServer"
 	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
 	retiredAppStatusBarKey                        = "features.appStatusBar"
@@ -57,9 +59,26 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
 	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
 	{key: retiredProviderInterruptionContinuationKey, envVar: retiredProviderInterruptionContinuationEnvVar},
+	{key: "features.dynamicCircuitBackoffEscalation", envVar: "KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION"},
 }
 
 var registrations = []runtimeFlagRegistration{
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.providerKeywordContext",
+			EnvVar:          "KANDEV_FEATURES_PROVIDER_KEYWORD_CONTEXT",
+			Kind:            KindFeature,
+			Label:           "Provider keyword and context classification",
+			Description:     "Classifies unmatched provider diagnostics using structural signals, keyword groups, and invocation context.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "May change recovery classification for new provider diagnostics. Existing candidate policies and invocation safety checks still apply.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderKeywordContext },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderKeywordContext = value },
+	},
 	{
 		definition: RuntimeFlagDefinition{
 			Key:             "features.integratedControl",
@@ -75,6 +94,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.IntegratedControl },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.IntegratedControl = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.workspaceCollaboration",
+			EnvVar:          "KANDEV_FEATURES_WORKSPACE_COLLABORATION",
+			Kind:            KindFeature,
+			Label:           "Workspace collaboration",
+			Description:     "Applies workspace grants to native conversation APIs and verified plugin Host callbacks. Disabling restores native permissions and retains saved grants.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Plugin domain callbacks require the current SDK handler context. Unidentified or expired callbacks and grant lookup errors fail closed. Disabling explicitly restores native permissions.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.WorkspaceCollaboration },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.WorkspaceCollaboration = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -189,16 +224,32 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
 			Kind:        KindFeature,
 			Label:       "Dynamic agent routing",
-			Description: "Enables reusable dynamic agent profiles and provider-error routing across task, utility, and Office execution.",
+			Description: "Enables dynamic agent profiles, provider-error routing, and shared circuit admission for fixed profiles, using the default circuit backoff ladder.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskHigh,
 			RiskDescription: "Dynamic routing can change the concrete provider used by a logical session and is still experimental. " +
-				"Enable it only on a controlled installation and review route recovery behavior before using it for unattended work.",
+				"Shared resource circuits use a 1-minute to 4-hour backoff ladder, which can delay fixed profiles and dynamic candidates; a later provider reset time can extend it. Account holds require owner release. Enable on a controlled installation.",
 			RestartRequired: true,
 			Mutable:         true,
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicAgentRouting },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicAgentRouting = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keyACPV2,
+			EnvVar:          envACPV2,
+			Kind:            KindFeature,
+			Label:           "ACP v2 preview",
+			Description:     "Use ACP v2 for supported local agents.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "After disabling the preview, reconnect running ACP v2 sessions to send new prompts.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ACPV2 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ACPV2 = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -231,6 +282,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.AgentBackgroundWork },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentBackgroundWork = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.opencodePlugin",
+			EnvVar:          "KANDEV_FEATURES_OPENCODE_PLUGIN",
+			Kind:            KindFeature,
+			Label:           "OpenCode integration plugin",
+			Description:     "Supplies the Kandev integration plugin to supported OpenCode v2 task launches so native background shell outcomes can settle existing jobs.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "The plugin observes native shell terminal facts through a private loopback callback. Enable it only for OpenCode v2 2.2.0 sessions; unsupported versions keep ordinary ACP behavior.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.OpenCodePlugin },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.OpenCodePlugin = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

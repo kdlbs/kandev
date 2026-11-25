@@ -2,6 +2,7 @@ import { Extension, isNodeEmpty, type Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { storedPromptSuggestion } from "./tiptap-prompt-suggestion";
 
 type DynamicPlaceholderStorage = {
   dynamicPlaceholder: { text: string };
@@ -30,16 +31,20 @@ export const DynamicPlaceholder = Extension.create({
             const { anchor } = selection;
             const decorations: InstanceType<typeof Decoration>[] = [];
             const isEmptyDoc = editor.isEmpty;
+            const suggestion =
+              isEmptyDoc && editor.isEditable ? storedPromptSuggestion(editor) : "";
             doc.descendants((node: ProseMirrorNode, pos: number) => {
               const hasAnchor = anchor >= pos && anchor <= pos + node.nodeSize;
               const isEmpty = !node.isLeaf && isNodeEmpty(node);
               if (hasAnchor && isEmpty) {
                 const classes = ["is-empty"];
                 if (isEmptyDoc) classes.push("is-editor-empty");
+                if (suggestion) classes.push("has-prompt-suggestion");
                 decorations.push(
                   Decoration.node(pos, pos + node.nodeSize, {
                     class: classes.join(" "),
                     "data-placeholder": placeholderStorage(editor).dynamicPlaceholder.text,
+                    ...(suggestion ? { "data-prompt-suggestion": suggestion } : {}),
                   }),
                 );
               }

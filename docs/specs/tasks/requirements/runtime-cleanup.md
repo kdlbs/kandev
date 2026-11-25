@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-06-22
-updated: 2026-09-05
+updated: 2026-10-26
 owners:
   - cfl
 ---
@@ -10,20 +10,18 @@ owners:
 
 ## Overview
 
-Task lifecycle operations release runtime resources without deleting reusable task workspaces or
-discarding the durable evidence needed to retry cleanup safely.
+Task cleanup preserves reusable workspaces and durable retry evidence.
 
 ## Requirements
 
 ### REQ-TASKS-RUNTIME-CLEANUP-001: Task Runtime Cleanup
 
-**Intent:** Make archive, delete, shutdown, and startup cleanup ownership-aware, durable, idempotent,
-and safe when runtimes or task rows are already gone.
+**Intent:** Release owned resources safely, durably, and idempotently.
 
 #### Acceptance criteria
 
-- **AC-TASKS-RUNTIME-CLEANUP-001.1:** When a task is archived or deleted, the system shall stop every runtime recorded for that task before destructive workspace cleanup, using `executors_running` ownership rather than terminal session state alone.
-- **AC-TASKS-RUNTIME-CLEANUP-001.2:** When a session is deleted, the system shall remove only that session and its references; the task-owned workspace, Git worktrees, branches, and reusable files shall remain until a task lifecycle operation requests cleanup.
+- **AC-TASKS-RUNTIME-CLEANUP-001.1:** Archive or delete shall stop every task-owned runtime before destructive workspace cleanup, using `executors_running` ownership regardless of terminal session state.
+- **AC-TASKS-RUNTIME-CLEANUP-001.2:** Session deletion shall remove only the session and its references. Task-owned workspaces, worktrees, branches, and reusable files shall remain until task lifecycle cleanup is requested.
 - **AC-TASKS-RUNTIME-CLEANUP-001.3:** When a task environment is shared, cleanup shall stop the deleting task's runtimes but shall defer destructive environment or worktree teardown until no active session holds the shared environment, and shall never remove borrowed resources.
 - **AC-TASKS-RUNTIME-CLEANUP-001.4:** When an agent or agentctl process does not stop within its grace period, the system shall terminate the complete process group and shall not report shutdown complete while descendants remain attached to PID 1.
 - **AC-TASKS-RUNTIME-CLEANUP-001.5:** When startup reconciliation sees a stale runtime row, the system shall remove only a confirmed-dead local runtime, preserve alive, unknown, remote, or generically failed rows for retry, and emit bounded diagnostics for fail-closed outcomes.
@@ -157,11 +155,11 @@ and safe when runtimes or task rows are already gone.
   A deleted workspace's group with foreign members is rehomed with shared
   resources to a deterministic surviving owner, retaining foreign edges with
   valid FKs and ownership-generation evidence for later reconciliation.
-- **AC-TASKS-RUNTIME-CLEANUP-001.42:** After archive preparation, every
-  request-owned rollback, recovery, finalization, vacancy, activation, and
-  compensation context shall use the earlier of the original absolute deadline
-  and its step budget; an expired request shall persist retry/wakeup rather than
-  extending work with a fresh context.
+- **AC-TASKS-RUNTIME-CLEANUP-001.42:** After preparation, all request-owned
+  rollback, recovery, finalization, vacancy, activation, and compensation shall
+  use the earlier original deadline or step budget. Expiry persists retry/wakeup
+  without extending work. HTTP response writes shall have a bounded allowance
+  beyond the work deadline.
 - **AC-TASKS-RUNTIME-CLEANUP-001.43:** When a snapshotted group is missing,
   immutable proof shall contain every group and ordered membership field
   required to reconstruct the exact row set, protected by canonical encoding,
@@ -244,3 +242,6 @@ and safe when runtimes or task rows are already gone.
   `preparing` creation operations without task lifecycle events and shall finish
   `completing` operations before deleting them, producing ordered created then
   deleted revisions; replay shall not strand an unsettled task.
+- **AC-TASKS-RUNTIME-CLEANUP-001.58:** After successful owned worktree removal,
+  every sharing session shall observe absence. Eligible materialization retries
+  shall work without backend restart; unrelated worktrees shall remain reusable.

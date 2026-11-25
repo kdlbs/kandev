@@ -27,12 +27,16 @@ func TestRecoveryLaunchDoesNotInheritConcurrentWorkspaceAdmissionFailure(t *test
 	for _, tc := range []struct {
 		name           string
 		action         string
+		candidateID    string
 		peerError      error
 		alreadyRunning bool
 		wantError      error
 	}{
 		{name: "native resume", action: "resume"},
 		{name: "explicit continuation", action: "continue_from_history"},
+		{name: "silent native restore", candidateID: "workspace-execution"},
+		{name: "silent restore unrelated peer error", candidateID: "workspace-execution", peerError: unrelatedFailure, wantError: unrelatedFailure},
+		{name: "silent restore own launch failure", candidateID: "workspace-execution", alreadyRunning: true, wantError: ErrAgentAlreadyRunning},
 		{name: "normal launch remains blocked", wantError: ErrSessionRecoveryRequired},
 		{name: "unrelated peer error", action: "resume", peerError: unrelatedFailure, wantError: unrelatedFailure},
 		{name: "own launch failure", action: "resume", alreadyRunning: true, wantError: ErrAgentAlreadyRunning},
@@ -73,7 +77,7 @@ func TestRecoveryLaunchDoesNotInheritConcurrentWorkspaceAdmissionFailure(t *test
 			got, err := mgr.Launch(ctx, &LaunchRequest{
 				TaskID: workspaceRecoveryTaskID, SessionID: workspaceRecoverySessionID,
 				AgentProfileID: "profile-1", ACPSessionID: "original-native-session",
-				RecoveryAction: tc.action,
+				RecoveryAction: tc.action, CandidateExecutionID: tc.candidateID,
 			})
 			peerResult := <-peer
 			if tc.peerError != nil {
@@ -99,17 +103,32 @@ func TestRecoveryLaunchDoesNotInheritConcurrentWorkspaceAdmissionFailure(t *test
 }
 
 func TestCancelledRecoveryLaunchDoesNotStartSharedOperation(t *testing.T) {
-	mgr := newTestManager(t)
-	resolver := &countingProfileResolver{err: errors.New("profile unavailable")}
-	mgr.profileResolver = resolver
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := mgr.coalesceSessionLaunch(ctx, &LaunchRequest{SessionID: "cancelled-session", AgentProfileID: "profile", RecoveryAction: "resume"})
-	require.ErrorIs(t, err, context.Canceled)
-	// Joining the same singleflight key waits for any operation admitted above.
-	_, err = mgr.doCoalescedExecution(context.Background(), "cancelled-session", func(context.Context) (interface{}, error) { return nil, nil })
-	if err != nil {
-		require.ErrorContains(t, err, "profile unavailable")
+	for _, tc := range []struct {
+		name        string
+		action      string
+		candidateID string
+	}{
+		{name: "explicit resume", action: "resume"},
+		{name: "silent restore", candidateID: "cancelled-candidate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := newTestManager(t)
+			resolver := &countingProfileResolver{err: errors.New("profile unavailable")}
+			mgr.profileResolver = resolver
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, err := mgr.coalesceSessionLaunch(ctx, &LaunchRequest{
+				SessionID: "cancelled-session", AgentProfileID: "profile",
+				RecoveryAction: tc.action, CandidateExecutionID: tc.candidateID,
+			})
+
+			require.ErrorIs(t, err, context.Canceled)
+			// Joining the same singleflight key waits for any operation admitted above.
+			_, err = mgr.doCoalescedExecution(context.Background(), "cancelled-session", func(context.Context) (interface{}, error) { return nil, nil })
+			if err != nil {
+				require.ErrorContains(t, err, "profile unavailable")
+			}
+			require.Zero(t, resolver.calls.Load(), "an already cancelled recovery must not launch caller-independent work")
+		})
 	}
-	require.Zero(t, resolver.calls.Load(), "an already cancelled recovery must not launch caller-independent work")
 }

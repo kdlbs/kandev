@@ -72,6 +72,37 @@ type VirtualAgent interface {
 	IsVirtual() bool
 }
 
+// LocalInstallAgent is an agent whose runtime can be installed explicitly
+// through the server-owned install job path. The implementation owns the
+// trusted artifact table; requests never supply a URL or version.
+type LocalInstallAgent interface {
+	SupportsLocalInstall() bool
+	LocalInstall(ctx context.Context, progress func(string)) error
+}
+
+// LocalRuntimeSelection contains the command, environment, and trusted
+// identity resolved for one host-local operation.
+type LocalRuntimeSelection struct {
+	Command        Command
+	Env            map[string]string
+	Variant        string
+	Version        string
+	AdapterVersion string
+}
+
+// LocalRuntimeAgent resolves a complete local runtime selection. It is only
+// consulted for host-local executions.
+type LocalRuntimeAgent interface {
+	ResolveLocalRuntime(ctx context.Context) (LocalRuntimeSelection, error)
+}
+
+// SavedLocalRuntimeAgent resolves the runtime variant recorded with a native
+// conversation. It is optional so other local agents keep their current
+// runtime selection contract.
+type SavedLocalRuntimeAgent interface {
+	ResolveSavedLocalRuntime(ctx context.Context, adapterVersion string) (LocalRuntimeSelection, error)
+}
+
 // StoredProfilePreserver marks a disabled optional agent whose saved profiles
 // remain valid historical configuration and must not be orphan-cleaned.
 type StoredProfilePreserver interface {
@@ -165,6 +196,17 @@ type LoginCommand struct {
 type LoginAgent interface {
 	LoginCommand() *LoginCommand
 }
+
+// ContextLoginAgent resolves an interactive login command against the current
+// host runtime. The variant is supplied by the client and must be checked
+// again before the PTY starts.
+type ContextLoginAgent interface {
+	ResolveLoginCommand(ctx context.Context, variant string) (*LoginCommand, error)
+}
+
+// ErrLoginRuntimeChanged means the selected login action no longer matches
+// the host runtime. The caller must refresh agent discovery before retrying.
+var ErrLoginRuntimeChanged = errors.New("login runtime changed")
 
 // IsPassthroughOnly returns true if the agent only supports passthrough mode
 // (a raw CLI under a PTY, no ACP protocol mode). It governs execution mode —
@@ -285,6 +327,12 @@ type PassthroughOptions struct {
 
 // RuntimeConfig holds Docker / standalone runtime settings.
 type RuntimeConfig struct {
+	// ToolTimeoutEnvKey names the environment variable that bounds one MCP
+	// tool call in this harness, and ToolTimeoutUnit is its unit. Empty means
+	// the harness has no such variable and no floor is applied.
+	ToolTimeoutEnvKey string
+	ToolTimeoutUnit   time.Duration
+
 	// ContainerEnv provides agent-specific environment required only when the
 	// process runs inside a container runtime. These values are independent of
 	// session mode and never reach host or SSH processes.
@@ -563,6 +611,9 @@ type RemoteAuthMethod struct {
 	// FileConflictPolicy controls how an existing target file is handled. It is
 	// an internal transfer contract and is not part of the remote-auth API.
 	FileConflictPolicy RemoteAuthFileConflictPolicy `json:"-"`
+	// ProvisionAtLaunch keeps the credential selection available when the agent
+	// uses its CLI instead of copying a local credential file.
+	ProvisionAtLaunch bool `json:"-"`
 	// SetupScript is an optional shell script that runs on the remote after the
 	// env var is resolved. Used to bootstrap credential files from env vars.
 	// Only meaningful for type="env". Can reference the env var by name.

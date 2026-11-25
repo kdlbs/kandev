@@ -12,8 +12,9 @@ requirements:
 Platform owns the notification configuration saved through
 `internal/notifications/controller`, `service`, and `store`. Provider adapter
 validation, semantic delivery, and the settings UI remain their existing contracts.
-This design repairs the approved provider/subscription persistence defect without
-a schema migration, new public payload, or new authorization boundary.
+This design covers provider/subscription persistence and mounted Save
+acknowledgement without a schema migration, new public payload, or new
+authorization boundary.
 
 ## Requirement mapping
 
@@ -21,6 +22,7 @@ a schema migration, new public payload, or new authorization boundary.
 | --- | --- | --- |
 | `REQ-PLATFORM-NOTIFICATIONS-001` | `AC-PLATFORM-NOTIFICATIONS-001.6`, `AC-PLATFORM-NOTIFICATIONS-001.10` | Event selection and ownership |
 | `REQ-PLATFORM-NOTIFICATIONS-001` | `AC-PLATFORM-NOTIFICATIONS-001.9` | Validation and persistence |
+| `REQ-PLATFORM-NOTIFICATIONS-001` | `AC-PLATFORM-NOTIFICATIONS-001.12` | Mounted Save acknowledgement |
 
 ## Validation and persistence
 
@@ -57,6 +59,33 @@ affected rows before replacing subscriptions. An absent/foreign row returns
 `ErrProviderNotFound` and rolls back without touching subscriptions. Atomic create
 derives subscription ownership from the new provider's user ID.
 
+## Mounted Save acknowledgement
+
+`AC-PLATFORM-NOTIFICATIONS-001.12` specializes the shared
+[manual Save contract](../../ui/requirements/settings-manual-save.md) for the
+mounted notification contributor. At request admission, capture the provider
+snapshot, pending deletion IDs, raw Apprise buffers and create-form identity.
+On success, publish canonical responses over that submitted snapshot to the
+existing saved-provider owner and advance the baseline. Reconcile the current
+draft by provider identity: apply canonical fields only where the current value
+still equals the submitted value. Preserve subsequent event-membership changes,
+provider fields, raw name/URL buffers, removed providers and deletion intentions.
+Remove only acknowledged deletion IDs from the pending set. New canonical
+providers join the baseline and draft, while only the unchanged submitted create
+form is cleared; a replacement or edited form survives. Reset uses the advanced
+baseline. The existing shared coordinator retains Save admission and error policy.
+
+This does not migrate cache ownership, change the API, introduce a generic
+coordinator, or promise batch atomicity, exactly-once creation, recovery from
+ambiguous transport outcomes, or cross-request server ordering. Partial batch
+progress on failure remains the existing limitation.
+
+The shipped notification event desktop table and native phone stacked list use
+the same state/actions. This repair changes only draft reconciliation; layout,
+navigation, touch handlers, scrolling and copy remain unchanged. Transport-held
+integration tests exercise the real provider, API and coordinator; managed
+real-backend browser checks use the existing controls and disposable data only.
+
 ## Failure and verification
 
 An error is returned through the existing controller/handler path. A successful
@@ -76,4 +105,5 @@ and exercise update omission/empty semantics. No live instance or data is used.
 
 ## Delivery record
 
+- [Draft preservation plan and work order](../../../plans/notification-save-drafts/plan.md)
 - [Plan and work order](../../../plans/notification-settings-atomicity/plan.md)

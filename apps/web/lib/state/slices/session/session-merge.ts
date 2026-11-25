@@ -1,3 +1,4 @@
+import { mergeRuntimeStorageHealth } from "@/lib/session-delivery-storage";
 import type { TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
 import { mergePendingActionProjection } from "./task-session-projection-actions";
 import { getAgentGoal, isAgentGoalSnapshotNewer, mergeAgentGoalMetadata } from "@/lib/agent-goal";
@@ -5,6 +6,10 @@ import {
   readAgentDeliveryRecovery,
   type AgentDeliveryRecovery,
 } from "@/lib/session-agent-delivery-recovery";
+import {
+  mergeCompactionCountValue,
+  mergeCompactionReportingValue,
+} from "@/lib/state/slices/session-runtime/context-window";
 import { parseTurnTimestamp } from "./turn-actions";
 
 // i18n-exempt: stable backend failure code, not user-facing copy.
@@ -177,6 +182,16 @@ function mergeSessionMetadata(
   if (incoming.metadata == null) return existing.metadata;
   const current = existing.metadata ?? {};
   const next = { ...current, ...incoming.metadata };
+  const compactionCount = mergeCompactionCountValue(
+    current.context_compaction_count,
+    incoming.metadata.context_compaction_count,
+  );
+  if (compactionCount !== undefined) next.context_compaction_count = compactionCount;
+  const compactionReporting = mergeCompactionReportingValue(
+    current.context_compaction_reporting,
+    incoming.metadata.context_compaction_reporting,
+  );
+  if (compactionReporting) next.context_compaction_reporting = compactionReporting;
   const history = asMetadataRecord(current.agent_delivery_history_gaps);
   if (history)
     next.agent_delivery_history_gaps = {
@@ -296,6 +311,14 @@ function mergeParkedProjection(
   };
 }
 
+function mergeAgentWorkspacePath(
+  existing: TaskSession,
+  incoming: TaskSession,
+): TaskSession["agent_workspace_path"] {
+  if (incoming.agent_workspace_path === undefined) return existing.agent_workspace_path;
+  return incoming.agent_workspace_path;
+}
+
 /** Merge an incoming session update with an existing session, preserving nullable fields. */
 export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
   const cancellation = mergeCancellationProjection(existing, incoming);
@@ -308,6 +331,12 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
   const pendingAction = mergePendingActionProjection(existing, incoming);
   const attachmentChanged = hasACPAttachmentChanged(existing, incoming);
   const merged = { ...existing, ...incoming };
+  const runtimeStorageHealth = mergeRuntimeStorageHealth(
+    existing.runtime_storage_health,
+    incoming.runtime_storage_health,
+  );
+  if (runtimeStorageHealth) merged.runtime_storage_health = runtimeStorageHealth;
+  else delete merged.runtime_storage_health;
   merged.workspace_recovery = mergeWorkspaceRecoveryProjection(
     existing.workspace_recovery,
     incoming.workspace_recovery,
@@ -349,6 +378,8 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
     worktree_path: incoming.worktree_path ?? existing.worktree_path,
     worktree_branch: incoming.worktree_branch ?? existing.worktree_branch,
     workspace_path: incoming.workspace_path ?? existing.workspace_path,
+    // Omission means "no update"; an authoritative null clears the base.
+    agent_workspace_path: mergeAgentWorkspacePath(existing, incoming),
     repository_id: incoming.repository_id ?? existing.repository_id,
     base_branch: incoming.base_branch ?? existing.base_branch,
     task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,

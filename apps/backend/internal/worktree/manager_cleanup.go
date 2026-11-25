@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/retention"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,12 @@ import (
 )
 
 func (m *Manager) PruneQuarantinedWorkspace(ctx context.Context, entry storage.QuarantineEntry) error {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return retentionErr
+	}
+	defer releaseRetention()
+
 	worktrees, err := m.GetAllByTaskID(ctx, entry.TaskID)
 	if err != nil {
 		return err
@@ -41,6 +48,9 @@ func (m *Manager) PruneQuarantinedWorkspace(ctx context.Context, entry storage.Q
 }
 
 func (m *Manager) pruneQuarantinedWorktree(ctx context.Context, wt *Worktree) error {
+	if err := m.checkWorkspaceRetention(ctx, wt.TaskID, wt.ID, wt.Path); err != nil {
+		return err
+	}
 	repoLock := m.getRepoLock(wt.RepositoryPath)
 	repoLock.Lock()
 	defer func() {
@@ -223,6 +233,65 @@ func (m *Manager) RemoveByIDWithReceipt(ctx context.Context, worktreeID string) 
 	return receipt, err
 }
 
+// RollbackCreatedPreparation removes a worktree created by a preparation
+// attempt that failed before its environment transaction persisted inventory.
+// Initial materialization defers persistence until that transaction, so the
+// manager may still own a physical checkout with no store row. Callers must
+// pass only checkouts their own attempt created; reused checkouts are never
+// rolled back through this method.
+func (m *Manager) RollbackCreatedPreparation(ctx context.Context, wt *Worktree) error {
+	if wt == nil || strings.TrimSpace(wt.Path) == "" {
+		return nil
+	}
+	if m.store != nil && wt.ID != "" {
+		stored, err := m.store.GetWorktreeByID(ctx, wt.ID)
+		if err != nil && !errors.Is(err, ErrWorktreeNotFound) {
+			return err
+		}
+		if stored != nil {
+			return m.RemoveByID(ctx, wt.ID, false)
+		}
+	}
+	// The store has no inventory row yet, but persistAndCacheWorktree still
+	// cached the checkout. Serialize physical cleanup with create/recreate on
+	// the same repository, then evict the exact aliases so a retry of the same
+	// session cannot reuse a directory this attempt removed.
+	repoLock := m.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
+	if err := m.removeWorktreeDir(ctx, wt.Path, wt.RepositoryPath); err != nil {
+		return err
+	}
+	m.evictRolledBackWorktree(wt)
+	return nil
+}
+
+// evictRolledBackWorktree removes every cache alias for one exact rolled-back
+// checkout. Callers hold no worktree cache lock; the repository lock keeps
+// concurrent creation out of the same repository path.
+func (m *Manager) evictRolledBackWorktree(wt *Worktree) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, cached := range m.worktrees {
+		if cached == nil {
+			continue
+		}
+		if wt.ID != "" && cached.ID == wt.ID {
+			delete(m.worktrees, key)
+			continue
+		}
+		if cached.RepositoryID == wt.RepositoryID && cached.Path != "" && cached.Path == wt.Path {
+			delete(m.worktrees, key)
+		}
+	}
+	if wt.SessionID != "" {
+		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
+	}
+}
+
 // removeWorktree performs the actual removal of a worktree.
 func (m *Manager) removeWorktree(
 	ctx context.Context, wt *Worktree, removeBranch bool, options WorktreeCleanupOptions,
@@ -234,6 +303,12 @@ func (m *Manager) removeWorktree(
 func (m *Manager) removeWorktreeWithReceipt(
 	ctx context.Context, wt *Worktree, removeBranch bool, options WorktreeCleanupOptions,
 ) (BranchCleanupReceipt, error) {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return BranchCleanupReceipt{}, retentionErr
+	}
+	defer releaseRetention()
+
 	receipt := newBranchCleanupReceipt()
 	if wt == nil {
 		return receipt, errors.New("worktree cleanup requires a worktree")
@@ -283,6 +358,9 @@ func (m *Manager) removeWorktreeWithReceipt(
 		return retainedReceipt, nil
 	}
 
+	if err := m.checkWorkspaceRetention(ctx, wt.TaskID, wt.ID, wt.Path); err != nil {
+		return receipt, err
+	}
 	audit, err := m.auditWorktreeCleanup(ctx, wt, removeBranch, options)
 	if err != nil {
 		return receipt, fmt.Errorf("audit worktree cleanup %s: %w", wt.ID, err)
@@ -327,13 +405,24 @@ func (m *Manager) finalizeRemovedWorktree(ctx context.Context, wt *Worktree) err
 		if err := m.ReleaseWorktreeReference(ctx, wt); err != nil {
 			return fmt.Errorf("release worktree reference %s: %w", wt.ID, err)
 		}
+	} else if m.store != nil && wt.ID != "" {
+		// A retained environment can lose its last bound session to a
+		// replacement. Its inventory row is still keyed by worktree ID.
+		if err := m.markWorktreeInventoryDeleted(ctx, wt); err != nil {
+			return fmt.Errorf("mark removed worktree %s deleted: %w", wt.ID, err)
+		}
 	}
 
-	// Removing a worktree affects only its repository cache entry; sibling
-	// repositories in the same session remain cached.
+	// Every session alias of the removed physical worktree becomes unavailable.
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if wt.SessionID != "" {
+	if wt.ID != "" {
+		for key, cached := range m.worktrees {
+			if cached != nil && cached.ID == wt.ID {
+				delete(m.worktrees, key)
+			}
+		}
+	} else if wt.SessionID != "" {
 		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
 	}
 	return nil
@@ -367,6 +456,18 @@ func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) er
 	if wt == nil || wt.SessionID == "" {
 		return fmt.Errorf("session ID is required to release worktree reference")
 	}
+	if err := m.markWorktreeInventoryDeleted(ctx, wt); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
+	m.mu.Unlock()
+	return nil
+}
+
+// markWorktreeInventoryDeleted changes only the inventory row's status, keyed
+// by worktree ID, and keeps the latest branch policy and recovery state.
+func (m *Manager) markWorktreeInventoryDeleted(ctx context.Context, wt *Worktree) error {
 	if m.store != nil && wt.ID != "" {
 		current, err := m.store.GetWorktreeByID(ctx, wt.ID)
 		if err != nil && !errors.Is(err, ErrWorktreeNotFound) {
@@ -385,12 +486,11 @@ func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) er
 	wt.Status = StatusDeleted
 	wt.DeletedAt = &now
 	wt.UpdatedAt = now
-	if err := m.store.UpdateWorktree(ctx, wt); err != nil && !errors.Is(err, ErrWorktreeNotFound) {
-		return err
+	if m.store != nil {
+		if err := m.store.UpdateWorktree(ctx, wt); err != nil && !errors.Is(err, ErrWorktreeNotFound) {
+			return err
+		}
 	}
-	m.mu.Lock()
-	delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
-	m.mu.Unlock()
 	return nil
 }
 
@@ -596,6 +696,12 @@ func (m *Manager) CleanupWorktreesWithReceipt(
 func (m *Manager) MaintainArchivedBranches(
 	ctx context.Context, limit int,
 ) (BranchCleanupReceipt, error) {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return BranchCleanupReceipt{}, retentionErr
+	}
+	defer releaseRetention()
+
 	receipt := newBranchCleanupReceipt()
 	if limit <= 0 {
 		return receipt, nil
@@ -677,6 +783,7 @@ func (m *Manager) cleanupWorktreesWithReceipt(
 		wt = m.enrichCleanupWorktreeFromCache(ctx, wt)
 		branchReceipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch, options)
 		receipt.merge(branchReceipt)
+		err = AnnotateCleanupInspectionWorktreeID(err, wt.ID)
 		if err != nil {
 			m.logger.Warn("failed to remove worktree during batch cleanup",
 				zap.String("task_id", wt.TaskID),
@@ -733,6 +840,9 @@ func (m *Manager) removeWorktreeDir(
 			m.logger.Debug("git worktree prune failed", zap.Error(err))
 		}
 		m.tryRemoveEmptyTaskDir(worktreePath)
+		if err := m.removeNestedWorkspaceExclusion(context.WithoutCancel(ctx), repoPath, worktreePath); err != nil {
+			m.logger.Debug("failed to remove nested workspace exclusion", zap.String("path", worktreePath), zap.Error(err))
+		}
 		return nil
 	}
 
@@ -765,6 +875,9 @@ func (m *Manager) removeWorktreeDir(
 		}
 	}
 	m.tryRemoveEmptyTaskDir(worktreePath)
+	if err := m.removeNestedWorkspaceExclusion(context.WithoutCancel(ctx), repoPath, worktreePath); err != nil {
+		m.logger.Debug("failed to remove nested workspace exclusion", zap.String("path", worktreePath), zap.Error(err))
+	}
 	return nil
 }
 

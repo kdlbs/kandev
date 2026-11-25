@@ -4,6 +4,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import type { ApiClient } from "../../helpers/api-client";
 import { linkToCoordinatorSettings } from "../../../lib/coordinator/links";
+import { enterGoalNameDuringInitialLoad } from "./goal-adoption-fixture";
 
 const ORDER_TEXT = "Prefer small cards.";
 const GOAL_NAME = "Ship the billing beta";
@@ -115,6 +116,34 @@ test.describe("Coordinator page sections", () => {
     await testPage.reload();
     await expect(testPage.getByTestId("goal-set")).toBeVisible();
     await expect(testPage.getByTestId("goal-name")).toHaveValue("");
+  });
+
+  // @covers AC-COORDINATOR-GOALS-001.1, AC-COORDINATOR-GOALS-001.5, AC-COORDINATOR-GOALS-001.9
+  test("keeps goal text entered as the first load finishes", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const coordinator = await seed(apiClient, seedData);
+    const settingsUrl = `${linkToCoordinatorSettings(seedData.workspaceId, coordinator.id)}?section=goal`;
+    const probe = await enterGoalNameDuringInitialLoad(testPage, settingsUrl, GOAL_NAME);
+    expect(probe).toEqual({ name: GOAL_NAME, setEnabled: true, afterPaint: true });
+
+    const put = waitForHttp(testPage, "PUT", GOAL_PATH);
+    await testPage.getByTestId("goal-set").click();
+    const response = await put;
+    expect(response.status()).toBe(200);
+    expect(response.request().postDataJSON()).toEqual({
+      name: GOAL_NAME,
+      due_on: null,
+      criteria: [],
+    });
+    await expect(testPage.getByTestId("goal-name")).toHaveValue(GOAL_NAME);
+    await expect(testPage.getByTestId("goal-mark-met")).toBeVisible();
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("goal-name")).toHaveValue(GOAL_NAME);
+    await expect(testPage.getByTestId("goal-mark-met")).toBeVisible();
   });
 });
 

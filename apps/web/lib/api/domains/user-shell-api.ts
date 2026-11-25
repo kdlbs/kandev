@@ -113,6 +113,8 @@ export type CreateUserShellOptions = {
   scriptId?: string;
   command?: string;
   label?: string;
+  /** Absolute working directory for the first shell. Backend validates containment. */
+  workingDir?: string;
 };
 
 export async function createUserShell(
@@ -129,6 +131,7 @@ export async function createUserShell(
   if (options?.scriptId) payload.script_id = options.scriptId;
   if (options?.command) payload.command = options.command;
   if (options?.label) payload.label = options.label;
+  if (options?.workingDir) payload.working_dir = options.workingDir;
 
   const response = (await client.request("user_shell.create", payload)) as {
     terminal_id: string;

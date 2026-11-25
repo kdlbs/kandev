@@ -1,3 +1,4 @@
+import { proveRetentionRefreshOrdering } from "../../helpers/retention-refresh-ordering";
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Office retention settings on phones", () => {
@@ -44,4 +45,11 @@ test.describe("Office retention settings on phones", () => {
       )
       .toBe(true);
   });
+});
+
+// @covers AC-OFFICE-RUN-HISTORY-RETENTION-004.10
+test("preserves the acknowledged policy after leaving and reentering Storage", async ({
+  testPage,
+}) => {
+  await proveRetentionRefreshOrdering(testPage, true);
 });

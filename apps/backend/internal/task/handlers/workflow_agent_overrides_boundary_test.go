@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -163,6 +164,7 @@ func TestHTTPCreateTaskRejectsIncompatibleWorkflowOverrideBeforeWrites(t *testin
 		"workflow_agent_overrides": map[string]string{"source-profile": "replacement-profile"},
 	}))
 	c.Request.Header.Set("Content-Type", "application/json")
+	authn.SetOnGin(c, authn.Identity{UserID: "test-user", Role: authn.RoleAdmin, Synthetic: true})
 
 	h.httpCreateTask(c)
 
@@ -175,7 +177,10 @@ func TestHTTPCreateTaskRejectsIncompatibleWorkflowOverrideBeforeWrites(t *testin
 
 func TestWSCreateTaskRejectsIncompatibleWorkflowOverrideBeforeWrites(t *testing.T) {
 	h, repo, validator := newWorkflowOverrideBoundaryHandlers(t)
-	response, err := h.wsCreateTask(context.Background(), wsWorkflowRequest(t, ws.ActionTaskCreate, map[string]any{
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{
+		UserID: "test-user", Role: authn.RoleAdmin, Synthetic: true,
+	})
+	response, err := h.wsCreateTask(ctx, wsWorkflowRequest(t, ws.ActionTaskCreate, map[string]any{
 		"workspace_id":             repo.workspace.ID,
 		"workflow_id":              repo.workflow.ID,
 		"title":                    "Rejected override",

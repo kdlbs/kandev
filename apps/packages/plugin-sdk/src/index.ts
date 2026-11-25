@@ -6,6 +6,22 @@
  * all runtime values during initialize and use these structural types at
  * compile time only.
  */
+
+/** Host-resolved complete grouping, distinct from page-local task-list facets. */
+export type SidebarGroupingReference = `plugin:${string}:${string}`;
+export interface SidebarGroupingProvider {
+  reference: SidebarGroupingReference;
+  label: string;
+  labelKey?: string;
+  generation: string;
+}
+export interface SidebarGroupingSnapshot {
+  version: 1;
+  revision: string;
+  complete: true;
+  groups: Array<{ id: string; label: string; color?: string }>;
+  memberships: Array<{ task_id: string; group_id: string }>;
+}
 export type HostNode = unknown;
 // `any` is deliberate at these two React compatibility seams. Reproducing
 // React's overloaded createElement and recursive ReactNode types would make
@@ -269,11 +285,62 @@ export interface HostReact {
 }
 
 export interface ActionInput {
+  notificationProviderId?: string;
+  notificationFormatter?: NotificationFormatterActionContext;
   workspaceId?: string;
   taskId?: string;
   sessionId?: string;
   repositoryId?: string;
   body?: unknown;
+}
+
+export interface NotificationFormatterActionContext {
+  installationId: string;
+  formatterKey: string;
+  expectedBindingRevision: string;
+  mode: "candidate" | "active";
+}
+
+/** Content-extension declaration selected for an owned notification provider. */
+export interface NotificationFormatterChoice {
+  plugin_id: string;
+  installation_id: string;
+  key: string;
+  version: string;
+}
+
+export interface NotificationFormatterBinding {
+  provider_id: string;
+  provider_type: string;
+  plugin_id: string;
+  installation_id: string;
+  formatter_key: string;
+  configuration_revision: string;
+  digest: string;
+  revision: string;
+}
+
+/** Props for the owner-isolated notification-formatter slot. The backend
+ * reauthorizes provider and installation identity for every operation. */
+export interface NotificationFormatterSlotProps {
+  provider: { id: string; name: string; type: string; events: readonly string[] };
+  events: readonly string[];
+  formatter: NotificationFormatterChoice;
+  binding: NotificationFormatterBinding | null;
+  /** Register selection-only drafts with shared Save; first activation stays explicit. */
+  selectionChanged?: boolean;
+  activateConfiguration(
+    prepared: { revision: string; digest: string },
+    expectedBindingRevision: string,
+  ): Promise<NotificationFormatterBinding>;
+  reload(): Promise<void>;
+  readActiveBinding(): Promise<NotificationFormatterBinding | null>;
+  previewConfiguration(
+    draft: unknown,
+    event: string,
+    sample: string,
+    signal?: AbortSignal,
+  ): Promise<{ title: string; body: string; used_fallback: boolean }>;
 }
 
 export interface PluginHostRepository {
@@ -1435,7 +1502,19 @@ export interface IntegrationSettingsActionProps {
   surface: IntegrationSettingsActionSurface;
 }
 
+/** Host-selected, read-only file bytes. The host grants access before mounting. */
+export interface FileViewerProps {
+  file: { name: string; sizeBytes: number; generation: string };
+  readBytes(signal: AbortSignal): Promise<ArrayBuffer>;
+}
+export interface FileViewerRegistration {
+  id: string;
+  Component: Component<FileViewerProps>;
+}
+
 export interface PluginRegistry {
+  /** Register a viewer declared in ui.file_viewers. */
+  registerFileViewer(registration: FileViewerRegistration): void;
   registerTranslations(catalogs: PluginTranslationCatalogs): void;
   registerRoute(path: string, component: Component, options?: PluginRouteOptions): void;
   registerNavItem(item: {

@@ -52,6 +52,12 @@ persistence checks, and router construction succeed. The existing background
 lifecycle-token sweep remains outside readiness: its watcher/scheduler ordering
 and deadline are unchanged.
 
+The [startup housekeeping design](startup-housekeeping.md) refines these
+recovery gates into required local preparation before runtime activation.
+Per-session remote attachment stays outside the global readiness prerequisite.
+Its [combined plan](../../../plans/startup-housekeeping/plan.md) owns the ordering
+change; it must preserve this design's listener, backup, and persistence gates.
+
 ## Timeout policy
 
 Keep release listener-health timeout at 45000 ms, development/E2E at 600000 ms.

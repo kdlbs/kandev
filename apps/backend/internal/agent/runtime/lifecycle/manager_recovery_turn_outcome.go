@@ -138,12 +138,14 @@ func (m *Manager) publishRecoveredExecutionRunning(ctx context.Context, executio
 	if !m.runtimeExecutionCurrent(execution) {
 		return
 	}
-	// Nothing was retained, so any turn still in flight across the restart
-	// carries a PromptGeneration this freshly reconstructed execution object
-	// has never seen (its own counter was recreated from zero). Let the first
-	// live completion adopt it instead of being rejected as superseded --
-	// see recoveredPromptGenerationPending.
-	execution.recoveredPromptGenerationPending.Store(true)
+	if !m.recoveredAvailabilityCompatible(ctx, execution) {
+		return
+	}
+	// Only an unknown generation can be adopted from a live completion.
+	// Authenticated restored generations retain their stale-event fence.
+	execution.promptLifecycleMu.Lock()
+	execution.recoveredPromptGenerationPending.Store(execution.promptGeneration == 0)
+	execution.promptLifecycleMu.Unlock()
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentRunning, execution)
 }
 
@@ -171,6 +173,9 @@ func (m *Manager) publishRecoveredExecutionReady(ctx context.Context, execution 
 	if execution == nil {
 		return
 	}
+	if !m.recoveredAvailabilityCompatible(ctx, execution) {
+		return
+	}
 	execution.recoveredPromptGenerationPending.Store(false)
 	if err := m.markReadyEventWithContext(ctx, execution.ID, events.AgentReady, false); err != nil {
 		m.logger.Error("failed to mark idle recovered execution as ready",
@@ -185,6 +190,9 @@ func (m *Manager) prepareRecoveredAvailability(
 	execution *AgentExecution,
 ) (*AgentEventPayload, error) {
 	if execution == nil || !m.runtimeExecutionCurrent(execution) {
+		return nil, nil
+	}
+	if !m.recoveredAvailabilityCompatible(ctx, execution) {
 		return nil, nil
 	}
 	var payload AgentEventPayload

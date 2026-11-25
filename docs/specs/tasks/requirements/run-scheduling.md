@@ -47,6 +47,11 @@ autonomous launches without creating workspace-local schedulers.
 - **AC-TASKS-RUN-SCHEDULING-001.8:** When shutdown completes normally, the
   backend shall not emit scheduler database-closed errors or scheduler logs
   after the graceful-shutdown completion message.
+- **AC-TASKS-RUN-SCHEDULING-001.9:** When the Office recovery sweep scans
+  unstarted tasks in SQLite or PostgreSQL, it shall use driver-compatible JSON
+  and time expressions and compare PostgreSQL's naive `created_at` timestamp
+  as UTC. An existing queued, claimed, or finished run for a task shall prevent
+  redispatch; failed and cancelled runs shall not.
 
 ## Out of scope
 

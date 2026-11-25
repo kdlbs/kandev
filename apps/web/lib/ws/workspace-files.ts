@@ -4,6 +4,7 @@ import type {
   FileContentResponse,
   FileSearchResponse,
   WorkspaceContentSearchResponse,
+  WorkspaceRootFilesResponse,
 } from "@/lib/types/backend";
 
 /**
@@ -76,12 +77,12 @@ export async function searchWorkspaceFiles(
   sessionId: string,
   query: string,
   limit: number = 20,
+  signal?: AbortSignal,
 ): Promise<FileSearchResponse> {
-  return client.request<FileSearchResponse>("workspace.files.search", {
-    session_id: sessionId,
-    query,
-    limit,
-  });
+  const payload = { session_id: sessionId, query, limit };
+  return signal
+    ? client.request<FileSearchResponse>("workspace.files.search", payload, undefined, signal)
+    : client.request<FileSearchResponse>("workspace.files.search", payload);
 }
 
 /** Search text content across every repository in the active task workspace. */
@@ -95,6 +96,16 @@ export async function searchWorkspaceContent(
     session_id: sessionId,
     query,
     limit_per_repo: limitPerRepo,
+  });
+}
+
+/** List files at the task workspace root that sit outside repository checkouts. */
+export async function listWorkspaceRootFiles(
+  client: WebSocketClient,
+  sessionId: string,
+): Promise<WorkspaceRootFilesResponse> {
+  return client.request<WorkspaceRootFilesResponse>("workspace.root_files.list", {
+    session_id: sessionId,
   });
 }
 

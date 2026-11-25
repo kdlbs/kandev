@@ -75,7 +75,7 @@ func NewInitialPromptSubmission(content string, planMode bool, attachments []v1.
 			deliveryMode = "prompt"
 		}
 		submission.Attachments = append(submission.Attachments, v1.MessageAttachment{
-			AttachmentID: attachment.AttachmentID,
+			CommentID: attachment.CommentID, AttachmentID: attachment.AttachmentID,
 			Type:         attachment.Type,
 			Name:         attachment.Name,
 			MimeType:     attachment.MimeType,

@@ -210,6 +210,7 @@ export function ThreadsBoard({
     registerColumn,
     preloadTaskIds,
     detailTaskIds,
+    visibleTaskIds,
     mobileTaskId,
     composition,
     layoutKey,
@@ -267,6 +268,7 @@ export function ThreadsBoard({
                 requestedSessionId={thread.taskId === focusedTaskId ? focusedSessionId : null}
                 isPreloaded={preloadTaskIds.has(thread.taskId)}
                 isDetailActive={detailTaskIds.has(thread.taskId)}
+                isMotionVisible={visibleTaskIds?.has(thread.taskId) ?? true}
                 onInvalidRequestedSession={onInvalidRequestedSession}
                 onColumnRef={registerColumn}
                 onOpenTask={onOpenTask}

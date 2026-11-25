@@ -55,6 +55,7 @@ type RestoreIdentity struct {
 	SessionID            string
 	IncarnationID        string
 	HarnessGeneration    uint64
+	AdapterVersion       string
 	NativeSessionID      string
 	OriginalWorkspace    string
 	TargetWorkspace      string

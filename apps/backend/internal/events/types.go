@@ -19,6 +19,7 @@ const (
 	// (.21) and not one task.updated per task.
 	TaskReordered                  = "task.reordered"
 	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
+	SessionTurnChangesUpdated      = "session.turn.changes.updated"
 	// TaskDependenciesResolved fires when a task's last unresolved dependency
 	// completes successfully. Payload: {task_id, resolved_by_task_id}.
 	TaskDependenciesResolved = "task.dependencies_resolved"
@@ -129,6 +130,16 @@ const (
 	// error message itself is projected into the task summary rather than
 	// streamed to task-list subscribers.
 	TaskSessionErrorChanged = "task_session.error_changed"
+	// TaskSessionRuntimeStorageChanged carries an owner-verified advisory
+	// capacity observation. It is independent of journal writes and transcript
+	// persistence.
+	TaskSessionRuntimeStorageChanged = "task_session.runtime_storage_changed"
+
+	// TaskSessionReadCursorChanged carries a session's persisted read cursor
+	// (last_read_message_id and its created_at) after a write. The task
+	// status projector derives the task unread aggregate from it. reset is
+	// true only when a test route force-set a possibly lower cursor.
+	TaskSessionReadCursorChanged = "task_session.read_cursor_changed"
 )
 
 // TaskStatusSummaryUpdated is a complete replacement projection for one
@@ -174,12 +185,6 @@ const (
 	RepositoryCreated = "repository.created"
 	RepositoryUpdated = "repository.updated"
 	RepositoryDeleted = "repository.deleted"
-)
-
-// Event types emitted by Azure DevOps watcher polling.
-const (
-	AzureDevOpsWorkItemWatchMatch    = "azure_devops.work_item_watch.match"
-	AzureDevOpsPullRequestWatchMatch = "azure_devops.pull_request_watch.match"
 )
 
 // Event types for repository sets
@@ -241,6 +246,10 @@ const (
 // docs/decisions/2026-08-01-per-user-plugin-storage.md. Routed to the
 // writing user's own WS connections only, via UserEventBroadcaster.
 const PluginUserStateUpdated = "plugin.user-state.updated"
+
+// PluginSidebarGroupingUpdated carries only provider identity and an optional
+// workspace. Catalog changes carry catalog=true without any workspace data.
+const PluginSidebarGroupingUpdated = "plugins.sidebar-grouping.updated"
 
 // Event types for system maintenance jobs (VACUUM, factory reset, snapshot
 // create/restore, disk walk). Published by internal/system/jobs.Tracker on
@@ -304,9 +313,11 @@ const (
 
 // Event types for workspace/git status
 const (
-	GitEvent           = "git.event"            // Internal git events (agentctl -> orchestrator)
-	GitWSEvent         = "git.ws"               // WebSocket git events (orchestrator -> frontend)
-	FileChangeNotified = "file.change.notified" // File changed in workspace
+	GitEvent                        = "git.event"                    // Internal git events (agentctl -> orchestrator)
+	WorkspaceWorktreesObserved      = "workspace.worktrees.observed" // Linked-worktree snapshots (agentctl -> task service)
+	WorkspaceWorktreesSubjectPrefix = "workspace.worktrees."
+	GitWSEvent                      = "git.ws"               // WebSocket git events (orchestrator -> frontend)
+	FileChangeNotified              = "file.change.notified" // File changed in workspace
 )
 
 // Event types for shell I/O
@@ -353,6 +364,7 @@ const (
 	SessionModelFallbackUpdated         = "session_model_fallback.updated"          // Session started on the profile's fallback model
 	SessionModelSelectionWarningUpdated = "session_model_selection_warning.updated" // Executor-authoritative model decision warning
 	SessionInfoUpdated                  = "session_info.updated"                    // ACP session info received
+	SessionPromptSuggestionUpdated      = "session_prompt_suggestion.updated"       // Native next-prompt suggestion received
 	SessionMCPStatusUpdated             = "session_mcp_status.updated"              // MCP attachment evidence changed
 	BackgroundWorkUpdated               = "background_work.updated"                 // Background workload updated
 	BackgroundWorkOutput                = "background_work.output"                  // Background workload output streamed
@@ -478,6 +490,16 @@ func BuildGitEventSubject(sessionID string) string {
 // BuildGitEventWildcardSubject creates a wildcard subscription for all internal git events
 func BuildGitEventWildcardSubject() string {
 	return GitEvent + ".*"
+}
+
+// BuildWorkspaceWorktreesSubject creates a worktree inventory subject for one session.
+func BuildWorkspaceWorktreesSubject(sessionID string) string {
+	return WorkspaceWorktreesSubjectPrefix + sessionID
+}
+
+// BuildWorkspaceWorktreesWildcardSubject subscribes to every worktree inventory.
+func BuildWorkspaceWorktreesWildcardSubject() string {
+	return WorkspaceWorktreesSubjectPrefix + "*"
 }
 
 // BuildGitWSEventSubject creates a git WebSocket event subject for a specific session
@@ -635,6 +657,16 @@ func BuildSessionInfoWildcardSubject() string {
 	return SessionInfoUpdated + ".*"
 }
 
+// BuildSessionPromptSuggestionSubject creates a prompt suggestion subject for a specific session.
+func BuildSessionPromptSuggestionSubject(sessionID string) string {
+	return SessionPromptSuggestionUpdated + "." + sessionID
+}
+
+// BuildSessionPromptSuggestionWildcardSubject subscribes to every session's prompt suggestions.
+func BuildSessionPromptSuggestionWildcardSubject() string {
+	return SessionPromptSuggestionUpdated + ".*"
+}
+
 // BuildSessionTodosSubject creates a session todos subject for a specific session
 func BuildSessionTodosSubject(sessionID string) string {
 	return SessionTodosUpdated + "." + sessionID
@@ -643,6 +675,16 @@ func BuildSessionTodosSubject(sessionID string) string {
 // BuildSessionTodosWildcardSubject creates a wildcard subscription for all session todos events
 func BuildSessionTodosWildcardSubject() string {
 	return SessionTodosUpdated + ".*"
+}
+
+// BuildSessionRuntimeStorageSubject creates one session's advisory storage subject.
+func BuildSessionRuntimeStorageSubject(sessionID string) string {
+	return TaskSessionRuntimeStorageChanged + "." + sessionID
+}
+
+// BuildSessionRuntimeStorageWildcardSubject subscribes to every advisory storage event.
+func BuildSessionRuntimeStorageWildcardSubject() string {
+	return TaskSessionRuntimeStorageChanged + ".*"
 }
 
 // BuildSessionPromptUsageSubject creates a prompt usage subject for a specific session
