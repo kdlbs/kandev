@@ -1,5 +1,6 @@
 "use client";
 
+import { useSSHSetupContinuation } from "@/components/settings/ssh-connections/setup-continuation";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
@@ -11,7 +12,7 @@ import { IconTerminal2 } from "@tabler/icons-react";
 import { ExecutorOwnerChoice } from "@/components/settings/executor-ownership";
 import { useAppStoreApi } from "@/components/state-provider";
 import { createExecutor, createExecutorProfile } from "@/lib/api/domains/settings-api";
-import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
+import { SSHConnectionEditor } from "@/components/settings/ssh-connections/executor-editor";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import { settingsActionClassName } from "@/components/settings/settings-control";
@@ -20,22 +21,14 @@ import type { Executor } from "@/lib/types/http";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 
-/**
- * SSH-specific "new executor" flow. Renders just the SSHConnectionCard;
- * Save POSTs to /api/v1/executors with type=ssh and the freshly-pinned
- * fingerprint, then immediately creates a default profile under it (the
- * /settings/executors index lists profiles, so an executor with no
- * profile would otherwise be invisible). Routes to the profile-edit page
- * after both writes succeed — that's where the user picks the shell,
- * probes for installed agents, and tunes per-task config (workdir,
- * prepare script, credentials). The host-level executor page
- * (/settings/executors/ssh/:id) remains reachable for re-trust and
- * sessions inspection.
- */
+/** Creates a shared SSH binding and its default executor profile. */
 export function SSHCreatePage() {
   const router = useRouter();
   const store = useAppStoreApi();
-  const [owner, setOwner] = useState("");
+  const flow = useSSHSetupContinuation();
+  const [owner, setOwner] = useState(
+    flow.draft?.editor === "/settings/executors/new/ssh" ? flow.draft.ownerUserId : "",
+  );
 
   const handleSave = useCallback(
     async (cfg: SSHExecutorConfig) => {
@@ -82,7 +75,7 @@ export function SSHCreatePage() {
     <div className="space-y-8">
       <SSHCreateHeader />
       <ExecutorOwnerChoice value={owner} onChange={setOwner} creating baseline="" />
-      <SSHConnectionCard onSave={handleSave} />
+      <SSHConnectionEditor onSave={handleSave} ownerUserId={owner} />
     </div>
   );
 }

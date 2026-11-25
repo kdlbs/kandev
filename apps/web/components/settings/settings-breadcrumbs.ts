@@ -228,6 +228,12 @@ export const SETTINGS_CRUMB_ROUTES: readonly SettingsCrumbRoute[] = [
   },
   // ── Executors ─────────────────────────────────────────────────────────────
   {
+    pattern: /^\/settings\/executors\/ssh-connections$/,
+    params: [],
+    crumbs: [],
+    title: { key: "settings:sshManager.title" },
+  },
+  {
     pattern: /^\/settings\/executors\/new\/([^/]+)$/,
     params: ["executorType"],
     crumbs: [],

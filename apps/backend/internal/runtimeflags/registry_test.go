@@ -627,3 +627,18 @@ func TestAgentSurvivalAvailabilityMatchesPlatformScope(t *testing.T) {
 		t.Fatalf("reasonCode = %q, want empty when available", reasonCode)
 	}
 }
+
+func TestCutoverSSHDefaults(t *testing.T) {
+	for _, profile := range []struct{ name, dev, e2e string }{
+		{"prod", "false", "false"}, {"dev", "true", "false"}, {"e2e", "false", "true"},
+	} {
+		t.Run(profile.name, func(t *testing.T) {
+			t.Setenv("KANDEV_DEBUG_DEV_MODE", profile.dev)
+			t.Setenv("KANDEV_E2E_MOCK", profile.e2e)
+			defaults, err := profiles.FeatureFlagDefaults()
+			if err != nil || defaults["ssh_connection_manager"] != "true" {
+				t.Fatalf("SSH default = %q, err = %v", defaults["ssh_connection_manager"], err)
+			}
+		})
+	}
+}

@@ -116,7 +116,7 @@ func sshDeliveryRecoveryFixture(t *testing.T) (*SSHExecutor, *models.ExecutorRun
 	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
 	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
 	metadata[MetadataKeySSHAgentctlInstanceID] = "native-execution-id"
-	rt := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	rt := newRetainedWireSSHTestExecutor(newTestLogger())
 	t.Cleanup(func() { require.NoError(t, rt.Close()) })
 	return rt, &models.ExecutorRunning{ID: "session-ssh", SessionID: "session-ssh", TaskID: "task-ssh", AgentExecutionID: "execution-ssh", Runtime: agentruntime.RuntimeSSH, PID: 4242, TransientAuthToken: "refreshed-auth-token", Metadata: metadata}, server
 }

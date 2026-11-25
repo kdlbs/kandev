@@ -9,6 +9,7 @@ import (
 )
 
 const (
+	internalSSHIdentitySecretPrefix       = "ssh-identity:"
 	internalGitHubSecretPrefix            = "github:"
 	internalRuntimeSecretPrefix           = "kandev-runtime:"
 	internalAutomationWebhookSecretPrefix = "automation-webhook:"
@@ -18,7 +19,8 @@ const (
 // and must never be listed, revealed, or selected as an agent credential.
 func IsInternalID(id string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(id))
-	return strings.HasPrefix(normalized, internalGitHubSecretPrefix) ||
+	return strings.HasPrefix(normalized, internalSSHIdentitySecretPrefix) ||
+		strings.HasPrefix(normalized, internalGitHubSecretPrefix) ||
 		strings.HasPrefix(normalized, internalRuntimeSecretPrefix) ||
 		strings.HasPrefix(normalized, internalAutomationWebhookSecretPrefix)
 }

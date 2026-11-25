@@ -1,0 +1,289 @@
+{
+  "date": "2026-10-20",
+  "working_tree": "uncommitted",
+  "unique_cases_with_final_passing_evidence": 34,
+  "final_rebuilt_run_cases": 10,
+  "skips_counted_as_passes": 0,
+  "runs": [
+    {
+      "log": "/tmp/kandev-run.e2e.vl3OK2Gr.log",
+      "cases": [],
+      "passed": 0,
+      "failed": 0,
+      "setup_failure": true
+    },
+    {
+      "log": "/tmp/kandev-run.e2e.FhkpdjQL.log",
+      "cases": [
+        {
+          "case": "e2e/tests/ssh/auth-methods.spec.ts \u203a ssh auth methods \u203a identity_source=file with a valid key succeeds",
+          "result": "passed",
+          "duration": "3.9s"
+        },
+        {
+          "case": "e2e/tests/ssh/auth-methods.spec.ts \u203a ssh auth methods \u203a identity_source=file with a missing key file surfaces a clear error",
+          "result": "passed",
+          "duration": "3.8s"
+        },
+        {
+          "case": "e2e/tests/ssh/auth-methods.spec.ts \u203a ssh auth methods \u203a identity_source=file with a passphrase-protected key surfaces 'load into ssh-agent'",
+          "result": "passed",
+          "duration": "3.9s"
+        },
+        {
+          "case": "e2e/tests/ssh/auth-methods.spec.ts \u203a ssh auth methods \u203a identity_source=agent without SSH_AUTH_SOCK fails with a clear message",
+          "result": "passed",
+          "duration": "3.8s"
+        },
+        {
+          "case": "e2e/tests/ssh/auth-methods.spec.ts \u203a ssh auth methods \u203a auth failure (wrong key) surfaces verbatim",
+          "result": "passed",
+          "duration": "3.8s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-connections.spec.ts \u203a managed key enrollment survives restart and launches a reusable SSH executor",
+          "result": "failed",
+          "duration": "2.1m"
+        },
+        {
+          "case": "e2e/tests/ssh/proxy-jump.spec.ts \u203a ssh executor \u2014 ProxyJump \u203a direct connect (no ProxyJump) succeeds against the bastion's own port",
+          "result": "passed",
+          "duration": "10.3s"
+        },
+        {
+          "case": "e2e/tests/ssh/proxy-jump.spec.ts \u203a ssh executor \u2014 ProxyJump \u203a ProxyJump through bastion reaches the otherwise-unreachable target",
+          "result": "passed",
+          "duration": "11.8s"
+        },
+        {
+          "case": "e2e/tests/ssh/proxy-jump.spec.ts \u203a ssh executor \u2014 ProxyJump \u203a chained ProxyJump (a -> b -> target) fails with a clear error",
+          "result": "passed",
+          "duration": "7.6s"
+        }
+      ],
+      "passed": 8,
+      "failed": 1,
+      "setup_failure": false
+    },
+    {
+      "log": "/tmp/kandev-run.e2e.2tzKGx6A.log",
+      "cases": [
+        {
+          "case": "e2e/tests/ssh/config-inheritance.spec.ts \u203a ssh ~/.ssh/config inheritance \u203a alias resolves HostName from ~/.ssh/config",
+          "result": "passed",
+          "duration": "4.0s"
+        },
+        {
+          "case": "e2e/tests/ssh/config-inheritance.spec.ts \u203a ssh ~/.ssh/config inheritance \u203a explicit form port wins over the alias' Port",
+          "result": "passed",
+          "duration": "3.9s"
+        },
+        {
+          "case": "e2e/tests/ssh/config-inheritance.spec.ts \u203a ssh ~/.ssh/config inheritance \u203a explicit form IdentityFile wins over the alias' IdentityFile",
+          "result": "passed",
+          "duration": "3.9s"
+        },
+        {
+          "case": "e2e/tests/ssh/config-inheritance.spec.ts \u203a ssh ~/.ssh/config inheritance \u203a unknown alias falls back to using the alias string as the hostname",
+          "result": "passed",
+          "duration": "3.8s"
+        },
+        {
+          "case": "e2e/tests/ssh/hostkey-rotation.spec.ts \u203a ssh executor \u2014 host key rotation \u203a regenerating the host key surfaces a new fingerprint on the next test",
+          "result": "passed",
+          "duration": "4.2s"
+        },
+        {
+          "case": "e2e/tests/ssh/hostkey-rotation.spec.ts \u203a ssh executor \u2014 host key rotation \u203a launching against a stale pinned fingerprint fails with host-key-changed",
+          "result": "passed",
+          "duration": "5.1s"
+        },
+        {
+          "case": "e2e/tests/ssh/hostkey-rotation.spec.ts \u203a ssh executor \u2014 host key rotation \u203a re-trusting the new fingerprint restores function",
+          "result": "passed",
+          "duration": "9.8s"
+        },
+        {
+          "case": "e2e/tests/ssh/launch-task.spec.ts \u203a ssh executor \u2014 task launch \u203a launches a session and records ssh runtime on the task environment",
+          "result": "passed",
+          "duration": "9.2s"
+        },
+        {
+          "case": "e2e/tests/ssh/launch-task.spec.ts \u203a ssh executor \u2014 task launch \u203a runs custom prepare and terminal cleanup hooks on the remote workspace",
+          "result": "passed",
+          "duration": "6.7s"
+        },
+        {
+          "case": "e2e/tests/ssh/launch-task.spec.ts \u203a ssh executor \u2014 task launch \u203a agentctl is uploaded on first launch and sha256 sidecar lands",
+          "result": "passed",
+          "duration": "9.1s"
+        },
+        {
+          "case": "e2e/tests/ssh/launch-task.spec.ts \u203a ssh executor \u2014 task launch \u203a second launch on the same host skips the upload (sha matches)",
+          "result": "passed",
+          "duration": "14.1s"
+        },
+        {
+          "case": "e2e/tests/ssh/launch-task.spec.ts \u203a ssh executor \u2014 task launch \u203a per-task workdir lives at <workdir>/tasks/<task-dir>/",
+          "result": "passed",
+          "duration": "9.8s"
+        },
+        {
+          "case": "e2e/tests/ssh/launch-task.spec.ts \u203a ssh executor \u2014 task launch \u203a per-session runtime dir holds the agentctl pid and port files",
+          "result": "passed",
+          "duration": "8.6s"
+        },
+        {
+          "case": "e2e/tests/ssh/launch-task.spec.ts \u203a ssh executor \u2014 task launch \u203a uploads path-mode attachments into the remote executor workspace",
+          "result": "passed",
+          "duration": "8.8s"
+        },
+        {
+          "case": "e2e/tests/ssh/launch-task.spec.ts \u203a ssh executor \u2014 task launch \u203a uploads path-mode attachments queued while the remote task is running",
+          "result": "passed",
+          "duration": "29.9s"
+        },
+        {
+          "case": "e2e/tests/ssh/launch-task.spec.ts \u203a ssh executor \u2014 task launch \u203a stopping the session cleans up the session runtime dir but leaves the task dir",
+          "result": "passed",
+          "duration": "9.3s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-adoption.spec.ts \u203a direct adoption preserves the route and rejects unverified or stale changes",
+          "result": "passed",
+          "duration": "6.3s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-adoption.spec.ts \u203a bastion adoption preserves the route and rejects unverified or stale changes",
+          "result": "failed",
+          "duration": "9.6s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-connections.spec.ts \u203a managed key enrollment survives restart and launches a reusable SSH executor",
+          "result": "passed",
+          "duration": "41.2s"
+        },
+        {
+          "case": "e2e/tests/ssh/recovery.spec.ts \u203a ssh executor \u2014 recovery after restart \u203a remote execution replays completed output after backend downtime with local survival disabled",
+          "result": "passed",
+          "duration": "50.8s"
+        },
+        {
+          "case": "e2e/tests/ssh/recovery.spec.ts \u203a ssh executor \u2014 recovery after restart \u203a live session survives a backend restart",
+          "result": "passed",
+          "duration": "10.2s"
+        },
+        {
+          "case": "e2e/tests/ssh/recovery.spec.ts \u203a ssh executor \u2014 recovery after restart \u203a backend restart with a dead remote agentctl marks the execution stopped",
+          "result": "passed",
+          "duration": "8.4s"
+        },
+        {
+          "case": "e2e/tests/ssh/recovery.spec.ts \u203a ssh executor \u2014 recovery after restart \u203a persisted metadata keys are present in ExecutorRunning after launch",
+          "result": "passed",
+          "duration": "9.5s"
+        }
+      ],
+      "passed": 22,
+      "failed": 1,
+      "setup_failure": false
+    },
+    {
+      "log": "/tmp/kandev-run.e2e.mO5Kv3nv.log",
+      "cases": [
+        {
+          "case": "e2e/tests/ssh/managed-adoption.spec.ts \u203a direct adoption preserves the route and rejects unverified or stale changes",
+          "result": "passed",
+          "duration": "7.1s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-adoption.spec.ts \u203a bastion adoption preserves the route and rejects unverified or stale changes",
+          "result": "passed",
+          "duration": "14.2s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-connections.spec.ts \u203a managed key enrollment survives restart and launches a reusable SSH executor",
+          "result": "failed",
+          "duration": "1.7m"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-enrollment.spec.ts \u203a direct password enrollment preserves existing keys and authenticates after restart",
+          "result": "passed",
+          "duration": "6.5s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-enrollment.spec.ts \u203a bastion password enrollment preserves existing keys and authenticates after restart",
+          "result": "passed",
+          "duration": "11.6s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-enrollment.spec.ts \u203a bastion identity enrollment preserves existing keys and authenticates after restart",
+          "result": "passed",
+          "duration": "10.5s"
+        }
+      ],
+      "passed": 5,
+      "failed": 1,
+      "setup_failure": false
+    },
+    {
+      "log": "/tmp/kandev-run.e2e.qZlN7RIp.log",
+      "cases": [
+        {
+          "case": "e2e/tests/ssh/managed-adoption.spec.ts \u203a direct adoption preserves the route and rejects unverified or stale changes",
+          "result": "passed",
+          "duration": "6.9s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-adoption.spec.ts \u203a bastion adoption preserves the route and rejects unverified or stale changes",
+          "result": "passed",
+          "duration": "10.5s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-connections.spec.ts \u203a managed key enrollment survives restart and launches a reusable SSH executor",
+          "result": "passed",
+          "duration": "14.1s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-enrollment.spec.ts \u203a direct password enrollment preserves existing keys and authenticates after restart",
+          "result": "passed",
+          "duration": "6.5s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-enrollment.spec.ts \u203a bastion password enrollment preserves existing keys and authenticates after restart",
+          "result": "passed",
+          "duration": "11.7s"
+        },
+        {
+          "case": "e2e/tests/ssh/managed-enrollment.spec.ts \u203a bastion identity enrollment preserves existing keys and authenticates after restart",
+          "result": "passed",
+          "duration": "11.6s"
+        },
+        {
+          "case": "e2e/tests/ssh/recovery.spec.ts \u203a ssh executor \u2014 recovery after restart \u203a remote execution replays completed output after backend downtime with local survival disabled",
+          "result": "passed",
+          "duration": "50.3s"
+        },
+        {
+          "case": "e2e/tests/ssh/recovery.spec.ts \u203a ssh executor \u2014 recovery after restart \u203a live session survives a backend restart",
+          "result": "passed",
+          "duration": "9.7s"
+        },
+        {
+          "case": "e2e/tests/ssh/recovery.spec.ts \u203a ssh executor \u2014 recovery after restart \u203a backend restart with a dead remote agentctl marks the execution stopped",
+          "result": "passed",
+          "duration": "8.8s"
+        },
+        {
+          "case": "e2e/tests/ssh/recovery.spec.ts \u203a ssh executor \u2014 recovery after restart \u203a persisted metadata keys are present in ExecutorRunning after launch",
+          "result": "passed",
+          "duration": "8.9s"
+        }
+      ],
+      "passed": 10,
+      "failed": 0,
+      "setup_failure": false
+    }
+  ],
+  "environment_cleanup": "dedicated daemon stopped; no containers; six bridge-specific firewall rules, bridge, temporary daemon data and runtime pointer removed; Nix store packages retained"
+}

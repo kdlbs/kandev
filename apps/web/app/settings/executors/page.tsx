@@ -3,7 +3,11 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
-import { IconPlus, IconTrash } from "@tabler/icons-react";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
+import Link from "@/components/routing/app-link";
+import { SSH_CONNECTIONS_SETTINGS_HREF } from "@/lib/settings/ssh-connection-settings-routes";
+import { IconPlus, IconTrash, IconChevronRight, IconKey } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -23,6 +27,7 @@ import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { SettingsGroup } from "@/components/settings/settings-group";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 import { ExecutorProfilesCard } from "@/components/settings/executor-profiles-card";
 
@@ -277,11 +282,12 @@ export default function ExecutorsHubPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">{t("common:executors")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t("executors:hubDescription")}</p>
-      </div>
+      <SettingsPageHeader
+        title={t("common:executors")}
+        description={t("executors:hubDescription")}
+      />
       <Separator />
+      <SSHConnectionsEntry />
       {!canManageKubernetes && <KubernetesReadOnlyNotice />}
       {builtInProfiles.length > 0 && (
         <SettingsGroup title={t("executors:profiles")} contentClassName="space-y-4 divide-y-0">
@@ -336,5 +342,34 @@ export default function ExecutorsHubPage() {
         deleting={deleting}
       />
     </div>
+  );
+}
+
+function SSHConnectionsEntry() {
+  const { t } = useTranslation();
+  const enabled = useFeature("sshConnectionManager");
+  const admin = useIsAdmin();
+  if (!enabled || !admin) return null;
+  return (
+    <Link
+      href={SSH_CONNECTIONS_SETTINGS_HREF}
+      aria-label={t("settings:sshManager.title")}
+      aria-describedby="ssh-connections-entry-description"
+      className="group flex w-full min-w-0 items-center gap-4 rounded-lg border border-border bg-card p-4 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer transition-colors duration-150 motion-reduce:transition-none"
+    >
+      <span className="shrink-0 rounded-md bg-muted p-2 text-muted-foreground">
+        <IconKey className="size-5" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{t("settings:sshManager.title")}</span>
+        <span
+          id="ssh-connections-entry-description"
+          className="mt-1 block text-sm text-muted-foreground"
+        >
+          {t("settings:sshManager.description")}
+        </span>
+      </span>
+      <IconChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+    </Link>
   );
 }

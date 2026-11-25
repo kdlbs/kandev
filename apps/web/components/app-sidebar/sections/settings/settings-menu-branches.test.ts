@@ -504,3 +504,15 @@ describe("key path helpers", () => {
     expect(findSubtreeKeys(workspaces, "workspace:deleted")).toEqual([]);
   });
 });
+
+// @covers AC-EXECUTORS-SSH-CONNECTIONS-004.6
+it("offers SSH management before profiles even with no executor records", () => {
+  const [ssh] = buildExecutorsBranch([], true);
+  expect(ssh).toMatchObject({
+    href: "/settings/executors/ssh-connections",
+    label: { key: "settings:sshManager.title" },
+  });
+  expect(ssh.children).toBeUndefined();
+  expect(buildExecutorsBranch([], false)).toEqual([]);
+  expect(buildExecutorsBranch(EXECUTORS, true)[1]).toEqual(buildExecutorsBranch(EXECUTORS)[0]);
+});

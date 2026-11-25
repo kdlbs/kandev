@@ -182,6 +182,7 @@ export function SettingsTree({
   const multiTenancyEnabled = useFeature("multiTenancy");
   const authMode = useAppStore((s) => s.auth.mode);
   const isAdmin = useIsAdmin();
+  const sshEnabled = useFeature("sshConnectionManager");
   const showAccountItems = authEnabled && authMode === "enabled";
   const showUsersItem = authEnabled && isAdmin;
   // Only the instance operator can use this page, but that answer costs a
@@ -200,6 +201,7 @@ export function SettingsTree({
   const itemVisible = (item: SettingsMenuItem) => {
     if (item.requires === "account") return showAccountItems;
     if (item.requires === "users") return showUsersItem;
+    if (item.requires === "sshConnections") return sshEnabled && isAdmin;
     if (item.requires === "organizations") return showOrganizationsItem;
     return true;
   };

@@ -55,6 +55,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
+	"github.com/kandev/kandev/internal/sshconnections"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -141,6 +142,13 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		services.Plugins.SetSourceIssueController(pluginSourceIssueController{
 			tasks: services.Task, jira: services.Jira, linear: services.Linear,
 		})
+	}
+	services.SSHConnections = newSSHConnections(cfg, repos)
+	repos.Task.SetExecutorBindingGuard(sshconnections.NewService(cfg.Features.SSHConnectionManager, repos.SSHConnections, repos.SSHIdentityVault))
+	if services.SSHConnections != nil {
+		if err := services.SSHConnections.RecoverEnrollments(ctx); err != nil {
+			return nil, nil, fmt.Errorf("recover SSH enrollment: %w", err)
+		}
 	}
 	mentionProviders := builtinMentionProviders(services, repos.Task)
 	reserveBuiltinMentionIdentities(pluginsSvc, mentionProviders)

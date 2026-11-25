@@ -401,3 +401,23 @@ it.each([undefined, false, true])("gates retention discovery with Office=%s", (o
   expect(items.some((item) => item.id === "system-retention")).toBe(officeEnabled === true);
   expect(items.some((item) => item.id === "system-storage")).toBe(true);
 });
+
+it("shows managed SSH settings only when management is enabled for the caller", () => {
+  const context = {
+    t: (key: string) => key,
+    showAccount: false,
+    showUsers: false,
+    showOrganizations: false,
+    workspaces: [],
+    agents: [],
+    executors: [],
+    showSSHConnections: false,
+  };
+  expect(resolveSettingsDiscovery(context).some((item) => item.id === "ssh-connections")).toBe(
+    false,
+  );
+  context.showSSHConnections = true;
+  const item = resolveSettingsDiscovery(context).find((item) => item.id === "ssh-connections");
+  expect(item?.href).toBe("/settings/executors/ssh-connections");
+  expect(item?.breadcrumb).toContain("common:executors");
+});

@@ -525,6 +525,7 @@ type FeaturesConfig struct {
 	// connected across browser attachment loss. Off in every embedded profile.
 	LSPBrowserContinuity bool `mapstructure:"lsp_browser_continuity" json:"lspBrowserContinuity"`
 
+	SSHConnectionManager bool `mapstructure:"ssh_connection_manager" json:"sshConnectionManager"`
 	// Office gates the autonomous-agent feature: backend service construction,
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`

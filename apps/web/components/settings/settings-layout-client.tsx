@@ -1,5 +1,6 @@
 "use client";
 
+import { SSHSetupContinuationProvider } from "./ssh-connections/setup-continuation";
 import { usePathname } from "@/lib/routing/client-router";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { PageShell } from "@/components/page-shell";
@@ -18,15 +19,17 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
   const { parents, title } = useSettingsBreadcrumbs(pathname);
 
   return (
-    <SettingsShell
-      title={title}
-      backHref="/"
-      backLabel="Kandev"
-      parents={parents}
-      showIntegrationCopyAction={integrationFromPathname(pathname) !== null}
-    >
-      {children}
-    </SettingsShell>
+    <SSHSetupContinuationProvider>
+      <SettingsShell
+        title={title}
+        backHref="/"
+        backLabel="Kandev"
+        parents={parents}
+        showIntegrationCopyAction={integrationFromPathname(pathname) !== null}
+      >
+        {children}
+      </SettingsShell>
+    </SSHSetupContinuationProvider>
   );
 }
 

@@ -3,6 +3,7 @@ package backendapp
 import (
 	"errors"
 	replaywire "github.com/kandev/kandev/internal/coordinator/replay/wire"
+	"github.com/kandev/kandev/internal/sshconnections"
 	taskusage "github.com/kandev/kandev/internal/task/usage"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -66,6 +67,8 @@ type Repositories struct {
 	Analytics                        analyticsrepository.Repository
 	AgentSettings                    settingsstore.Repository
 	User                             userstore.Repository
+	SSHConnections                   *sshconnections.Store
+	SSHIdentityVault                 *secrets.SSHIdentityVault
 	// UserAccounts is the account-management view of the same user store
 	// (list/create/role/status), consumed by the auth service.
 	UserAccounts  userstore.AccountRepository
@@ -90,6 +93,7 @@ type Services struct {
 	TurnHistoryStore         *taskchanges.GitHistoryStore
 	TurnHistory              *taskchanges.HistoryService
 	DeliveryRetention        *deliveryretention.Worker
+	SSHConnections           *sshconnections.Service
 	ManagedRuntimeSelections managedruntime.SelectionStore
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
 	DynamicBindingResolver   *dynamicruntime.CredentialBindingResolver

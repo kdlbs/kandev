@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/sshconnections"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -2059,7 +2060,9 @@ func registerSecondaryRoutes(
 			p.log,
 			p.taskRepo,
 			reachabilityPoller,
+			managedSSHManagement(p.services),
 		)
+		sshconnections.RegisterRoutes(p.router, p.services.SSHConnections)
 		p.log.Debug("Registered SSH handlers (HTTP + WebSocket)")
 
 		// The remote Docker connection test rides the same SSH transport, so

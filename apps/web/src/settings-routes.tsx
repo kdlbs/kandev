@@ -1,3 +1,4 @@
+import { SSH_CONNECTIONS_SETTINGS_HREF } from "@/lib/settings/ssh-connection-settings-routes";
 /* eslint-disable max-lines -- the settings route table is one public dispatch boundary. */
 
 import type { ReactNode } from "react";
@@ -41,6 +42,7 @@ import { renderWorkspaceCoordinatorRoute } from "./settings-routes.coordinators"
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
 import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
+import { SSHConnectionsSettings } from "@/components/settings/ssh-connections/settings";
 import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
 import { PluginShortcutsCard } from "@/components/settings/plugins/plugin-shortcuts-card";
@@ -141,6 +143,8 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/workspaces": () => <WorkspacesPage />,
   "/settings/workspace": () => <SettingsRedirect to={WORKSPACES_SETTINGS_HREF} />,
   "/settings/secrets": () => <SecretsSettings />,
+  "/settings/ssh-connections": () => <SettingsRedirect to={SSH_CONNECTIONS_SETTINGS_HREF} />,
+  "/settings/executors/ssh-connections": () => <SSHConnectionsSettings />,
   "/settings/agents": () => <AgentsSettingsPage />,
   "/settings/agents/browse": () => <AgentsBrowsePage />,
   "/settings/automations": () => <ActiveWorkspaceSectionRedirect section="automations" />,
@@ -360,7 +364,8 @@ function renderExecutorSettingsRoute(pathname: string): ReactNode {
     return <LegacyExecutorSettingsRoute executorId={executorId} />;
   }
   const profileId = matchSingle(pathname, /^\/settings\/executors\/([^/]+)$/);
-  if (profileId) return <ProfileEditPage profileId={profileId} />;
+  if (profileId && profileId !== "ssh-connections")
+    return <ProfileEditPage profileId={profileId} />;
   const executorType = matchSingle(pathname, /^\/settings\/executors\/new\/([^/]+)$/);
   if (executorType) return <CreateProfilePage executorType={executorType} />;
   const sshExecutorId = matchSingle(pathname, /^\/settings\/executors\/ssh\/([^/]+)$/);

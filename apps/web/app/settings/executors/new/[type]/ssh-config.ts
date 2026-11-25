@@ -1,11 +1,27 @@
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
 
 /**
- * Maps the SSHConnectionCard's flat config to the snake_case `Config` map
- * the backend persists on the Executor row. Empty optional fields are
- * dropped so the JSON we POST is minimal.
+ * Maps the shared connection binding to the executor config.
  */
 export function buildSSHExecutorConfig(cfg: SSHExecutorConfig): Record<string, string> {
+  return {
+    ssh_connection_id: cfg.connection_id ?? "",
+    ssh_connection_stamp: cfg.connection_stamp ?? "",
+  };
+}
+
+export function parseManagedSSHExecutorConfig(
+  name: string,
+  config?: Record<string, string>,
+): Partial<SSHExecutorConfig> {
+  return {
+    name,
+    connection_id: config?.ssh_connection_id,
+    connection_stamp: config?.ssh_connection_stamp,
+  };
+}
+
+export function buildInlineSSHExecutorConfig(cfg: SSHExecutorConfig): Record<string, string> {
   const out: Record<string, string> = {
     ssh_identity_source: cfg.identity_source,
   };
@@ -20,10 +36,10 @@ export function buildSSHExecutorConfig(cfg: SSHExecutorConfig): Record<string, s
 }
 
 /**
- * Inverse of {@link buildSSHExecutorConfig}: reads the backend `Config` map
+ * Inverse of {@link buildInlineSSHExecutorConfig}: reads the backend `Config` map
  * into the form's flat shape so an existing executor can be edited.
  */
-export function parseSSHExecutorConfig(
+export function parseInlineSSHExecutorConfig(
   name: string,
   config?: Record<string, string>,
 ): Partial<SSHExecutorConfig> {

@@ -19,6 +19,7 @@ import (
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
 	completionPolicies      []completion.Policy
+	executorBindingGuard    ExecutorBindingGuard
 	db                      *sqlx.DB // writer
 	ro                      *sqlx.DB // reader (read-only pool)
 	ownsDB                  bool

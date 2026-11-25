@@ -78,6 +78,7 @@ const SEGMENT_LABEL_KEYS: Record<string, string> = {
   secrets: "settings:secrets",
   security: "settings:security",
   sidebar: "settings:sidebar",
+  "ssh-connections": "settings:sshManager.title",
   status: "common:status",
   storage: "system:storageTitle",
   system: "common:system",

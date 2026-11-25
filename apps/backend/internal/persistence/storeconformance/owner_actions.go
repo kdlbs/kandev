@@ -165,6 +165,7 @@ func buildOwnerBehaviors() map[string]ownerBehavior {
 	behaviors["quick-terminal"] = ownerBehavior{actions: []apiAction{quickTerminalAction()}}
 	behaviors["runtime-flags"] = ownerBehavior{actions: []apiAction{runtimeFlagsAction()}}
 	behaviors["auth"] = ownerBehavior{actions: []apiAction{authIdentityAction()}}
+	behaviors["ssh-connections"] = ownerBehavior{actions: []apiAction{sshConnectionAction()}}
 	behaviors["secrets"] = ownerBehavior{actions: []apiAction{secretAction()}}
 	behaviors["system-settings"] = ownerBehavior{actions: []apiAction{systemSettingsAction()}}
 	behaviors["auth-hostnames"] = ownerBehavior{actions: []apiAction{hostnameAction()}}

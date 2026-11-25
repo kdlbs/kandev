@@ -262,7 +262,7 @@ func TestSSHExecutorResumeRemoteInstance(t *testing.T) {
 	t.Run("re-attaches to a live remote agentctl", func(t *testing.T) {
 		withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
 		harness := newSSHLaunchHarness(t, "4242")
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		t.Cleanup(func() { _ = exec.Close() })
 
 		metadata := sshConnectionMetadata(t, harness.server)
@@ -310,7 +310,7 @@ func TestSSHExecutorResumeRemoteInstance(t *testing.T) {
 			}
 			return sshOut(t.TempDir())
 		})
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		metadata := sshConnectionMetadata(t, server)
 		metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
 		metadata[MetadataKeySSHRemoteAgentctlPort] = "41234"
@@ -391,7 +391,7 @@ func TestSSHExecutorResumeRemoteInstance(t *testing.T) {
 }
 
 func execSSHResumeWithMetadata(metadata map[string]interface{}) error {
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	return exec.ResumeRemoteInstance(context.Background(), &ExecutorCreateRequest{
 		InstanceID: "instance-1",
 		AuthToken:  "persisted-token",
@@ -416,7 +416,7 @@ func TestSSHExecutorResetManagedBrokerResume(t *testing.T) {
 	}
 
 	t.Run("tracked session is stopped and its runtime metadata cleared", func(t *testing.T) {
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		var preflightCalls, stopCalls, closeCalls int
 		var stoppedDir string
 		var stoppedPid int
@@ -464,7 +464,7 @@ func TestSSHExecutorResetManagedBrokerResume(t *testing.T) {
 	})
 
 	t.Run("preflight failure aborts before stopping anything", func(t *testing.T) {
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		wantErr := errors.New("broker unreachable")
 		exec.brokerPreflight = func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error {
 			return wantErr
@@ -484,7 +484,7 @@ func TestSSHExecutorResetManagedBrokerResume(t *testing.T) {
 	})
 
 	t.Run("stop failure closes the client and surfaces the error", func(t *testing.T) {
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		exec.brokerPreflight = func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error {
 			return nil
 		}
@@ -507,7 +507,7 @@ func TestSSHExecutorResetManagedBrokerResume(t *testing.T) {
 
 	t.Run("untracked session dials the host to refresh the broker", func(t *testing.T) {
 		server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshOK })
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		preflightCalls := 0
 		exec.brokerPreflight = func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error {
 			preflightCalls++
@@ -592,7 +592,7 @@ func TestClearSSHResumeRuntimeMetadata(t *testing.T) {
 }
 
 func TestSSHExecutorReportIsANoOpWithoutACallback(t *testing.T) {
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	exec.report(nil, "Step", PrepareStepCompleted, "output") // must not panic
 
 	var got PrepareStep
@@ -605,7 +605,7 @@ func TestSSHExecutorReportIsANoOpWithoutACallback(t *testing.T) {
 func TestSSHExecutorPreflightAgentBinary(t *testing.T) {
 	t.Run("no agent config skips the probe", func(t *testing.T) {
 		server := newFakeSSHServer(t, nil)
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		err := exec.preflightAgentBinary(context.Background(), server.dial(t),
 			&ExecutorCreateRequest{}, SSHRemotePlatform{})
 		if err != nil {
@@ -618,7 +618,7 @@ func TestSSHExecutorPreflightAgentBinary(t *testing.T) {
 
 	t.Run("missing binary surfaces the install hint", func(t *testing.T) {
 		server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshOut("") })
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		agent := newFakeIdentityAgent("phantom")
 		agent.name = "Phantom Agent"
 		agent.installScript = "npm i -g phantom"
@@ -645,7 +645,7 @@ func TestSSHExecutorPreflightAgentBinary(t *testing.T) {
 
 	t.Run("present binary passes and reports the resolved path", func(t *testing.T) {
 		server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshOut("/usr/bin/mock\n") })
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		var completed []PrepareStep
 		err := exec.preflightAgentBinary(context.Background(), server.dial(t), &ExecutorCreateRequest{
 			AgentConfig: newFakeIdentityAgent("mock"),
@@ -665,7 +665,7 @@ func TestSSHExecutorPreflightAgentBinary(t *testing.T) {
 
 	t.Run("probe transport failure fails the launch", func(t *testing.T) {
 		server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshFail("closed") })
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		err := exec.preflightAgentBinary(context.Background(), server.dial(t),
 			&ExecutorCreateRequest{AgentConfig: newFakeIdentityAgent("mock")}, SSHRemotePlatform{})
 		if err == nil || !strings.Contains(err.Error(), "probe") {
@@ -682,7 +682,7 @@ func TestSSHExecutorProbeNativeBinary(t *testing.T) {
 			}
 			return sshOut("/usr/bin/opencode\n")
 		})
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		req := &ExecutorCreateRequest{
 			AgentConfig:           agents.NewOpenCodeACP(),
 			ManagedRuntimeFamily:  managedruntime.OpenCodeFamilyV2,
@@ -700,7 +700,7 @@ func TestSSHExecutorProbeNativeBinary(t *testing.T) {
 
 	t.Run("managed OpenCode selection skips unrelated native executable", func(t *testing.T) {
 		server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshOut("/usr/bin/opencode\n") })
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		req := &ExecutorCreateRequest{
 			AgentConfig:           agents.NewOpenCodeACP(),
 			ManagedRuntimeFamily:  managedruntime.OpenCodeFamilyV2,
@@ -717,7 +717,7 @@ func TestSSHExecutorProbeNativeBinary(t *testing.T) {
 
 	t.Run("agent without a native binary is skipped", func(t *testing.T) {
 		server := newFakeSSHServer(t, nil)
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		req := &ExecutorCreateRequest{AgentConfig: newFakeIdentityAgent("mock")}
 		if exec.probeNativeBinary(context.Background(), server.dial(t), "bash", req, "step") {
 			t.Fatal("a non-NativeBinaryAgent must not report a hit")
@@ -726,7 +726,7 @@ func TestSSHExecutorProbeNativeBinary(t *testing.T) {
 
 	t.Run("empty native binary name is skipped", func(t *testing.T) {
 		server := newFakeSSHServer(t, nil)
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		req := &ExecutorCreateRequest{AgentConfig: &fakeNativeBinaryAgent{
 			fakeIdentityAgent: newFakeIdentityAgent("copilot"),
 		}}
@@ -740,7 +740,7 @@ func TestSSHExecutorProbeNativeBinary(t *testing.T) {
 
 	t.Run("hit records the binary in metadata", func(t *testing.T) {
 		server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshOut("/usr/bin/copilot\n") })
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		req := &ExecutorCreateRequest{AgentConfig: &fakeNativeBinaryAgent{
 			fakeIdentityAgent: newFakeIdentityAgent("copilot"),
 			nativeBinary:      "copilot",
@@ -755,7 +755,7 @@ func TestSSHExecutorProbeNativeBinary(t *testing.T) {
 
 	t.Run("miss clears any stale metadata value", func(t *testing.T) {
 		server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshOut("") })
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		req := &ExecutorCreateRequest{
 			AgentConfig: &fakeNativeBinaryAgent{
 				fakeIdentityAgent: newFakeIdentityAgent("copilot"),
@@ -773,7 +773,7 @@ func TestSSHExecutorProbeNativeBinary(t *testing.T) {
 
 	t.Run("transport error falls through without aborting", func(t *testing.T) {
 		server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshFail("closed") })
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 		req := &ExecutorCreateRequest{
 			AgentConfig: &fakeNativeBinaryAgent{
 				fakeIdentityAgent: newFakeIdentityAgent("copilot"),
@@ -793,7 +793,7 @@ func TestSSHExecutorProbeNativeBinary(t *testing.T) {
 func TestSSHExecutorMaybeUploadCredentialsSwallowsFailures(t *testing.T) {
 	// A credential-upload failure is best-effort: the launch continues.
 	server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshFail("no home") })
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	req := &ExecutorCreateRequest{
 		TaskID:    "task-1",
 		SessionID: "session-1",

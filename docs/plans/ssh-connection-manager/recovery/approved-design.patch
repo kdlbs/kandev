@@ -1,0 +1,2026 @@
+diff --git a/docs/decisions/2026-09-19-managed-ssh-credential-custody.md b/docs/decisions/2026-09-19-managed-ssh-credential-custody.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/docs/decisions/2026-09-19-managed-ssh-credential-custody.md
+@@ -0,0 +1,78 @@
++# ADR-2026-09-19-managed-ssh-credential-custody: Managed SSH credential custody
++
++**Status:** accepted
++**Date:** 2026-09-19
++**Area:** backend
++
++## Context
++
++[Issue #3735](https://github.com/kdlbs/kandev/issues/3735) exposes a bootstrap
++gap: an external agent or unencrypted file must exist before an SSH executor
++can be created. Desktop and service processes need not inherit a shell's agent.
++SSH access is also a prerequisite for proposed remote Docker execution.
++On 2026-09-19 the maintainer explicitly selected unattended use,
++admin-managed connections, and assisted enrollment. This accepts the product
++boundary; implementation remains unapproved.
++
++## Decision
++
++Executors owns installation-wide reusable SSH connections and identities.
++Administrators manage them through the existing org.config.manage authority;
++users consume connections only through authorized executor profiles and task
++operations. The connection fixes the endpoint, login, identity, and host trust.
++The maintainer subsequently included single-hop ProxyJump in the first release.
++A destination may reference one direct bastion connection, with its own login,
++identity and explicit host trust. Both records participate in readiness,
++mutation/deletion guards, and runtime recovery. No destination credential is
++forwarded or silently used as the bastion credential; sharing one identity
++requires explicitly selecting it for each hop. Chained jumps remain excluded.
++
++Managed private keys are internal encrypted secrets, unavailable to user
++secret reveal/export APIs and agent credential selection. They use the
++existing installation protection key and remain usable after unattended
++restarts. No new persistent ssh-agent or OS-keychain dependency is introduced.
++The backend obtains an in-memory signer for a bounded SSH handshake, never a
++private key path or an agent socket to forward into a workload.
++
++Import may accept a passphrase transiently to decode a key. Stored protection
++is Kandev's protection, not continuing enforcement of the original passphrase.
++The UI states this before import. Backend-host compromise remains outside the
++protection boundary; encrypted-at-rest does not mean protected from that host.
++
++Enrollment is a separate administrator operation: observe and verify host
++trust each relevant hop first, explicitly install the destination public key using one-time password or
++existing identity access, and prove access with the new identity. Password
++bootstrap does not become a persistent executor authentication mode.
++
++## Consequences
++
++Service/headless and desktop installs share one behavior. Connections can be
++reused without copying pins and key material into profiles. Existing external
++agent/file modes remain valid. Backend backups must preserve database and
++protection key together. Lost key material requires restoring the matching
++backup or explicitly replacing identities and enrolling again.
++
++Shared executor use grants the remote account's workload privileges, including
++Docker privileges where configured. It does not grant export of its SSH key.
++Audit records distinguish management, host trust, enrollment, and authentication.
++Deleting local credentials does not revoke a public key on the remote.
++
++## Alternatives Considered
++
++- **Interactive unlock after restart:** stronger separation from unattended
++  host use, but rejects the maintainer's service/headless requirement.
++- **Offer two custody modes now:** creates two recovery and scheduling contracts
++  before one complete flow works; deferred unless requested later.
++- **Depend on an inherited or Kandev-managed ssh-agent:** preserves the original
++  process-environment friction or adds a second credential daemon lifecycle.
++- **User/workspace-owned identities:** useful for stronger tenant isolation,
++  but differs from the selected installation-admin scope and shared executors.
++- **Public-key copy only:** remains a fallback but does not fulfill assisted
++  enrollment. Bootstrap access is always required; Kandev cannot create trust
++  or authorization on an inaccessible host.
++
++## References
++
++- [Requirements](../specs/executors/requirements/ssh-connection-manager.md)
++- [System design](../specs/executors/system-design/ssh-connection-manager.md)
++- [Existing secret ownership](../specs/workspaces/system-design/repository-secrets.md)
+
+diff --git a/docs/plans/ssh-connection-manager/plan.md b/docs/plans/ssh-connection-manager/plan.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/docs/plans/ssh-connection-manager/plan.md
+@@ -0,0 +1,333 @@
++---
++created: 2026-09-19
++status: draft
++requirements:
++  - REQ-EXECUTORS-SSH-CONNECTIONS-001
++  - REQ-EXECUTORS-SSH-CONNECTIONS-002
++  - REQ-EXECUTORS-SSH-CONNECTIONS-003
++  - REQ-EXECUTORS-SSH-CONNECTIONS-004
++  - REQ-EXECUTORS-SSH-CONNECTIONS-005
++system_design:
++  - ../../specs/executors/system-design/ssh-connection-manager.md
++legacy_specs: []
++---
++
++# Implementation Plan: SSH connection manager
++
++## Overview
++
++Deliver reusable, admin-managed SSH connections with unattended managed keys
++and explicit assisted enrollment. Implement sequentially: shared transport and
++storage, identity management, trusted connections, enrollment, executor
++consumption, then integrated restart/compatibility evidence and public docs.
++All work orders are pending. No production or test implementation is authorized
++by this package. Implement through TDD only after a later maintainer request.
++
++Sources: [#3735](https://github.com/kdlbs/kandev/issues/3735),
++[requirements](../../specs/executors/requirements/ssh-connection-manager.md),
++[design](../../specs/executors/system-design/ssh-connection-manager.md), and
++[custody ADR](../../decisions/2026-09-19-managed-ssh-credential-custody.md).
++
++## Provenance and moving dependencies
++
++- Intake owner: zeval, reverified sole assignee on 2026-09-19. Claim timestamp:
++  2026-09-19T14:32:04.959823+00:00; eyes reaction ID: 514704201.
++- Existing task: 74961be3-8c1a-4c16-ac36-3eff5f7455e8; session:
++  e60c5f55-efb3-43f9-926d-0a985337679e; intake task:
++  4b90f67b-010a-454e-9f68-74fe712cf037. No duplicate tasks.
++- Local baseline: 794773dd6887ae5c326ee77757dedd7bafb1ecf7. Fetched main:
++  9e48a71dbe502408f3678f6bfefd9ee87490c3cc. Its intervening repository-checkout
++  options changes do not add SSH custody; do not reset or rebase user work.
++- Related remote Docker PR #3783 head:
++  b7edaee8f00bf31ee0d0f52467842cbccc0d3312. Reachability PR #3747 head:
++  67c76e43f31549b68656c608fa4cb25d4f2c6301. These are snapshots, not pinned
++  dependencies. Re-resolve before implementation and reconcile newly landed
++  consumers; do not push to contributor branches.
++- Existing companion contracts: SSH executor design and
++  docs/plans/ssh-executor/e2e-plan.md, ssh-transport-liveness,
++  ssh-dead-runtime-resume, and repository-secrets plans. Preserve their behavior;
++  no historic completion status is changed by this design package.
++
++## Scope
++
++In scope: managed generation/import, external identity references, connection
++CRUD/trust/readiness including single-hop ProxyJump, public-key copy and assisted
++enrollment through the selected route, SSH profile
++binding/adoption, frontend/mobile flows, internal audit, and default-off gate.
++Out of scope: remote Docker runtime implementation, chained ProxyJump, private
++key export, automatic remote revocation/rotation, per-user/workspace sharing,
++interactive unlock after restart, sudo and keyboard-interactive bootstrap.
++
++## Technical approach
++
++Follow the paired design's proposed packages internal/sshtransport and
++internal/sshconnections. Extract existing low-level SSH machinery with adapters;
++reuse the secrets encryption provider with a purpose-specific transactional
++internal-secret capability. Extend the existing scope resolver and feature
++registry instead of adding parallel authority/config maps. Runtime consumers
++receive a connection dial capability, never raw secret IDs or key bytes.
++
++Tables: ssh_identities, ssh_connections, enrollment operation state, and
++ssh_connection_audit in the existing DB, with SQLite/PostgreSQL parity.
++Reserved secret prefix: ssh-identity:. Gate: features.sshConnectionManager /
++KANDEV_FEATURES_SSH_CONNECTION_MANAGER, false in prod/dev/e2e, restart required.
++Settings metadata uses shared Save changes; remote commands have explicit
++buttons. Implement all catalog changes and translations alongside each UI slice.
++
++Existing public SSH requirement .4 remains the legacy agent/file contract;
++managed behavior is owned by the new pair. The current requirement .5 mentions
++IdentitiesOnly despite code/design/docs excluding it. Record that pre-existing
++drift; do not implement IdentitiesOnly or silently broaden this package to fix it.
++
++## ASCII UI preview
++
++### UI-01: Identity creation, desktop and phone
++
++Entry: Settings > SSH connections > Identities. Empty or selected identity.
++
++```text
++Desktop
++SSH connections   [Connections] [Identities]
++No identities yet                         [Generate key] [Import key]
++Selected: Build host key | Ed25519 | SHA256:... | Used by 2 connections
++Public key [ssh-ed25519 AAAA...                     ] [Copy]
++Protected by Kandev. Available after backend restart.
++
++Phone: direct page, one scroll region
++< SSH connections       Identities
++No identities yet
++[Generate key]
++[Import key]
++
++< Identities            Build host key
++Ed25519   SHA256:...
++[Public key, wrapped]
++[Copy public key]
++Protected by Kandev. Available after restart.
++```
++
++Maps to 001.1-001.3 and 004.1/004.3/004.4. A wrong import passphrase keeps the
++non-secret label but clears key/passphrase inputs, shows an inline error, and
++allows an explicit retry. No private-key reveal/export action exists.
++
++### UI-02: Connection setup, desktop and phone
++
++Entry: Settings > SSH connections > New connection, or an executor-editor link.
++State shown: target saved; host trust pending. Existing list rows show name,
++remote user/host, identity, and readiness; tapping a phone row opens its route.
++
++```text
++Desktop
++SSH connections                      [New connection]
++Build box  | builder@build.example | Setup incomplete
++
++Build box
++[Target] -> [Host trust] -> [Identity] -> [Access]
++Host [build.example] Port [22] User [builder]
++Route [Via bastion v]  Bastion [Gateway: Ready v] [Create bastion]
++Bastion: ops@gateway.example | Identity: Gateway key | Trusted SHA256:...
++Destination fingerprint SHA256:...
++Verify this fingerprint using a trusted source.
++[Trust this host]                         [Continue]
++
++Phone: focused full-page step
++< SSH connections            Build box
++Step 2 of 4: Host trust
++builder@build.example:22
++Via Gateway [Change]
++Bastion: Trusted | Gateway key
++Destination SHA256:...
++Verify using a trusted source.
++[Trust this host]
++[Continue]
++```
++
++Maps to 002.1-002.3, 002.7-002.8 and 004.1-004.4. Target edits use the existing shared Save
++changes coordinator; Continue saves through it before moving to the next step.
++Phone identity/bastion selection uses temporary inset Drawers. Create bastion
++opens a separate direct setup page and returns with the destination draft
++preserved; no nested dialogs. Only ready direct bastions are selectable. A changed fingerprint shows OLD/NEW and blocks
++authentication; an explicit replacement-trust action is separate from Test.
++
++### UI-03: Enrollment and recovery
++
++Entry: saved connection > Access. Target and trust fixed to the saved revision.
++
++```text
++Desktop
++Build box: builder@build.example:22    Host SHA256:...
++Via Gateway: ops@gateway.example       Bastion SHA256:...
++Identity: Build host key              Key SHA256:...
++[Copy public key]   Install using: ( ) Password ( ) Existing identity
++Password [................]   Used once; never saved.
++[Install public key and verify]
++Status: Checking access...    [action disabled while request runs]
++
++Phone: full-page Access step
++< Identity                    Build box
++Step 4 of 4: Access
++builder@build.example:22
++Via Gateway (trusted, Gateway key)
++Host SHA256:...  Key SHA256:...
++[Copy public key]
++Install using [Password v]
++Password [................]
++Used once; never saved.
++[Install public key and verify]
++
++Recovery, both compositions
++Key may already be installed. Verification failed.
++[Check access again]   [Copy public key]
++```
++
++Maps to 003.1-003.6 and 004.2-004.4. Bootstrap applies to Build box only;
++Gateway uses its saved identity. Bastion failures identify that hop and block
++destination authentication/enrollment. Unknown outcome never displays Ready.
++Wrong password clears the input and offers a new explicit attempt. No
++credentials appear in URLs, logs, persisted form state, or event payloads.
++
++### UI-04: Executor binding
++
++Entry: SSH executor editor, shared composition with phone picker Drawer.
++
++```text
++Connection [Build box: Ready v]     [Manage connections]
++Connection: Ready | Agent readiness: Not checked
++[Test executor]
++Shared Save changes: disabled until executor check succeeds
++
++Legacy profile
++Connection: Existing inline SSH settings
++[Move to shared connection]
++Preview: destination + optional bastion, each user/identity/fingerprint
++[Create connection and check]
++```
++
++Maps to 002.4-002.8, 004.5, and 005.1-005.2. Converted forms cannot override the
++connection target or pin. Conflicting edits keep current server data and show a
++reload/retry action. Single-hop adoption adds explicit bastion trust and route
++checks; unsupported chained settings leave the legacy editor untouched.
++
++Structural requirements are control order, explicit trust before credential
++use at each hop, focused phone navigation, and a distinct recovery state. Labels and spacing
++are illustrative and must be localized. Reuse SettingsLayoutClient's single
++scroll owner and save bar. Phone/coarse targets are >=44px; desktop controls
++are 28px. Safe-area/keyboard space keeps the current action reachable; no
++horizontal document scroll. Test around 767/768px and on a coarse tablet.
++
++## Tests
++
++All test names below are proposed unless identified as existing. Go names are
++in the named package; frontend names are in the new settings/ssh-connections
++component family. Every work order writes its regression tests before behavior.
++
++| ACs (prefix AC-EXECUTORS-SSH-CONNECTIONS-) | Test file and proposed cases | Work |
++| --- | --- | --- |
++| 001.1-001.4 | sshconnections/identity_test.go: TestIdentityGenerateImport, TestIdentityUnavailable; secrets/user_visible_store_test.go: TestSSHIdentityHidden | 01, 02 |
++| 001.5 | sshconnections/authorization_test.go: TestManagementAuthorization, TestRuntimeUseBoundToExecutor; backendapp/ssh_connections_test.go: TestSSHConnectionsAuthSetup | 01, 05 |
++| 001.6, 002.6 | sshconnections/store_test.go: TestReferenceDeletion, TestConditionalMutations; postgres_store_test.go: TestPostgresSSHConnectionsTransactions | 01, 05 |
++| 002.1-002.3 | sshconnections/trust_test.go: TestObservationTrustReceipt, TestStaleReadiness, TestHostChangeBeforeCredentials | 03 |
++| 002.7-002.8 | sshconnections/proxyjump_test.go: TestManagedProxyJumpDistinctIdentitiesAndPins, TestManagedProxyJumpDependencyInvalidation, TestManagedProxyJumpRejectsChainsAndCycles; sshtransport/proxyjump_test.go: TestManagedProxyJumpClosesBothHops | 01, 03, 05 |
++| 002.4-002.5 | lifecycle/executor_ssh_managed_test.go: TestManagedSSHBinding, TestManagedSSHRevisionMismatch | 05 |
++| 003.1-003.4 | sshconnections/enrollment_test.go: TestEnrollmentModes, TestEnrollmentPreservesAuthorizedKeys, TestEnrollmentFreshAuthentication | 04 |
++| 003.6 | sshconnections/enrollment_test.go: TestEnrollmentViaBastionIsDestinationOnly; recovery_test.go: TestManagedProxyJumpRestart | 04, 06 |
++| 003.5 | sshconnections/enrollment_recovery_test.go: TestEnrollmentUnknownOutcome, TestEnrollmentIdempotencyAndRestart | 04, 06 |
++| 004.1, 004.3 | identity-form.test.tsx, connection-steps.test.tsx, enrollment-form.test.tsx: stale responses, explicit effects, secret clearing | 02, 03, 04 |
++| 004.2 | sshconnections/preflight_test.go: TestPreflightClassification; connection-steps.test.tsx: safe code-to-action mapping | 03 |
++| 004.4 | settings and mobile browser files below; pseudo-locale and computed target geometry | 02-05 |
++| 004.5 | lifecycle/executor_ssh_managed_test.go: TestConnectionReadyIsNotExecutorReady; managed-binding.test.tsx | 05 |
++| 005.1-005.2 | sshconnections/adoption_test.go: TestLegacyAdoptionPreservesConfig; existing lifecycle SSH connection/dial tests | 01, 05 |
++| 005.3 | sshconnections/feature_gate_test.go: TestDisabledNoSideEffects; backendapp/ssh_connections_test.go: TestManagedSelectorsCannotBypassGate; existing feature contract tests | 01, 05, 06 |
++| 005.4 | sshconnections/audit_test.go: TestAuditRedactionAndFailure; enrollment_recovery_test.go: final audit failure | 01, 04 |
++| 005.5 | sshconnections/recovery_test.go: TestProtectionKeyMismatch; real runtime restart test below | 01, 06 |
++
++## E2E tests
++
++Browser paths below are relative to apps/web/e2e. All use a real isolated backend.
++Settings files cover key creation/import, draft navigation, public-key copy,
++error handling, and local management; real remote operations use SSH fixtures.
++Phone coverage proves the same generate/copy/setup value and the enrollment
++form's navigation/state; wire-level enrollment correctness is also proven by
++backend tests and the real-host containers suite. No backend response stubs.
++
++| File | Project | Scenarios / ACs |
++| --- | --- | --- |
++| tests/settings/ssh-identities.spec.ts | chromium | generate/import/copy, secret clearing and unavailable identity; 001.1-001.4, 004.1/3 |
++| tests/settings/mobile-ssh-identities.spec.ts | mobile-chrome | same generate/import/copy, back/focus, geometry; 004.4 |
++| tests/settings/ssh-connections.spec.ts | chromium | save/reopen draft, missing prerequisites, conflicting edits; 002.1/3/6, 004.1-004.3 |
++| tests/settings/mobile-ssh-connections.spec.ts | mobile-chrome | focused steps, identity/bastion Drawers, create-bastion return, disabled enrollment without trust, no overflow; 002.2/7/8, 004.4 |
++| tests/auth/ssh-connections-permissions.spec.ts | auth | member cannot manage/reveal/override, authorized task consumption; 001.5 |
++| tests/ssh/managed-enrollment.spec.ts | containers | disposable sshd password/existing identity over direct/single-hop routes, fresh auth, each changed host, unchanged bastion authorized_keys; 002.2/3/7, 003.1-003.6 |
++| tests/ssh/managed-connections.spec.ts | containers | multiple profiles, distinct hop identities/pins, direct/jump adoption, bastion revision conflict and chain rejection; 002.4-002.8, 004.5, 005.1/2 |
++| tests/ssh/managed-restart.spec.ts | containers | no SSH_AUTH_SOCK over either route, both hop records preserved, restart outcome unknown, missing master key; 001.3/4, 002.7, 003.5/6, 005.5 |
++| tests/settings/ssh-connections-disabled.spec.ts | chromium | hidden settings and direct managed API rejection; legacy unaffected; 005.3 |
++
++Use existing fixtures/ssh-test-base.ts and helpers/ssh.ts, extended only for
++isolated password-enabled/unavailable targets and a two-sshd bastion/target
++route. Make the destination inaccessible directly from the backend so tests
++cannot pass by silently bypassing the bastion. Never enroll against a developer
++host. Gate is enabled explicitly per worker/spec and reset on teardown. New
++mobile files remain outside tests/ssh so ordinary mobile runs do not acquire a
++Docker dependency. Run projects sequentially with the managed resource budget.
++
++## Work orders
++
++- [ ] [Task 01: Shared transport and protected connection store](task-01-connection-foundation.md)
++- [ ] [Task 02: Managed identity settings](task-02-managed-identities.md)
++- [ ] [Task 03: Trusted connection setup](task-03-trusted-connections.md)
++- [ ] [Task 04: Assisted enrollment](task-04-assisted-enrollment.md)
++- [ ] [Task 05: Executor binding and explicit adoption](task-05-executor-bindings.md)
++- [ ] [Task 06: Restart and disabled-path integration](task-06-recovery-and-rollout.md)
++
++Dependency order: 01 -> 02 -> 03 -> 04 -> 05 -> 06. Work is sequential; no
++subagents or persistent child tasks are authorized. Each order names exact
++commands and acceptance IDs. Run relevant commands once after its final change;
++repeat prior tests only when later integration changes the paths they cover.
++
++## Verification prerequisites
++
++Commands run from the repository root and use isolated subshells for package
++paths. Put Go on PATH; this cloud image uses /usr/local/go/bin/go. In a fresh
++worktree first run `(cd apps && pnpm install --frozen-lockfile)` once. PostgreSQL
++checks require KANDEV_TEST_POSTGRES_DSN pointing to a disposable server and must
++not be reported as passed when skipped. Real SSH tests require Docker and use
++KANDEV_E2E_CONTAINERS=1. Managed e2e:run rebuilds backend/web/fixtures; do not
++reuse stale artifacts or overlap full suites. No live product E2E is required
++for this documentation-only design turn.
++
++## Verification results
++
++Implementation remains pending. Documentation-only checks on 2026-09-19:
++
++- `python3 scripts/list-docs.py validate`: passed, 292 decisions and 1040 specifications.
++- `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
++- `python3 scripts/lint-spec-files.py --all`: passed.
++- `git diff --check -- docs/specs docs/decisions docs/plans/ssh-connection-manager`: passed.
++- Revalidated after adding managed single-hop ProxyJump; linter tests: 36 passed.
++- Local link/traceability audit: five requirement IDs, 30 acceptance criteria,
++  six pending work orders; every AC assigned and every artifact link resolves.
++- Status and whitespace checks included all new untracked artifacts.
++
++No production code or permanent tests changed. Product unit/E2E commands in
++work orders were not run: their implementations and new tests do not exist yet.
++The earlier triage's existing SSH authentication tests passed independently;
++that is baseline evidence, not proof of the proposed feature.
++
++## Risks
++
++- Internal installation secrets must bypass only user-secret ownership, never
++  caller authorization, and remain hidden from all generic secret consumers.
++- A bastion change invalidates every dependent route. Validate both revisions
++  at admission, trust, enrollment and resume; never fall back to a direct dial.
++- A trusted but wrong host can receive a bootstrap password; independent host
++  fingerprint verification is mandatory and cannot be automated away.
++- Remote authorized_keys edits are not a distributed transaction. Preserve
++  unknown outcomes, idempotent explicit retry, and external editor limitations.
++- Transport edits are blocked while live/resumable references remain. Surface
++  their existing stop/reset/archive actions; stale generation mismatches still
++  fail closed rather than redirecting a runtime.
++- Unattended custody relies on backend host and master-key backup protection.
++- Main/#3783 can move. Reconcile actual call sites and their plans before work
++  05; this package is not authorization to copy or publish contributor work.
++- Identity generation/import and remote enrollment are explicit effects; shared
++  settings save must never replay them as ordinary form persistence.
+
+diff --git a/docs/plans/ssh-connection-manager/task-01-connection-foundation.md b/docs/plans/ssh-connection-manager/task-01-connection-foundation.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/docs/plans/ssh-connection-manager/task-01-connection-foundation.md
+@@ -0,0 +1,103 @@
++---
++id: "01-connection-foundation"
++title: "Shared transport and protected connection store"
++status: pending
++wave: 1
++depends_on: []
++plan: "plan.md"
++requirements:
++  - REQ-EXECUTORS-SSH-CONNECTIONS-001
++  - REQ-EXECUTORS-SSH-CONNECTIONS-002
++  - REQ-EXECUTORS-SSH-CONNECTIONS-005
++acceptance_criteria:
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.1
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.5
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.6
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.6
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.1
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.3
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.5
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.7
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.8
++system_design:
++  - ../../specs/executors/system-design/ssh-connection-manager.md
++---
++
++# Task 01: Shared transport and protected connection store
++
++## Summary
++
++Provide the shared transport and persistence boundary on which managed setup can operate. Preserve legacy behavior while making internal credential storage transactional and inaccessible through user-secret APIs.
++
++## In scope
++
++- Extract transport with adapters and move low-level tests without duplicating implementations. Keep agentctl/workload logic in lifecycle.
++- Implement optional direct-bastion references with cycle/chain rejection, route revision and deletion guards; metadata/audit schema and prefix-constrained internal-secret transaction support on SQLite and PostgreSQL; use existing DB composition.
++- Add default-off feature identity through profiles, config, registry/config binding, frontend defaults, and disabled service construction. Add role authorization, deletion/revision guards, audit redaction, and protection-key mismatch handling.
++
++## Out of scope
++
++Production work outside this order, remote Docker runtime implementation, and
++changes to the confirmed credential ownership boundary. No publishing or delegation.
++
++## Acceptance
++
++- Legacy auth/config/ProxyJump regressions pass through the shared transport; managed single-hop transport accepts separately pinned/authenticated hops and closes the tunnel and bastion on success/failure.
++- Metadata/backing-secret operations roll back together, internal secrets cannot be listed/revealed/copied/moved/bound, and creating-user deletion/auth setup does not break approved runtime access.
++- Disabled service entry rejects before secret access/dial; default/retired flag contracts and audit failure behavior are covered.
++
++## Verification
++
++Use TDD for changed logic. Commands below are run from the repository root;
++read the [prerequisites](plan.md#verification-prerequisites) first. Tests named
++in this package are created by their owning order, not claimed to exist today.
++
++```bash
++(cd apps/backend && go test ./internal/sshtransport ./internal/sshconnections ./internal/secrets ./internal/authz ./internal/runtimeflags ./internal/common/config ./internal/profiles)
++(cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'Test(InheritFromSSHConfig|ApplyTargetDefaults|BuildAuthMethods|BuildClientConfig|DialSSH|DialViaJump|ResolveBastion|BastionHostKey|IdentityAgent|EffectiveSSHConfig)' -count=1)
++(test -n "$KANDEV_TEST_POSTGRES_DSN" && cd apps/backend && go test ./internal/sshconnections ./internal/secrets -run TestPostgres -count=1)
++(cd apps/web && pnpm exec vitest run lib/state/slices/features/features-contract.test.ts)
++git diff --check
++```
++
++## Files likely touched
++
++- `apps/backend/internal/sshtransport/ (new)`
++- `apps/backend/internal/sshconnections/ (new)`
++- `apps/backend/internal/secrets/`
++- `apps/backend/internal/agent/runtime/lifecycle/executor_ssh_connection.go`
++- `apps/backend/internal/agent/runtime/lifecycle/executor_ssh_connection_test.go`
++- `apps/backend/internal/agent/runtime/lifecycle/executor_ssh_dial_test.go`
++- `apps/backend/internal/backendapp/storage.go`
++- `apps/backend/internal/backendapp/agents.go`
++- `apps/backend/internal/runtimeflags/registry.go`
++- `apps/backend/internal/runtimeflags/config.go`
++- `apps/backend/internal/common/config/config.go`
++- `profiles.yaml`
++- `apps/web/lib/state/slices/features/types.ts`
++
++## Dependencies
++
++None. Recheck main and related PR heads before extracting transport.
++
++## Risks
++
++Preserve existing exported lifecycle seams while moving internals. Do not treat ScopeGlobal user secrets as installation secrets or drop an HTTP identity to bypass authorization.
++
++## Parallelism
++
++`sequential`
++
++## Inputs
++
++- [Requirements](../../specs/executors/requirements/ssh-connection-manager.md), IDs above.
++- [System design](../../specs/executors/system-design/ssh-connection-manager.md), corresponding sections.
++- [Custody ADR](../../decisions/2026-09-19-managed-ssh-credential-custody.md).
++- Existing source seams, test cases, and fixtures identified in the manifest and design.
++
++## Results
++
++Pending. Record RED/GREEN evidence, exact final command results, skipped checks,
++and any difference between rendered UI and the assigned preview.
+
+diff --git a/docs/plans/ssh-connection-manager/task-02-managed-identities.md b/docs/plans/ssh-connection-manager/task-02-managed-identities.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/docs/plans/ssh-connection-manager/task-02-managed-identities.md
+@@ -0,0 +1,137 @@
++---
++id: "02-managed-identities"
++title: "Managed identity settings"
++status: pending
++wave: 2
++depends_on:
++  - "01-connection-foundation"
++plan: "plan.md"
++requirements:
++  - REQ-EXECUTORS-SSH-CONNECTIONS-001
++  - REQ-EXECUTORS-SSH-CONNECTIONS-004
++acceptance_criteria:
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.1
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.2
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.3
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.5
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.6
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.1
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.3
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.4
++system_design:
++  - ../../specs/executors/system-design/ssh-connection-manager.md
++---
++
++# Task 02: Managed identity settings
++
++## Summary
++
++Deliver the first usable vertical slice: an administrator can generate/import a key, copy its public key, and manage safe metadata from desktop or phone.
++
++## In scope
++
++- Implement bounded generate/import/file/agent identity APIs and identity UI; no private-key export.
++- Add hidden-secret exclusion regression coverage, command idempotency, transient input clearing, and reference-aware deletion.
++- Wire settings route/discovery, scoped domain hooks/client/state, shared Save changes, permission gating, and all locales.
++
++## Out of scope
++
++Production work outside this order, remote Docker runtime implementation, and
++changes to the confirmed credential ownership boundary. No publishing or delegation.
++
++## Acceptance
++
++- Generation/import succeeds without SSH_AUTH_SOCK; wrong passphrase creates nothing; ciphertext/private inputs are absent from user-facing projections.
++- Desktop and phone can generate/import/copy and recover from errors, with secret clearing, safe focus/back behavior, and required target geometry.
++- Only org.config.manage may manage identities; duplicate command UUIDs cannot issue a second key.
++
++## ASCII UI preview
++
++[Combined previews](plan.md#ascii-ui-preview). Applicable ACs are listed above;
++retain the same structure and state rules in the rendered result.
++
++### UI-01: Identity creation, desktop and phone
++
++Entry: Settings > SSH connections > Identities. Empty or selected identity.
++
++```text
++Desktop
++SSH connections   [Connections] [Identities]
++No identities yet                         [Generate key] [Import key]
++Selected: Build host key | Ed25519 | SHA256:... | Used by 2 connections
++Public key [ssh-ed25519 AAAA...                     ] [Copy]
++Protected by Kandev. Available after backend restart.
++
++Phone: direct page, one scroll region
++< SSH connections       Identities
++No identities yet
++[Generate key]
++[Import key]
++
++< Identities            Build host key
++Ed25519   SHA256:...
++[Public key, wrapped]
++[Copy public key]
++Protected by Kandev. Available after restart.
++```
++
++Maps to 001.1-001.3 and 004.1/004.3/004.4. A wrong import passphrase keeps the
++non-secret label but clears key/passphrase inputs, shows an inline error, and
++allows an explicit retry. No private-key reveal/export action exists.
++
++
++## Verification
++
++Use TDD for changed logic. Commands below are run from the repository root;
++read the [prerequisites](plan.md#verification-prerequisites) first. Tests named
++in this package are created by their owning order, not claimed to exist today.
++
++```bash
++(cd apps/backend && go test ./internal/sshconnections ./internal/secrets -count=1)
++(cd apps/web && pnpm exec vitest run components/settings/ssh-connections/identity-form.test.tsx lib/api/domains/ssh-connections-api.test.ts)
++(cd apps/web && pnpm run typecheck && pnpm run i18n:check)
++(cd apps/web && pnpm e2e:run --project chromium tests/settings/ssh-identities.spec.ts)
++(cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-ssh-identities.spec.ts)
++git diff --check
++```
++
++## Files likely touched
++
++- `apps/backend/internal/sshconnections/identity.go (new)`
++- `apps/backend/internal/sshconnections/identity_test.go (new)`
++- `apps/backend/internal/sshconnections/handlers.go (new)`
++- `apps/backend/internal/backendapp/helpers.go`
++- `apps/web/components/settings/ssh-connections/ (new)`
++- `apps/web/src/settings-routes.tsx`
++- `apps/web/lib/settings-discovery/navigation.ts`
++- `apps/web/lib/api/domains/ssh-connections-api.ts (new)`
++- `apps/web/hooks/domains/settings/`
++- `apps/web/lib/state/slices/settings/`
++- `apps/web/src/locales/`
++- `apps/web/e2e/tests/settings/ssh-identities.spec.ts (new)`
++- `apps/web/e2e/tests/settings/mobile-ssh-identities.spec.ts (new)`
++
++## Dependencies
++
++Task 01; see the [manifest](plan.md#work-orders).
++
++## Risks
++
++Generating/importing is an explicit command, not a shared-save side effect. Explain loss of original passphrase unlock protection before import. Verify secret data does not reach browser persistence.
++
++## Parallelism
++
++`sequential`
++
++## Inputs
++
++- [Requirements](../../specs/executors/requirements/ssh-connection-manager.md), IDs above.
++- [System design](../../specs/executors/system-design/ssh-connection-manager.md), corresponding sections.
++- [Custody ADR](../../decisions/2026-09-19-managed-ssh-credential-custody.md).
++- Existing source seams, test cases, and fixtures identified in the manifest and design.
++
++## Results
++
++Pending. Record RED/GREEN evidence, exact final command results, skipped checks,
++and any difference between rendered UI and the assigned preview.
+
+diff --git a/docs/plans/ssh-connection-manager/task-03-trusted-connections.md b/docs/plans/ssh-connection-manager/task-03-trusted-connections.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/docs/plans/ssh-connection-manager/task-03-trusted-connections.md
+@@ -0,0 +1,146 @@
++---
++id: "03-trusted-connections"
++title: "Trusted connection setup"
++status: pending
++wave: 3
++depends_on:
++  - "02-managed-identities"
++plan: "plan.md"
++requirements:
++  - REQ-EXECUTORS-SSH-CONNECTIONS-002
++  - REQ-EXECUTORS-SSH-CONNECTIONS-004
++acceptance_criteria:
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.1
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.2
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.3
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.6
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.1
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.2
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.3
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.7
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.8
++system_design:
++  - ../../specs/executors/system-design/ssh-connection-manager.md
++---
++
++# Task 03: Trusted connection setup
++
++## Summary
++
++An administrator can save a draft connection, establish explicit host trust, and diagnose/test the selected identity without binding an executor yet.
++
++## In scope
++
++- Implement connection CRUD, conditional route revisions, per-hop observation receipts, separate bastion/destination trust and identities, local preflight, and pinned tests. Bastion observation sends no credentials; destination observation may authenticate only the already trusted bastion.
++- Complete the focused desktop/phone setup flow, identity picker, failure-code translations and stale-response rejection.
++- Use in-process SSH servers in Go tests for real host-key/auth ordering; browser tests cover real backend metadata flow and unavailable prerequisite states.
++
++## Out of scope
++
++Production work outside this order, remote Docker runtime implementation, and
++changes to the confirmed credential ownership boundary. No publishing or delegation.
++
++## Acceptance
++
++- No hop receives credentials before its own host trust; distinct identities and both pins are enforced, chain/cycle requests cause no dial, and bastion edits invalidate dependent routes; changed pins, expired/foreign receipts and stale results cannot authorize progress.
++- Preflight distinguishes proven local failures from generic remote auth rejection; drafts survive navigation without retaining secrets.
++- Phone has focused direct routes and an inset identity picker; no overflow, inaccessible action, or duplicated business logic.
++
++## ASCII UI preview
++
++[Combined previews](plan.md#ascii-ui-preview). Applicable ACs are listed above;
++retain the same structure and state rules in the rendered result.
++
++### UI-02: Connection setup, desktop and phone
++
++Entry: Settings > SSH connections > New connection, or an executor-editor link.
++State shown: target saved; host trust pending. Existing list rows show name,
++remote user/host, identity, and readiness; tapping a phone row opens its route.
++
++```text
++Desktop
++SSH connections                      [New connection]
++Build box  | builder@build.example | Setup incomplete
++
++Build box
++[Target] -> [Host trust] -> [Identity] -> [Access]
++Host [build.example] Port [22] User [builder]
++Route [Via bastion v]  Bastion [Gateway: Ready v] [Create bastion]
++Bastion: ops@gateway.example | Identity: Gateway key | Trusted SHA256:...
++Destination fingerprint SHA256:...
++Verify this fingerprint using a trusted source.
++[Trust this host]                         [Continue]
++
++Phone: focused full-page step
++< SSH connections            Build box
++Step 2 of 4: Host trust
++builder@build.example:22
++Via Gateway [Change]
++Bastion: Trusted | Gateway key
++Destination SHA256:...
++Verify using a trusted source.
++[Trust this host]
++[Continue]
++```
++
++Maps to 002.1-002.3, 002.7-002.8 and 004.1-004.4. Target edits use the existing shared Save
++changes coordinator; Continue saves through it before moving to the next step.
++Phone identity/bastion selection uses temporary inset Drawers. Create bastion
++opens a separate direct setup page and returns with the destination draft
++preserved; no nested dialogs. Only ready direct bastions are selectable. A changed fingerprint shows OLD/NEW and blocks
++authentication; an explicit replacement-trust action is separate from Test.
++
++
++## Verification
++
++Use TDD for changed logic. Commands below are run from the repository root;
++read the [prerequisites](plan.md#verification-prerequisites) first. Tests named
++in this package are created by their owning order, not claimed to exist today.
++
++```bash
++(cd apps/backend && go test ./internal/sshtransport ./internal/sshconnections -count=1)
++(cd apps/web && pnpm exec vitest run components/settings/ssh-connections/connection-steps.test.tsx lib/api/domains/ssh-connections-api.test.ts)
++(cd apps/web && pnpm run typecheck && pnpm run i18n:check)
++(cd apps/web && pnpm e2e:run --project chromium tests/settings/ssh-connections.spec.ts)
++(cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-ssh-connections.spec.ts)
++git diff --check
++```
++
++## Files likely touched
++
++- `apps/backend/internal/sshconnections/connection.go (new)`
++- `apps/backend/internal/sshconnections/trust_test.go (new)`
++- `apps/backend/internal/sshconnections/proxyjump_test.go (new)`
++- `apps/backend/internal/sshconnections/preflight_test.go (new)`
++- `apps/backend/internal/sshtransport/`
++- `apps/web/components/settings/ssh-connections/connection-steps.tsx (new)`
++- `apps/web/components/settings/ssh-connections/connection-steps.test.tsx (new)`
++- `apps/web/hooks/domains/settings/`
++- `apps/web/src/locales/`
++- `apps/web/e2e/tests/settings/ssh-connections.spec.ts (new)`
++- `apps/web/e2e/tests/settings/mobile-ssh-connections.spec.ts (new)`
++
++## Dependencies
++
++Task 02; see the [manifest](plan.md#work-orders).
++
++## Risks
++
++Observation is untrusted evidence, not permission to authenticate. Config aliases resolve to displayed concrete values; do not silently follow later alias edits.
++
++## Parallelism
++
++`sequential`
++
++## Inputs
++
++- [Requirements](../../specs/executors/requirements/ssh-connection-manager.md), IDs above.
++- [System design](../../specs/executors/system-design/ssh-connection-manager.md), corresponding sections.
++- [Custody ADR](../../decisions/2026-09-19-managed-ssh-credential-custody.md).
++- Existing source seams, test cases, and fixtures identified in the manifest and design.
++
++## Results
++
++Pending. Record RED/GREEN evidence, exact final command results, skipped checks,
++and any difference between rendered UI and the assigned preview.
+
+diff --git a/docs/plans/ssh-connection-manager/task-04-assisted-enrollment.md b/docs/plans/ssh-connection-manager/task-04-assisted-enrollment.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/docs/plans/ssh-connection-manager/task-04-assisted-enrollment.md
+@@ -0,0 +1,144 @@
++---
++id: "04-assisted-enrollment"
++title: "Assisted enrollment"
++status: pending
++wave: 4
++depends_on:
++  - "03-trusted-connections"
++plan: "plan.md"
++requirements:
++  - REQ-EXECUTORS-SSH-CONNECTIONS-003
++  - REQ-EXECUTORS-SSH-CONNECTIONS-004
++  - REQ-EXECUTORS-SSH-CONNECTIONS-005
++acceptance_criteria:
++  - AC-EXECUTORS-SSH-CONNECTIONS-003.1
++  - AC-EXECUTORS-SSH-CONNECTIONS-003.2
++  - AC-EXECUTORS-SSH-CONNECTIONS-003.3
++  - AC-EXECUTORS-SSH-CONNECTIONS-003.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-003.5
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.2
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.3
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-003.6
++system_design:
++  - ../../specs/executors/system-design/ssh-connection-manager.md
++---
++
++# Task 04: Assisted enrollment
++
++## Summary
++
++Install a public key using explicitly supplied bootstrap access, then prove access with the destination identity. The flow preserves remote authorization and reports partial/unknown outcomes truthfully.
++
++## In scope
++
++- Implement durable idempotent enrollment state, bounded destination-only password/existing-identity bootstrap over direct or trusted single-hop routes, and append-only authorized_keys procedure with unsafe-path checks and lock handling.
++- Require independent destination authentication; handle duplicate entries with options, no trailing newline, mid-operation disconnect, audit failures, cancellation, and restart without password replay.
++- Add enrollment/recovery UI in the existing access step, translated messages, no secret persistence, and isolated sshd fixture coverage.
++
++## Out of scope
++
++Production work outside this order, remote Docker runtime implementation, and
++changes to the confirmed credential ownership boundary. No publishing or delegation.
++
++## Acceptance
++
++- Host-pin check precedes bootstrap credential use; existing key restrictions survive and no password/private key enters remote command text or persisted state.
++- Success requires fresh destination auth; duplicate requests, unknown outcomes and audit failures follow the specified state machine without silent rollback/retry.
++- Desktop/phone access forms expose the same controls and clear transient inputs; real-host tests prove password and existing-identity enrollment over both routes, with the bastion authorized_keys unchanged.
++
++## ASCII UI preview
++
++[Combined previews](plan.md#ascii-ui-preview). Applicable ACs are listed above;
++retain the same structure and state rules in the rendered result.
++
++### UI-03: Enrollment and recovery
++
++Entry: saved connection > Access. Target and trust fixed to the saved revision.
++
++```text
++Desktop
++Build box: builder@build.example:22    Host SHA256:...
++Via Gateway: ops@gateway.example       Bastion SHA256:...
++Identity: Build host key              Key SHA256:...
++[Copy public key]   Install using: ( ) Password ( ) Existing identity
++Password [................]   Used once; never saved.
++[Install public key and verify]
++Status: Checking access...    [action disabled while request runs]
++
++Phone: full-page Access step
++< Identity                    Build box
++Step 4 of 4: Access
++builder@build.example:22
++Via Gateway (trusted, Gateway key)
++Host SHA256:...  Key SHA256:...
++[Copy public key]
++Install using [Password v]
++Password [................]
++Used once; never saved.
++[Install public key and verify]
++
++Recovery, both compositions
++Key may already be installed. Verification failed.
++[Check access again]   [Copy public key]
++```
++
++Maps to 003.1-003.6 and 004.2-004.4. Bootstrap applies to Build box only;
++Gateway uses its saved identity. Bastion failures identify that hop and block
++destination authentication/enrollment. Unknown outcome never displays Ready.
++Wrong password clears the input and offers a new explicit attempt. No
++credentials appear in URLs, logs, persisted form state, or event payloads.
++
++
++## Verification
++
++Use TDD for changed logic. Commands below are run from the repository root;
++read the [prerequisites](plan.md#verification-prerequisites) first. Tests named
++in this package are created by their owning order, not claimed to exist today.
++
++```bash
++(cd apps/backend && go test ./internal/sshconnections -run 'Test(Enrollment|Audit|HostChange|ManagedProxyJump)' -count=1)
++(cd apps/web && pnpm exec vitest run components/settings/ssh-connections/enrollment-form.test.tsx)
++(cd apps/web && pnpm run typecheck && pnpm run i18n:check)
++(cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-ssh-connections.spec.ts)
++(cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --project containers tests/ssh/managed-enrollment.spec.ts)
++git diff --check
++```
++
++## Files likely touched
++
++- `apps/backend/internal/sshconnections/enrollment.go (new)`
++- `apps/backend/internal/sshconnections/enrollment_test.go (new)`
++- `apps/backend/internal/sshconnections/enrollment_recovery_test.go (new)`
++- `apps/web/components/settings/ssh-connections/enrollment-form.tsx (new)`
++- `apps/web/components/settings/ssh-connections/enrollment-form.test.tsx (new)`
++- `apps/web/src/locales/`
++- `apps/web/e2e/fixtures/ssh-test-base.ts`
++- `apps/web/e2e/helpers/ssh.ts`
++- `apps/web/e2e/tests/ssh/managed-enrollment.spec.ts (new)`
++- `apps/web/e2e/tests/settings/mobile-ssh-connections.spec.ts (new)`
++
++## Dependencies
++
++Task 03; see the [manifest](plan.md#work-orders).
++
++## Risks
++
++The remote operation cannot be atomic with local audit storage. Preserve started/outcome_unknown records, never infer no mutation from a timeout, and never break a remote lock automatically.
++
++## Parallelism
++
++`sequential`
++
++## Inputs
++
++- [Requirements](../../specs/executors/requirements/ssh-connection-manager.md), IDs above.
++- [System design](../../specs/executors/system-design/ssh-connection-manager.md), corresponding sections.
++- [Custody ADR](../../decisions/2026-09-19-managed-ssh-credential-custody.md).
++- Existing source seams, test cases, and fixtures identified in the manifest and design.
++
++## Results
++
++Pending. Record RED/GREEN evidence, exact final command results, skipped checks,
++and any difference between rendered UI and the assigned preview.
+
+diff --git a/docs/plans/ssh-connection-manager/task-05-executor-bindings.md b/docs/plans/ssh-connection-manager/task-05-executor-bindings.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/docs/plans/ssh-connection-manager/task-05-executor-bindings.md
+@@ -0,0 +1,146 @@
++---
++id: "05-executor-bindings"
++title: "Executor binding and explicit adoption"
++status: pending
++wave: 5
++depends_on:
++  - "04-assisted-enrollment"
++plan: "plan.md"
++requirements:
++  - REQ-EXECUTORS-SSH-CONNECTIONS-001
++  - REQ-EXECUTORS-SSH-CONNECTIONS-002
++  - REQ-EXECUTORS-SSH-CONNECTIONS-004
++  - REQ-EXECUTORS-SSH-CONNECTIONS-005
++acceptance_criteria:
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.5
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.6
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.5
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.6
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.5
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.1
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.2
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.3
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.7
++  - AC-EXECUTORS-SSH-CONNECTIONS-002.8
++system_design:
++  - ../../specs/executors/system-design/ssh-connection-manager.md
++---
++
++# Task 05: Executor binding and explicit adoption
++
++## Summary
++
++Connect the new manager to real SSH task execution and make legacy adoption explicit. Bound executor settings cannot substitute another target or identity.
++
++## In scope
++
++- Wire the resolver into preparation/launch/readiness/status/resume/cleanup; retain the complete route stamp and both identity generations. Validate dependency revisions before remote effects; reject direct fallback.
++- Implement atomic profile binding/adoption against current revision/config digest, target-change conflicts, reference deletion protections, and managed-selector enforcement in legacy HTTP/WS routes.
++- Add executor selector/adoption UI and auth tests; recheck #3783 and migrate its consumers if it has landed without implementing that runtime here.
++
++## Out of scope
++
++Production work outside this order, remote Docker runtime implementation, and
++changes to the confirmed credential ownership boundary. No publishing or delegation.
++
++## Acceptance
++
++- Two profiles reuse one connection; auth readiness and executor readiness stay distinct, and non-admin task use cannot override credentials or target.
++- Legacy direct and single-hop adoption retains the exact target/pin, resolves each hop identity, and requires explicit bastion trust; failed route checks leave the profile unchanged. Refuse transport edits while retained runtimes depend on either route record; stale recorded generations never reconnect to a changed target.
++- Enabled/disabled and HTTP/WS/runtime paths obey the same gate and authority, including background probes and authenticated task use.
++
++## ASCII UI preview
++
++[Combined previews](plan.md#ascii-ui-preview). Applicable ACs are listed above;
++retain the same structure and state rules in the rendered result.
++
++### UI-04: Executor binding
++
++Entry: SSH executor editor, shared composition with phone picker Drawer.
++
++```text
++Connection [Build box: Ready v]     [Manage connections]
++Connection: Ready | Agent readiness: Not checked
++[Test executor]
++Shared Save changes: disabled until executor check succeeds
++
++Legacy profile
++Connection: Existing inline SSH settings
++[Move to shared connection]
++Preview: destination + optional bastion, each user/identity/fingerprint
++[Create connection and check]
++```
++
++Maps to 002.4-002.8, 004.5, and 005.1-005.2. Converted forms cannot override the
++connection target or pin. Conflicting edits keep current server data and show a
++reload/retry action. Single-hop adoption adds explicit bastion trust and route
++checks; unsupported chained settings leave the legacy editor untouched.
++
++Structural requirements are control order, explicit trust before credential
++use at each hop, focused phone navigation, and a distinct recovery state. Labels and spacing
++are illustrative and must be localized. Reuse SettingsLayoutClient's single
++scroll owner and save bar. Phone/coarse targets are >=44px; desktop controls
++are 28px. Safe-area/keyboard space keeps the current action reachable; no
++horizontal document scroll. Test around 767/768px and on a coarse tablet.
++
++
++## Verification
++
++Use TDD for changed logic. Commands below are run from the repository root;
++read the [prerequisites](plan.md#verification-prerequisites) first. Tests named
++in this package are created by their owning order, not claimed to exist today.
++
++```bash
++(cd apps/backend && go test ./internal/sshconnections ./internal/ssh ./internal/task/service ./internal/task/handlers -count=1)
++(cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'Test(ManagedSSH|ConnectionReady|SSH|BuildAuth|IdentityAgent)' -count=1)
++(cd apps/backend && go test ./internal/backendapp -run 'Test(SSHConnections|ManagedSelectors)' -count=1)
++(cd apps/web && pnpm exec vitest run components/settings/ssh-connections/managed-binding.test.tsx components/settings/ssh-connection-card.test.tsx)
++(cd apps/web && pnpm run typecheck && pnpm run i18n:check)
++(cd apps/web && pnpm e2e:run --project auth tests/auth/ssh-connections-permissions.spec.ts)
++(cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --project containers tests/ssh/managed-connections.spec.ts tests/ssh/auth-methods.spec.ts tests/ssh/proxy-jump.spec.ts)
++git diff --check
++```
++
++## Files likely touched
++
++- `apps/backend/internal/agent/runtime/lifecycle/executor_ssh.go`
++- `apps/backend/internal/agent/runtime/lifecycle/env_preparer_ssh.go`
++- `apps/backend/internal/agent/runtime/lifecycle/executor_ssh_managed_test.go (new)`
++- `apps/backend/internal/ssh/handlers.go`
++- `apps/backend/internal/sshconnections/adoption.go (new)`
++- `apps/backend/internal/task/service/`
++- `apps/backend/internal/task/handlers/executor_handlers.go`
++- `apps/backend/internal/backendapp/agents.go`
++- `apps/backend/internal/backendapp/ssh_connections_test.go (new)`
++- `apps/web/components/settings/ssh-connections/managed-binding.tsx (new)`
++- `apps/web/components/settings/ssh-connection-card.tsx`
++- `apps/web/app/settings/executors/`
++- `apps/web/src/locales/`
++- `apps/web/e2e/tests/auth/ssh-connections-permissions.spec.ts (new)`
++- `apps/web/e2e/tests/ssh/managed-connections.spec.ts (new)`
++
++## Dependencies
++
++Task 04; see the [manifest](plan.md#work-orders).
++
++## Risks
++
++Connection edits and task admission race across network calls. Recheck revision before workload effects and protect references transactionally. Do not treat management scope as workspace reach.
++
++## Parallelism
++
++`sequential`
++
++## Inputs
++
++- [Requirements](../../specs/executors/requirements/ssh-connection-manager.md), IDs above.
++- [System design](../../specs/executors/system-design/ssh-connection-manager.md), corresponding sections.
++- [Custody ADR](../../decisions/2026-09-19-managed-ssh-credential-custody.md).
++- Existing source seams, test cases, and fixtures identified in the manifest and design.
++
++## Results
++
++Pending. Record RED/GREEN evidence, exact final command results, skipped checks,
++and any difference between rendered UI and the assigned preview.
+
+diff --git a/docs/plans/ssh-connection-manager/task-06-recovery-and-rollout.md b/docs/plans/ssh-connection-manager/task-06-recovery-and-rollout.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/docs/plans/ssh-connection-manager/task-06-recovery-and-rollout.md
+@@ -0,0 +1,115 @@
++---
++id: "06-recovery-and-rollout"
++title: "Restart and disabled-path integration"
++status: pending
++wave: 6
++depends_on:
++  - "05-executor-bindings"
++plan: "plan.md"
++requirements:
++  - REQ-EXECUTORS-SSH-CONNECTIONS-001
++  - REQ-EXECUTORS-SSH-CONNECTIONS-003
++  - REQ-EXECUTORS-SSH-CONNECTIONS-004
++  - REQ-EXECUTORS-SSH-CONNECTIONS-005
++acceptance_criteria:
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.3
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-001.5
++  - AC-EXECUTORS-SSH-CONNECTIONS-003.5
++  - AC-EXECUTORS-SSH-CONNECTIONS-004.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.1
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.2
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.3
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.4
++  - AC-EXECUTORS-SSH-CONNECTIONS-005.5
++  - AC-EXECUTORS-SSH-CONNECTIONS-003.6
++system_design:
++  - ../../specs/executors/system-design/ssh-connection-manager.md
++---
++
++# Task 06: Restart and disabled-path integration
++
++## Summary
++
++Complete the cross-process recovery and rollout contract with executable real-host evidence and operator documentation. This is the final feature integration slice, not an extra generic QA phase.
++
++## In scope
++
++- Add real managed direct/single-hop runtime restart/no-agent and missing-key recovery tests, including retained bastion pin/identity and dependent-route conflicts; interrupted enrollment must remain unknown and never replay.
++- Complete off-state route/direct-call/runtime coverage, feature registry contract checks, and all final changed-path checks.
++- Update public executor how-to and secret protection/recovery reference alongside behavior, backend scoped guidance for new ownership, and spec statuses only after actual implementation passes.
++
++## Out of scope
++
++Production work outside this order, remote Docker runtime implementation, and
++changes to the confirmed credential ownership boundary. No publishing or delegation.
++
++## Acceptance
++
++- A managed task reconnects after backend restart without an inherited agent; key loss, pin changes, and connection revision conflicts fail before remote workload action.
++- Disabled paths retain data, refuse managed remote actions/decryption, and preserve legacy behavior; browser and runtime evidence agree.
++- Public docs explain bootstrap prerequisites, backup custody, deletion versus revocation, feature enable/restart, manual-copy fallback, and compatibility limits; final evidence records all required checks without counting skips as passes.
++
++## Verification
++
++Use TDD for changed logic. Commands below are run from the repository root;
++read the [prerequisites](plan.md#verification-prerequisites) first. Tests named
++in this package are created by their owning order, not claimed to exist today.
++
++```bash
++(cd apps/backend && go test ./internal/sshtransport ./internal/sshconnections ./internal/secrets ./internal/ssh ./internal/runtimeflags ./internal/common/config ./internal/profiles -count=1)
++(test -n "$KANDEV_TEST_POSTGRES_DSN" && cd apps/backend && go test ./internal/sshconnections ./internal/secrets -run TestPostgres -count=1)
++(cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'Test(ManagedSSH|SSH|ConnectionReady)' -count=1)
++(cd apps/backend && go test ./internal/backendapp -run 'Test(SSHConnections|ManagedSelectors)' -count=1)
++make -C apps/backend lint
++(cd apps/web && pnpm exec vitest run components/settings/ssh-connections lib/api/domains/ssh-connections-api.test.ts lib/state/slices/features/features-contract.test.ts)
++(cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check)
++(cd apps/web && pnpm e2e:run --project chromium tests/settings/ssh-identities.spec.ts tests/settings/ssh-connections.spec.ts tests/settings/ssh-connections-disabled.spec.ts)
++(cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-ssh-identities.spec.ts tests/settings/mobile-ssh-connections.spec.ts)
++(cd apps/web && pnpm e2e:run --project auth tests/auth/ssh-connections-permissions.spec.ts)
++(cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --project containers tests/ssh/managed-enrollment.spec.ts tests/ssh/managed-connections.spec.ts tests/ssh/managed-restart.spec.ts tests/ssh/auth-methods.spec.ts tests/ssh/proxy-jump.spec.ts)
++node --test scripts/validate-public-docs.test.mjs
++node scripts/validate-public-docs.mjs
++python3 scripts/list-docs.py validate
++python3 scripts/lint-spec-files.py --all
++git diff --check
++```
++
++## Files likely touched
++
++- `apps/backend/internal/sshconnections/recovery_test.go (new)`
++- `apps/backend/internal/backendapp/ssh_connections_test.go (new)`
++- `apps/web/e2e/tests/ssh/managed-restart.spec.ts (new)`
++- `apps/web/e2e/tests/settings/ssh-connections-disabled.spec.ts (new)`
++- `apps/web/e2e/tests/settings/mobile-ssh-connections.spec.ts (new)`
++- `docs/public/executors.md`
++- `docs/public/configuration.md`
++- `docs/public/operations.md`
++- `apps/backend/AGENTS.md`
++- `docs/specs/executors/requirements/ssh-connection-manager.md`
++- `docs/specs/executors/system-design/ssh-connection-manager.md`
++- `docs/plans/ssh-connection-manager/`
++
++## Dependencies
++
++Task 05; see the [manifest](plan.md#work-orders).
++
++## Risks
++
++Use disposable backend state, master keys, and SSH hosts only. Test authoring must not delete a real protection key. No new gate promotion, publication, or automatic GitHub actions are included.
++
++## Parallelism
++
++`sequential`
++
++## Inputs
++
++- [Requirements](../../specs/executors/requirements/ssh-connection-manager.md), IDs above.
++- [System design](../../specs/executors/system-design/ssh-connection-manager.md), corresponding sections.
++- [Custody ADR](../../decisions/2026-09-19-managed-ssh-credential-custody.md).
++- Existing source seams, test cases, and fixtures identified in the manifest and design.
++
++## Results
++
++Pending. Record RED/GREEN evidence, exact final command results, skipped checks,
++and any difference between rendered UI and the assigned preview.
+
+diff --git a/docs/specs/executors/README.md b/docs/specs/executors/README.md
+index a0b326883..1929fd754 100644
+--- a/docs/specs/executors/README.md
++++ b/docs/specs/executors/README.md
+@@ -19,6 +19,9 @@ including local, container, and SSH execution boundaries.
+ This system owns executor profiles, environment construction, SSH lifecycle,
+ runtime resource admission, process and port safety, agent process lifetime
+ across a backend restart, and executor-specific failure and recovery contracts.
++Reusable SSH connection identity, host trust, and enrollment also belong here;
++the workspace system supplies the existing secret-storage contract, and auth
++supplies management and task-use permissions.
+ 
+ ## Exclusions
+ 
+@@ -80,3 +83,6 @@ replace the foundation's resource ownership, recovery, or cleanup rules.
+ 
+ - [Agents](../agents/README.md): supplies the agent command and profile.
+ - [Tasks](../tasks/README.md): owns task-scoped execution lifecycle.
++
++- [Workspaces](../workspaces/README.md): owns the existing secret-storage contract.
++- [Auth](../auth/README.md): owns administrative and task-use authority.
+
+diff --git a/docs/specs/executors/requirements/ssh-connection-manager.md b/docs/specs/executors/requirements/ssh-connection-manager.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/docs/specs/executors/requirements/ssh-connection-manager.md
+@@ -0,0 +1,213 @@
++---
++status: draft
++system: executors
++created: 2026-09-19
++owners:
++  - kandev
++---
++
++# SSH connection manager requirements
++
++## Overview
++
++An administrator can establish reusable SSH access starting without a local key
++or agent, then attach that connection to executor profiles. Executors owns the
++identity-to-host connection and its lifecycle. Workspace secrets supplies
++storage protection; authentication supplies management and task permissions.
++
++Source: [issue #3735](https://github.com/kdlbs/kandev/issues/3735).
++The maintainer selected unattended key availability, administrator-managed
++installation-wide connections, and assisted enrollment on 2026-09-19.
++This is a proposed extension to the [SSH executor](ssh-executor.md), not a claim
++that managed credentials already ship. Its existing external-file and agent
++modes retain their current contract.
++
++## Terms
++
++- **Identity:** a managed key or a reference to an external key file or agent.
++- **Connection:** one named remote host, port, login user, identity, and trusted
++  host key, optionally reached through one separately trusted bastion connection,
++  reusable by executor profiles.
++- **Enrollment:** explicitly adding an identity's public key to the selected
++  remote user's authorized keys using access the administrator already holds.
++- **Ready:** the current connection revision has a trusted host key and has
++  passed authentication. Executor-specific readiness is a separate check.
++
++## Requirements
++
++### REQ-EXECUTORS-SSH-CONNECTIONS-001: Managed identity custody
++
++**Intent:** Administrators can create SSH credentials without shell setup.
++
++- **AC-EXECUTORS-SSH-CONNECTIONS-001.1:** An administrator shall be able to
++  generate an Ed25519 identity, name it, and view/copy its public key and
++  fingerprint. Kandev shall never return its private key through user APIs,
++  exports, logs, agent messages, or credential selectors.
++- **AC-EXECUTORS-SSH-CONNECTIONS-001.2:** An administrator shall be able to
++  import a supported private key, including an encrypted key with a one-time
++  passphrase. Failed parsing or a wrong passphrase shall create no identity;
++  the passphrase shall not be retained after the request.
++- **AC-EXECUTORS-SSH-CONNECTIONS-001.3:** Managed identities shall work after
++  an unattended backend restart without SSH_AUTH_SOCK or user unlock. The UI
++  shall explain that Kandev protects the stored key and that backend host
++  access can access it; importing a key shall not retain its original
++  passphrase as an additional unlock requirement.
++- **AC-EXECUTORS-SSH-CONNECTIONS-001.4:** Missing or unreadable protected key
++  material shall produce an unavailable-identity result without creating a
++  replacement key or falling back to another identity.
++- **AC-EXECUTORS-SSH-CONNECTIONS-001.5:** Only administrators shall manage
++  identities and connections. Other users shall consume them only through
++  executor profiles they may use, without choosing a different host, login,
++  identity, or trust value for that use. Auth-disabled installs retain their
++  existing single-operator behavior.
++- **AC-EXECUTORS-SSH-CONNECTIONS-001.6:** Deleting a referenced identity shall
++  be refused with its connection/runtime dependencies identified to the
++  administrator. Deleting an unused identity shall not claim to revoke a key
++  already installed on a remote host. Replacing a key shall use a new identity.
++
++### REQ-EXECUTORS-SSH-CONNECTIONS-002: Shared connection and host trust
++
++**Intent:** Profiles can reuse a connection without duplicating credentials or pins.
++
++- **AC-EXECUTORS-SSH-CONNECTIONS-002.1:** Administrators shall be able to save
++  an incomplete named connection and resume setup later. Only a ready
++  connection shall be selectable for a new executor binding.
++- **AC-EXECUTORS-SSH-CONNECTIONS-002.2:** An administrator shall inspect and
++  explicitly trust each hop's observed host fingerprint before Kandev sends
++  authentication credentials to that hop or changes its remote authorization.
++  Observing a destination behind a bastion may authenticate to the already
++  trusted bastion, but shall not authenticate to the untrusted destination. A changed fingerprint shall block authentication and
++  enrollment until separately verified and explicitly trusted.
++- **AC-EXECUTORS-SSH-CONNECTIONS-002.3:** Host, port, user, identity, trust, and
++  bastion selection/configuration changes shall invalidate previous readiness
++  for every affected route. A result from an older revision
++  shall not mark the changed connection ready or authorize enrollment.
++- **AC-EXECUTORS-SSH-CONNECTIONS-002.4:** Multiple profiles bound to one
++  connection shall use that connection's current approved identity and host
++  trust for new launches. Non-admin callers shall not override these fields.
++- **AC-EXECUTORS-SSH-CONNECTIONS-002.5:** A changed connection shall not redirect
++  an existing or resumed runtime to another endpoint. Transport-affecting edits
++  shall be refused while live or resumable runtimes depend on the connection.
++  Existing established transports may finish; reconnecting a retained runtime with a different
++  connection revision shall stop before remote actions and explain the conflict.
++- **AC-EXECUTORS-SSH-CONNECTIONS-002.6:** Connection deletion shall be refused
++  while a profile, another connection using it as a bastion, or a retained
++  runtime references it. Conflicting administrator
++  edits shall be reported instead of silently overwriting newer settings.
++
++- **AC-EXECUTORS-SSH-CONNECTIONS-002.7:** Managed connections shall support
++  direct access and one ProxyJump bastion, with independently selected login
++  users, identities, and explicitly trusted host keys. The destination identity
++  shall not be forwarded to or silently reused for the bastion. Both hops shall
++  be verified on each new connection, with failures identifying the failed hop.
++- **AC-EXECUTORS-SSH-CONNECTIONS-002.8:** Chained jumps, cycles, and an
++  incomplete/untrusted bastion shall not become a ready route. Chained or
++  cyclic configurations shall be rejected before any network or remote work.
++  Changing a bastion shall not redirect a live or resumed dependent runtime.
++
++### REQ-EXECUTORS-SSH-CONNECTIONS-003: Explicit host enrollment
++
++**Intent:** The administrator can authorize a key without an out-of-product agent setup.
++
++- **AC-EXECUTORS-SSH-CONNECTIONS-003.1:** Enrollment shall offer public-key copy
++  and optional installation through a one-time SSH password or an existing
++  authorized identity. Kandev shall clearly state that existing access is
++  required; it shall not bypass hosts that disallow password authentication.
++- **AC-EXECUTORS-SSH-CONNECTIONS-003.2:** Before installation, Kandev shall show
++  the exact host, login user, trusted fingerprint, and public key fingerprint
++  and require an explicit installation action. The bootstrap password shall
++  not be stored, replayed, added to command arguments, or included in diagnostics.
++- **AC-EXECUTORS-SSH-CONNECTIONS-003.3:** Installation shall add only the
++  selected public key for the selected login user, preserve all existing
++  authorization entries and restrictions, avoid duplicate entries on retry,
++  and never use privilege escalation. Unsafe ownership, permissions, symlinks,
++  unsupported authorization layouts, or lock conflicts shall cause a clear
++  failure without replacing existing files.
++- **AC-EXECUTORS-SSH-CONNECTIONS-003.4:** Enrollment shall be successful only
++  after a separate connection authenticates with the selected destination
++  identity and the trusted host key, without the bootstrap credential.
++- **AC-EXECUTORS-SSH-CONNECTIONS-003.5:** If installation may have succeeded
++  but verification or transport fails, Kandev shall show that authorization
++  may already have changed, retain the public-key identity, and offer a fresh
++  check. It shall not silently remove the key, retry a password, or mark the
++  connection ready. Restart shall not resume an enrollment mutation.
++
++- **AC-EXECUTORS-SSH-CONNECTIONS-003.6:** An administrator shall be able to
++  enroll a destination reached through a ready, trusted single-hop bastion.
++  Bootstrap credentials and authorized-key changes shall apply only to the
++  selected destination; destination verification shall use the same approved
++  route with the destination identity. Setting up a bastion's own authorization
++  shall be a separate, explicit direct-connection enrollment operation.
++
++### REQ-EXECUTORS-SSH-CONNECTIONS-004: Guided setup and diagnostics
++
++**Intent:** Desktop and phone users can complete the same setup and recovery flow.
++
++- **AC-EXECUTORS-SSH-CONNECTIONS-004.1:** Settings shall expose SSH connections
++  and identities, with a discoverable path from the executor editor. Setup
++  shall guide target selection, host trust, identity selection/creation,
++  authorization, and authentication checking, preserving non-secret drafts.
++- **AC-EXECUTORS-SSH-CONNECTIONS-004.2:** Preflight shall distinguish locally
++  missing identity, unavailable protected storage, missing/unreachable/empty
++  external agent, untrusted/changed host, network failure, and authentication
++  rejection, identifying bastion versus destination when applicable. Authentication rejection shall not assert that the key is absent
++  from authorized_keys when that cause is unproven.
++- **AC-EXECUTORS-SSH-CONNECTIONS-004.3:** Loading and failed steps shall show
++  the next permitted action without discarding completed setup. Changing a
++  prerequisite shall invalidate dependent results; duplicate submissions and
++  stale responses shall not advance the flow. Secrets shall be cleared on
++  submission completion, navigation, and dismissal.
++- **AC-EXECUTORS-SSH-CONNECTIONS-004.4:** Phones shall provide focused direct
++  navigation through setup, accessible identity selection, reachable primary
++  actions, at least 44px touch targets, and no horizontal document scrolling.
++  Keyboard navigation, focus restoration, and all required actions shall work
++  on desktop and phone. All copy shall be localized in supported languages.
++- **AC-EXECUTORS-SSH-CONNECTIONS-004.5:** Executor setup shall separately report
++  connection readiness and executor-specific checks. A successful SSH login
++  alone shall not claim that an agent or Docker daemon is ready.
++
++### REQ-EXECUTORS-SSH-CONNECTIONS-005: Compatibility and rollout
++
++**Intent:** Introduce managed access without replacing working operator configuration.
++
++- **AC-EXECUTORS-SSH-CONNECTIONS-005.1:** Existing agent/file profiles, config
++  aliases, IdentityAgent overrides, and ProxyJump settings shall continue to
++  work unchanged. No private key shall be automatically copied into Kandev.
++- **AC-EXECUTORS-SSH-CONNECTIONS-005.2:** Converting a legacy direct or single-hop profile
++  shall require an administrator action, preserve the exact resolved endpoint
++  and existing destination pin, and pass current connection/executor checks
++  before binding. A single-hop conversion shall separately resolve and confirm
++  the bastion identity and explicitly trust its host fingerprint; it shall not
++  carry forward legacy acceptance of an unknown bastion key.
++  Profiles shall not be merged because their host names match. Failed or
++  unsupported conversion shall leave the original profile operational.
++- **AC-EXECUTORS-SSH-CONNECTIONS-005.3:** The feature shall ship disabled in
++  all runtime profiles. When disabled, new management, probes, enrollment,
++  managed bindings, and managed runtime connections shall fail before secret
++  resolution or remote work; legacy profiles shall retain existing behavior.
++  Saved managed records shall remain available when re-enabled.
++- **AC-EXECUTORS-SSH-CONNECTIONS-005.4:** Administrator mutations, trust
++  decisions, enrollment results, and managed authentication failures shall
++  produce attributable audit records without private keys, passwords, or
++  raw remote output. A failed audit write shall prevent a new enrollment
++  mutation from starting.
++- **AC-EXECUTORS-SSH-CONNECTIONS-005.5:** Restoring a database without its
++  matching protection key shall leave identities unavailable and explain the
++  recovery requirement. Decryption failure shall never replace an existing
++  identity or result in a successful connection status.
++
++## Out of scope
++
++Per-user/workspace sharing policies, per-use passphrase unlock, private-key
++export, automatic remote revocation or rotation, certificate authorities,
++cloud-provider enrollment APIs, hardware-key generation, general interactive
++keyboard authentication, sudo, custom AuthorizedKeysCommand management, and
++chained ProxyJump connections are excluded. Single-hop ProxyJump and explicit
++legacy conversion are included. The first managed
++connection consumer is SSH; implementing the remote Docker runtime itself
++remains [#3710](https://github.com/kdlbs/kandev/issues/3710).
++
++## Related artifacts
++
++- [System design](../system-design/ssh-connection-manager.md)
++- [Implementation plan](../../../plans/ssh-connection-manager/plan.md)
+
+diff --git a/docs/specs/executors/requirements/ssh-executor.md b/docs/specs/executors/requirements/ssh-executor.md
+index dfde9160e..e787ea664 100644
+--- a/docs/specs/executors/requirements/ssh-executor.md
++++ b/docs/specs/executors/requirements/ssh-executor.md
+@@ -35,3 +35,10 @@ Today the only ways to run an agent are: (1) locally on the user's own machine (
+ ## System design
+ 
+ The migrated technical source is split into [part 1](../system-design/ssh-executor.md).
++
++## Proposed managed-connection extension
++
++The draft [SSH connection manager](ssh-connection-manager.md) defines an additive managed-key
++and shared-connection path. The agent/file authentication and inline-profile
++behavior above remain the legacy contract; password bootstrap in that proposal
++is an explicit enrollment operation, not persistent executor authentication.
+
+diff --git a/docs/specs/executors/system-design/ssh-connection-manager.md b/docs/specs/executors/system-design/ssh-connection-manager.md
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/docs/specs/executors/system-design/ssh-connection-manager.md
+@@ -0,0 +1,488 @@
++---
++status: draft
++system: executors
++requirements:
++  - REQ-EXECUTORS-SSH-CONNECTIONS-001
++  - REQ-EXECUTORS-SSH-CONNECTIONS-002
++  - REQ-EXECUTORS-SSH-CONNECTIONS-003
++  - REQ-EXECUTORS-SSH-CONNECTIONS-004
++  - REQ-EXECUTORS-SSH-CONNECTIONS-005
++---
++
++# SSH connection manager system design
++
++## Purpose and boundaries
++
++Implement the [requirements](../requirements/ssh-connection-manager.md) under
++[the custody decision](../../../decisions/2026-09-19-managed-ssh-credential-custody.md).
++Executors owns connections and identity metadata. The existing secrets package
++owns encryption, authz owns authorization, and task/runtime services retain
++control of task admission, lifetime, and recovery.
++
++This is a proposed design. New packages, types, tables, and routes below are
++explicit proposals, not existing APIs. Implementation must preserve the
++[legacy SSH contract](ssh-executor.md) until a profile is explicitly converted.
++
++## Requirement mapping
++
++| Requirement | Design sections |
++| --- | --- |
++| `REQ-EXECUTORS-SSH-CONNECTIONS-001` | Identity custody; Authorization; Persistence |
++| `REQ-EXECUTORS-SSH-CONNECTIONS-002` | Connection model; Trust and readiness; Runtime binding |
++| `REQ-EXECUTORS-SSH-CONNECTIONS-003` | Enrollment protocol; Failure and recovery |
++| `REQ-EXECUTORS-SSH-CONNECTIONS-004` | API contracts; Settings and mobile composition; Diagnostics |
++| `REQ-EXECUTORS-SSH-CONNECTIONS-005` | Compatibility; Rollout; Audit and persistence |
++
++## Current integration points
++
++- `internal/agent/runtime/lifecycle/executor_ssh_connection.go` owns
++  `SSHConnConfig`, `SSHTarget`, `ResolveSSHTarget`, `DialSSH`, agent/file auth,
++  config expansion, and ProxyJump. Its connection/dial tests cover those rules.
++- `internal/ssh/handlers.go` owns `/api/v1/ssh/test`, `ssh.test`, sessions,
++  `resolveSSHTarget`, and readiness probes. It imports lifecycle today.
++- `SSHExecutor` launch/resume/status/cleanup consumes SSH credentials through
++  config/metadata. `SSHPreparer` currently reports configuration validation
++  without dialing. Keep preparation metadata validation consistent with the
++  new resolver; do not add a second authentication path or redundant dial.
++- `internal/secrets` supplies `SecretStore`, `MasterKeyProvider`,
++  `UserVisibleStore`, and `IsInternalID`. Global user secrets are per-user under
++  auth; that must not be mistaken for installation-owned credential storage.
++- `internal/authz` supplies `RequireOrgScope`, `ScopeOrgConfigManage`, and the
++  role resolver. Do not introduce parallel admin booleans or permission maps.
++- `internal/backendapp/{storage,services,agents,helpers}.go` composes stores,
++  runtime dependencies, and routes. The new packages are wired there.
++- Web seams: `src/settings-routes.tsx`, `lib/settings-discovery/navigation.ts`,
++  `components/settings/ssh-connection-card.tsx`, `lib/types/http-ssh.ts`,
++  `lib/api/domains/ssh-api.ts`, and the settings state/domain hooks.
++
++## Components and dependency direction
++
++Introduce `internal/sshtransport` below lifecycle and `internal/sshconnections`
++for the persistent connection service. Neither imports lifecycle or an executor.
++The connection service depends on transport, its own store, and a narrow
++internal-secret adapter. Lifecycle and existing SSH handlers receive that
++service through backend composition; consumers do not retrieve raw key bytes.
++
++Move the existing low-level target resolution, auth, and dial implementation
++into sshtransport with behavior-preserving adapters at existing lifecycle
++exports. Move internal transport tests with the implementation and retain
++consumer regressions. Do not copy a second SSH stack. Agentctl upload, shell
++probes, repository preparation, session lifetime, and credential-copy logic
++stay in lifecycle. Reuse the existing single-hop tunnel machinery for managed
++routes, with explicit independent bastion and destination authentication and
++pinned host policies. Preserve the legacy known_hosts/unknown-host behavior
++only for unconverted legacy profiles; managed routes never inherit its
++unknown-bastion acceptance. No agent forwarding or key upload to the bastion.
++
++Transport's proposed handshake contract takes an explicit resolved target,
++host-key policy, and an auth source producing signers/auth methods plus a
++cleanup callback. It supports agent/file auth and bounded in-memory managed
++signers. An observation operation performs key exchange without credentials to the
++hop being observed and captures its fingerprint, then closes without opening
++a session on that hop. Destination observation through a bastion first
++authenticates the separately trusted bastion and opens its TCP forwarding
++channel; destination auth remains empty. Observed
++keys are evidence, never implicitly trusted.
++
++Connection service exposes distinct authorized operations: manage identity,
++manage connection, observe/trust, preflight, authenticate, and enroll. Runtime
++consumers use `DialForExecutor` with a server-resolved executor binding, or
++`DialRecordedRuntime` with stored runtime identity. Neither accepts free-form
++caller overrides. These are proposed names. Handshake cleanup closes agent
++sockets and releases private buffers; it does not forward an agent, export a
++key, or put secrets in subprocess environments.
++
++## Identity custody
++
++Proposed `ssh_identities`: UUID, label, kind (`managed`, `file`, `agent`),
++public key/fingerprint where knowable, internal secret reference or file/socket
++reference, immutable credential generation, row version, created/updated timestamps.
++Managed generation is Ed25519 using crypto/rand. Imports use the SSH parser
++already in the dependency graph; accept supported Ed25519/RSA/ECDSA encodings,
++reject malformed/multi-key or oversized input (64 KiB), and reject certificate
++or hardware-backed formats that cannot be represented as a local signer.
++No new cryptographic implementation is introduced.
++
++Import decodes with a transient passphrase when needed and stores canonical
++private material encrypted under the existing master key. Request fields are
++write-only, HTTP bodies are bounded, and request/response diagnostic logging
++must redact the entire credential-bearing body. Frontend keeps input only in
++component memory, never Zustand, local storage, URL, task plan, or analytics.
++Server drops references and clears owned byte buffers after parsing/signing;
++Go/string memory cannot promise comprehensive zeroization, so do not claim it.
++
++Use a new reserved internal secret prefix `ssh-identity:` through a narrow
++adapter. Extend `IsInternalID` and its existing list/reveal/copy/move/provider
++exclusion tests. Identity requests never accept a secret ID; the service derives
++it from the identity UUID. User APIs cannot read, overwrite, delete, bind, copy,
++or move these backing secrets even when an ID is guessed.
++
++The adapter performs purpose-restricted installation-secret operations after
++service authorization, independent of the HTTP actor's per-user secret scope.
++Do not clear the identity from a general request context or fabricate synthetic
++admin authority. Add an explicit internal-secret transaction capability to
++secrets, constrained to the reserved prefix, used only by backend composition.
++This also avoids the auth setup claim of unowned secrets changing runtime
++access. Test both auth setup and removal of the identity's creating admin.
++
++File and agent identities are references, not copies. External encrypted files
++still require an external agent unless explicitly imported as managed. Agent
++preflight resolves the socket in the connection context and asks for signers;
++zero signers is distinct from a missing or unreachable socket. Managed
++identities have one fixed public key; agent identities may offer several and
++cannot supply an enrollment destination key. Enrollment requires a managed or
++parseable file identity with one public key. A bootstrap identity can be any
++supported kind but cannot equal an unavailable destination credential.
++
++## Connection model
++
++Proposed `ssh_connections`: UUID, name, resolved host/port/user, optional source
++alias for display, identity ID, host public key and SHA256 fingerprint, optional
++`bastion_connection_id`, transport revision, row version,
++trust generation, last authentication result/revision/time, timestamps.
++The row version changes on every metadata write and controls conditional
++updates. Transport revision changes only when endpoint, user, identity, trust or
++bastion selection changes; it binds probes and runtimes. Labels cannot invalidate
++runtime identity. Auth statuses
++are derived as `draft`, `untrusted`, `unchecked`, `ready`, or `unavailable`.
++Last success is historical evidence, not a liveness guarantee.
++
++For new connections, aliases are an input convenience. Resolve and display
++HostName, Port, User, IdentityAgent/IdentityFile and one ProxyJump before save.
++A jump alias resolves its own user/identity settings. Where legacy behavior
++would fall back to the destination identity, show that identity explicitly and
++require confirmation for the bastion rather than silently sharing it. Persist the concrete
++endpoint and selected identity; do not silently reinterpret an edited SSH config
++as a different managed target later. Host/port/user, identity selection, or pin
++changes increment revision and clear readiness. Labels do not change transport
++identity; their row-version conditional updates still prevent lost edits.
++
++A connection owns one target pin and may reference one direct connection as
++its bastion. The referenced record owns the bastion's user, identity and pin,
++and may be reused by several destination connections. It cannot itself have a
++bastion. Selection lists ready direct connections, with a Create bastion path
++through the existing direct setup flow. A draft may become unavailable if its
++selected bastion loses readiness; no silent direct fallback is permitted.
++Reject self-reference, nested/chained hops and cycles before network work,
++including changing a connection already used as a bastion into a jumped route.
++
++Readiness and trust receipts bind a route stamp: destination ID/revision plus
++bastion ID/revision when present. Read and compare both records in the same
++transaction; a bastion transport change invalidates dependent readiness even
++if destination rows have not been rewritten. Avoid cached success determined
++from only the destination revision. Locks/revision checks cover both IDs in
++stable order. Deletion references include dependent connections, and runtime
++references protect both identities and connections. There is no automatic pin
++reset, first-use acceptance, host-name deduplication, or profile-to-connection merge. Referenced identities are immutable in credential
++content; replace by creating/enrolling a new identity and changing selection.
++
++## Authorization and API contracts
++
++All new management endpoints require `org.config.manage` using the existing
++resolver at both HTTP and service boundaries. Missing authenticated identity
++fails closed; auth-disabled synthetic operator remains valid. Existing task
++access controls govern runtime use, not credential management authority.
++No new MCP/agent-tool mutation surface or public signer endpoint is added.
++
++Proposed HTTP endpoints under `/api/v1/ssh`:
++
++| Endpoint | Request / result |
++| --- | --- |
++| `GET /identities`, `GET /identities/:id` | Metadata and public keys only |
++| `POST /identities` | label plus generate/import/file/agent input; metadata |
++| `PATCH /identities/:id` | conditional label edit only |
++| `DELETE /identities/:id` | conditional, refuse referenced identity |
++| `GET /connections`, `GET /connections/:id` | Admin connection metadata |
++| `POST /connections`, `PATCH /connections/:id` | target/identity draft, expected row version |
++| `DELETE /connections/:id` | conditional, refuse profile/runtime references |
++| `POST /connections/:id/observe` | expected route stamp; destination host key and receipt; direct bastion observation uses its own ID |
++| `POST /connections/:id/trust` | expected route stamp, receipt, verified fingerprint for this connection |
++| `POST /connections/:id/preflight` | expected route stamp; non-mutating local checks for both hop identities |
++| `POST /connections/:id/test` | expected route stamp; pinned authentication result for the whole route |
++| `POST /connections/:id/enroll` | expected route stamp, request UUID, destination key fingerprint, bootstrap mode |
++| `GET /connections/:id/enrollments/:request_id` | Admin sanitized operation result |
++| `POST /executors/:id/adopt-connection` | expected executor config digest and ready connection ID/route stamp |
++
++Create operations also carry a caller-generated idempotency UUID scoped to
++actor and operation; repeated generation cannot accidentally issue a different
++key. Reusing a UUID with a different non-secret input digest returns conflict.
++Never persist credential inputs to implement idempotency.
++
++Trust receipt is a server-side random opaque token, five-minute expiry, scoped
++to actor, connection route stamp, resolved host/port/user, and observed host key.
++The stamp includes the bastion record/revision used to reach the destination.
++Consume it once when trust is committed. Restart discards receipts. Changed
++key replacement is a distinct confirmation showing old and new fingerprints,
++not a test checkbox reset. Observation does not execute remote commands.
++
++Success responses carry row version, transport revision, and the complete
++route stamp. Hop-specific failures include `hop: bastion | destination`. Metadata writes
++compare expected row version; probes/enrollment compare the complete route
++stamp. Mutation responses include resolved bastion metadata for administrators.
++Stale edits/tests yield 409.
++Stable error codes carry safe typed fields, not raw SSH errors: 400 invalid,
++401/403 access, 404 unavailable feature/entity, 409 stale/reference conflict,
++422 prerequisite/authentication failure, 503 network/protection unavailable.
++The frontend translates codes into localized guidance. Never claim that
++`authentication_rejected` proves a missing authorized_keys entry.
++
++Runtime endpoints accepting executor IDs resolve their stored managed binding;
++requests mixing connection ID with host/user/file/pin overrides are rejected.
++Legacy HTTP/WS `ssh.test` and readiness handlers must reject managed identity or
++connection requests from callers lacking management authority, rather than
++bypassing the new service through their existing free-form fields. Bound task
++operations never expose connection enumeration or a generic remote probe.
++
++## Trust and readiness
++
++1. Save a draft target and identity reference, without dialing.
++2. For a jumped route, select or create a ready direct bastion connection.
++   Its own host observation/trust/authentication completes before it is used.
++   Observe the destination host key with no destination authentication, over
++   the already trusted/authenticated bastion if selected. Independently
++   verify/trust the destination fingerprint. Observation failure remains a draft.
++3. Local preflight checks identity/storage/agent readiness and selected trust.
++4. Test uses only the pinned key and selected identities for both hops. No password fallback or direct-route fallback.
++5. Commit readiness only if the entire route stamp and both selected identity
++   generations still match; classify bastion auth/tunnel and destination failures.
++6. Profile binding requires connection readiness plus its existing executor
++   readiness checks; bind atomically against the tested route stamp.
++
++Each remote operation rechecks each hop's pin during its real handshake,
++including enrollment. A failed bastion pin/auth/tunnel prevents destination
++authentication; a failed destination pin prevents destination credentials from
++being sent even though trusted bastion authentication has already occurred. A spoofed observation cannot cause password release without the
++explicit trust step. A changed host fails before an auth callback supplies a
++password or signer. Backend restart invalidates in-memory receipts and pending
++probes, not stored trusted keys or managed credentials.
++
++## Enrollment protocol
++
++Enrollment targets the selected login user's standard OpenSSH home layout on
++supported Linux/macOS hosts, directly or over the approved single-hop route.
++The bastion must already authenticate with its selected identity. To bootstrap
++a new bastion, enroll its own direct connection first; never cascade remote
++authorization mutations across both hops in one request. Password and existing-identity bootstrap are
++separate inputs. No keyboard-interactive prompts, sudo, arbitrary command input,
++custom AuthorizedKeysFile discovery, or cloud console access is implied.
++Unsupported layouts use public-key copy and normal authentication checks.
++
++Before networking, validate feature, administrator authority, expected revision,
++route stamp and both trusted fingerprints, destination public key, and
++bootstrap choice. Persist a
++sanitized operation record with request UUID and `started`; fail closed if that
++write fails. Serialize enrollment for a connection; duplicate UUID returns its
++result and never repeats a password attempt. Limit password attempts to one
++handshake per explicit request; no background retries. Bound each operation to
++60 seconds, and only one active enrollment per connection.
++
++Open the trusted bastion using its configured identity if present; then
++authenticate to the destination with the bootstrap credential under the stored
++destination pin. The destination handshake runs end-to-end over the forwarding
++channel. Never use the destination bootstrap password to log into the bastion,
++forward an agent, or install the destination key on the bastion.
++Run a fixed, reviewed POSIX shell procedure, with the validated public key sent
++through stdin, not command interpolation. The procedure uses the remote login
++home, no caller-supplied path. Create missing .ssh and authorized_keys with
++0700/0600; refuse symlink/non-regular targets, unsafe ownership, and writable
++by-other directories/files. Existing safe permissions and contents are preserved.
++Take an atomic per-user .ssh enrollment lock directory; refuse a busy/stale lock
++with recovery guidance, never break it automatically. All error/success paths
++attempt lock release. No password or private material enters that procedure.
++
++Read existing entries as SSH authorized-key records and compare key blobs,
++including entries with options/comments. If the same key exists, preserve its
++options rather than appending an unrestricted copy. Otherwise append one
++validated bounded public-key line, ensuring a preceding newline, using append
++mode without truncation or replacement. Never rewrite the complete file or
++chmod an existing unsafe file into apparent compliance. Serialize Kandev writers;
++non-cooperating external editors and a malicious owner of the remote account
++are not a filesystem transaction boundary Kandev can guarantee. The remote
++account already controls its authorization; report conflicting/read failures
++rather than attempting to repair its files.
++
++Close bootstrap session, discard password, and independently dial with the
++destination identity and pinned host key, through a fresh verified bastion
++connection when applicable. Success records `verified` and marks
++the unchanged route stamp ready. Failed fresh auth after a write records
++`installed_unverified`; transport loss where the write outcome is unknown records
++`outcome_unknown`. No automatic rollback: another actor may already rely on
++that public key. Retry starts with a new ordinary destination-auth test; if that
++fails, explicit re-enrollment can supply new bootstrap input and safely check
++for the existing entry. On restart, `started` becomes `outcome_unknown`, never
++replayed. User cancellation may stop transport but cannot promise remote rollback.
++
++## Runtime binding and compatibility
++
++Add `ssh_connection_id` as the exclusive connection selector in executor Config.
++Existing profiles retain their inline fields. A managed binding cannot also
++contain inline auth/target/pin values. Profile-specific shell, preparation,
++agent selection, and workdir settings remain on their current objects.
++
++All launch, preparation, test/readiness, status, resume, and cleanup paths use
++one resolver. Recorded runtimes carry the complete route stamp, both identity IDs and
++generations when jumped, and the recorded endpoint/pin metadata for each hop,
++never key bytes.
++Validate those records against current connection generation before reconnecting;
++a mismatch produces `connection_changed` before dial, upload, or process signal.
++Existing live transports may finish on their recorded target. Transport edits
++to either destination or bastion are refused while live or resumable runtime
++references depend on that record, including through another connection; complete their
++existing stop/reset/archive lifecycle before changing the connection. Labels
++remain editable. A revision mismatch from stale/corrupt records still fails
++closed. Display dependent profiles and sessions, and offer their existing
++management routes; no silent session teardown or reattachment occurs.
++
++New admission and connection mutation share a serialization boundary covering
++all route IDs, locked in stable ID order. A dial can be slow outside the lock, but revision is rechecked before
++issuing remote workload commands or recording admission; discard a stale dial.
++Identity deletion checks connection and retained-runtime references, including
++older generations, so a changed selection cannot orphan a still-recorded key.
++Deletion never cascades across profiles or remote machines.
++
++Explicit adoption previews the legacy resolved endpoint, identity source, pin,
++and affected profile. Create a separate connection per selected legacy profile;
++keep legacy pin exactly, require trust when absent, and retest. Final adoption
++atomically checks the original config digest and ready connection revision,
++then replaces only inline connection fields. Failure leaves the profile intact;
++new unused connection records can remain visible for retry or deletion.
++For single-hop adoption, resolve the bastion separately using the existing
++alias/literal rules, preview both targets and identities, then explicitly
++observe/confirm the bastion pin and test the entire route. An existing
++known_hosts match can be shown as evidence but is not silent managed approval;
++legacy unknown-host acceptance is never copied. Create a distinct direct
++bastion record unless the administrator explicitly selects an existing record
++whose resolved endpoint, user and identity match. Bind only after both route
++revisions and the unchanged original executor config digest are verified.
++Chained/unsupported settings leave the original profile untouched.
++Unconverted resumable runtimes keep their legacy metadata path.
++
++Remote Docker is a future consumer of the same dial interface. The present
++checkout's `RemoteDockerExecutor` is a stub. Do not implement it here or copy
++its contributor branch. Before implementation recheck #3783: if it has landed,
++include its existing transport call sites in this resolver migration and its
++connection selector tests; otherwise document the interface handoff. Existing
++key discovery from that PR is a chooser for external file identities, never
++implicit import. #3747 reachability results are separate from auth readiness.
++
++## Persistence, audit, and failure recovery
++
++Use the existing backend writer/reader DB pools and dialect helpers for new
++identity, connection, and enrollment/audit tables; support SQLite and PostgreSQL.
++Metadata creation and backing internal-secret creation/deletion use the same
++transaction through the purpose-specific secret capability. Failures roll back
++both; do not rely on best-effort orphan cleanup for normal operation. Foreign
++reference checks and revision compare-and-swap must share the mutation
++transaction. No credential payload is placed in executor Config or JSON metadata.
++
++The secrets package already protects values with AES-GCM and a local master.key.
++Backups need both DB and matching key. The current MasterKeyProvider may create
++a new key when its file is missing/invalid; the connection service must detect
++unreadable existing identities and refuse automatic regeneration or overwrite
++of identity rows. It cannot recover old ciphertext with a new master key.
++A master-key loader hardening project is not a prerequisite of this feature;
++no stronger recovery guarantee than the existing backup boundary is claimed.
++
++Use a dedicated `ssh_connection_audit` table for administrator actions and
++managed authentication failures: actor ID (or synthetic operator), operation,
++entity IDs/revisions, timestamps, correlation/request UUID, outcome/error code,
++and relevant public fingerprint changes. The enrollment row is durable before
++remote mutation; finalize outcome after it. If final persistence fails after
++remote work, leave the earlier started record to reconcile as outcome_unknown.
++For local mutations write audit in the metadata transaction. Unavailable audit
++storage rejects enrollment before sending credentials. No request bodies,
++passwords, key bytes, raw remote output, or free-form socket errors are stored.
++Records remain until installation data is explicitly removed/restored; initial
++version adds no automatic audit purge. Document backup/storage impact.
++
++Logs use the same sanitized fields, never value-bearing DTOs. Metrics, if added,
++use only closed operation/outcome enums, not host/user/identity labels. No new
++metrics dashboard is necessary. Operational errors distinguish missing
++identity, credential_unavailable, agent_missing/unreachable/empty,
++host_untrusted/changed, network_unreachable, authentication_rejected,
++unsafe_authorized_keys, enrollment_busy, installed_unverified, and
++connection_changed. Success time never substitutes for a fresh failed probe.
++
++## Settings and mobile composition
++
++Add Settings > SSH connections, `/settings/ssh-connections`, with connection
++list/detail routes and an Identities tab. Executor editor links here while
++preserving its own draft. Connections can be drafts; profiles cannot bind an
++unfinished one. Show admin-only management; non-admin executor consumers see
++the binding name/readiness but not credential inputs or management actions.
++
++Use `SettingsLayoutClient`, settings discovery/navigation, existing tabs,
++`useSettingsSaveContributor`, and the shared Save changes bar for editable
++metadata. Generate/import/enroll/test/trust are explicitly named commands with
++their own effect confirmation, not hidden side effects of typing or Save.
++A setup transition first saves the current draft via the coordinator; remote
++commands operate on the acknowledged revision. Errors keep the form and mark
++which revision was checked. No automatic testing while the user types.
++
++Desktop: list then detail, with target/trust/identity/access steps and one
++current primary command. Phone: direct navigation from Settings to a full-page
++list, then one focused setup step with Back/Continue. Do not squeeze a desktop
++table or nest enrollment dialogs. Use a bottom Drawer only for temporary
++identity or bastion selection. The target step offers Direct or Via bastion,
++and lists only direct bastion records. Display separate Bastion and Destination
++trust/identity summaries and route-specific errors. Create bastion opens its
++own direct setup page, preserves the destination non-secret draft, and returns
++to it after the bastion is ready. Do not stack two trust dialogs on a phone. Exemplar `components/kanban/mobile-menu-sheet.tsx` supplies
++inset Drawer geometry/focus; `components/settings/settings-layout-client.tsx`
++supplies direct phone settings navigation, its sole scroll region, and safe-area
++space for the existing save control. Both were inspected for this package.
++
++Use `useResponsiveBreakpoint` (phone below 768px) and shared state/hooks across
++compositions. Maintain one scroll owner; viewport-bound pickers use dynamic
++height and safe-area insets. Ordinary desktop fields/actions remain 28px;
++phone/coarse targets are at least 44px. Back navigation is guarded for metadata
++but immediately clears secret inputs. Restore focus to selection/opening control;
++announce asynchronous step status via an accessible live region. Fingerprints
++and public keys wrap/scroll within their own bounded region, not the document.
++
++Empty, missing-agent, wrong-password, changed-host, and installed-unverified
++states appear in the [plan previews](../../../plans/ssh-connection-manager/plan.md#ascii-ui-preview).
++Translations cover en, pt-pt, zh-cn, zh-hk, zh-tw; generate Traditional Chinese
++using the existing command. Public keys and fingerprints are opaque values,
++not translated or used as English plural fragments.
++
++## Rollout
++
++Proposed identity: `features.sshConnectionManager`, environment
++`KANDEV_FEATURES_SSH_CONNECTION_MANAGER`, config field `SSHConnectionManager`,
++JSON key `sshConnectionManager`. These identities are not present or retired
++at authoring. Add through the typed registry/config and frontend defaults;
++prod/dev/e2e defaults are false. Metadata declares restart required because
++startup wires services and recovery. Tests explicitly enable in disposable
++instances; do not enable the whole E2E profile.
++
++Gate new HTTP/service entry points, boot/settings metadata, executor binding
++validation, runtime resolution (including background reconnect/probes), and
++legacy HTTP/WS managed-selector adapters. When off, legacy behavior remains,
++managed operations fail before reading secrets or dialing, and metadata is
++retained. In-flight established transports are not retroactively revoked;
++normal stop can close an already-held transport without resolving credentials.
++After restart with the flag off, managed runtimes require re-enablement for
++reconnect or remote cleanup; do not fall back to legacy fields. Backend shutdown
++may close local resources. No disabled startup enrollment replay or probes.
++
++Schema initialization is additive and safe with the gate off; migration must not
++create identities or adopt profiles. Promotion and eventual retirement follow
++the runtime-feature-flags skill. This package defines a default-off release,
++not a release date or automatic promotion.
++
++## Validation and delivery
++
++The [plan and work orders](../../../plans/ssh-connection-manager/plan.md) map
++all ACs to proposed tests and commands. Include SQLite/PostgreSQL transactions,
++HTTP/service/WS authorization, auth-setup continuity, restart recovery without
++SSH_AUTH_SOCK, host-key change at either hop before its password/signing, distinct identities,
++bastion replacement after destination observation, chain/cycle rejection, duplicate/stale
++requests, locked/unsafe authorized_keys, redaction, profile adoption, retained
++runtime revision mismatches, and flag-disabled side-effect prevention.
++
++Browser tests use the real backend. Identity/settings/mobile tests need no
++Docker; real enrollment uses the existing isolated sshd fixture under the
++containers project. Mobile network-free tests stay outside tests/ssh to avoid
++accidentally inheriting the containers matcher. Public docs change alongside
++implementation, not this draft design.
+
+diff --git a/docs/specs/executors/system-design/ssh-executor.md b/docs/specs/executors/system-design/ssh-executor.md
+index a7ff068b1..afecd9709 100644
+--- a/docs/specs/executors/system-design/ssh-executor.md
++++ b/docs/specs/executors/system-design/ssh-executor.md
+@@ -266,3 +266,10 @@ This design follows [ADR-2026-09-05-agent-owned-credential-file-conflicts](../..
+ ## Open questions
+ 
+ (All v1 design decisions resolved during planning. None outstanding at spec-approval time.)
++
++## Proposed managed-connection extension
++
++The draft [SSH connection manager](ssh-connection-manager.md) defines an additive managed-key
++and shared-connection path. The agent/file authentication and inline-profile
++behavior above remain the legacy contract; password bootstrap in that proposal
++is an explicit enrollment operation, not persistent executor authentication.

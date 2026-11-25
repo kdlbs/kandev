@@ -225,7 +225,7 @@ func (h *ExecutorProfileHandlers) httpCreateProfile(c *gin.Context) {
 		EnvVars:       body.EnvVars,
 	})
 	if err != nil {
-		if writeExecutorOwnershipError(c, err) {
+		if writeExecutorResourceError(c, err) {
 			return
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
@@ -290,7 +290,7 @@ func (h *ExecutorProfileHandlers) httpUpdateProfile(c *gin.Context) {
 		EnvVars:       body.EnvVars,
 	})
 	if err != nil {
-		if writeExecutorOwnershipError(c, err) {
+		if writeExecutorResourceError(c, err) {
 			return
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
@@ -314,7 +314,7 @@ func (h *ExecutorProfileHandlers) httpUpdateProfile(c *gin.Context) {
 
 func (h *ExecutorProfileHandlers) httpDeleteProfile(c *gin.Context) {
 	if err := h.service.DeleteExecutorProfile(c.Request.Context(), c.Param("profileId")); err != nil {
-		if writeExecutorOwnershipError(c, err) {
+		if writeExecutorResourceError(c, err) {
 			return
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
@@ -417,7 +417,7 @@ func (h *ExecutorProfileHandlers) wsCreateProfile(ctx context.Context, msg *ws.M
 		EnvVars:       req.EnvVars,
 	})
 	if err != nil {
-		if status, code, message := executorOwnershipError(err); status != 0 {
+		if status, code, message := executorResourceError(err); status != 0 {
 			return ws.NewError(msg.ID, msg.Action, code, message, nil)
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
@@ -489,7 +489,7 @@ func (h *ExecutorProfileHandlers) wsUpdateProfile(ctx context.Context, msg *ws.M
 		EnvVars:       req.EnvVars,
 	})
 	if err != nil {
-		if status, code, message := executorOwnershipError(err); status != 0 {
+		if status, code, message := executorResourceError(err); status != 0 {
 			return ws.NewError(msg.ID, msg.Action, code, message, nil)
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
@@ -513,7 +513,7 @@ func (h *ExecutorProfileHandlers) wsDeleteProfile(ctx context.Context, msg *ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 	if err := h.service.DeleteExecutorProfile(ctx, req.ID); err != nil {
-		if status, code, message := executorOwnershipError(err); status != 0 {
+		if status, code, message := executorResourceError(err); status != 0 {
 			return ws.NewError(msg.ID, msg.Action, code, message, nil)
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {

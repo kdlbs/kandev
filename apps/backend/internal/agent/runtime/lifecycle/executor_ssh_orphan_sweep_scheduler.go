@@ -83,6 +83,7 @@ func decodeSSHOrphanReachabilityEvent(data interface{}) (sshOrphanReachabilityEv
 // Start and Stop are idempotent. Stop cancels every in-flight sweep and
 // waits for all of them (plus the loop) to drain before returning.
 type OrphanSweepScheduler struct {
+	managed          ManagedSSHExecutorConnection
 	executors        sshOrphanSweepExecutorStore
 	tasks            sshOrphanSweepStore
 	acquireTaskFence func(taskID string) func()
@@ -112,12 +113,14 @@ func NewOrphanSweepScheduler(
 	intervalSeconds int,
 	log *logger.Logger,
 	acquireTaskFence func(taskID string) func(),
+	managed ManagedSSHExecutorConnection,
 ) *OrphanSweepScheduler {
 	if intervalSeconds <= 0 {
 		intervalSeconds = sshOrphanSweepDefaultIntervalSeconds
 	}
 	return &OrphanSweepScheduler{
 		executors:        executors,
+		managed:          managed,
 		tasks:            tasks,
 		acquireTaskFence: acquireTaskFence,
 		log:              log,
@@ -298,23 +301,16 @@ func (s *OrphanSweepScheduler) trySweep(executor *models.Executor) {
 }
 
 func (s *OrphanSweepScheduler) runSweep(ctx context.Context, executor *models.Executor) {
-	target, err := SSHTargetFromExecutorConfig(executor.Config)
-	if err != nil {
-		s.warn(executor.ID, "resolve ssh target", err)
-		return
-	}
-
 	dialCtx, cancel := context.WithTimeout(ctx, sshOrphanSweepDialTimeout)
 	defer cancel()
-	client, err := dialSSH(dialCtx, target)
+	client, cleanup, err := s.openConnection(dialCtx, executor)
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return
+		if !errors.Is(err, context.Canceled) {
+			s.warn(executor.ID, "dial failed", err)
 		}
-		s.warn(executor.ID, "dial failed", err)
 		return
 	}
-	defer func() { _ = client.Close() }()
+	defer cleanup()
 
 	sweepCtx, sweepCancel := context.WithTimeout(ctx, sshOrphanSweepRunTimeout)
 	defer sweepCancel()

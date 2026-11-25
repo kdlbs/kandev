@@ -612,3 +612,15 @@ describe("workflow settings route", () => {
     expect(route.props.to).toBe("/settings/workspaces/demo-workspace/workflows");
   });
 });
+
+// @covers AC-EXECUTORS-SSH-CONNECTIONS-004.6, AC-EXECUTORS-SSH-CONNECTIONS-005.6
+describe("managed SSH navigation", () => {
+  it("reserves the nested manager route instead of treating it as a profile", () => {
+    const route = renderSettingsRoute("/settings/executors/ssh-connections") as ReactElement;
+    expect((route.type as { name?: string }).name).toBe("SSHConnectionsSettings");
+  });
+  it("redirects old management bookmarks to the nested page", () => {
+    const route = renderSettingsRoute("/settings/ssh-connections") as ReactElement<{ to: string }>;
+    expect(route.props.to).toBe("/settings/executors/ssh-connections");
+  });
+});

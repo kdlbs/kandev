@@ -70,12 +70,7 @@ func (r *SSHExecutor) prepareSSHRecovery(
 
 	recoveryCtx, cancel := context.WithTimeout(ctx, sshAgentctlHealthTimeout)
 	defer cancel()
-	target, err := r.targetFromMetadata(record.Metadata)
-	if err != nil {
-		r.logger.Debug("ssh recovery cannot resolve saved target", zap.String("session_id", record.SessionID), zap.Error(err))
-		return nil, nil, RecoveryOutcomeUnknown
-	}
-	client, err := dialSSH(recoveryCtx, target)
+	target, client, err := r.dialSession(recoveryCtx, record.SessionID, cloneSSHMetadata(record.Metadata), false)
 	if err != nil {
 		r.logger.Debug("ssh recovery cannot connect to saved target", zap.String("session_id", record.SessionID), zap.Error(err))
 		return nil, nil, RecoveryOutcomeUnknown

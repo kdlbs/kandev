@@ -5,11 +5,12 @@ import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-p
 import { useExecutorProfileOptions } from "@/components/task-create-dialog-options";
 import type { AppState } from "@/lib/state/store";
 import type { StoreApi } from "zustand";
+import type { SSHRoute } from "@/lib/types/http-ssh-connections";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { registerExecutorsHandlers } from "@/lib/ws/handlers/executors";
 import { registerExecutorProfileHandlers } from "@/lib/ws/handlers/executor-profiles";
-import { buildSSHExecutorConfig } from "@/app/settings/executors/new/[type]/ssh-config";
+import { buildInlineSSHExecutorConfig } from "@/app/settings/executors/new/[type]/ssh-config";
 import { useSaveExecutorConnection } from "./use-save-executor-connection";
 
 export const OWNER = "connection-owner";
@@ -21,7 +22,40 @@ export const form = {
   identity_source: "agent" as const,
   host_fingerprint: "SHA256:submitted",
 };
-export const submittedConfig = () => buildSSHExecutorConfig(form);
+export const submittedConfig = () => buildInlineSSHExecutorConfig(form);
+
+export const managedConnections: SSHRoute[] = ["current", "replacement"].map((id) => ({
+  destination: {
+    id,
+    name: id,
+    host: `${id}.lan`,
+    port: 22,
+    user: "builder",
+    identity_id: "key",
+    fingerprint: "SHA256:verified",
+    public_key: "",
+    version: 1,
+    revision: 1,
+    verified_route: id,
+  },
+  stamp: id,
+}));
+
+export function managedTransport() {
+  const existing = executor();
+  existing.config = managedConfig(managedConnections[0]);
+  const fixture = transport([existing, executor(OTHER)]);
+  fixture.fresh[0].config = managedConfig(managedConnections[1]);
+  return fixture;
+}
+
+function managedConfig(route: SSHRoute) {
+  return {
+    ssh_connection_id: route.destination.id,
+    ssh_connection_stamp: route.stamp,
+    ssh_shell: "bash",
+  };
+}
 
 export function profile(id: string, executorId = OWNER): ExecutorProfile {
   return {
@@ -155,6 +189,8 @@ function auxiliaryResponse(path: string) {
       consecutive_failures: 0,
     });
   if (path === "/api/v1/ssh/identities") return json({ identities: [] });
+  if (path === "/api/v1/ssh/managed/identities") return json([]);
+  if (path === "/api/v1/ssh/managed/connections") return json(managedConnections);
   return null;
 }
 

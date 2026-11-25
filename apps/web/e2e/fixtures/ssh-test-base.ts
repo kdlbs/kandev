@@ -1,3 +1,4 @@
+import { createTestedSSHRoute, sshBinding } from "../helpers/ssh-managed-fixture";
 import { expect, type Page, test as base } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import {
@@ -66,31 +67,6 @@ export const sshTest = backendFixture.extend<
       // Per-worker sshd container.
       const sshWorkDir = path.join(backend.tmpDir, "ssh");
       const sshTarget = startSSHServer(workerInfo.workerIndex, SSH_E2E_IMAGE_TAG, sshWorkDir);
-
-      // ssh-keyscan reports the ed25519 fingerprint, but the Go ssh client may
-      // negotiate a different key type — meaning the pinned fingerprint must
-      // be the one *kandev* observes, not the one we scanned. Hit the
-      // permissive test endpoint once to capture the canonical value.
-      try {
-        const observed = await apiClient.testSSHConnection({
-          name: "ssh-fixture-observe",
-          host: sshTarget.host,
-          port: sshTarget.port,
-          user: sshTarget.user,
-          identity_source: "file",
-          identity_file: sshTarget.identityFile,
-        });
-        if (!observed.success || !observed.fingerprint) {
-          throw new Error(
-            `SSH fixture: probe failed (${observed.error ?? "no error"}); ` +
-              `steps=${JSON.stringify(observed.steps)}`,
-          );
-        }
-        sshTarget.hostFingerprint = observed.fingerprint;
-      } catch (e) {
-        stopSSHServer(sshTarget);
-        throw e;
-      }
 
       let seed: Omit<SSHSeedData, "sshTarget"> | undefined;
       try {
@@ -259,14 +235,9 @@ async function seedSSHWorkspace(
     const agentProfileId = mock?.profiles[0]?.id;
     if (!agentProfileId) throw new Error("SSH E2E seed: mock-agent profile missing");
 
-    const sshExecutor = await apiClient.createSSHExecutor("E2E SSH Target", {
-      ssh_host: sshTarget.host,
-      ssh_port: String(sshTarget.port),
-      ssh_user: sshTarget.user,
-      ssh_identity_source: "file",
-      ssh_identity_file: sshTarget.identityFile,
-      ssh_host_fingerprint: sshTarget.hostFingerprint,
-    });
+    const route = await createTestedSSHRoute(backend.baseUrl, "E2E SSH Target", sshTarget);
+    sshTarget.hostFingerprint = route.destination.fingerprint;
+    const sshExecutor = await apiClient.createSSHExecutor("E2E SSH Target", sshBinding(route));
 
     const profile = await apiClient.createExecutorProfile(sshExecutor.id, {
       name: "E2E SSH",

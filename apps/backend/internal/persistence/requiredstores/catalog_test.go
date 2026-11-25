@@ -16,7 +16,7 @@ func TestCatalog(t *testing.T) {
 		"organizations": {}, "plugin-command-receipts": {}, "plugin-instance-state": {}, "plugin-instances": {},
 		"plugin-marketplace": {}, "plugin-settings": {}, "plugin-state": {},
 		"plugin-user-state": {}, "prompts": {}, "quick-terminal": {}, "runtime-flags": {},
-		"schema-meta": {}, "secrets": {}, "sentry": {}, "storage": {}, "system-settings": {},
+		"ssh-connections": {}, "schema-meta": {}, "secrets": {}, "sentry": {}, "storage": {}, "system-settings": {},
 		"task": {}, "task-share": {}, "telemetry-contract": {}, "terminal": {},
 		"user": {}, "utility": {}, "workflow": {}, "workflow-sync": {}, "prompt-sync": {},
 	}

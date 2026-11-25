@@ -1,120 +1,39 @@
-import { test, expect } from "../../fixtures/ssh-test-base";
-import { buildE2ESSHImage } from "../../fixtures/ssh-image";
-import { startBastionAndTarget, stopBastionAndTarget } from "../../helpers/ssh-bastion";
 import path from "node:path";
+import { test, expect } from "../../fixtures/ssh-test-base";
+import { startBastionAndTarget, stopBastionAndTarget } from "../../helpers/ssh-bastion";
+import {
+  createSSHRoute,
+  createTestedSSHRoute,
+  observeSSHRoute,
+} from "../../helpers/ssh-managed-fixture";
 
-/**
- * ProxyJump end-to-end: two-container topology where target is only
- * reachable from inside the bastion's Docker network. A successful test
- * against `target` MUST have traversed the bastion. Chained ProxyJump
- * (a -> b -> target) is out of v1 scope; we assert it fails clearly.
- *
- * Covers e2e-plan.md group N (N1–N3). Bastion topology is set up per-test
- * because it's heavier than the default fixture's single-sshd model.
- */
-test.describe("ssh executor — ProxyJump", () => {
-  test.describe.configure({ timeout: 900_000 });
+test("a tested shared bastion reaches the target and cannot itself have a bastion", async ({
+  backend,
+}, testInfo) => {
+  test.setTimeout(240_000);
+  const handles = startBastionAndTarget(
+    testInfo.workerIndex,
+    path.join(backend.tmpDir, "ssh-bastion-shared"),
+  );
+  try {
+    const entry = await createTestedSSHRoute(backend.baseUrl, "Entry bastion", handles.bastion);
+    const direct = await createSSHRoute(backend.baseUrl, "No route from host", handles.target);
+    await expect(observeSSHRoute(backend.baseUrl, direct)).rejects.toThrow();
 
-  test.beforeAll(() => {
-    buildE2ESSHImage();
-  });
-
-  test("direct connect (no ProxyJump) succeeds against the bastion's own port", async ({
-    apiClient,
-    backend,
-  }, testInfo) => {
-    test.setTimeout(180_000);
-    const bastion = startBastionAndTarget(
-      testInfo.workerIndex,
-      path.join(backend.tmpDir, "ssh-bastion-direct"),
+    const target = await createTestedSSHRoute(
+      backend.baseUrl,
+      "Private target",
+      handles.target,
+      entry.destination.id,
     );
-    try {
-      const result = await apiClient.testSSHConnection({
-        name: "N0 direct",
-        host: bastion.bastion.host,
-        port: bastion.bastion.port,
-        user: bastion.bastion.user,
-        identity_source: "file",
-        identity_file: bastion.bastion.identityFile,
-      });
-      expect(result.success).toBe(true);
-    } finally {
-      stopBastionAndTarget(bastion);
-    }
-  });
-
-  test("ProxyJump through bastion reaches the otherwise-unreachable target", async ({
-    apiClient,
-    backend,
-  }, testInfo) => {
-    test.setTimeout(240_000);
-    const handles = startBastionAndTarget(
-      testInfo.workerIndex,
-      path.join(backend.tmpDir, "ssh-bastion-jump"),
-    );
-    try {
-      // Without ProxyJump, target should be unreachable from the host.
-      const direct = await apiClient.testSSHConnection({
-        name: "N1 direct (should fail)",
-        host: handles.targetInternalHost,
-        port: 22,
-        user: handles.target.user,
-        identity_source: "file",
-        identity_file: handles.target.identityFile,
-      });
-      expect(direct.success).toBe(false);
-
-      // With ProxyJump set to the bastion, target should be reachable.
-      // Note: the SSH executor parses ProxyJump as a host:port string. The
-      // bastion is reachable from the host on 127.0.0.1:<bastionPort>.
-      const viaJump = await apiClient.testSSHConnection({
-        name: "N1 via jump",
-        host: handles.targetInternalHost,
-        port: 22,
-        user: handles.target.user,
-        identity_source: "file",
-        identity_file: handles.target.identityFile,
-        proxy_jump: `${handles.bastion.user}@${handles.bastion.host}:${handles.bastion.port}`,
-      });
-      expect(viaJump.success).toBe(true);
-      // Pre-discovery (ssh-keyscan, ed25519-only) doesn't always agree with
-      // the host-key type the Go ssh client negotiates, so assert that a
-      // fingerprint came back, not which exact one. The negative direct
-      // probe above already proves the target is only reachable via the
-      // bastion.
-      expect(viaJump.fingerprint).toMatch(/^SHA256:/);
-    } finally {
-      stopBastionAndTarget(handles);
-    }
-  });
-
-  test("chained ProxyJump (a -> b -> target) fails with a clear error", async ({
-    apiClient,
-    backend,
-  }, testInfo) => {
-    test.setTimeout(180_000);
-    const handles = startBastionAndTarget(
-      testInfo.workerIndex,
-      path.join(backend.tmpDir, "ssh-bastion-chained"),
-    );
-    try {
-      // Comma-separated chained ProxyJump is intentionally unsupported in
-      // v1. The first hop will accept, the second hop should fail because
-      // ResolveSSHTarget treats the value as a single bastion identifier.
-      const result = await apiClient.testSSHConnection({
-        name: "N3 chained",
-        host: handles.targetInternalHost,
-        port: 22,
-        user: handles.target.user,
-        identity_source: "file",
-        identity_file: handles.target.identityFile,
-        proxy_jump: `${handles.bastion.user}@${handles.bastion.host}:${handles.bastion.port},another-hop`,
-      });
-      expect(result.success).toBe(false);
-      const handshake = result.steps.find((s) => s.name === "SSH handshake");
-      expect(handshake?.error).toMatch(/bastion|resolve|connect|chain/i);
-    } finally {
-      stopBastionAndTarget(handles);
-    }
-  });
+    expect(target.destination.verified_route).toBe(target.stamp);
+    expect(target.bastion?.fingerprint).toBe(entry.destination.fingerprint);
+    await expect(
+      createSSHRoute(backend.baseUrl, "Invalid chain", handles.target, {
+        bastionId: target.destination.id,
+      }),
+    ).rejects.toThrow("ssh_invalid_route");
+  } finally {
+    stopBastionAndTarget(handles);
+  }
 });

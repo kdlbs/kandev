@@ -551,7 +551,9 @@
       ],
       "settingsRoutes": [
         "/settings/executor/new",
-        "/settings/executors"
+        "/settings/executors",
+        "/settings/ssh-connections",
+        "/settings/executors/ssh-connections"
       ],
       "mcpTools": [
         "create_executor_profile_kandev",

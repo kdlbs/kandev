@@ -72,7 +72,7 @@ export type SettingsMenuItem = {
    * the page that owns them.
    */
   activePrefixes?: string[];
-  requires?: "account" | "users" | "organizations";
+  requires?: "account" | "users" | "organizations" | "sshConnections";
   /** Rows whose page owns a list show its size as a trailing badge. */
   countKey?: MenuCountKey;
 };

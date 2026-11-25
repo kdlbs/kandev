@@ -9,6 +9,7 @@ export const defaultFeatureFlags = {
   // New release toggles start disabled in every frontend state. The SSR layer
   // overwrites this with the backend's effective values after startup.
   lspBrowserContinuity: false,
+  sshConnectionManager: false,
   office: false,
   integratedControl: false,
   workspaceCollaboration: false,

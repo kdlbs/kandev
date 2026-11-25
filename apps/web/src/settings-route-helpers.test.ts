@@ -26,3 +26,12 @@ describe("resolveSettingsRedirect", () => {
     );
   });
 });
+
+it("preserves SSH bookmark context and fragment on relocation", () => {
+  const query =
+    "?tab=identities&id=key%2Fa&new=1&adopt_executor=e&adopt_digest=d&adopt_connection=c&return_connection=b#key";
+  window.history.replaceState({}, "", `/settings/ssh-connections${query}`);
+  expect(resolveSettingsRedirect("/settings/executors/ssh-connections")).toBe(
+    `/settings/executors/ssh-connections${query}`,
+  );
+});

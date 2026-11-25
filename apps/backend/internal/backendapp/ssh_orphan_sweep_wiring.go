@@ -39,8 +39,9 @@ func startSSHOrphanSweepScheduler(
 	log *logger.Logger,
 	addCleanup func(func() error) func() error,
 	acquireTaskFence func(taskID string) func(),
+	managed agentruntime.ManagedSSHExecutorConnection,
 ) *agentruntime.OrphanSweepScheduler {
-	scheduler := agentruntime.StartOrphanSweepScheduler(ctx, repo, repo, 0, log, eventBus, acquireTaskFence)
+	scheduler := agentruntime.StartOrphanSweepScheduler(ctx, repo, repo, 0, log, eventBus, acquireTaskFence, managed)
 	addCleanup(func() error { scheduler.Stop(); return nil })
 	return scheduler
 }

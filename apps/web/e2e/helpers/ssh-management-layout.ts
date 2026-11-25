@@ -1,0 +1,252 @@
+import { randomUUID } from "node:crypto";
+import { expect, test, type Page } from "@playwright/test";
+import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
+
+export async function seedSSHLayout(baseUrl: string, name = "Layout connection") {
+  const post = async (path: string, body: unknown) => {
+    const response = await fetch(`${baseUrl}/api/v1/ssh/managed${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(response.ok).toBe(true);
+    return response.json();
+  };
+  const identity = await post("/identities", {
+    request_id: randomUUID(),
+    kind: "generate",
+    label: "Layout identity",
+  });
+  const route = await post("/connections", {
+    request_id: randomUUID(),
+    expected_version: 0,
+    connection: {
+      name,
+      host: "layout.invalid",
+      port: 22,
+      user: "deploy",
+      identity_id: identity.id,
+    },
+  });
+  return { identity, route };
+}
+
+// @covers AC-EXECUTORS-SSH-CONNECTIONS-004.8, 004.9, 004.12
+export async function exerciseSSHLayout(page: Page, baseUrl: string, mobile: boolean) {
+  const { route } = await seedSSHLayout(baseUrl);
+  await page.goto(`/settings/executors/ssh-connections?tab=connections&id=${route.destination.id}`);
+  await page.getByRole("heading", { name: "Layout connection", exact: true }).waitFor();
+  // Saved details must begin as a readable overview, not an edit form.
+  await expect(page.getByLabel("Host", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Layout connection", exact: true })).toBeVisible();
+  await expect(page.getByText("deploy@layout.invalid:22", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("SSH password", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Delete connection", exact: true })).toBeVisible();
+  const edit = page.getByRole("button", { name: "Edit", exact: true });
+  const box = await edit.boundingBox();
+  expect(box).not.toBeNull();
+  if (mobile) expect(box!.height).toBeGreaterThanOrEqual(44);
+  else expect(Math.abs(box!.height - 28)).toBeLessThanOrEqual(1);
+  await assertSSHOverviewColumns(page);
+  await page.screenshot({ path: test.info().outputPath("ssh-overview.png"), fullPage: true });
+  await edit.click();
+  await expect(page.getByLabel("Host", { exact: true })).toHaveValue("layout.invalid");
+  await page.getByLabel("Name", { exact: true }).fill("Renamed layout connection");
+  const saved = page.waitForResponse(
+    (r) =>
+      r.url().includes(`/connections/${route.destination.id}`) && r.request().method() === "PATCH",
+  );
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  expect((await saved).ok()).toBe(true);
+  await expect(page.getByRole("tab", { name: "Access", exact: true })).toHaveAttribute(
+    "data-state",
+    "active",
+  );
+  await page.getByRole("tab", { name: "Overview", exact: true }).click();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Renamed layout connection", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Back to connections", exact: true }).click();
+  const row = page.locator(`a[id="ssh-row-${route.destination.id}"]`);
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("deploy@layout.invalid:22");
+  await expect(row).toBeFocused();
+  const collection = await page.getByRole("tabpanel").locator(":scope > *").boundingBox();
+  expect(collection).not.toBeNull();
+  if (await page.evaluate(() => navigator.maxTouchPoints > 0)) await row.tap();
+  else await row.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "Renamed layout connection", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Diagnostics", exact: true })).toHaveCount(0);
+  for (const name of ["Overview", "Access"]) {
+    await page.getByRole("tab", { name, exact: true }).click();
+    const panel = page.getByRole("tabpanel", { name, exact: true });
+    const content = await panel.locator(":scope > *").boundingBox();
+    expect(content).not.toBeNull();
+    expect(Math.abs(content!.x - collection!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(content!.width - collection!.width)).toBeLessThanOrEqual(1);
+    await assertNoDocumentHorizontalOverflow(page);
+  }
+}
+
+// @covers AC-EXECUTORS-SSH-CONNECTIONS-004.20
+async function assertSSHOverviewColumns(page: Page) {
+  const overview = page.getByTestId("ssh-connection-overview");
+  const endpoint = await overview
+    .getByRole("heading", { name: "Connection details" })
+    .boundingBox();
+  const identity = await overview
+    .getByRole("heading", { name: "Identity and route" })
+    .boundingBox();
+  const body = await overview.boundingBox();
+  const remove = await page
+    .getByRole("button", { name: "Delete connection", exact: true })
+    .boundingBox();
+  expect(endpoint).not.toBeNull();
+  expect(identity).not.toBeNull();
+  expect(body).not.toBeNull();
+  expect(remove).not.toBeNull();
+  if (body!.width >= 864) {
+    expect(Math.abs(endpoint!.y - identity!.y)).toBeLessThanOrEqual(1);
+    expect(identity!.x).toBeGreaterThan(endpoint!.x);
+  } else {
+    expect(identity!.y).toBeGreaterThan(endpoint!.y);
+    expect(Math.abs(endpoint!.x - identity!.x)).toBeLessThanOrEqual(1);
+  }
+  if (!page.viewportSize() || page.viewportSize()!.width >= 768) {
+    expect(Math.abs(remove!.x + remove!.width - body!.x - body!.width)).toBeLessThanOrEqual(1);
+  }
+}
+
+export async function exerciseSSHOverviewBreakpoint(page: Page, baseUrl: string) {
+  const name = "LongConnectionName".repeat(6);
+  const { route } = await seedSSHLayout(baseUrl, name);
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await page.goto(`/settings/executors/ssh-connections?id=${route.destination.id}`);
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+  const overview = page.getByTestId("ssh-connection-overview");
+  const sidebar = page.getByTestId("app-sidebar");
+  for (const control of ["Collapse sidebar", "Expand sidebar"]) {
+    await expect(sidebar.getByRole("button", { name: control, exact: true })).toBeVisible();
+    const reference = (await overview.boundingBox())!;
+    const inset = page.viewportSize()!.width - reference.width;
+    for (const width of [863, 864]) {
+      await page.setViewportSize({ width: width + Math.round(inset), height: 900 });
+      await expect(overview).toHaveCSS("width", `${width}px`);
+      await assertSSHOverviewColumns(page);
+      await assertNoDocumentHorizontalOverflow(page);
+    }
+    await sidebar.getByRole("button", { name: control, exact: true }).click();
+    await page.setViewportSize({ width: 1100, height: 900 });
+  }
+  // A 1920 × 900 desktop at 200% zoom exposes a 960 × 450 CSS pixel viewport.
+  await page.setViewportSize({ width: 960, height: 450 });
+  await assertSSHOverviewColumns(page);
+  await assertNoDocumentHorizontalOverflow(page);
+  const scroller = page.getByTestId("settings-scroll-container");
+  await expect(scroller).toHaveCSS("overflow-y", "auto");
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollHeight > element.clientHeight))
+    .toBe(true);
+  await page.getByRole("button", { name: "Set up access", exact: true }).scrollIntoViewIfNeeded();
+  await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+}
+
+export async function exerciseSSHCollection(page: Page, baseUrl: string) {
+  const { route } = await seedSSHLayout(baseUrl);
+  const response = await fetch(`${baseUrl}/api/v1/ssh/managed/connections`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      request_id: randomUUID(),
+      expected_version: 0,
+      connection: { ...route.destination, id: undefined, version: 0, revision: 0 },
+    }),
+  });
+  expect(response.ok).toBe(true);
+  const duplicate = await response.json();
+  await page.goto("/settings/executors/ssh-connections");
+  const rows = page.getByRole("link").filter({ hasText: "Layout connection" });
+  await expect(rows.filter({ hasText: route.destination.id })).toHaveCount(1);
+  await expect(rows.filter({ hasText: duplicate.destination.id })).toHaveCount(1);
+  await assertSSHCollectionToolbar(page);
+
+  await expect(rows.filter({ hasText: route.destination.id })).toContainText(
+    "deploy@layout.invalid:22",
+  );
+  await page.evaluate(() => localStorage.setItem("theme", "dark"));
+  await page.reload();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await assertNoDocumentHorizontalOverflow(page);
+  await page.evaluate(() => localStorage.setItem("theme", "light"));
+  await page.reload();
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await assertNoDocumentHorizontalOverflow(page);
+  await page.evaluate(() => {
+    document.cookie = "kandev_locale=pseudo; path=/; max-age=31536000; SameSite=Lax";
+  });
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("lang", "pseudo");
+  await expect(rows.filter({ hasText: route.destination.id })).toHaveCount(1);
+  await assertNoDocumentHorizontalOverflow(page);
+}
+
+export async function exerciseSSHIdentityRemoval(page: Page, baseUrl: string, touch: boolean) {
+  const name = `Unused identity ${randomUUID()}`;
+  const response = await fetch(`${baseUrl}/api/v1/ssh/managed/identities`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ request_id: randomUUID(), kind: "generate", label: name }),
+  });
+  expect(response.ok).toBe(true);
+  const identity = await response.json();
+  await page.goto(`/settings/executors/ssh-connections?tab=identities&id=${identity.id}`);
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+  const remove = page.getByRole("button", { name: "Delete identity", exact: true });
+  const activate = (locator: import("@playwright/test").Locator) =>
+    touch ? locator.tap() : locator.click();
+  await activate(remove);
+  const confirmation = page.getByRole("dialog", { name: "Delete identity", exact: true });
+  await expect(confirmation).toBeVisible();
+  await activate(confirmation.getByRole("button", { name: "Cancel", exact: true }));
+  await expect(remove).toBeFocused();
+  await activate(remove);
+  const deleted = page.waitForResponse(
+    (r) =>
+      new URL(r.url()).pathname.endsWith(`/identities/${identity.id}`) &&
+      r.request().method() === "DELETE",
+  );
+  await activate(confirmation.getByRole("button", { name: "Delete identity", exact: true }));
+  expect((await deleted).ok()).toBe(true);
+  await expect(page).not.toHaveURL(/id=/);
+  await expect(page.getByRole("button", { name: "New identity", exact: true })).toBeFocused();
+  await expect(page.getByRole("link").filter({ hasText: name })).toHaveCount(0);
+}
+
+// @covers AC-EXECUTORS-SSH-CONNECTIONS-004.13
+export async function assertSSHCollectionToolbar(page: Page) {
+  const title = await page
+    .getByRole("heading", { name: "SSH connections", exact: true })
+    .boundingBox();
+  const tabs = await page.getByRole("tablist").boundingBox();
+  const create = await page.locator("#ssh-create-resource").boundingBox();
+  expect(title).not.toBeNull();
+  expect(tabs).not.toBeNull();
+  expect(create).not.toBeNull();
+  expect(tabs!.y).toBeGreaterThan(title!.y + title!.height);
+  expect(Math.abs(tabs!.x - title!.x)).toBeLessThanOrEqual(1);
+  if ((page.viewportSize()?.width ?? 1280) < 768) {
+    expect(create!.y).toBeGreaterThanOrEqual(tabs!.y + tabs!.height);
+    expect(Math.abs(create!.x - title!.x)).toBeLessThanOrEqual(1);
+    const toolbar = await page.locator("#ssh-create-resource").locator("..").boundingBox();
+    expect(Math.abs(create!.width - toolbar!.width)).toBeLessThanOrEqual(1);
+  } else {
+    expect(
+      Math.abs(create!.y + create!.height / 2 - (tabs!.y + tabs!.height / 2)),
+    ).toBeLessThanOrEqual(1);
+    expect(create!.x - (tabs!.x + tabs!.width)).toBeGreaterThanOrEqual(8);
+    expect(create!.x - (tabs!.x + tabs!.width)).toBeLessThanOrEqual(24);
+  }
+}

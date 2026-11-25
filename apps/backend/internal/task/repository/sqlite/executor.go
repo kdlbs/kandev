@@ -33,11 +33,19 @@ func (r *Repository) CreateExecutor(ctx context.Context, executor *models.Execut
 		return fmt.Errorf("failed to serialize executor config: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.beginExecutorWrite(ctx, executor.ID, string(executor.Type), executor.Config)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at, owner_user_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))
 	`), executor.ID, executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt, executor.OwnerUserID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
@@ -78,7 +86,7 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 		return fmt.Errorf("failed to serialize executor config: %w", err)
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.beginExecutorWrite(ctx, executor.ID, string(executor.Type), executor.Config)
 	if err != nil {
 		return err
 	}
@@ -112,7 +120,7 @@ func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
 
 func (r *Repository) deleteExecutor(ctx context.Context, id string, expectedOwner *string) error {
 	now := time.Now().UTC()
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.beginExecutorWrite(ctx, id, "", nil)
 	if err != nil {
 		return fmt.Errorf("begin executor delete: %w", err)
 	}
@@ -598,6 +606,9 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.releaseRuntimeReferenceIn(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
@@ -935,6 +946,9 @@ func (r *Repository) DeleteExecutorRunningIfCurrent(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.releaseRuntimeReferenceIn(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
 		return err
 	}

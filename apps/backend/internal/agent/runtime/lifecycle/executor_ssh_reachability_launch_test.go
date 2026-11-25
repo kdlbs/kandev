@@ -21,16 +21,18 @@ func TestSSHExecutorCreateInstanceDialErrorNamesHostAndReason(t *testing.T) {
 	exec := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
 	t.Cleanup(func() { _ = exec.Close() })
 
+	metadata := map[string]interface{}{
+		MetadataKeySSHHost:            "127.0.0.1",
+		MetadataKeySSHPort:            strconv.Itoa(server.port()),
+		MetadataKeySSHUser:            "kandev",
+		MetadataKeySSHHostFingerprint: "SHA256:not-the-server-key",
+		MetadataKeySSHIdentitySource:  string(SSHIdentitySourceFile),
+		MetadataKeySSHIdentityFile:    identity,
+	}
+	wireSavedSSHLaunch(exec, metadata)
 	_, err := exec.CreateInstance(context.Background(), &ExecutorCreateRequest{
 		InstanceID: "instance-1",
-		Metadata: map[string]interface{}{
-			MetadataKeySSHHost:            "127.0.0.1",
-			MetadataKeySSHPort:            strconv.Itoa(server.port()),
-			MetadataKeySSHUser:            "kandev",
-			MetadataKeySSHHostFingerprint: "SHA256:not-the-server-key",
-			MetadataKeySSHIdentitySource:  string(SSHIdentitySourceFile),
-			MetadataKeySSHIdentityFile:    identity,
-		},
+		Metadata:   metadata,
 	})
 
 	if err == nil {

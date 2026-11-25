@@ -4,78 +4,49 @@ import fs from "node:fs";
 import path from "node:path";
 import { execInContainer } from "../../helpers/ssh";
 
-/**
- * The SSH executor commits to surfacing connection errors verbatim — no
- * generic "executor failed" wrapping. Spec lists this as a hard
- * requirement; the suite asserts the strings users see.
- *
- * Covers e2e-plan.md group Q (Q1–Q5).
- */
-test.describe("ssh error surfacing", () => {
-  test("TCP refused — error mentions 'connection refused'", async ({ apiClient, seedData }) => {
-    const result = await apiClient.testSSHConnection({
-      name: "Q1",
-      host: "127.0.0.1",
+import {
+  createSSHRoute,
+  observeSSHRoute,
+  trustAndTestSSHRoute,
+  readSSHRoute,
+} from "../../helpers/ssh-managed-fixture";
+
+test.describe("SSH connection errors", () => {
+  test("unreachable destination reports a connection failure", async ({ backend, seedData }) => {
+    const route = await createSSHRoute(backend.baseUrl, "Unreachable", {
+      ...seedData.sshTarget,
       port: 1,
-      user: "kandev",
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
     });
-    expect(result.success).toBe(false);
-    const handshake = result.steps.find((s) => s.name === "SSH handshake");
-    expect(handshake?.error).toMatch(/connection refused|tcp dial/i);
+    await expect(observeSSHRoute(backend.baseUrl, route)).rejects.toThrow(/ssh_connection_failed/);
   });
 
-  test("auth failed — error names the failure mode", async ({ apiClient, seedData }) => {
-    const strangerKey = path.join(seedData.sshTarget.workDir, "q2-stranger");
-    fs.rmSync(strangerKey, { force: true });
-    fs.rmSync(`${strangerKey}.pub`, { force: true });
-    execFileSync("ssh-keygen", ["-t", "ed25519", "-f", strangerKey, "-N", "", "-q"]);
-
-    const result = await apiClient.testSSHConnection({
-      name: "Q2 auth fail",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identity_source: "file",
-      identity_file: strangerKey,
-    });
-    expect(result.success).toBe(false);
-    const handshake = result.steps.find((s) => s.name === "SSH handshake");
-    expect(handshake?.error).toMatch(
-      /handshake|unable to authenticate|permission denied|no supported methods/i,
+  test("the destination identifies a rejected key", async ({ backend, seedData }) => {
+    const key = path.join(fs.mkdtempSync(path.join(backend.tmpDir, "unknown-key-")), "identity");
+    execFileSync("ssh-keygen", ["-t", "ed25519", "-f", key, "-N", "", "-q"]);
+    const route = await createSSHRoute(
+      backend.baseUrl,
+      "Unrecognized identity",
+      seedData.sshTarget,
+      {
+        identity: { kind: "file", reference: key },
+      },
+    );
+    await expect(trustAndTestSSHRoute(backend.baseUrl, route)).rejects.toThrow(
+      /ssh_authentication_rejected/,
     );
   });
 
-  test("ProxyJump unreachable — error mentions the bastion", async ({ apiClient, seedData }) => {
-    const result = await apiClient.testSSHConnection({
-      name: "Q4 bastion unreachable",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
-      proxy_jump: "127.0.0.1:1",
-    });
-    expect(result.success).toBe(false);
-    const handshake = result.steps.find((s) => s.name === "SSH handshake");
-    expect(handshake?.error).toMatch(/bastion|proxy|connection refused/i);
-  });
-
-  test("supported platform check surfaces normalized platform output", async ({
+  test("executor test reports the supported remote platform", async ({
+    backend,
     apiClient,
     seedData,
   }) => {
-    // We can't trivially spin up every OS/arch SSH target in CI, but we can
-    // assert the successful platform step shape on the running Linux container.
-    // Unsupported platform guidance is unit-tested in executor_ssh_connection_test.go.
+    const executor = await apiClient.getExecutor(seedData.sshExecutorId);
+    const route = await readSSHRoute(backend.baseUrl, executor.config!.ssh_connection_id);
     const result = await apiClient.testSSHConnection({
-      name: "Q-platform-control",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
+      name: "Platform control",
+      ssh_connection_id: route.destination.id,
+      expected_stamp: route.stamp,
     });
     expect(result.success).toBe(true);
     const platform = result.steps.find((s) => s.name === "Verify platform");
@@ -145,9 +116,7 @@ test.describe("ssh error surfacing", () => {
     }
   });
 
-  test("backend 5xx on /api/v1/ssh/test is not the same as 'test failed'", async ({
-    apiClient,
-  }) => {
+  test("malformed executor test request returns a client error", async ({ apiClient }) => {
     // POST with a body that triggers a 400 from the gin route. Asserts the
     // client surfaces the HTTP error verbatim rather than synthesising a
     // SSHTestResult-shaped success=false.

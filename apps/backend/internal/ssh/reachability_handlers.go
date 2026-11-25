@@ -11,15 +11,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
+	"github.com/kandev/kandev/internal/sshconnections"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 // reachabilityConfigValidator is the production seam over the runtime's SSH
-// reachability prober, used only to check whether an executor's config
-// resolves to a dialable target — no probe is actually run here.
-var reachabilityConfigValidator = agentruntime.NewSSHReachabilityProber()
 
 // ReachabilityLister is the narrow repository slice the reachability GET
 // routes need: every stored record in one query (the list route) or a
@@ -179,7 +176,7 @@ func (h *Handler) probeReachability(ctx context.Context, executorID string) (*re
 // loadSSHExecutor enforces the 404/400 split the reachability routes need:
 // 404 for a nonexistent or soft-deleted id, 400 only when the executor
 // exists but isn't type ssh. Deliberately does not attempt config
-// resolution (unlike resolveSSHTarget) — an unresolvable ssh config is a 200
+// resolution — an unresolvable ssh config is a 200
 // with reason config, decided by the caller, never a 400 here.
 func (h *Handler) loadSSHExecutor(ctx context.Context, executorID string) (*models.Executor, int, error) {
 	executor, err := h.executorFetcher.GetExecutor(ctx, executorID)
@@ -189,7 +186,7 @@ func (h *Handler) loadSSHExecutor(ctx context.Context, executorID string) (*mode
 		}
 		return nil, http.StatusInternalServerError, fmt.Errorf("look up executor %q: %w", executorID, err)
 	}
-	if executor.Type != models.ExecutorTypeSSH {
+	if executor == nil || executor.Type != models.ExecutorTypeSSH {
 		return nil, http.StatusBadRequest, fmt.Errorf("executor %q is not an SSH executor", executorID)
 	}
 	return executor, http.StatusOK, nil
@@ -222,13 +219,12 @@ func buildReachabilityDTOFromRecord(executor *models.Executor, record *models.Ex
 	if record != nil {
 		return reachabilitypkg.BuildRecordDTO(executor.ID, record, intervalSeconds, true)
 	}
-	if err := reachabilityConfigValidator.ValidateConfig(executor.Config); err != nil {
+	if executor.Config[sshconnections.ConnectionConfigKey] == "" {
 		synthetic := &models.ExecutorReachability{
 			ExecutorID: executor.ID,
 			State:      models.ExecutorReachabilityStateUnreachable,
 			Reason:     models.ExecutorReachabilityReasonConfig,
-			Message:    agentruntime.SanitizeSSHReachabilityMessage(err),
-			Host:       executor.Config["ssh_host"],
+			Message:    sshconnections.ErrInvalidRoute.Error(),
 		}
 		return reachabilitypkg.BuildRecordDTO(executor.ID, synthetic, intervalSeconds, false)
 	}

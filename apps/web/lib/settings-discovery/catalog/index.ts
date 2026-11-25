@@ -37,6 +37,7 @@ const TO_WORKSPACE_INTEGRATIONS = "Redirects into the active workspace's Integra
 export const SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS: Record<string, string> = {
   "/settings": "Owned by the top-level Go to Settings destination.",
   "/settings/preferences": TO_APPEARANCE,
+  "/settings/ssh-connections": "Redirects to SSH connections under Executors.",
   "/settings/general": "Legacy prefix; redirects to Preferences pages.",
   "/settings/general/appearance": TO_APPEARANCE,
   "/settings/general/changes-panel": TO_APPEARANCE,

@@ -67,6 +67,14 @@ function hrefs(pathname: string): Array<string | undefined> {
 }
 
 describe("settings breadcrumb chain", () => {
+  it("localizes the managed SSH page title", () => {
+    expect(chain("/settings/executors/ssh-connections")).toEqual([
+      SETTINGS,
+      EXECUTORS,
+      "settings:sshManager.title",
+    ]);
+  });
+
   it("gives the settings index no parents", () => {
     const crumbs = resolveSettingsBreadcrumbs(SETTINGS_HREF, t, values());
     expect(crumbs.parents).toEqual([]);

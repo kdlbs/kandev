@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 
+const ACTIVE_ATTR = "data-active";
 const MAIN_WORKSPACE_ID = "ws-1";
 const MAIN_WORKSPACE_NAME = "Main Workspace";
 // The active workspace carries a badge, so its row's accessible name is the
@@ -196,8 +197,8 @@ describe("SettingsTree static menu", () => {
   it("marks the owning page row active for detail routes", () => {
     render(<SettingsTree pathname="/settings/agents/claude-code/profiles/profile-1" />);
 
-    expect(screen.getByRole("link", { name: /^Agents/ }).getAttribute("data-active")).toBe("true");
-    expect(screen.getByRole("link", { name: /^Executors/ }).getAttribute("data-active")).toBeNull();
+    expect(screen.getByRole("link", { name: /^Agents/ }).getAttribute(ACTIVE_ATTR)).toBe("true");
+    expect(screen.getByRole("link", { name: /^Executors/ }).getAttribute(ACTIVE_ATTR)).toBeNull();
   });
 
   it("hides auth-gated rows and the Access Control section when auth is disabled", () => {
@@ -241,7 +242,7 @@ describe("SettingsTree static menu", () => {
     render(<SettingsTree pathname="/settings/preferences/task-behavior" />);
 
     expect(screen.queryByRole("link", { name: NESTED_SECTION_LABEL })).toBeNull();
-    expect(screen.getByRole("link", { name: "Task Behavior" }).getAttribute("data-active")).toBe(
+    expect(screen.getByRole("link", { name: "Task Behavior" }).getAttribute(ACTIVE_ATTR)).toBe(
       "true",
     );
   });
@@ -608,4 +609,23 @@ describe("SettingsTree search", () => {
     expect(screen.getByText("No matching settings")).toBeTruthy();
     expect(screen.queryByRole("link", { name: NESTED_SECTION_LABEL })).toBeNull();
   });
+});
+
+it("renders SSH as the active Executors leaf without adding to the profile count", () => {
+  featuresOn.add("sshConnectionManager");
+  state.auth.mode = "disabled";
+  state.auth.user = null;
+  setMenuMode("accordion");
+  try {
+    render(<SettingsTree pathname="/settings/executors/ssh-connections" />);
+    const ssh = screen.getByRole("link", { name: "SSH connections" });
+    expect(ssh.getAttribute("href")).toBe("/settings/executors/ssh-connections");
+    expect(ssh.getAttribute(ACTIVE_ATTR)).toBe("true");
+    expect(screen.getByRole("link", { name: "Executors 1" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Expand SSH connections" })).toBeNull();
+  } finally {
+    featuresOn.clear();
+    setMenuMode("flat");
+    cleanup();
+  }
 });

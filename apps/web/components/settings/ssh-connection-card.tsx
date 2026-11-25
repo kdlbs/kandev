@@ -17,7 +17,6 @@ import {
   IconTestPipe,
   IconX,
 } from "@tabler/icons-react";
-import { testSSHConnection } from "@/lib/api/domains/ssh-api";
 import { FingerprintTrustBlock } from "@/components/settings/ssh-fingerprint-trust-block";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsCardHeader } from "@/components/settings/settings-card-header";
@@ -29,7 +28,7 @@ import {
 } from "@/components/settings/settings-save-provider";
 import type {
   SSHIdentitySource,
-  SSHTestRequest,
+  RemoteDockerSSHTestRequest,
   SSHTestResult,
   SSHTestStep,
 } from "@/lib/types/http-ssh";
@@ -38,6 +37,8 @@ import type {
 // The host_fingerprint is set only after a successful Test Connection has
 // completed and the user has ticked "Trust this host".
 export interface SSHExecutorConfig {
+  connection_id?: string;
+  connection_stamp?: string;
   name: string;
   host_alias?: string;
   host?: string;
@@ -60,11 +61,7 @@ export interface SSHConnectionCardProps {
   // Existing running sessions for this executor. Triggers the
   // "this won't affect existing sessions" warning on save.
   runningSessionCount?: number;
-  // Endpoint that runs the connection test. Defaults to the SSH executor's
-  // test. The remote Docker executor passes its own, which adds the daemon
-  // and API-version steps on top of the same SSH connection, so both share
-  // this card's test-then-trust flow rather than forking it.
-  testConnection?: (request: SSHTestRequest) => Promise<SSHTestResult>;
+  testConnection: (request: RemoteDockerSSHTestRequest) => Promise<SSHTestResult>;
 }
 
 interface SSHConnectionState {
@@ -204,7 +201,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
       error: null,
     }));
     try {
-      const req: SSHTestRequest = {
+      const req: RemoteDockerSSHTestRequest = {
         name: form.name,
         host_alias: form.host_alias || undefined,
         host: form.host || undefined,
@@ -214,7 +211,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
         identity_file: form.identity_file || undefined,
         proxy_jump: form.proxy_jump || undefined,
       };
-      const res = await (props.testConnection ?? testSSHConnection)(req);
+      const res = await props.testConnection(req);
       setState((prev) => ({
         ...prev,
         result: res,

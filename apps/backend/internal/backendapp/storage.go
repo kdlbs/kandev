@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/sshconnections"
 
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
@@ -182,6 +183,14 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 	}
 	cleanups = append(cleanups, cleanup)
 
+	sshConnectionStore, err := sshconnections.NewStore(writer)
+	if err == nil {
+		err = sshConnectionStore.MigrateLegacyExecutors(ctx)
+	}
+	if err := recordRequiredStore(ctx, tracker, "ssh-connections", err); err != nil {
+		return nil, nil, nil, fmt.Errorf("SSH connection store: %w", err)
+	}
+	sshConnectionStore.ActivateMigrationMetrics()
 	if err := checkStartupContext(ctx, "system settings and hostname repositories"); err != nil {
 		return nil, nil, nil, err
 	}
@@ -228,6 +237,8 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		Auth:                             authRepo,
 		HostnameCache:                    hostnameCache,
 		SystemSettings:                   systemSettings,
+		SSHConnections:                   sshConnectionStore,
+		SSHIdentityVault:                 secrets.NewSSHIdentityVault(masterKeyProvider),
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, nil, nil, err

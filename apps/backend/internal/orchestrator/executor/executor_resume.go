@@ -2661,6 +2661,13 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 		req.PreviousExecutionID = running.AgentExecutionID
 	}
 
+	if running.Runtime == agentruntime.RuntimeSSH {
+		for key := range req.Metadata {
+			if lifecycle.IsSSHRuntimeRouteMetadataKey(key) {
+				delete(req.Metadata, key)
+			}
+		}
+	}
 	// Carry forward only persistent metadata from the previous run.
 	// Keys not in lifecycle.ShouldPersistMetadataKey() are launch-time-only
 	// and are intentionally NOT carried forward (e.g., task_description).

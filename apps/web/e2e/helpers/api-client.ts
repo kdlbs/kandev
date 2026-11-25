@@ -68,6 +68,7 @@ import type {
   SSHProbeShellsResponse,
   SSHSession,
   SSHTestRequest,
+  RemoteDockerSSHTestRequest,
   SSHTestResult,
 } from "../../lib/types/http-ssh";
 import type {
@@ -4208,13 +4209,7 @@ export class ApiClient {
 
   // --- SSH executor helpers ---
 
-  /**
-   * Create an SSH executor. The `config` map carries the fields the SSH
-   * runtime reads at launch time: ssh_host / ssh_port / ssh_user /
-   * ssh_host_fingerprint / ssh_identity_source / ssh_identity_file /
-   * ssh_proxy_jump. Pre-trusting a fingerprint here lets tests skip the UI
-   * test-then-trust flow.
-   */
+  /** Binds an SSH executor to a tested shared connection. */
   async createSSHExecutor(
     name: string,
     config: Record<string, string>,
@@ -4243,7 +4238,7 @@ export class ApiClient {
   }
 
   /** Remote Docker connection test: SSH reachability plus the daemon steps. */
-  async testRemoteDockerConnection(req: SSHTestRequest): Promise<SSHTestResult> {
+  async testRemoteDockerConnection(req: RemoteDockerSSHTestRequest): Promise<SSHTestResult> {
     return this.request("POST", "/api/v1/remote-docker/test", req);
   }
 

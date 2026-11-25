@@ -127,6 +127,7 @@ var schemaInitializers = map[string]testconformance.Scenario{
 	"office-config-sync":      officeConfigSyncSchema,
 	"automation":              automationSchema,
 	"coordinator":             coordinatorSchema,
+	"ssh-connections":         sshConnectionSchema,
 }
 
 func schemaInitializerFor(descriptor requiredstores.Descriptor) testconformance.Scenario {

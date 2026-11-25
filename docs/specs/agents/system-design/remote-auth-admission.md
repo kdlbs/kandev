@@ -147,7 +147,7 @@ Existing `remote-credentials-card.tsx` state preserves the two independent metho
 No new page, picker, sharing control, or automatic credential selection is required.
 
 Use the existing inline accordion on desktop and phone.
-The closest shipped exemplar is that accordion's multiple-env-method rendering and `mobile-ssh-profile-connection-link.spec.ts` settings navigation.
+The closest shipped exemplar is that accordion's multiple-env-method rendering and `mobile-ssh-connection-migration.spec.ts` settings navigation.
 The profile page remains the only vertical scroll owner. Existing secret pickers retain focus return and dismissal.
 Phone actions need 44px targets and no horizontal overflow. Desktop keeps the current compact controls.
 The plan's UI-01 sketch covers only the added method row.

@@ -14,7 +14,8 @@ import (
 // happens in SSHExecutor.CreateInstance — this preparer just emits a single
 // validation step so the launch UI has consistent progress feedback.
 type SSHPreparer struct {
-	logger *logger.Logger
+	logger          *logger.Logger
+	validateSession func(context.Context, string) error
 }
 
 // NewSSHPreparer creates a new SSHPreparer.
@@ -30,11 +31,16 @@ func (p *SSHPreparer) Name() string { return executorTypeSSH }
 // CreateInstance). This step is intentionally minimal so the UI still sees
 // the preparer running for every launch — preserves a uniform progress shape
 // across executor types.
-func (p *SSHPreparer) Prepare(_ context.Context, req *EnvPrepareRequest, onProgress PrepareProgressCallback) (*EnvPrepareResult, error) {
+func (p *SSHPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onProgress PrepareProgressCallback) (*EnvPrepareResult, error) {
 	p.logger.Debug("preparing ssh environment",
 		zap.String("task", req.TaskID),
 		zap.String("session", req.SessionID))
 
+	if p.validateSession != nil {
+		if err := p.validateSession(ctx, req.SessionID); err != nil {
+			return nil, err
+		}
+	}
 	started := time.Now()
 	step := beginStep("Validate SSH executor configuration")
 	reportProgress(onProgress, step, 0, 1)
@@ -47,4 +53,8 @@ func (p *SSHPreparer) Prepare(_ context.Context, req *EnvPrepareRequest, onProgr
 		Duration:       time.Since(started),
 		WorktreeBranch: nonWorktreeTaskBranch(req),
 	}, nil
+}
+
+func (p *SSHPreparer) SetManagedValidation(validate func(context.Context, string) error) {
+	p.validateSession = validate
 }

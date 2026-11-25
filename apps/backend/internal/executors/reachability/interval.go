@@ -4,13 +4,7 @@
 // docs/specs/executors/system-design/ssh-reachability.md.
 package reachability
 
-import "time"
-
 const (
-	// probeTimeout bounds a single probe's TCP dial and SSH handshake.
-	// sshDialTimeout is 30s; a shorter bound here keeps one hung host from
-	// holding a semaphore slot for half the interval.
-	probeTimeout = 10 * time.Second
 	// passConcurrency bounds simultaneous outbound connections and file
 	// descriptors while keeping a pass short.
 	passConcurrency = 4

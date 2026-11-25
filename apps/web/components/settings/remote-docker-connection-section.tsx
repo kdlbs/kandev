@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
 import { remoteDockerConnectionConfig } from "@/components/settings/remote-docker-connection-config";
-import { parseSSHExecutorConfig } from "@/app/settings/executors/new/[type]/ssh-config";
+import { parseInlineSSHExecutorConfig } from "@/app/settings/executors/new/[type]/ssh-config";
 import { useSaveExecutorConnection } from "@/hooks/domains/settings/use-save-executor-connection";
 import { testRemoteDockerConnection } from "@/lib/api/domains/remote-docker-api";
 import type { Executor } from "@/lib/types/http";
@@ -28,7 +28,7 @@ export function RemoteDockerConnectionSection({
 }) {
   const { t } = useTranslation();
 
-  const initial = parseSSHExecutorConfig(executor.name, executor.config);
+  const initial = parseInlineSSHExecutorConfig(executor.name, executor.config);
   const buildConfig = useCallback(
     (cfg: SSHExecutorConfig) => remoteDockerConnectionConfig(executor.config ?? {}, cfg),
     [executor.config],

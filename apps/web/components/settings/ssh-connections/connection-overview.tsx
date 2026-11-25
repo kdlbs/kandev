@@ -1,0 +1,73 @@
+"use client";
+import { useTranslation } from "react-i18next";
+import { Button } from "@kandev/ui/button";
+import { IconPlayerPlay } from "@tabler/icons-react";
+import type { SSHRoute } from "@/lib/types/http-ssh-connections";
+import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
+import { connectionEndpoint, connectionState } from "./connection-presentation";
+import { OperationFeedback } from "./operation-feedback";
+import { SettingsGroup, SettingsRow } from "../settings-group";
+import { settingsActionClassName } from "../settings-control";
+
+export function ConnectionOverview({
+  route,
+  manager,
+  onAccess,
+}: {
+  route: SSHRoute;
+  manager: SSHManager;
+  onAccess: () => void;
+}) {
+  const { t } = useTranslation();
+  const c = route.destination;
+  const state = connectionState(route, manager.identities);
+  const review = ["incomplete", "unavailable", "untrusted", "attention"].includes(state);
+  const identity = manager.identities.find((item) => item.id === c.identity_id);
+  const value = (text: string) => <span className="text-sm break-all text-right">{text}</span>;
+  return (
+    <div
+      className="grid items-start gap-6 @min-[54rem]/ssh-detail:grid-cols-2"
+      data-testid="ssh-connection-overview"
+    >
+      <SettingsGroup title={t("settings:sshManager.ui.connectionDetails")}>
+        <SettingsRow
+          className="max-md:gap-1"
+          controlWrapperClassName="max-md:min-h-0 [@media(pointer:coarse)]:min-h-0"
+          label={t("settings:sshManager.ui.endpoint")}
+          control={value(connectionEndpoint(c))}
+        />
+      </SettingsGroup>
+      <SettingsGroup title={t("settings:sshManager.ui.identityDetails")}>
+        <SettingsRow
+          className="max-md:gap-1"
+          controlWrapperClassName="max-md:min-h-0 [@media(pointer:coarse)]:min-h-0"
+          label={t("settings:sshManager.identity")}
+          control={value(identity?.label ?? t("settings:sshManager.ui.states.unavailable"))}
+        />
+        <SettingsRow
+          className="max-md:gap-1"
+          controlWrapperClassName="max-md:min-h-0 [@media(pointer:coarse)]:min-h-0"
+          label={t("settings:sshManager.bastion")}
+          control={value(route.bastion?.name ?? t("settings:sshManager.direct"))}
+        />
+      </SettingsGroup>
+      <div className="col-span-full space-y-3">
+        <OperationFeedback manager={manager} route={route} kind="test" />
+        <Button
+          className={settingsActionClassName()}
+          disabled={manager.busy}
+          onClick={() => {
+            if (review) onAccess();
+            else void manager.test(route).catch(() => undefined);
+          }}
+        >
+          <IconPlayerPlay className="size-3.5 mr-1.5" aria-hidden />
+          {t(review ? "settings:sshManager.ui.setupAccess" : "settings:sshManager.test")}
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          {t("settings:sshManager.executorReadiness")}
+        </p>
+      </div>
+    </div>
+  );
+}

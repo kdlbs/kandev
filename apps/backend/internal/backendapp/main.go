@@ -711,6 +711,7 @@ func startAgentInfrastructure(
 		services.Task,
 		repos.Task,
 		startupRecoveryGuard,
+		managedSSHRuntime(services),
 		services.Auth,
 	)
 	if err != nil {
@@ -727,6 +728,7 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Worktree Manager...")
 
+	services.Task.SetSSHTaskDirReclaimer(newSSHTaskDirReclaimerAdapter(log, services.SSHConnections))
 	worktreeMgr, worktreeCleanup, err := provideWorktreeManager(dbPool, cfg, log, lifecycleMgr, services.Task)
 	if err != nil {
 		log.Error("Failed to initialize worktree manager", zap.Error(err))
@@ -1023,6 +1025,7 @@ func startAgentInfrastructure(
 		log,
 		reachabilitypkg.NewPublisher(eventBus, log),
 		addRuntimeCleanup,
+		managedSSHProbe(services),
 	)
 	services.Task.SetExecutorSaveObserver(reachabilitypkg.NewSaveObserver(sshReachabilityPoller))
 
@@ -1034,7 +1037,7 @@ func startAgentInfrastructure(
 	// poller publishes, plus its own slow interval backstop.
 	startSSHOrphanSweepScheduler(
 		ctx, repos.Task, eventBus, log, addRuntimeCleanup,
-		lifecycleMgr.AcquireSSHOrphanSweepFence,
+		lifecycleMgr.AcquireSSHOrphanSweepFence, managedSSHExecutor(services),
 	)
 
 	// Launch-time session.launch.warning producer (task 05): repos.Task

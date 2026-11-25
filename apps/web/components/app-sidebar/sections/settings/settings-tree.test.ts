@@ -117,3 +117,12 @@ describe("settings menu shape", () => {
     expect(system?.items[2]?.labelKey).toBe("system:storageTitle");
   });
 });
+
+it("keeps SSH management under Executors without a peer settings row", () => {
+  expect(settingsMenuOwnerOf("/settings/executors/ssh-connections")?.href).toBe(EXECUTORS_HREF);
+  expect(
+    SETTINGS_MENU_SECTIONS.flatMap((section) => section.items).some(
+      (item) => item.labelKey === "settings:sshManager.title",
+    ),
+  ).toBe(false);
+});

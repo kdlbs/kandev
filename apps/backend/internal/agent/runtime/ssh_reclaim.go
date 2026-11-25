@@ -7,22 +7,31 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/sshconnections"
+	"github.com/kandev/kandev/internal/sshtransport"
 	"golang.org/x/crypto/ssh"
 )
 
 // SSHTaskDirReclaimRequest describes the recorded SSH connection and remote
 // path for one terminal task cleanup attempt.
 type SSHTaskDirReclaimRequest struct {
-	Host            string
-	Port            int
-	User            string
-	HostFingerprint string
-	IdentitySource  string
-	IdentityFile    string
-	ProxyJump       string
-	Shell           string
-	WorkdirRoot     string
-	TaskDir         string
+	ConnectionID              string
+	RouteStamp                string
+	IdentityGeneration        string
+	BastionIdentityGeneration string
+	HostAlias                 string
+	LegacyRouteRecorded       bool
+	IdentityAgent             string
+	Host                      string
+	Port                      int
+	User                      string
+	HostFingerprint           string
+	IdentitySource            string
+	IdentityFile              string
+	ProxyJump                 string
+	Shell                     string
+	WorkdirRoot               string
+	TaskDir                   string
 }
 
 // SSHTaskDirReclaimResult reports whether the remote task directory was
@@ -41,19 +50,19 @@ type SSHTaskDirReclaimer interface {
 }
 
 type sshTaskDirReclaimer struct {
-	logger        *logger.Logger
-	resolveTarget func(lifecycle.SSHConnConfig) (*lifecycle.SSHTarget, error)
-	dial          func(context.Context, *lifecycle.SSHTarget) (*ssh.Client, error)
-	reclaim       func(context.Context, *ssh.Client, string, string, string) (lifecycle.SSHReclaimOutcome, lifecycle.SSHReclaimVerdict, error)
+	logger  *logger.Logger
+	open    func(context.Context, SSHTaskDirReclaimRequest) (*ssh.Client, func(), error)
+	reclaim func(context.Context, *ssh.Client, string, string, string) (lifecycle.SSHReclaimOutcome, lifecycle.SSHReclaimVerdict, error)
 }
 
 // NewSSHTaskDirReclaimer creates the production adapter over the lifecycle
-// SSH target resolver, pinned dialer, and guarded task-directory reclaimer.
-func NewSSHTaskDirReclaimer(log *logger.Logger) SSHTaskDirReclaimer {
+// managed retained route opener and guarded task-directory reclaimer.
+func NewSSHTaskDirReclaimer(log *logger.Logger, connections *sshconnections.Service) SSHTaskDirReclaimer {
 	return &sshTaskDirReclaimer{
-		logger:        log,
-		resolveTarget: lifecycle.ResolveSSHTarget,
-		dial:          lifecycle.DialSSH,
+		logger: log,
+		open: func(ctx context.Context, req SSHTaskDirReclaimRequest) (*ssh.Client, func(), error) {
+			return openReclaimRoute(ctx, connections, req)
+		},
 		reclaim: func(ctx context.Context, client *ssh.Client, shell, workdirRoot, taskDir string) (lifecycle.SSHReclaimOutcome, lifecycle.SSHReclaimVerdict, error) {
 			return lifecycle.NewSSHTaskDirReclaimer(client, shell, log).Reclaim(ctx, workdirRoot, taskDir)
 		},
@@ -72,31 +81,14 @@ func (a *sshTaskDirReclaimer) ReclaimTaskDir(
 		return SSHTaskDirReclaimResult{}, errors.New(
 			"ssh reclaim: no pinned host fingerprint recorded for " + req.Host)
 	}
-	resolveTarget := a.resolveTarget
-	if resolveTarget == nil {
-		resolveTarget = lifecycle.ResolveSSHTarget
+	if a.open == nil {
+		return SSHTaskDirReclaimResult{}, sshconnections.ErrDisabled
 	}
-	target, err := resolveTarget(lifecycle.SSHConnConfig{
-		Host:              req.Host,
-		Port:              req.Port,
-		User:              req.User,
-		IdentitySource:    lifecycle.SSHIdentitySource(req.IdentitySource),
-		IdentityFile:      req.IdentityFile,
-		ProxyJump:         req.ProxyJump,
-		PinnedFingerprint: req.HostFingerprint,
-	})
-	if err != nil {
-		return SSHTaskDirReclaimResult{}, fmt.Errorf("resolve ssh target %s: %w", req.Host, err)
-	}
-	dial := a.dial
-	if dial == nil {
-		dial = lifecycle.DialSSH
-	}
-	client, err := dial(ctx, target)
+	client, cleanup, err := a.open(ctx, req)
 	if err != nil {
 		return SSHTaskDirReclaimResult{}, fmt.Errorf("dial ssh %s: %w", req.Host, err)
 	}
-	defer func() { _ = client.Close() }()
+	defer cleanup()
 
 	reclaim := a.reclaim
 	if reclaim == nil {
@@ -116,3 +108,29 @@ func (a *sshTaskDirReclaimer) ReclaimTaskDir(
 }
 
 var _ SSHTaskDirReclaimer = (*sshTaskDirReclaimer)(nil)
+
+func openReclaimRoute(ctx context.Context, connections *sshconnections.Service, req SSHTaskDirReclaimRequest) (*ssh.Client, func(), error) {
+	if connections == nil {
+		return nil, func() {}, sshconnections.ErrDisabled
+	}
+	if req.ConnectionID != "" {
+		return connections.OpenRetainedRoute(ctx, sshconnections.RuntimeSnapshot{
+			Route: sshconnections.Route{Stamp: req.RouteStamp, Destination: sshconnections.Connection{
+				ID: req.ConnectionID, Host: req.Host, Port: req.Port, User: req.User, Fingerprint: req.HostFingerprint,
+			}},
+			IdentityGeneration: req.IdentityGeneration, BastionIdentityGeneration: req.BastionIdentityGeneration,
+		})
+	}
+	if !req.LegacyRouteRecorded {
+		return nil, func() {}, sshconnections.ErrInvalidRoute
+	}
+	client, err := connections.DialRetainedLegacy(ctx, sshtransport.SSHTarget{
+		Host: req.Host, Port: req.Port, User: req.User, PinnedFingerprint: req.HostFingerprint,
+		IdentitySource: sshtransport.SSHIdentitySource(req.IdentitySource), IdentityFile: req.IdentityFile,
+		ProxyJump: req.ProxyJump, OriginalHost: req.HostAlias, IdentityAgent: req.IdentityAgent,
+	})
+	if err != nil {
+		return nil, func() {}, err
+	}
+	return client, func() { _ = client.Close() }, nil
+}

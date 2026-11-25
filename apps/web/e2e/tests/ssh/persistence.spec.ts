@@ -1,24 +1,7 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
 import { SSHSettingsPage } from "../../pages/SSHSettingsPage";
 
-/**
- * UI persistence: saved executor state survives reload, and partial forms
- * do not leak state or show premature results.
- */
-test.describe("ssh executor — persistence + UI sweep", () => {
-  test("fingerprint persists across reload (Trusted badge stays)", async ({
-    testPage,
-    seedData,
-  }) => {
-    const page = new SSHSettingsPage(testPage);
-    await page.gotoExisting(seedData.sshExecutorId);
-    await expect(page.connectionBadge).toHaveAttribute("data-status", "trusted");
-
-    await testPage.reload();
-    await expect(page.connectionBadge).toHaveAttribute("data-status", "trusted");
-    await expect(page.pinnedFingerprint()).toHaveText(seedData.sshTarget.hostFingerprint);
-  });
-
+test.describe("SSH binding persistence", () => {
   test("existing executor edits persist only after the floating Save", async ({
     testPage,
     apiClient,
@@ -28,6 +11,7 @@ test.describe("ssh executor — persistence + UI sweep", () => {
     await page.gotoExisting(seedData.sshExecutorId);
 
     const originalName = await page.nameInput.inputValue();
+    const connection = await page.connectionPicker.inputValue();
     try {
       const renamed = `${originalName} renamed`;
       await page.nameInput.fill(renamed);
@@ -39,9 +23,8 @@ test.describe("ssh executor — persistence + UI sweep", () => {
       );
       expect(beforeSave?.name).toBe(originalName);
 
-      await page.clickTest();
-      expect(await page.waitForTestResult()).toBe("true");
-      await page.tickTrust();
+      await page.testButton.click();
+      await expect(page.executorReady).toBeVisible();
       await expect(page.floatingSaveButton).toBeEnabled();
       const saved = testPage.waitForResponse(
         (response) =>
@@ -62,38 +45,9 @@ test.describe("ssh executor — persistence + UI sweep", () => {
       expect(afterSave?.name).toBe(renamed);
       await testPage.reload();
       await expect(page.nameInput).toHaveValue(renamed);
+      await expect(page.connectionPicker).toHaveValue(connection);
     } finally {
       await apiClient.updateExecutor(seedData.sshExecutorId, { name: originalName });
     }
-  });
-
-  test("opening the new-executor form does not leak state from a prior session", async ({
-    testPage,
-  }) => {
-    const page = new SSHSettingsPage(testPage);
-    await page.gotoNew();
-    await expect(page.nameInput).toHaveValue("");
-    await expect(page.hostInput).toHaveValue("");
-    await expect(page.portInput).toHaveValue("22"); // default
-    await expect(page.connectionBadge).toHaveAttribute("data-status", "unverified");
-  });
-
-  test("incomplete test (no click yet) does not show a result panel", async ({
-    testPage,
-    seedData,
-  }) => {
-    const page = new SSHSettingsPage(testPage);
-    await page.gotoNew();
-    await page.fillForm({
-      name: "R4 partial",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identitySource: "file",
-      identityFile: seedData.sshTarget.identityFile,
-    });
-    // No clickTest call → no result panel.
-    await expect(testPage.getByTestId("ssh-test-result")).toHaveCount(0);
-    await expect(page.saveButton).toBeDisabled();
   });
 });

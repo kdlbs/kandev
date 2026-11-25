@@ -186,6 +186,7 @@ func applyRouteOverrideToProfile(profile *AgentProfileInfo, req *LaunchRequest) 
 // task override them would allow pivoting an SSH launch to a different host
 // or bypassing the pinned host-key.
 var trustedExecutorConfigKeys = map[string]bool{
+	MetadataKeySSHConnectionID:                 true,
 	MetadataKeySSHHost:                         true,
 	MetadataKeySSHHostAlias:                    true,
 	MetadataKeySSHPort:                         true,
@@ -342,9 +343,8 @@ func hasCompleteKubernetesRecordedResumeMetadata(metadata map[string]interface{}
 
 // buildLaunchMetadata builds runtime metadata for the Launch request.
 //
-// Per-executor config (host, fingerprint, ssh identity, …) is the trusted
-// source for connection-routing decisions, so it overrides any same-key
-// values the caller passed in req.Metadata. Other keys (per-task settings
+// Saved executor config is authoritative for fresh connection routing.
+// Retained SSH transport metadata is projected from runtime inventory. Other keys (per-task settings
 // like setup_script, base_branch, repo_setup_script, etc.) keep the caller's
 // value when present.
 func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktreeBranch string) map[string]interface{} {
@@ -379,7 +379,11 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	}
 	putBuiltinLaunchMetadata(metadata, req.McpProfile)
 	putPrimaryCheckoutOptions(metadata, req)
+	sshLaunch := projectSSHLaunchBinding(req, metadata)
 	for k, v := range req.ExecutorConfig {
+		if sshLaunch && IsSSHRuntimeRouteMetadataKey(k) {
+			continue
+		}
 		if isTrustedExecutorConfigKey(k) {
 			// Executor config wins for connection-routing keys so a malicious
 			// or buggy task metadata payload can't swap out the SSH host /
@@ -420,6 +424,24 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	setSelectedCheckoutMetadata(req, metadata)
 	applyTrustedRepositoryContextToMetadata(metadata, req)
 	return metadata
+}
+
+func projectSSHLaunchBinding(req *LaunchRequest, metadata map[string]interface{}) bool {
+	if req.ExecutorType != string(models.ExecutorTypeSSH) {
+		return false
+	}
+	if req.PreviousExecutionID != "" && getMetadataString(metadata, MetadataKeySSHRemoteSessionDir) != "" {
+		return true
+	}
+	for key := range metadata {
+		if IsSSHRuntimeRouteMetadataKey(key) {
+			delete(metadata, key)
+		}
+	}
+	if connectionID := req.ExecutorConfig[MetadataKeySSHConnectionID]; connectionID != "" {
+		metadata[MetadataKeySSHConnectionID] = connectionID
+	}
+	return true
 }
 
 func applyTrustedRepositoryContextToMetadata(metadata map[string]interface{}, req *LaunchRequest) {

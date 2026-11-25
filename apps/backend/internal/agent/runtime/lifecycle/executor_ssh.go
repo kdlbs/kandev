@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/sshconnections"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -101,6 +102,7 @@ type sshSessionState struct {
 // the client — at the cost of an extra TCP+handshake per session on the same
 // host. See docs/specs/executors/requirements/ssh-executor.md for the full design.
 type SSHExecutor struct {
+	managedConnections   ManagedSSHConnections
 	agentctlResolver     *AgentctlResolver
 	secretStore          secrets.SecretStore
 	agentList            RemoteAuthAgentLister
@@ -182,44 +184,6 @@ func (r *SSHExecutor) closeSSHClient(client *ssh.Client) error {
 	return client.Close()
 }
 
-// targetFromMetadata builds an SSHTarget from the executor metadata
-// propagated via buildLaunchMetadata (req.ExecutorConfig keys merged in).
-func (r *SSHExecutor) targetFromMetadata(md map[string]interface{}) (*SSHTarget, error) {
-	host := getMetadataString(md, MetadataKeySSHHost)
-	hostAlias := getMetadataString(md, MetadataKeySSHHostAlias)
-	if host == "" && hostAlias == "" {
-		return nil, errors.New("ssh executor: host (or host_alias) is required in executor config")
-	}
-	port := 0
-	if p := getMetadataString(md, MetadataKeySSHPort); p != "" {
-		// Reject malformed / out-of-range ports loudly instead of silently
-		// falling back to 22 — that fallback would mask an obviously bad
-		// config (e.g. ssh_port="abc" or ssh_port="0") and route every
-		// launch through a port the user never meant to use.
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 1 || n > 65535 {
-			return nil, fmt.Errorf("ssh executor: invalid ssh_port %q (must be 1-65535)", p)
-		}
-		port = n
-	}
-	identitySource := SSHIdentitySource(getMetadataString(md, MetadataKeySSHIdentitySource))
-	identityFile := getMetadataString(md, MetadataKeySSHIdentityFile)
-	cfg := SSHConnConfig{
-		HostAlias:         hostAlias,
-		Host:              host,
-		Port:              port,
-		User:              getMetadataString(md, MetadataKeySSHUser),
-		IdentitySource:    identitySource,
-		IdentityFile:      identityFile,
-		ProxyJump:         getMetadataString(md, MetadataKeySSHProxyJump),
-		PinnedFingerprint: getMetadataString(md, MetadataKeySSHHostFingerprint),
-	}
-	if cfg.PinnedFingerprint == "" {
-		return nil, errors.New("ssh executor: host_fingerprint is required — open the SSH executor connection settings, run Test connection, and trust the host")
-	}
-	return ResolveSSHTarget(cfg)
-}
-
 // workdirRoot returns the per-profile or per-executor workdir root (defaults
 // to ~/.kandev). Per-profile wins over per-executor.
 func (r *SSHExecutor) workdirRoot(md map[string]interface{}) string {
@@ -259,17 +223,17 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		return nil, fmt.Errorf("ssh: validate contribution destinations: %w", err)
 	}
 
-	target, err := r.targetFromMetadata(req.Metadata)
+	target, client, err := r.dialSession(baseCtx, req.SessionID, req.Metadata, true)
 	if err != nil {
-		return nil, err
-	}
-	client, err := dialSSH(baseCtx, target)
-	if err != nil {
+		var migrationFailure *sshconnections.ProbeFailure
+		if errors.As(err, &migrationFailure) {
+			return nil, fmt.Errorf("ssh: connect to %s: %w", migrationFailure.Hop, err)
+		}
 		// Classified from this launch's own attempt, never from a stored
 		// reachability record — that record can predate this dial by a full
 		// probe interval and would misattribute a stale cause to a fresh
 		// failure (see task-05-launch-non-gating.md).
-		return nil, fmt.Errorf("ssh: connect to %s@%s: %s: %w", target.User, target.Host, ClassifyDialError(err), err)
+		return nil, fmt.Errorf("ssh: connect: %s: %w", ClassifyDialError(err), err)
 	}
 	var runtimeAPITunnel *sshRuntimeAPITunnel
 	released := false
@@ -434,6 +398,7 @@ func (r *SSHExecutor) buildInstanceForLostRace(req *ExecutorCreateRequest, exist
 	// ran for the winner), so it carries the winner's still-open tunnel's keys —
 	// never this caller's own, since this caller's tunnel was just closed above.
 	copySSHRuntimeAPIMetadata(metadata, existing.metadata)
+	copyManagedSSHMetadata(metadata, existing.metadata)
 	return &ExecutorInstance{
 		InstanceID:    req.InstanceID,
 		TaskID:        req.TaskID,
@@ -827,6 +792,7 @@ func (r *SSHExecutor) buildInstance(
 	}
 	applySSHLaunchReceiptMetadata(metadata, receipt)
 	copySSHRuntimeAPIMetadata(metadata, req.Metadata)
+	copyManagedSSHMetadata(metadata, req.Metadata)
 	return &ExecutorInstance{
 		InstanceID:  req.InstanceID,
 		TaskID:      req.TaskID,
@@ -881,6 +847,7 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 	}
 	applySSHLaunchReceiptMetadata(metadata, state.launchReceipt)
 	copySSHRuntimeAPIMetadata(metadata, req.Metadata)
+	copyManagedSSHMetadata(metadata, req.Metadata)
 	return &ExecutorInstance{
 		InstanceID:    req.InstanceID,
 		TaskID:        req.TaskID,
@@ -1040,13 +1007,9 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 		return fmt.Errorf("%w: receipt pid %d does not match recorded pid %d",
 			errSSHLaunchIdentityConflict, receipt.Process.PID, pid)
 	}
-	target, err := r.targetFromMetadata(instance.Metadata)
-	if err != nil {
-		return fmt.Errorf("ssh: resolve persisted target for instance %q: %w", instance.InstanceID, err)
-	}
 	cleanupCtx, cancel := sshRemoteCleanupContext(ctx)
 	defer cancel()
-	client, err := dialSSH(cleanupCtx, target)
+	_, client, err := r.dialSession(cleanupCtx, instance.SessionID, instance.Metadata, false)
 	if err != nil {
 		return fmt.Errorf("ssh: dial persisted target for instance %q: %w", instance.InstanceID, err)
 	}
@@ -1194,11 +1157,7 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	}
 	r.mu.Unlock()
 
-	target, err := r.targetFromMetadata(req.Metadata)
-	if err != nil {
-		return err
-	}
-	client, err := dialSSH(ctx, target)
+	target, client, err := r.dialSession(ctx, req.SessionID, req.Metadata, false)
 	if err != nil {
 		return fmt.Errorf("ssh resume: connect: %w", err)
 	}
@@ -1444,11 +1403,7 @@ func (r *SSHExecutor) resetManagedBrokerResume(
 		return r.resetTrackedManagedBrokerResume(ctx, req, state, receipt, brokerPreflight, stopRemote)
 	}
 
-	target, err := r.targetFromMetadata(req.Metadata)
-	if err != nil {
-		return err
-	}
-	client, err := dialSSH(ctx, target)
+	_, client, err := r.dialSession(ctx, req.SessionID, req.Metadata, false)
 	if err != nil {
 		return fmt.Errorf("ssh resume: connect for broker refresh: %w", err)
 	}

@@ -82,17 +82,9 @@ Multiple sessions in the _same_ task share the same worktree on disk (same files
 
 ### Auth, connectivity, and host-key trust
 
-- **Auth: SSH key file + ssh-agent.** Authentication via `golang.org/x/crypto/ssh` uses either an explicit `IdentityFile` or an ssh-agent. A per-host OpenSSH `IdentityAgent` overrides the backend process's `$SSH_AUTH_SOCK`, covering 1Password / Secretive / Yubikey / forwarded-agent users whose agent socket differs from the desktop process environment. `IdentityAgent none` disables agent authentication for that host. **Passphrase-protected keys are not handled in kandev** — users must load them into `ssh-agent` themselves. Password and keyboard-interactive auth are not supported in v1.
+SSH executors select a shared connection. Its identity can use a managed key, a backend key file or an SSH agent. Both direct access and one bastion hop use pinned host keys. An administrator inspects and trusts keys in Access. The executor test checks the saved route and the remote platform. The [connection manager](ssh-connection-manager.md) defines these operations.
 
-- **OpenSSH config inheritance.** When a `host_alias` is configured, kandev resolves user and system OpenSSH client configuration to inherit `HostName`, `Port`, `User`, `IdentityAgent`, `IdentityFile`, and one `ProxyJump`. `IdentityAgent` supports `~`, `${VAR}`, whole-value `$VAR`, `SSH_AUTH_SOCK`, and percent tokens `%%`, `%d`, `%h`, `%i`, `%j`, `%k`, `%L`, `%l`, `%n`, `%p`, `%r`, and `%u`; `%C` is not supported. A user whose terminal already does `ssh prod` can paste `prod` into kandev and have it just work.
-
-- **Connectivity: direct, ProxyJump, mesh-VPN.** Direct TCP to `host:port` (default 22). `ProxyJump` (single bastion in v1; chained jumps deferred) implemented natively via the Go SSH client. Tailscale / WireGuard / corporate VPN: "just works" when the kandev backend process is on the same network namespace.
-
-- **Create flow: test-connection gate + explicit fingerprint trust.** The Sprites executor already gates creation behind a "Test Connection" step. The SSH executor adopts the same pattern and extends it with an explicit host-key trust step:
-  1. **User fills the form.**
-  2. **User clicks "Test connection".** Backend `POST /api/v1/ssh/test` dials with a permissive host-key callback that records (but does not pin) the observed fingerprint, then probes `uname -a`, arch, `git --version`, and the agentctl-cache-or-upload status.
-  3. **UI shows the result** with per-step badges and a prominent fingerprint block with a **"Trust this host"** checkbox that must be ticked before Save is enabled.
-  4. **On Save**, the trusted fingerprint is written to the executor's `Config` as `host_fingerprint`. On every subsequent connection (CreateInstance, RecoverInstances, status polling), a mismatch is a hard error — no silent re-pin.
+OpenSSH alias resolution applies to earlier saved settings during [automatic migration](ssh-connection-migration.md). Session recovery uses the route evidence recorded for that session.
 
 ### One SSH connection per host, fanned out to per-session forwards
 
@@ -183,16 +175,7 @@ This design follows [ADR-2026-09-05-agent-owned-credential-file-conflicts](../..
 
 ### Settings UI
 
-- New `apps/web/components/settings/ssh-settings.tsx` exporting two cards:
-  - **`SSHConnectionCard`** — the form + "Test connection" gate. Fields: name, `host` (or `host_alias` from `~/.ssh/config`), `port`, `user`, identity source (`agent` | `file`), optional `identity_file`, optional `proxy_jump`. Save disabled until a successful test produced a fingerprint and the "Trust this host" checkbox is ticked.
-  - **`SSHSessionsCard`** — mirrors `SpritesInstancesCard` and `DockerContainersCard`. Table columns: task ID, session ID, host (`user@host`), remote agentctl port, local forward port, uptime, status badge. Data sourced from `GET /api/v1/ssh/executors/{id}/sessions`. Refreshes every 90 seconds.
-- Per-profile settings: `workdir_root` stored on `ExecutorProfile.Config` (so the same host can serve different profiles into different roots).
-- SSH profile pages include a direct "Connection Settings" action back to the host-level SSH connection page so users can find Test connection / re-trust without knowing the dedicated executor URL.
-
-### Edit-with-live-sessions UX
-
-- On save, if the executor has any running sessions, a confirm modal warns: _"This executor has N running session(s). They will keep running on the current host. Only new sessions started after save will use the updated config."_
-- Backend accepts the save unconditionally — the warning is pure UX. Live sessions retain their `ssh_host` / `ssh_port` / `ssh_user` snapshot in `ExecutorRunning.Metadata`, which is already how recovery works after a restart, so they're insulated from config changes by construction.
+Under **Settings > Executors**, **SSH connections** manages identities, host trust and reusable destinations. The executor editor selects a connection and tests its remote platform. The profile editor owns workload settings such as shell, preparation scripts, environment bindings and task directory cleanup. The session list continues to use `GET /api/v1/ssh/executors/:id/sessions`. See the [settings design](ssh-connection-management-ui.md) for the desktop and phone layouts.
 
 ### Telemetry & errors
 
@@ -317,3 +300,7 @@ task and session state.
 ## Open questions
 
 (All v1 design decisions resolved during planning. None outstanding at spec-approval time.)
+
+## SSH connection ownership
+
+The [SSH connection manager](ssh-connection-manager.md) owns SSH executor credentials and host trust. The [upgrade design](ssh-connection-migration.md) supersedes inline setup and describes the historical format used for migration and retained sessions. Password bootstrap belongs to explicit enrollment.

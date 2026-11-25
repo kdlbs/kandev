@@ -3,9 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -152,37 +150,4 @@ func isSSHAuthFailure(err error) bool {
 func isSSHNetworkError(err error) bool {
 	var opErr *net.OpError
 	return errors.As(err, &opErr)
-}
-
-// SSHTargetFromExecutorConfig projects an SSH executor's persisted config map
-// into a resolved SSHTarget, applying the same ~/.ssh/config inheritance as
-// ResolveSSHTarget. A missing host or fingerprint fails resolution here,
-// which callers should classify as SSHReachabilityReasonConfig without
-// attempting a dial.
-func SSHTargetFromExecutorConfig(cfg map[string]string) (*SSHTarget, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("ssh executor has no config")
-	}
-	fingerprint := strings.TrimSpace(cfg["ssh_host_fingerprint"])
-	if fingerprint == "" {
-		return nil, fmt.Errorf("ssh host fingerprint is required for reachability probes")
-	}
-	port := 0
-	if p := strings.TrimSpace(cfg["ssh_port"]); p != "" {
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 1 || n > 65535 {
-			return nil, fmt.Errorf("invalid ssh_port %q", p)
-		}
-		port = n
-	}
-	return ResolveSSHTarget(SSHConnConfig{
-		HostAlias:         cfg["ssh_host_alias"],
-		Host:              cfg["ssh_host"],
-		Port:              port,
-		User:              cfg["ssh_user"],
-		IdentitySource:    SSHIdentitySource(cfg["ssh_identity_source"]),
-		IdentityFile:      cfg["ssh_identity_file"],
-		ProxyJump:         cfg["ssh_proxy_jump"],
-		PinnedFingerprint: fingerprint,
-	})
 }

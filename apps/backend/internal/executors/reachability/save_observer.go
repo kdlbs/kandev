@@ -16,6 +16,8 @@ import (
 // key (or a non-config field) changing is not connection-relevant and must
 // not trigger a reset.
 var connectionConfigKeys = []string{
+	"ssh_connection_id",
+	"ssh_connection_stamp",
 	"ssh_host",
 	"ssh_host_alias",
 	"ssh_port",

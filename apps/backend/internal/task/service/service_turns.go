@@ -1115,7 +1115,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 	}
 	if executorID != "" {
-		if err := s.applyWorkspaceExecutorRecord(ctx, sessionID, executorID, recordedKubernetes, info); err != nil {
+		if err := s.applyWorkspaceExecutorRecord(ctx, sessionID, executorID, recordedKubernetes, running != nil && running.Runtime == agentruntime.RuntimeSSH, info); err != nil {
 			return nil, err
 		}
 	}
@@ -1161,7 +1161,7 @@ func (s *Service) resolveWorkspaceInfoMcpMode(ctx context.Context, taskID string
 func (s *Service) applyWorkspaceExecutorRecord(
 	ctx context.Context,
 	sessionID, executorID string,
-	recordedKubernetes bool,
+	recordedKubernetes, retainedSSH bool,
 	info *lifecycle.WorkspaceInfo,
 ) error {
 	exec, err := s.executors.GetExecutor(ctx, executorID)
@@ -1185,10 +1185,7 @@ func (s *Service) applyWorkspaceExecutorRecord(
 		return fmt.Errorf("restore Kubernetes workspace executor %q: executor is no longer Kubernetes", executorID)
 	}
 	info.ExecutorType = string(exec.Type)
-	// Only stable SSH connection/profile keys fill missing metadata. A retained
-	// Kubernetes row instead keeps resource inventory while current connection
-	// config authoritatively replaces every connection key.
-	if exec.Type == models.ExecutorTypeSSH {
+	if exec.Type == models.ExecutorTypeSSH && !retainedSSH {
 		mergeExecutorConfigMetadata(info, exec.Config)
 	}
 	if exec.Type == models.ExecutorTypeKubernetes {
@@ -1594,19 +1591,8 @@ func ensureWorkspaceMetadata(info *lifecycle.WorkspaceInfo) map[string]interface
 	return info.Metadata
 }
 
-// mergeExecutorConfigMetadata projects an SSH executor record's stable
-// connection/profile config keys (e.g. ssh_host, ssh_host_alias,
-// ssh_host_fingerprint, ssh_user) into the workspace metadata WITHOUT
-// overwriting values already present — a live ExecutorRunning record carries
-// authoritative per-session values (remote dirs/ports) and must win. This is
-// the fallback that lets terminal-state SSH sessions open a terminal / restore
-// the workspace when no running record exists.
-//
-// It filters through lifecycle.FilterSSHWorkspaceFallbackConfig rather than the
-// general persistent-metadata allowlist so that (a) alias-only executors
-// (ssh_host_alias, no ssh_host) are preserved, and (b) session-scoped runtime
-// keys (remote agentctl port/PID/session dir) can never be projected — those
-// would make a restore reattach to a stale/dead remote instance.
+// mergeExecutorConfigMetadata restores the shared selector and shell
+// settings for a workspace with no retained SSH execution.
 func mergeExecutorConfigMetadata(info *lifecycle.WorkspaceInfo, config map[string]string) {
 	filtered := lifecycle.FilterSSHWorkspaceFallbackConfig(config)
 	if filtered == nil {

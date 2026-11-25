@@ -1,0 +1,58 @@
+[
+  {
+    "id": "d4222e2c-a443-4ce7-9241-03b4c6e3f74f",
+    "session_id": "e60c5f55-efb3-43f9-926d-0a985337679e",
+    "created_at": "2026-09-19T14:51:27.825491188Z",
+    "author_type": "user",
+    "content": "go for spec on this one"
+  },
+  {
+    "id": "49edb532-b9e6-55d1-b17f-f4128a43bc22",
+    "session_id": "e60c5f55-efb3-43f9-926d-0a985337679e",
+    "created_at": "2026-09-19T14:54:54.4962781Z",
+    "author_type": "user",
+    "content": "use the recommended approach for those 3 questions"
+  },
+  {
+    "id": "ab41f99d-7e8b-4aae-8eaf-6c0f6bf4d675",
+    "session_id": "e60c5f55-efb3-43f9-926d-0a985337679e",
+    "created_at": "2026-09-19T15:49:40.136826425Z",
+    "author_type": "user",
+    "content": "### Agent Message Comments\n\nSelected agent response:\n> New managed connections initially exclude ProxyJump, private-key export, and automatic revocation\n\nUser feedback:\n> wdym by this?\n\n---"
+  },
+  {
+    "id": "b479cace-0d9b-475f-bb65-71582f210795",
+    "session_id": "e60c5f55-efb3-43f9-926d-0a985337679e",
+    "created_at": "2026-09-19T18:20:32.385738137Z",
+    "author_type": "user",
+    "content": "do you think those features should be supported eventually? 1 and 2 only, 3 im discarding for now"
+  },
+  {
+    "id": "95b7e7d5-ae09-4642-b9a1-51b1ec5f3cd0",
+    "session_id": "e60c5f55-efb3-43f9-926d-0a985337679e",
+    "created_at": "2026-09-19T18:21:14.385303317Z",
+    "author_type": "user",
+    "content": "is 1. already supported in the existing ssh executor?"
+  },
+  {
+    "id": "82818c48-8202-42ae-aaa2-981a5c952d94",
+    "session_id": "e60c5f55-efb3-43f9-926d-0a985337679e",
+    "created_at": "2026-09-19T18:23:49.597658525Z",
+    "author_type": "user",
+    "content": "yeah, we should include it"
+  },
+  {
+    "id": "e9e9a3e5-54f4-4dd4-bd69-2dca2e3b8d7a",
+    "session_id": "e60c5f55-efb3-43f9-926d-0a985337679e",
+    "created_at": "2026-09-22T15:15:26.043598401Z",
+    "author_type": "user",
+    "content": "go for impl"
+  },
+  {
+    "id": "91bd4255-52db-4809-91c4-9822b3b99973",
+    "session_id": "e60c5f55-efb3-43f9-926d-0a985337679e",
+    "created_at": "2026-09-28T10:09:52.376764771Z",
+    "author_type": "user",
+    "content": "continue"
+  }
+]

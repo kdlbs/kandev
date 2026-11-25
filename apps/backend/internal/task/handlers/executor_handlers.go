@@ -120,7 +120,7 @@ func (h *ExecutorHandlers) httpCreateExecutor(c *gin.Context) {
 		Config:      body.Config,
 	})
 	if err != nil {
-		if writeExecutorOwnershipError(c, err) {
+		if writeExecutorResourceError(c, err) {
 			return
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
@@ -182,7 +182,7 @@ func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
 		Config:      body.Config,
 	})
 	if err != nil {
-		if writeExecutorOwnershipError(c, err) {
+		if writeExecutorResourceError(c, err) {
 			return
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
@@ -206,7 +206,7 @@ func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
 
 func (h *ExecutorHandlers) httpDeleteExecutor(c *gin.Context) {
 	if err := h.service.DeleteExecutor(c.Request.Context(), c.Param("id")); err != nil {
-		if writeExecutorOwnershipError(c, err) {
+		if writeExecutorResourceError(c, err) {
 			return
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
@@ -269,7 +269,7 @@ func (h *ExecutorHandlers) wsCreateExecutor(ctx context.Context, msg *ws.Message
 		Config:      req.Config,
 	})
 	if err != nil {
-		if status, code, message := executorOwnershipError(err); status != 0 {
+		if status, code, message := executorResourceError(err); status != 0 {
 			return ws.NewError(msg.ID, msg.Action, code, message, nil)
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
@@ -340,7 +340,7 @@ func (h *ExecutorHandlers) wsUpdateExecutor(ctx context.Context, msg *ws.Message
 		Config:      req.Config,
 	})
 	if err != nil {
-		if status, code, message := executorOwnershipError(err); status != 0 {
+		if status, code, message := executorResourceError(err); status != 0 {
 			return ws.NewError(msg.ID, msg.Action, code, message, nil)
 		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {

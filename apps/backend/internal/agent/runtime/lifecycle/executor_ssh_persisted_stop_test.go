@@ -23,7 +23,7 @@ func TestSSHExecutorStopInstanceFromPersistedMetadataOnly(t *testing.T) {
 		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "kill 4242", result: sshOK},
 	).handle)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -63,7 +63,7 @@ func TestSSHExecutorStopInstanceDeadPidEmptyStderrReapsCleanly(t *testing.T) {
 		sshScriptRule{match: "test -d '/remote/session'", result: sshFail("")},
 		sshScriptRule{match: "rm -rf '/remote/session'", result: sshOK},
 	).handle)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -91,7 +91,7 @@ func TestSSHExecutorStopInstanceDeadPidWithNewerSessionPreservesDirectory(t *tes
 		sshScriptRule{match: "ps -p 4242 -o command=", result: sshFail("")},
 		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("9999")},
 	).handle)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -131,7 +131,7 @@ func TestSSHExecutorStopInstanceSharedTaskDirIdentityUsesPidfile(t *testing.T) {
 			sshScriptRule{match: "cat -- '/remote/session-a/agentctl.pid'", result: sshOut("4242")},
 			sshScriptRule{match: "rm -rf '/remote/session-a'", result: sshOK},
 		).handle)
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 		metadata := sshConnectionMetadata(t, server)
 		metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -159,7 +159,7 @@ func TestSSHExecutorStopInstanceSharedTaskDirIdentityUsesPidfile(t *testing.T) {
 			sshScriptRule{match: "cat -- '/remote/session-b/agentctl.pid'", result: sshOut("9999")},
 			sshScriptRule{match: "rm -rf '/remote/session-b'", result: sshOK},
 		).handle)
-		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 		metadata := sshConnectionMetadata(t, server)
 		metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -193,7 +193,7 @@ func TestSSHExecutorStopInstanceIdentityMismatchSkipsKill(t *testing.T) {
 		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "rm -rf '/remote/session'", result: sshOK},
 	).handle)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -227,7 +227,7 @@ func TestSSHExecutorStopInstanceIdentityMismatchDirRemovalFailurePropagatesError
 		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "rm -rf '/remote/session'", result: sshFail("permission denied")},
 	).handle)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -255,7 +255,7 @@ func TestSSHExecutorStopInstanceIdentityTaskDirMismatchSkipsKill(t *testing.T) {
 		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "rm -rf '/remote/session'", result: sshOK},
 	).handle)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -285,7 +285,7 @@ func TestSSHExecutorStopInstanceIdentityTaskDirMismatchSkipsKill(t *testing.T) {
 // possibly-live orphan as reaped.
 func TestSSHExecutorStopInstanceIdentityProbeFailurePreservesRow(t *testing.T) {
 	server := newFakeSSHServer(t, nil)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	exec.verifyRemoteIdentity = func(context.Context, *ssh.Client, int, string, string) (bool, error) {
 		return false, errors.New("ssh: channel closed mid-command")
 	}
@@ -318,7 +318,7 @@ func TestSSHExecutorStopInstanceStopCommandFailurePropagatesError(t *testing.T) 
 		sshScriptRule{match: "cat -- '/remote/session/agentctl.pid'", result: sshOut("4242")},
 		sshScriptRule{match: "kill 4242", result: sshFail("permission denied")},
 	).handle)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -337,7 +337,7 @@ func TestSSHExecutorStopInstanceStopCommandFailurePropagatesError(t *testing.T) 
 
 func TestSSHExecutorStopInstancePersistedMetadataPreservesOnBackendShutdown(t *testing.T) {
 	server := newFakeSSHServer(t, nil)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"
@@ -396,7 +396,7 @@ func TestSSHExecutorStopInstanceIncompletePersistedMetadataErrors(t *testing.T) 
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+			exec := newRetainedWireSSHTestExecutor(newTestLogger())
 			err := exec.StopInstance(context.Background(), &ExecutorInstance{
 				InstanceID: "orphaned-instance",
 				StopReason: "startup terminal session cleanup",
@@ -410,7 +410,7 @@ func TestSSHExecutorStopInstanceIncompletePersistedMetadataErrors(t *testing.T) 
 }
 
 func TestSSHExecutorStopInstancePersistedMetadataUnresolvableTargetErrors(t *testing.T) {
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 	err := exec.StopInstance(context.Background(), &ExecutorInstance{
 		InstanceID: "orphaned-instance",
 		StopReason: "startup terminal session cleanup",
@@ -440,7 +440,7 @@ func TestSSHExecutorStopInstanceUnreadablePidfilePreservesLiveAgentctl(t *testin
 		sshScriptRule{match: "test -d '/remote/session'", result: sshFail("ssh: unable to open channel")},
 		sshScriptRule{match: "rm -rf '/remote/session'", result: sshOK},
 	).handle)
-	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec := newRetainedWireSSHTestExecutor(newTestLogger())
 
 	metadata := sshConnectionMetadata(t, server)
 	metadata[MetadataKeySSHRemoteAgentctlPID] = "4242"

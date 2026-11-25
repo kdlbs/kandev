@@ -66,7 +66,7 @@ func newPendingDeletedSSHStopFixture(t *testing.T) pendingDeletedSSHStopFixture 
 	}}
 	log := newTestRegistryLogger()
 	registry := NewExecutorRegistry(log)
-	registry.Register(NewSSHExecutor(nil, nil, nil, log))
+	registry.Register(newRetainedWireSSHTestExecutor(log))
 	manager := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
 	cleanupManagerStopCh(t, manager)
 	manager.SetExecutorRunningWriter(store)

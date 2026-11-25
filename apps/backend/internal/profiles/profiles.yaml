@@ -59,6 +59,10 @@ features:
     prod: "true"
     dev:  "true"
     e2e:  "true"
+  KANDEV_FEATURES_SSH_CONNECTION_MANAGER:
+    prod: "true"
+    dev: "true"
+    e2e: "true"
 
   # Office (autonomous agent surface). Off in prod until the feature
   # is user-ready; on in dev/e2e so contributors and tests exercise it.

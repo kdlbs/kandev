@@ -5,6 +5,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/sshconnections"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
@@ -16,8 +17,8 @@ type sshTaskDirReclaimerAdapter struct {
 	reclaimer agentruntime.SSHTaskDirReclaimer
 }
 
-func newSSHTaskDirReclaimerAdapter(log *logger.Logger) *sshTaskDirReclaimerAdapter {
-	return &sshTaskDirReclaimerAdapter{reclaimer: agentruntime.NewSSHTaskDirReclaimer(log)}
+func newSSHTaskDirReclaimerAdapter(log *logger.Logger, connections *sshconnections.Service) *sshTaskDirReclaimerAdapter {
+	return &sshTaskDirReclaimerAdapter{reclaimer: agentruntime.NewSSHTaskDirReclaimer(log, connections)}
 }
 
 func (a *sshTaskDirReclaimerAdapter) ReclaimTaskDir(
@@ -25,16 +26,23 @@ func (a *sshTaskDirReclaimerAdapter) ReclaimTaskDir(
 	req taskservice.SSHTaskDirReclaimRequest,
 ) (taskservice.SSHTaskDirReclaimResult, error) {
 	result, err := a.reclaimer.ReclaimTaskDir(ctx, agentruntime.SSHTaskDirReclaimRequest{
-		Host:            req.Host,
-		Port:            req.Port,
-		User:            req.User,
-		HostFingerprint: req.HostFingerprint,
-		IdentitySource:  req.IdentitySource,
-		IdentityFile:    req.IdentityFile,
-		ProxyJump:       req.ProxyJump,
-		Shell:           req.Shell,
-		WorkdirRoot:     req.WorkdirRoot,
-		TaskDir:         req.TaskDir,
+		ConnectionID:              req.ConnectionID,
+		RouteStamp:                req.RouteStamp,
+		IdentityGeneration:        req.IdentityGeneration,
+		BastionIdentityGeneration: req.BastionIdentityGeneration,
+		HostAlias:                 req.HostAlias,
+		LegacyRouteRecorded:       req.LegacyRouteRecorded,
+		IdentityAgent:             req.IdentityAgent,
+		Host:                      req.Host,
+		Port:                      req.Port,
+		User:                      req.User,
+		HostFingerprint:           req.HostFingerprint,
+		IdentitySource:            req.IdentitySource,
+		IdentityFile:              req.IdentityFile,
+		ProxyJump:                 req.ProxyJump,
+		Shell:                     req.Shell,
+		WorkdirRoot:               req.WorkdirRoot,
+		TaskDir:                   req.TaskDir,
 	})
 	if err != nil {
 		return taskservice.SSHTaskDirReclaimResult{}, err

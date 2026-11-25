@@ -28,9 +28,10 @@ type OrphanSweepTaskStore interface {
 	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
 }
 
-// OrphanSweepScheduler is the runtime-seam handle for the SSH orphaned-agentctl
-// sweep scheduler; Stop is the only capability callers outside the runtime
-// seam need.
+// ManagedSSHExecutorConnection holds a saved route during background cleanup.
+type ManagedSSHExecutorConnection = lifecycle.ManagedSSHExecutorConnection
+
+// OrphanSweepScheduler owns the background SSH process sweep.
 type OrphanSweepScheduler struct {
 	inner *lifecycle.OrphanSweepScheduler
 }
@@ -53,8 +54,9 @@ func StartOrphanSweepScheduler(
 	log *logger.Logger,
 	eventBus bus.EventBus,
 	acquireTaskFence func(taskID string) func(),
+	managed ManagedSSHExecutorConnection,
 ) *OrphanSweepScheduler {
-	scheduler := lifecycle.NewOrphanSweepScheduler(executors, tasks, intervalSeconds, log, acquireTaskFence)
+	scheduler := lifecycle.NewOrphanSweepScheduler(executors, tasks, intervalSeconds, log, acquireTaskFence, managed)
 	startup.AfterReady(ctx, func() { scheduler.Start(ctx, eventBus) })
 	return &OrphanSweepScheduler{inner: scheduler}
 }

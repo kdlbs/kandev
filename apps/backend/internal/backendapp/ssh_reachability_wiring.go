@@ -18,9 +18,13 @@ func startSSHReachabilityPoller(
 	log *logger.Logger,
 	publisher *reachabilitypkg.Publisher,
 	addCleanup func(func() error) func() error,
+	managed ...reachabilitypkg.ManagedProbe,
 ) *reachabilitypkg.Poller {
 	poller := reachabilitypkg.New(repo, intervalSeconds, log)
 	poller.SetPublisher(publisher)
+	if len(managed) > 0 {
+		poller.SetManagedProbe(managed[0])
+	}
 	startup.AfterReady(ctx, func() { poller.Start(ctx) })
 	addCleanup(func() error { poller.Stop(); return nil })
 	return poller

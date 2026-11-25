@@ -1,0 +1,806 @@
+[
+  {
+    "path": "apps/backend/internal/agent/runtime/lifecycle/env_preparer_ssh.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/agent/runtime/lifecycle/executor_backend.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/backend/internal/agent/runtime/lifecycle/executor_ssh.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_connection.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_connection_test.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_dial_test.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_managed.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_managed_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_transport_teardown_test.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/agent/runtime/lifecycle/manager_launch.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/backendapp/agents.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/backendapp/helpers.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/backendapp/main.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/backendapp/services.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/backend/internal/backendapp/ssh_connections.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/backendapp/ssh_connections_probe.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/backendapp/ssh_connections_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/backendapp/ssh_reachability_wiring.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/backend/internal/backendapp/storage.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/backendapp/types.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 2
+  },
+  {
+    "path": "apps/backend/internal/common/config/config.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/backend/internal/executors/reachability/managed_probe.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/executors/reachability/managed_probe_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/executors/reachability/probe.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/executors/reachability/save_observer.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/persistence/requiredstores/catalog.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/persistence/requiredstores/catalog_test.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/persistence/requiredstores/sweep_test.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/backend/internal/persistence/storeconformance/adapters.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/persistence/storeconformance/owner_actions.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/persistence/storeconformance/ssh_connections.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/persistence/storeconformance/suite_test.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/profiles/profiles.yaml",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/backend/internal/runtimeflags/registry.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/backend/internal/secrets/ssh_identity.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/secrets/ssh_identity_postgres_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/secrets/ssh_identity_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/secrets/user_visible_store.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/ssh/handlers.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/ssh/managed_connections.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/ssh/managed_connections_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/adoption.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/adoption_bind.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/adoption_drafts.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/adoption_handlers.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/adoption_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/binding.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/binding_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/connection_management.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/connections.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/connections_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/credential.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/enroll.sh",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/enrollment.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/enrollment_script.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/enrollment_script_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/enrollment_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/executor_probe.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/executor_probe_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/handlers.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/handlers_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/identity.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/identity_management.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/identity_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/models.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/preflight.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/preflight_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/probe.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/probe_result.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/probe_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/recovery.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/route.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/runtime.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/runtime_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/service.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/store.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/store_postgres_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/store_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/trust.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshconnections/trust_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshtransport/config_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshtransport/connection.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshtransport/connection_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshtransport/identity_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshtransport/managed.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshtransport/managed_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/sshtransport/teardown_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/task/repository/sqlite/base.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/task/repository/sqlite/executor.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 4
+  },
+  {
+    "path": "apps/backend/internal/task/repository/sqlite/executor_binding.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/task/repository/sqlite/executor_binding_test.go",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/backend/internal/task/repository/sqlite/session.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/backend/internal/task/repository/sqlite/task.go",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/app/settings/executors/new/[type]/ssh-config.test.ts",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/app/settings/executors/new/[type]/ssh-config.ts",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/app/settings/executors/new/[type]/ssh-create-page.tsx",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/web/app/settings/executors/ssh/[executorId]/page.tsx",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/web/components/app-sidebar/sections/settings/settings-menu-sections.ts",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/app-sidebar/sections/settings/settings-tree.tsx",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connection-card.tsx",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/adoption.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/confirmation.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/connection-details.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/enrollment-panel.test.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/enrollment-panel.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/executor-editor.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/identity-details.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/identity-form.test.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/identity-form.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/managed-binding.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/picker.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/prerequisite-panel.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/components/settings/ssh-connections/settings.tsx",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/e2e/tests/settings/ssh-connections.spec.ts",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/e2e/tests/ssh/managed-connections.spec.ts",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/hooks/domains/settings/use-settings-discovery.ts",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 3
+  },
+  {
+    "path": "apps/web/hooks/domains/settings/use-ssh-connections.ts",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/lib/api/domains/ssh-connections-api.test.ts",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/lib/api/domains/ssh-connections-api.ts",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/lib/settings-discovery/catalog.test.ts",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/lib/settings-discovery/catalog/executors.ts",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/lib/settings-discovery/resolve.ts",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/lib/settings-discovery/types.ts",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/web/lib/state/slices/features/types.ts",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/web/lib/types/http-ssh-connections.ts",
+    "source_base_exists": false,
+    "current_exists": false,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/lib/types/http-ssh.ts",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "apps/web/src/locales/en/settings.json",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/web/src/locales/ja/executors.json",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/web/src/locales/ja/settings.json",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/web/src/locales/ja/task.json",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/web/src/locales/pt-pt/settings.json",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/web/src/locales/zh-cn/settings.json",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 1
+  },
+  {
+    "path": "apps/web/src/settings-routes.tsx",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  },
+  {
+    "path": "docs/public/executors.md",
+    "source_base_exists": true,
+    "current_exists": true,
+    "conflicts": 0
+  }
+]
