@@ -28,6 +28,7 @@ export const defaultFeatureFlags = {
   autoStartPendingWork: false,
   autoContinueFromHistory: false,
   autoRetryUnsentRequests: false,
+  acpV2: false,
   agentBackgroundWork: false,
   opencodePlugin: false,
 } as const;

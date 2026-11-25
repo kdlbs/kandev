@@ -11,14 +11,19 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 )
 
 const minimumACPCLIVersion = "1.5.0"
+const workerModeFlag = "--process-per-session"
+
+const acpHelpTimeout = 5 * time.Second
 
 var errCLITooOld = errors.New("antigravity CLI version predates ACP support")
+var errCLIWorkerModeUnsupported = errors.New("antigravity CLI does not advertise --process-per-session")
 
 // SavedRuntimeError identifies a selected runtime that can no longer be
 // resolved for a native conversation. Callers must preserve the conversation
@@ -35,7 +40,7 @@ func (e *SavedRuntimeError) Error() string {
 func (e *SavedRuntimeError) Unwrap() error { return e.Cause }
 
 // LocalRuntime identifies the complete command selected for a host-local
-// Antigravity operation. CLI version qualification happens once per selection.
+// Antigravity operation. CLI qualification happens once per selection.
 type LocalRuntime struct {
 	Variant string
 	Args    []string
@@ -101,7 +106,7 @@ func absoluteExecutable(path, goos string) (string, bool) {
 }
 
 // ResolveLocal qualifies the host CLI before falling back to the complete
-// standalone bundle. A failed version check cannot select an unqualified CLI.
+// standalone bundle. A failed qualification cannot select an unqualified CLI.
 func ResolveLocal(ctx context.Context, opts ResolveOptions) (*LocalRuntime, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -109,7 +114,7 @@ func ResolveLocal(ctx context.Context, opts ResolveOptions) (*LocalRuntime, erro
 	cliPath := FindCLIPath(opts)
 	var cliErr error
 	if cliPath != "" {
-		selected, err := resolveQualifiedCLI(ctx, cliPath, opts.VersionProbe)
+		selected, err := resolveQualifiedCLI(ctx, cliPath, opts.VersionProbe, opts.ACPHelpProbe)
 		if err == nil {
 			return selected, nil
 		}
@@ -134,9 +139,70 @@ func IsSelectedCLICommand(ctx context.Context, args []string) bool {
 	return slices.Equal(args[:len(selected.Args)], selected.Args)
 }
 
+// RequireWorkerMode ensures the worker option wins over profile arguments.
+// The caller applies wrappers afterward.
+func RequireWorkerMode(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	optionEnd := len(args)
+	workerEnabled := false
+	workerOptionIndex := -1
+	for index := 1; index < len(args); index++ {
+		argument := args[index]
+		if argument == "--" {
+			optionEnd = index
+			break
+		}
+		option, value, hasValue := strings.Cut(argument, "=")
+		if isAntigravityValueOption(option) {
+			if !hasValue && index+1 < len(args) {
+				index++
+			}
+			continue
+		}
+		if option == workerModeFlag {
+			workerEnabled = !hasValue || isTrueValue(value)
+			workerOptionIndex = index
+		}
+	}
+	if workerEnabled && workerOptionIndex == optionEnd-1 {
+		return slices.Clone(args)
+	}
+	result := make([]string, 0, len(args)+1)
+	result = append(result, args[:optionEnd]...)
+	result = append(result, "--process-per-session")
+	result = append(result, args[optionEnd:]...)
+	return result
+}
+
+// isAntigravityValueOption identifies options that consume the next argv token.
+func isAntigravityValueOption(option string) bool {
+	switch option {
+	case "--add-dir", "--agent", "--app-data-dir", "--app_data_dir", "--cli_dir_name",
+		"--cli_log_file", "--cloud_code_endpoint", "--gemini-dir", "--gemini_dir",
+		"--ide-mcp-port", "--ide_mcp_port", "--log-file", "--override_user_agent_name":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTrueValue(value string) bool {
+	switch strings.ToLower(value) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 // ResolveSaved resolves only the runtime recorded with a native conversation.
 // Empty and unknown adapter versions retain the historical standalone path.
 func ResolveSaved(ctx context.Context, opts ResolveOptions, adapterVersion string) (*LocalRuntime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	variant := acpcompat.AntigravityRuntimeForAdapterVersion(adapterVersion)
 	selected, err := resolveVariant(ctx, opts, variant)
 	if err != nil {
@@ -151,7 +217,7 @@ func resolveVariant(ctx context.Context, opts ResolveOptions, variant string) (*
 		if cliPath == "" {
 			return nil, errors.New("antigravity CLI was not found")
 		}
-		selected, err := resolveQualifiedCLI(ctx, cliPath, opts.VersionProbe)
+		selected, err := resolveQualifiedCLI(ctx, cliPath, opts.VersionProbe, opts.ACPHelpProbe)
 		if err != nil {
 			return nil, fmt.Errorf("qualify Antigravity CLI: %w", err)
 		}
@@ -163,20 +229,79 @@ func resolveVariant(ctx context.Context, opts ResolveOptions, variant string) (*
 func resolveQualifiedCLI(
 	ctx context.Context,
 	cliPath string,
-	probe func(context.Context, string) (string, error),
+	versionProbe func(context.Context, string) (string, error),
+	helpProbe func(context.Context, string) (string, error),
 ) (*LocalRuntime, error) {
-	version, err := probeCLI(ctx, cliPath, probe)
+	version, err := probeCLI(ctx, cliPath, versionProbe)
 	if err != nil {
 		return nil, err
 	}
 	if compareVersion(version, minimumACPCLIVersion) < 0 {
 		return nil, fmt.Errorf("%w: found %s, require %s or later", errCLITooOld, version, minimumACPCLIVersion)
 	}
+	help, err := probeCLIACPHelp(ctx, cliPath, helpProbe)
+	if err != nil {
+		return nil, err
+	}
+	if !hasWorkerModeFlag(help) {
+		return nil, errCLIWorkerModeUnsupported
+	}
 	return &LocalRuntime{
 		Variant: acpcompat.AntigravityRuntimeCLI,
-		Args:    []string{cliPath, "acp"},
+		Args:    []string{cliPath, "acp", workerModeFlag},
 		Version: version,
 	}, nil
+}
+
+func probeCLIACPHelp(
+	ctx context.Context,
+	path string,
+	probe func(context.Context, string) (string, error),
+) (string, error) {
+	helpCtx, cancel := context.WithTimeout(ctx, acpHelpTimeout)
+	defer cancel()
+	var (
+		output string
+		err    error
+	)
+	if probe != nil {
+		output, err = probe(helpCtx, path)
+	} else {
+		output, err = (hostcli.ExecRunner{}).Output(helpCtx, []string{path, "acp", "--help"})
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if errors.Is(helpCtx.Err(), context.DeadlineExceeded) {
+		return "", fmt.Errorf("antigravity CLI ACP help check timed out after %s", acpHelpTimeout)
+	}
+	if err != nil {
+		return "", fmt.Errorf("antigravity CLI ACP help check failed: %w", err)
+	}
+	return output, nil
+}
+
+func hasWorkerModeFlag(output string) bool {
+	inDeclarations := false
+	for _, line := range strings.Split(output, "\n") {
+		declaration := strings.TrimSpace(line)
+		if strings.HasSuffix(declaration, ":") && !strings.HasPrefix(declaration, "-") {
+			inDeclarations = declaration == "Flags:" || declaration == "Options:"
+			continue
+		}
+		if !inDeclarations {
+			continue
+		}
+		fields := strings.Fields(declaration)
+		if len(fields) == 0 {
+			continue
+		}
+		option := strings.Trim(fields[0], "[]{}()<>,;:'\"`")
+		if option == workerModeFlag || strings.HasPrefix(option, workerModeFlag+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveStandalone(ctx context.Context, opts ResolveOptions, cliErr error) (*LocalRuntime, error) {

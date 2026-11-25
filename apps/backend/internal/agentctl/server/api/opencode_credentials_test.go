@@ -41,7 +41,7 @@ func TestOpenCodeCredentialIdentityCapability(t *testing.T) {
 func configureCredentialFixture(server *Server, args []string, env map[string]string) error {
 	env["PATH"] = os.Getenv("PATH")
 	runtime := opencode.Runtime{Family: opencode.FamilyV2, Source: opencode.SourceManaged, Version: "2.1.2"}
-	return server.procMgr.ConfigureRuntime("", args[3:], true, env, "", nil, false, false, nil, nil, runtime, launchwrapper.Profile(args[:3]))
+	return server.procMgr.ConfigureRuntime("", args[3:], true, env, "", nil, false, false, false, nil, nil, runtime, launchwrapper.Profile(args[:3]))
 }
 
 func credentialFixtureAccountsPath(home, store string) string {

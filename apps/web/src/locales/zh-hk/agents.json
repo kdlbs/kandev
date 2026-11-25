@@ -60,6 +60,8 @@
   "cursorMcpSelectionTitle": "代理程式 MCP 選擇",
   "cursorMcpSelectionDescription": "選擇此設定在下次啓動時使用的已啓用原生 MCP 伺服器。",
   "refreshMcpDiscovery": "刷新發現結果",
+  "copilotLongContextFlag": "長上下文",
+  "copilotLongContextFlagDescription": "為使用受支援模型的新工作階段請求更大的上下文窗口。可能消耗更多 AI 積分。",
   "copilotPluginsTitle": "外掛程式",
   "copilotPluginsDescription": "為此設定載入完整外掛程式。外掛程式可以執行 MCP 伺服器、技能、代理、命令、鈎子和其他可執行組件。所選外掛程式會新增到 Copilot 的原生載入中，因此 Copilot 仍可載入其他已啓用的外掛程式。",
   "copilotPluginsScopeNote": "僅限本地和工作樹執行器。選擇會在下一個程序啓動時生效。正在執行的程序保留原有外掛程式。",

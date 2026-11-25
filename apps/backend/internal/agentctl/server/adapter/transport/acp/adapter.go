@@ -239,7 +239,8 @@ type Adapter struct {
 	// During load, we capture the last Plan so we can re-emit it after load completes.
 	// AvailableCommandsUpdate is NOT suppressed — it may arrive after the replay as a
 	// "ready" signal, and the last one always wins in the frontend.
-	isLoadingSession bool
+	isLoadingSession    bool
+	copilotInterruption copilotInterruptionState
 	// Session creation buffers startup reports until the provider's returned ID is bound.
 	sessionCreationPending        bool
 	pendingSessionStartupWarnings []AgentEvent
@@ -267,6 +268,7 @@ type Adapter struct {
 	// on turn end / reset (clearCursorTaskMetaLocked), so it never outlives the
 	// turn that produced it.
 	cursorTaskMetaBySession map[string]map[string]cursorTaskMeta
+	cursorShellWatches      map[string]cursorShellWatch
 	// toolCallParents preserves nested tool lineage while a handed-off
 	// predecessor continues streaming beside its human successor.
 	toolCallParents map[string]string
@@ -606,6 +608,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		contextCompactions:                make(map[string]*streams.NormalizedPayload),
 		openCodePluginClaims:              make(map[string]opencodeplugin.Claim),
 		cursorTaskMetaBySession:           make(map[string]map[string]cursorTaskMeta),
+		cursorShellWatches:                make(map[string]cursorShellWatch),
 		toolCallParents:                   make(map[string]string),
 		handoffProtectedToolCalls:         make(map[string]struct{}),
 		activeMonitors:                    make(map[string]map[string]string),
@@ -1007,6 +1010,8 @@ func (a *Adapter) Close() error {
 		return nil
 	}
 	a.closed = true
+	clear(a.cursorShellWatches)
+	a.clearCopilotInterruptionLocked()
 	if a.closedCh != nil {
 		close(a.closedCh)
 	}

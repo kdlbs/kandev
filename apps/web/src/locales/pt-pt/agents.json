@@ -54,6 +54,8 @@
   "cursorMcpSelectionTitle": "Seleção MCP do agente",
   "cursorMcpSelectionDescription": "Escolha os servidores MCP nativos ativados que este perfil usará no próximo arranque.",
   "refreshMcpDiscovery": "Atualizar descoberta",
+  "copilotLongContextFlag": "Contexto longo",
+  "copilotLongContextFlagDescription": "Pedir uma janela de contexto maior para novas sessões em modelos compatíveis. Pode consumir mais créditos de IA.",
   "copilotPluginsTitle": "Plugins",
   "copilotPluginsDescription": "Carregue plugins completos para este perfil. Um plugin pode executar servidores MCP, competências, agentes, comandos, hooks e outros componentes executáveis. Os plugins selecionados são adicionados ao carregamento nativo do Copilot, pelo que o Copilot continua a poder carregar outros plugins ativados.",
   "copilotPluginsScopeNote": "Apenas executores locais e worktree. As seleções aplicam-se quando o próximo processo iniciar. Um processo em execução mantém os plugins originais.",

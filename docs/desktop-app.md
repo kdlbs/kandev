@@ -54,6 +54,8 @@ Those channels are separate from desktop installers, even though all release art
 
 Desktop apps launched from an OS app launcher may not inherit the same shell initialization as a terminal. Kandev preserves available environment variables and adds common user binary directories such as `/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin`, `/bin`, `~/.local/bin`, and common agent install directories.
 
+On macOS, Kandev also reads `~/.nvm/alias/default`. It accepts `node` and numeric versions with one to three components, such as `22`, `22.9`, or `v22.9.0`. For `node` or a partial version, Kandev selects the highest matching installed version. An exact version selects its own directory. Kandev appends that version's `bin` directory after other common PATH entries only when it contains executable `node`, `npm`, and `npx`.
+
 If an agent CLI is not discoverable from the desktop app:
 
 - Set the agent profile command to the full executable path.
