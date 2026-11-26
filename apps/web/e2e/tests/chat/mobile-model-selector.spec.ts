@@ -28,11 +28,16 @@ type E2ESessionModels = {
   >;
 };
 
-async function seedAndOpenTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
+async function seedAndOpenTask(
+  testPage: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+  agentProfileId = seedData.agentProfileId,
+) {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     "Mobile Model Selector",
-    seedData.agentProfileId,
+    agentProfileId,
     {
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
@@ -107,6 +112,62 @@ async function seedLongReasoningMenu(testPage: Page, sessionId: string) {
 
 test.describe("Mobile chat model selector", () => {
   test.describe.configure({ timeout: 60_000 });
+
+  test("Antigravity arch loads from the logo API in the phone model picker", async ({
+    backend,
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(90_000);
+    const restoreBackend = await backend.useEnv({ KANDEV_E2E_MOCK_ANTIGRAVITY: "true" });
+    try {
+      const { agents } = await apiClient.listAgents();
+      const agent = agents.find((candidate) => candidate.name === "antigravity-acp");
+      if (!agent) throw new Error("Antigravity agent is not available in the E2E registry");
+      const profile = await apiClient.createAgentProfile(agent.id, "Antigravity logo phone", {
+        model: "mock-fast",
+        cli_flags: [],
+      });
+      await testPage.addInitScript((theme) => localStorage.setItem("theme", theme), "light");
+      const logoResponsePromise = testPage.waitForResponse((response) =>
+        response.url().includes("/api/v1/agents/antigravity-acp/logo?variant=light"),
+      );
+      await seedAndOpenTask(testPage, apiClient, seedData, profile.id);
+
+      const logoResponse = await logoResponsePromise;
+      expect(logoResponse.status()).toBe(200);
+      expect(logoResponse.headers()["content-type"]).toContain("image/svg+xml");
+      const trigger = testPage
+        .getByTestId("mobile-chat-toolbar-left-actions")
+        .getByTestId("model-config-trigger");
+      await expect(trigger).toContainText("Mock Fast");
+      const icon = trigger.getByTestId("model-provider-icon");
+      const image = icon.locator("img");
+      await expect(image).toBeVisible();
+      await expect
+        .poll(() => image.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+        .toBeGreaterThan(0);
+      expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+
+      await trigger.tap();
+      const pickerIcon = testPage
+        .locator("[cmdk-group-heading]")
+        .getByTestId("model-provider-icon");
+      await expect(pickerIcon.locator("img")).toBeVisible();
+      await expect(testPage.getByRole("option", { name: /Mock Smart/ })).toBeVisible();
+      await prCapture.screenshot("antigravity-logo-phone", {
+        caption: "Antigravity arch in the phone composer model picker",
+      });
+      const viewport = testPage.viewportSize()!;
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(viewport.width);
+    } finally {
+      await restoreBackend();
+    }
+  });
 
   test("keeps model settings open after a persisted touch selection", async ({
     testPage,

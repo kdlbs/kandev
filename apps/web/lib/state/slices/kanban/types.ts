@@ -110,6 +110,7 @@ export type KanbanState = {
     /** Card identifier (e.g. "KAN-42"); shown in place of the title where the UI calls for it. */
     identifier?: string;
     description?: string;
+    flagNote?: string;
     autopilot?: boolean;
     priority?: TaskPriority;
     origin?: TaskOrigin | string;

@@ -258,8 +258,9 @@ type Adapter struct {
 
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
-	activeToolCalls    map[string]*streams.NormalizedPayload
-	contextCompactions map[string]*streams.NormalizedPayload
+	activeToolCalls                map[string]*streams.NormalizedPayload
+	antigravityPermissionToolNames map[permissionToolNameKey]permissionToolName
+	contextCompactions             map[string]*streams.NormalizedPayload
 	// cursorTaskMetaBySession stores Cursor's non-standard `cursor/task`
 	// metadata until the matching subagent tool_call appears, keyed by session
 	// then wire tool-call ID. An entry is drained either when its tool_call
@@ -604,6 +605,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:                         make(chan AgentEvent, 100),
 		notifQueue:                        make(chan notifWork, notifQueueCapacity),
 		activeToolCalls:                   make(map[string]*streams.NormalizedPayload),
+		antigravityPermissionToolNames:    make(map[permissionToolNameKey]permissionToolName),
 		contextCompactions:                make(map[string]*streams.NormalizedPayload),
 		openCodePluginClaims:              make(map[string]opencodeplugin.Claim),
 		cursorTaskMetaBySession:           make(map[string]map[string]cursorTaskMeta),

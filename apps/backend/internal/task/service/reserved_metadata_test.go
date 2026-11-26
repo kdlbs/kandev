@@ -26,6 +26,36 @@ func TestCreateTaskRefusesReservedMetadataKey(t *testing.T) {
 	}
 }
 
+func TestCreateTaskRefusesInterruptedOwnershipMetadata(t *testing.T) {
+	for _, allowed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary", true: "reserved_allowed"}[allowed], func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-interruption-create")
+			_, err := svc.CreateTask(ctx, &CreateTaskRequest{
+				WorkspaceID: "ws-interruption-create",
+				WorkflowID:  wfID,
+				Title:       "Task",
+				Metadata: map[string]interface{}{
+					models.MetaKeyInterruptedAt: "2026-11-25T10:00:00Z",
+					models.MetaKeyInterruptedSessions: map[string]interface{}{
+						"session-forged": map[string]interface{}{
+							"incarnation_id": "forged-incarnation",
+							"interrupted_at": "2026-11-25T10:00:00Z",
+							"token":          "forged-token",
+						},
+					},
+					models.MetaKeyLegacyInterruptedAt: "2026-11-25T10:00:00Z",
+				},
+				AllowReservedMetadata: allowed,
+			})
+			if !errors.Is(err, ErrReservedMetadata) {
+				t.Fatalf("CreateTask error = %v, want ErrReservedMetadata", err)
+			}
+		})
+	}
+}
+
 func TestCreateTaskAllowsReservedMetadataKeyWhenFlagged(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -92,14 +122,31 @@ func TestUpdateTaskReservedMetadata(t *testing.T) {
 
 func TestProtectedTaskMetadataUpdatePreservesOnlyReservedKeys(t *testing.T) {
 	updated := models.ProtectedTaskMetadataUpdate(
-		map[string]interface{}{"b": 2, testBindingKey: "x"},
-		map[string]interface{}{"a": 1},
+		map[string]interface{}{
+			"b": 2, testBindingKey: "x",
+			models.MetaKeyInterruptedAt: "projection",
+			models.MetaKeyInterruptedSessions: map[string]interface{}{
+				"session-1": map[string]interface{}{"token": "private-1"},
+			},
+			models.MetaKeyLegacyInterruptedAt: "legacy-private",
+		},
+		map[string]interface{}{
+			"a":                               1,
+			models.MetaKeyInterruptedSessions: map[string]interface{}{"forged": true},
+			models.MetaKeyLegacyInterruptedAt: "forged-legacy",
+		},
 	)
 	if _, ok := updated["b"]; ok {
 		t.Fatal("ordinary key must not be restored")
 	}
 	if updated[testBindingKey] != "x" {
 		t.Fatal("reserved key must be restored")
+	}
+	if updated[models.MetaKeyInterruptedSessions].(map[string]interface{})["session-1"] == nil {
+		t.Fatal("scoped interruption ownership must come from current metadata")
+	}
+	if updated[models.MetaKeyLegacyInterruptedAt] != "legacy-private" {
+		t.Fatal("legacy interruption ownership must come from current metadata")
 	}
 }
 

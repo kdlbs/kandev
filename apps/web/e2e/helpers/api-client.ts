@@ -3233,6 +3233,7 @@ export class ApiClient {
     primary_session_id?: string | null;
     primary_executor_type?: string | null;
     state?: string;
+    interrupted?: boolean;
     workflow_step_id?: string;
     workflow_agent_overrides?: WorkflowAgentOverrides;
     wip_admitted?: boolean;

@@ -82,6 +82,20 @@ func isMonitorMeta(meta map[string]any) bool {
 	return name == monitorToolName
 }
 
+// isTaskStopMeta recognizes Claude Code's TaskStop tool by its ACP dialect
+// metadata. The caller still gates settlement to Claude and the controlled mock.
+func isTaskStopMeta(meta map[string]any) bool {
+	if meta == nil {
+		return false
+	}
+	cc, ok := meta["claudeCode"].(map[string]any)
+	if !ok {
+		return false
+	}
+	name, _ := cc["toolName"].(string)
+	return name == "TaskStop"
+}
+
 // recognizeMonitorTaskCall inspects a `tool_call` notification's metadata and
 // rawInput. Returns the watched command (best-effort) when the call is a
 // Monitor invocation, plus true. Used during replay to seed activeMonitors
@@ -120,6 +134,32 @@ func monitorCommandFromPayload(payload *streams.NormalizedPayload) string {
 	}
 	cmd, _ := rawInput["command"].(string)
 	return cmd
+}
+
+func monitorTitleFromPayload(payload *streams.NormalizedPayload) string {
+	if description := monitorDescriptionFromPayload(payload); description != "" {
+		return description
+	}
+	if command := strings.TrimSpace(monitorCommandFromPayload(payload)); command != "" {
+		return command
+	}
+	return monitorToolName
+}
+
+func monitorDescriptionFromPayload(payload *streams.NormalizedPayload) string {
+	if payload == nil || payload.Generic() == nil {
+		return ""
+	}
+	args, _ := payload.Generic().Input.(map[string]any)
+	if args == nil {
+		return ""
+	}
+	rawInput, _ := args["raw_input"].(map[string]any)
+	if rawInput == nil {
+		rawInput = args
+	}
+	description, _ := rawInput["description"].(string)
+	return strings.TrimSpace(description)
 }
 
 func validMonitorCommandFromPayload(payload *streams.NormalizedPayload) (string, bool) {

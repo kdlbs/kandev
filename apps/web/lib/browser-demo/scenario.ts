@@ -1485,6 +1485,7 @@ export function createWorkflowSnapshot(tasks: Task[], workflow: Workflow, steps:
         workflowStepId: task.workflow_step_id,
         title: task.title,
         description: task.description,
+        flagNote: task.flag_note,
         position: task.position,
         state: task.state,
         repositoryId: DEMO_IDS.repository,

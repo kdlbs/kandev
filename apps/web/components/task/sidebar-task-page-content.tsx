@@ -1,5 +1,6 @@
 import type { ComponentProps, RefObject } from "react";
 import type { useSidebarTaskPage } from "@/hooks/domains/kanban/use-sidebar-task-page";
+import { TaskFlagEditorProvider } from "./task-flag-editor-provider";
 import { TaskSwitcher } from "./task-switcher";
 import { SidebarTaskQueryStatus } from "./sidebar-task-query-status";
 import { SidebarTaskPagination } from "./sidebar-task-pagination";
@@ -16,7 +17,7 @@ export function SidebarTaskPageContent({
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   return (
-    <>
+    <TaskFlagEditorProvider>
       {!workspaceContextError && (
         <SidebarTaskQueryStatus
           error={page.error}
@@ -36,6 +37,6 @@ export function SidebarTaskPageContent({
           page.goToPage(nextPage, () => scrollRef.current?.scrollTo({ top: 0 }))
         }
       />
-    </>
+    </TaskFlagEditorProvider>
   );
 }

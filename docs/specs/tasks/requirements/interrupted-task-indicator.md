@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-02
-updated: 2026-09-21
+updated: 2026-11-25
 owners:
   - kandev
 ---
@@ -11,19 +11,15 @@ owners:
 
 ## Overview
 
-A backend restart can interrupt work while preserving its conversation for recovery.
-Users must be able to identify affected tasks until their agents resume.
-The task system owns the durable interruption marker and its visible lifecycle.
-
-This revision changes the existing red error-style circle to a warning triangle.
-It also prevents a failed resume attempt from erasing the interruption marker.
-Implementation belongs to the [recovery package](../../../plans/orphaned-session-open-recovery/plan.md).
+A backend restart can interrupt work while preserving its conversation. An
+agent can restore the conversation and wait for another message. Users must be
+able to identify tasks with interrupted work that still needs attention.
 
 ## Requirements
 
 ### REQ-TASKS-INTERRUPTED-TASK-INDICATOR-001: Interrupted task warning
 
-**Intent:** Show which tasks lost running work to a restart until recovery succeeds.
+**Intent:** Show which tasks still need to continue work interrupted by a restart.
 
 - **AC-TASKS-INTERRUPTED-TASK-INDICATOR-001.1:** Superseded by criteria
   001.2 through 001.7. The previous migrated criterion required a red alert
@@ -32,14 +28,13 @@ Implementation belongs to the [recovery package](../../../plans/orphaned-session
   interrupted starting or running work, the system shall retain a durable
   interruption marker on its unarchived task. Idle conversations and executions
   that survived the restart shall not gain that marker.
-- **AC-TASKS-INTERRUPTED-TASK-INDICATOR-001.3:** Unresumed interrupted tasks
-  shall show a warning triangle in the sidebar and task card. The shared
-  interruption indicator shall use the existing warning color instead of error red.
-  Its accessible label shall remain "Interrupted by restart".
+- **AC-TASKS-INTERRUPTED-TASK-INDICATOR-001.3:** Interrupted tasks that still
+  need continuation shall show an amber warning triangle in the sidebar and
+  task card. Its accessible label shall be "Interrupted by restart".
 - **AC-TASKS-INTERRUPTED-TASK-INDICATOR-001.4:** Opening Kandev, focusing a
-  task, or accepting a resume request shall not clear the marker. Failed,
-  cancelled, or blocked recovery attempts shall preserve it. Successful agent
-  recovery shall clear it and update visible task surfaces without a reload.
+  task, or restoring a conversation without a prompt shall preserve the
+  warning. A failed, cancelled, or blocked recovery shall preserve it.
+  Criterion 001.8 replaces the previous provider-ready clearing rule.
 - **AC-TASKS-INTERRUPTED-TASK-INDICATOR-001.5:** The marker shall survive
   reload, reconnect, repeated restart, and updates that omit interruption state.
   A stale callback shall not clear a newer interruption marker.
@@ -51,20 +46,28 @@ Implementation belongs to the [recovery package](../../../plans/orphaned-session
   remain. Temporary startup progress shall not erase the durable warning.
   Failed recovery shall leave the interruption state available alongside the
   actual recovery error. Explicit failure and cancellation icons remain unchanged.
+- **AC-TASKS-INTERRUPTED-TASK-INDICATOR-001.8:** When the agent accepts a new
+  prompt for an interrupted session, Kandev shall resolve that interruption.
+  A prompt that is only queued, refused, or has an unknown delivery outcome
+  shall preserve the warning. The task status shall update without a reload.
+- **AC-TASKS-INTERRUPTED-TASK-INDICATOR-001.9:** If at least one interrupted
+  session still needs continuation, the task shall retain its warning.
+  Continuing or deleting one interrupted session shall resolve only that
+  session's interruption. A prompt in a healthy sibling session shall preserve
+  the warning.
+- **AC-TASKS-INTERRUPTED-TASK-INDICATOR-001.10:** When an existing warning lacks
+  a session owner, Kandev shall retain it until the task next accepts a prompt.
 
 ## Boundaries
 
-Recovery follows [the interruption contract](restart-orphaned-session-terminalization.md).
-The warning does not cancel work, start an agent, replay a prompt, or advance
-its workflow. Successful recovery can clear the warning before a new message
-arrives; restoring the agent and continuing work are separate actions.
-
-No new task state, manual dismiss action, or Office dashboard behavior is added.
-Reuse the existing marker and translated label. This is a task-owned indicator,
-not a separate UI-owned requirement.
+The warning follows [the interruption contract](restart-orphaned-session-terminalization.md).
+Scope covers the warning lifecycle and its existing task surfaces. Agent startup,
+prompt replay policy, workflow transitions, and Office dashboard behavior belong
+to their respective contracts.
 
 ## Related
 
 - [System design](../system-design/interrupted-task-indicator.md)
+- [Implementation plan](../../../plans/interrupted-task-warning-continuation/plan.md)
 - [Task recovery design](../system-design/restart-orphaned-session-terminalization.md)
 - [Sidebar task completion icons](../../ui/requirements/sidebar-task-completion-icons.md)

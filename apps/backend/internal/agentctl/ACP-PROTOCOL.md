@@ -45,6 +45,15 @@ boundary, and additional `__` sequences in the tool suffix. This prevents a
 server such as `kandev__external` from being read as the reserved `kandev`
 server. Tool names with these ambiguous forms keep the pending flow.
 
+Antigravity CLI uses the typed `mcp_kandev_<tool>` name observed in tool-call
+notifications. The adapter scopes notification correlation to the Antigravity
+CLI runtime and requires both the native session ID and tool-call ID to match
+when `session/request_permission` omits the name. The process manager resolves
+the alias only against the live Core tool catalog and the exact injected
+endpoint. A configured server whose name can also parse from the alias makes
+the identity ambiguous and keeps the request pending. Other Antigravity
+runtimes do not use this alias rule.
+
 ### ACP frame debug logging (`adapter/transport/shared/acplog.go`)
 
 When `KANDEV_DEBUG_AGENT_MESSAGES=true` (on by default in the **dev** profile), the ACP adapter dumps every raw + normalized frame to **per-session** JSONL files:

@@ -105,14 +105,29 @@ func (m *Manager) resolveInjectedKandevPermission(req *adapter.PermissionRequest
 	}
 	server, tool, parsed := types.ParseQualifiedMCPToolName(*req.ToolName)
 	if !parsed {
+		server, tool, parsed = m.resolveAntigravityMCPToolAlias(*req.ToolName)
+	}
+	if !parsed {
 		return "", "", adapter.PermissionOption{}, false
+	}
+	if server == injectedKandevMCPServerName && m.usesAntigravityCLI() {
+		nativeNames, inventoryKnown := m.antigravityMCPInventorySnapshot()
+		flattenedName := "mcp_" + server + "_" + tool
+		if !inventoryKnown || !m.antigravityMCPRegistrationIsUnambiguous(flattenedName, nativeNames) {
+			return "", "", adapter.PermissionOption{}, false
+		}
 	}
 	if m.cfg.McpProfile != nil && m.cfg.McpProfile.BuiltinPackages != nil {
 		if !m.builtinPermissionAllowed(server, tool) {
 			return "", "", adapter.PermissionOption{}, false
 		}
-	} else if server != injectedKandevMCPServerName {
-		return "", "", adapter.PermissionOption{}, false
+	} else {
+		if server != injectedKandevMCPServerName {
+			return "", "", adapter.PermissionOption{}, false
+		}
+		if m.cfg.AgentType == acpcompat.AntigravityAgentID && !slices.Contains(m.liveCoreToolNames(), tool) {
+			return "", "", adapter.PermissionOption{}, false
+		}
 	}
 	option, ok = injectedKandevPermissionOption(req.Options)
 	if !ok {
@@ -121,25 +136,34 @@ func (m *Manager) resolveInjectedKandevPermission(req *adapter.PermissionRequest
 	return server, tool, option, true
 }
 
+func (m *Manager) usesAntigravityCLI() bool {
+	return m != nil && m.cfg != nil && m.cfg.AgentType == acpcompat.AntigravityAgentID &&
+		m.cfg.AuthPolicy != nil && m.cfg.AuthPolicy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI
+}
+
 func injectedKandevMCPConfigured(cfg *config.InstanceConfig) bool {
 	for _, server := range cfg.McpServers {
-		if server.Name != injectedKandevMCPServerName || server.Command != "" || len(server.Args) != 0 || len(server.Env) != 0 || len(server.Headers) != 0 {
-			continue
-		}
-		switch server.Type {
-		case "http":
-			wantURL, err := config.MCPServerURLForInstance(cfg.MCPHost, cfg.Port, cfg.InstanceID, cfg.ScopedMCPRoutes, "/mcp")
-			if err == nil && server.URL == wantURL {
-				return true
-			}
-		case "sse":
-			wantURL, err := config.MCPServerURLForInstance(cfg.MCPHost, cfg.Port, cfg.InstanceID, cfg.ScopedMCPRoutes, "/sse")
-			if err == nil && server.URL == wantURL {
-				return true
-			}
+		if injectedKandevMCPServerMatches(cfg, server) {
+			return true
 		}
 	}
 	return false
+}
+
+func injectedKandevMCPServerMatches(cfg *config.InstanceConfig, server config.McpServerConfig) bool {
+	if cfg == nil || server.Name != injectedKandevMCPServerName || !builtinEndpointOnly(server) {
+		return false
+	}
+	switch server.Type {
+	case "http":
+		wantURL, err := config.MCPServerURLForInstance(cfg.MCPHost, cfg.Port, cfg.InstanceID, cfg.ScopedMCPRoutes, "/mcp")
+		return err == nil && server.URL == wantURL
+	case "sse":
+		wantURL, err := config.MCPServerURLForInstance(cfg.MCPHost, cfg.Port, cfg.InstanceID, cfg.ScopedMCPRoutes, "/sse")
+		return err == nil && server.URL == wantURL
+	default:
+		return false
+	}
 }
 
 func injectedKandevPermissionOption(options []adapter.PermissionOption) (adapter.PermissionOption, bool) {
