@@ -182,26 +182,31 @@ func (h *Health) checkRuntime(ctx context.Context) (deferred bool, err error) {
 func (h *Health) checkRuntimeDetailed(
 	ctx context.Context,
 ) (deferred bool, diagnostic *probeFailureDiagnostic, err error) {
-	deferred, result, err := h.probeRuntime(ctx)
+	deferred, result, release, err := h.probeRuntime(ctx)
+	if release != nil {
+		defer release()
+	}
 	if deferred || err != nil {
 		return deferred, result.diagnostic, err
 	}
 	return false, result.diagnostic, h.record(result)
 }
 
-func (h *Health) probeRuntime(ctx context.Context) (deferred bool, result probeResult, err error) {
+func (h *Health) probeRuntime(
+	ctx context.Context,
+) (deferred bool, result probeResult, release func(), err error) {
 	if h.isSQLite() {
-		release, ok := maintenance.ForPool(h.pool).TryAcquire()
+		var ok bool
+		release, ok = maintenance.ForPool(h.pool).TryAcquire()
 		if !ok {
 			if h.log != nil {
 				h.log.Debug("required persistence probe deferred during database maintenance")
 			}
-			return true, probeResult{}, nil
+			return true, probeResult{}, nil, nil
 		}
-		defer release()
 	}
 	result, err = h.probe(ctx)
-	return false, result, err
+	return false, result, release, err
 }
 
 func (h *Health) shouldConfirm(result probeResult) bool {
@@ -443,22 +448,28 @@ func (h *Health) run(ctx context.Context, interval time.Duration, done chan stru
 				return
 			}
 			checkCtx, cancel := context.WithTimeout(ctx, probeTimeout)
-			deferred, result, err := h.probeRuntime(checkCtx)
+			deferred, result, release, err := h.probeRuntime(checkCtx)
 			cancel()
 			if deferred {
 				continue
 			}
 			if err != nil {
+				if release != nil {
+					release()
+				}
 				h.logProbeFailure(result.diagnostic)
 				continue
 			}
 			if h.shouldConfirm(result) {
+				if release != nil {
+					release()
+				}
 				h.logUnconfirmedDeadline(result.diagnostic)
 				if !waitForConfirmation(ctx, h.confirmationDelayDuration()) {
 					return
 				}
 				confirmCtx, confirmCancel := context.WithTimeout(ctx, probeTimeout)
-				deferred, result, err = h.probeRuntime(confirmCtx)
+				deferred, result, release, err = h.probeRuntime(confirmCtx)
 				confirmCancel()
 				if deferred {
 					continue
@@ -466,6 +477,9 @@ func (h *Health) run(ctx context.Context, interval time.Duration, done chan stru
 			}
 			if err == nil {
 				err = h.record(result)
+			}
+			if release != nil {
+				release()
 			}
 			if err != nil {
 				h.logProbeFailure(result.diagnostic)

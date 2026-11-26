@@ -29,7 +29,7 @@ before warning. After a warning, let a later live update restart recovery once s
 
 - Schedule selection in `lib/sidebar/sidebar-task-page-recovery.ts`: default 5 attempts / 30 s;
   sustained 9 attempts with delays 2, 5, 10, 10, 20, 30, 30, 30 s / 150 s, via the clock's `budgetMs`.
-- `hasRetainedRows` request option, passed from `beginSidebarLoad` when the hook has a displayed page for the view.
+- `hasRetainedRows` request option, passed from `beginSidebarLoad` for a matching displayed response or cached first page.
 - `RecoveryRecord.exhaustedAt` and the sixty-second background cooldown in `SidebarTaskPageCache.admit()`;
   disclosure-sync exhaustion keeps its explicit-Retry-only latch.
 - Update the sidebar paragraph in `apps/web/AGENTS.md` to the new schedule and admission rule.
@@ -107,7 +107,7 @@ None.
 
 ## Results
 
-- The specified Vitest suites passed: 8 files, 92 tests, including cooldown boundaries for both cold loads and retained-row reads.
+- The specified Vitest suites passed: 8 files, 93 tests, including cached-page remount recovery and cooldown boundaries for cold loads and retained-row reads.
 - `pnpm run typecheck` and `pnpm run lint` passed.
 - `pnpm --filter @kandev/web build:e2e` passed.
 - The backend E2E app and host fixtures built with `make build-kandev` and `make build-mock-agent build-e2e-delivery-fixture build-e2e-send-now-fixture e2e-plugin-package`.

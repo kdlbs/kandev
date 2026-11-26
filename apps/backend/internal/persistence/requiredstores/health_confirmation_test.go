@@ -307,3 +307,34 @@ func TestHealthConfirmsOnlyHealthyDeadlineOnlyResults(t *testing.T) {
 		t.Fatal("already unhealthy stores should not wait for confirmation")
 	}
 }
+
+func TestRuntimeHealthRecordsBeforeMaintenanceCanStart(t *testing.T) {
+	_, pool, _, health := newHealthySQLiteHealth(t)
+	deferred, result, releaseProbe, err := health.probeRuntime(context.Background())
+	if deferred || err != nil {
+		t.Fatalf("runtime probe = deferred %v, err %v; want false, nil", deferred, err)
+	}
+	if releaseProbe == nil {
+		t.Fatal("SQLite probe did not retain maintenance admission")
+	}
+	t.Cleanup(releaseProbe)
+
+	if releaseMaintenance, ok := maintenance.ForPool(pool).TryAcquire(); ok {
+		releaseMaintenance()
+		t.Fatal("maintenance started before the runtime result was recorded")
+	}
+	if err := health.record(result); err != nil {
+		t.Fatalf("record the runtime probe result: %v", err)
+	}
+	releaseProbe()
+
+	releaseMaintenance, ok := maintenance.ForPool(pool).TryAcquire()
+	if !ok {
+		t.Fatal("maintenance could not start after the runtime result was recorded")
+	}
+	health.MarkUnavailable()
+	releaseMaintenance()
+	if health.Healthy() {
+		t.Fatal("maintenance did not leave health unavailable after recording its transition")
+	}
+}

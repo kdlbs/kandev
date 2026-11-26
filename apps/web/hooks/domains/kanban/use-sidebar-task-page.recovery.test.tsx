@@ -8,6 +8,7 @@ import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 
 const QUERY_REFRESH_FAILED: string = "sidebar:queryRefreshFailed";
 const PAGE_LOAD_FAILED: string = "sidebar:pageLoadFailed";
+const CACHED_PAGE_QUERY_KEY = "cached-page";
 
 const mocks = vi.hoisted(() => ({
   state: {
@@ -185,6 +186,29 @@ describe("useSidebarTaskPage quiet recovery", () => {
 });
 
 describe("useSidebarTaskPage retained-row recovery", () => {
+  it("keeps cached rows on the retained-row retry schedule after a hook remount", async () => {
+    vi.useFakeTimers();
+    vi.mocked(querySidebarTasks).mockResolvedValueOnce({
+      ...response(1, false, false),
+      query_key: CACHED_PAGE_QUERY_KEY,
+    });
+    const first = renderHook(() => useSidebarTaskPage("ws-1"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(first.result.current.response?.query_key).toBe(CACHED_PAGE_QUERY_KEY);
+    first.unmount();
+
+    vi.mocked(querySidebarTasks).mockRejectedValue(busy());
+    const remounted = renderHook(() => useSidebarTaskPage("ws-1"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(remounted.result.current.response?.query_key).toBe(CACHED_PAGE_QUERY_KEY);
+
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(remounted.result.current.error).toBeNull();
+    expect(remounted.result.current.response?.query_key).toBe(CACHED_PAGE_QUERY_KEY);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+    vi.useRealTimers();
+  });
+
   it("recovers a displayed page after a ninety-second outage without publishing the warning", async () => {
     vi.useFakeTimers();
     vi.mocked(querySidebarTasks)

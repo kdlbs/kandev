@@ -359,6 +359,7 @@ with delays of 2, 5, 10, and 10 seconds, inside thirty seconds of visible time.
 With eligible retained rows, it uses the sustained schedule: nine attempts, with delays of
 2, 5, 10, 10, 20, 30, 30, and 30 seconds, inside one hundred fifty seconds of visible time.
 `SidebarTaskPageCache.request` receives a `hasRetainedRows` option from the hook.
+A matching displayed response or first page loaded from cache sets this option when a cycle starts.
 A shared record uses the sustained schedule when any consumer that starts the cycle has retained rows.
 Consumers that join an active cycle do not change its schedule or budget.
 Reuse `TaskNavigationRecoveryClock` for each budget and for hidden-tab accounting.
