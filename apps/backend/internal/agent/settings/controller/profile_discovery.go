@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
@@ -297,6 +298,9 @@ func (c *Controller) resolveProfileProbeLaunchSettings(
 	cliTokens, err := cliflags.Resolve(profileFlags)
 	if err != nil {
 		return profileProbeLaunchSettings{}, ErrInvalidProfileDiscovery
+	}
+	if registered.ID() == agents.AntigravityACPAgentID {
+		cliTokens = antigravityruntime.FilterDangerouslySkipPermissionTokens(cliTokens)
 	}
 	prefixTokens, err := cliflags.Tokenise(commandPrefix)
 	if err != nil {

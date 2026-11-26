@@ -81,6 +81,54 @@ func TestAntigravityPermissionIdentityWaitUsesSessionAndCallBoundary(t *testing.
 	}
 }
 
+func TestAntigravityPermissionWaitsForIdentityAfterActiveCallRegistration(t *testing.T) {
+	a := newTestAdapterForAgent(acpcompat.AntigravityAgentID)
+	a.cfg.AuthPolicy = &acpcompat.AuthPolicy{RuntimeVariant: acpcompat.AntigravityRuntimeCLI}
+	key := permissionToolNameKey{sessionID: "session-1", toolCallID: "call-1"}
+	a.mu.Lock()
+	a.activeToolCalls[key.toolCallID] = &streams.NormalizedPayload{}
+	a.antigravityPermissionToolNames[key] = permissionToolName{}
+
+	waitCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	type waitResult struct {
+		tracked   bool
+		name      *string
+		ambiguous bool
+	}
+	waitDone := make(chan waitResult, 1)
+	waitStarted := make(chan struct{})
+	go func() {
+		close(waitStarted)
+		tracked, name, ambiguous := a.waitForAntigravityPermissionToolCall(waitCtx, key.sessionID, key.toolCallID, time.Second)
+		waitDone <- waitResult{tracked: tracked, name: name, ambiguous: ambiguous}
+	}()
+	<-waitStarted
+	a.mu.Unlock()
+
+	select {
+	case result := <-waitDone:
+		t.Fatalf("permission wait returned before identity publication: %+v", result)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	toolName := "mcp_kandev_step_complete_kandev"
+	a.mu.Lock()
+	a.trackAntigravityPermissionToolNameLocked(key.sessionID, &acpsdk.SessionUpdateToolCall{
+		ToolCallId: acpsdk.ToolCallId(key.toolCallID), Name: &toolName,
+	})
+	a.mu.Unlock()
+
+	select {
+	case result := <-waitDone:
+		if !result.tracked || result.name == nil || *result.name != toolName || result.ambiguous {
+			t.Fatalf("identity waiter result = %+v, want published identity", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("permission wait did not observe the published identity")
+	}
+}
+
 func TestAntigravityCallIdentityConflictSurvivesTypedName(t *testing.T) {
 	a := newTestAdapterForAgent(acpcompat.AntigravityAgentID)
 	a.cfg.AuthPolicy = &acpcompat.AuthPolicy{RuntimeVariant: acpcompat.AntigravityRuntimeCLI}

@@ -7,6 +7,7 @@ import {
 } from "./cli-flags-field-model";
 
 const skipPermissionsFlag = "--dangerously-skip-permissions";
+const modeWithValue = "--mode 'safe value'";
 
 describe("curated CLI flag choices", () => {
   it("treats any enabled exact match as enabled", () => {
@@ -23,6 +24,19 @@ describe("curated CLI flag choices", () => {
     expect(isCuratedFlagMatch("--profile", skipPermissionsFlag)).toBe(false);
   });
 
+  it("matches a curated flag with its separate value", () => {
+    const flags = [
+      { flag: modeWithValue, description: "custom mode", enabled: true },
+      { flag: "--verbose", description: "verbose", enabled: true },
+    ];
+
+    expect(isCuratedFlagMatch(flags[0].flag, modeWithValue)).toBe(true);
+    expect(setCuratedFlagEnabled(flags, modeWithValue, "mode", false)).toEqual([
+      { flag: "--verbose", description: "verbose", enabled: true },
+      { flag: modeWithValue, description: "custom mode", enabled: false },
+    ]);
+  });
+
   it("matches whitespace-padded curated rows consistently", () => {
     const paddedFlag = ` ${skipPermissionsFlag} `;
     const flags = [
@@ -35,6 +49,33 @@ describe("curated CLI flag choices", () => {
     expect(setCuratedFlagEnabled(flags, skipPermissionsFlag, "permission bypass", false)).toEqual([
       { flag: "--profile", description: "profile", enabled: true },
       { flag: skipPermissionsFlag, description: "legacy bypass", enabled: false },
+    ]);
+  });
+
+  it("matches quoted and bundled curated flag tokens and preserves unrelated arguments", () => {
+    const flags = [
+      {
+        flag: '"' + skipPermissionsFlag + '"',
+        description: "quoted permission mode",
+        enabled: true,
+      },
+      {
+        flag: "--verbose " + skipPermissionsFlag + " --profile 'two words'",
+        description: "bundled permission mode",
+        enabled: true,
+      },
+      { flag: "--profile", description: "profile", enabled: true },
+    ];
+
+    expect(curatedFlagEnabled(flags, skipPermissionsFlag, false)).toBe(true);
+    expect(setCuratedFlagEnabled(flags, skipPermissionsFlag, "permission bypass", false)).toEqual([
+      {
+        flag: "--verbose --profile 'two words'",
+        description: "bundled permission mode",
+        enabled: true,
+      },
+      { flag: "--profile", description: "profile", enabled: true },
+      { flag: skipPermissionsFlag, description: "bundled permission mode", enabled: false },
     ]);
   });
 

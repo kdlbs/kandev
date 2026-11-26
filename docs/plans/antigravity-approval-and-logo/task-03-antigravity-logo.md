@@ -49,6 +49,7 @@ The placeholder represents the reference SVG. [Full preview](plan.md#ui-02-compo
 
 ```bash
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/settings/handlers -run '^Test(AntigravityACP_LogosNonEmpty|GetAgentLogoEndpoint)$' -count=1)
+(cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm e2e:run --project chromium tests/chat/model-selector-provider-icon.spec.ts -- --grep 'Antigravity arch')
 (cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/chat/mobile-model-selector.spec.ts -- --grep 'Antigravity arch')
 ```
@@ -90,6 +91,7 @@ Verification passed:
 
 ```bash
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/settings/handlers -run '^Test(AntigravityACP_LogosNonEmpty|GetAgentLogoEndpoint)$' -count=1)
+(cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm e2e:run --project chromium tests/chat/model-selector-provider-icon.spec.ts -- --grep 'Antigravity arch')
 (cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/chat/mobile-model-selector.spec.ts -- --grep 'Antigravity arch')
 ```

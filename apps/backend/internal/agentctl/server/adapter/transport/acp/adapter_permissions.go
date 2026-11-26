@@ -19,6 +19,7 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	if sessionID == "" {
 		sessionID = fallbackSessionID
 	}
+	turn := a.currentPromptTurn()
 	var alreadyTracked bool
 	var observedName *string
 	var identityAmbiguous bool
@@ -49,10 +50,9 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	}
 
 	// Prefer session ID from the request; fall back to adapter-level session ID
-	if finish := a.beginContinuationPermission(sessionID, req.ToolCallID, req.Options); finish != nil {
+	if finish := a.beginContinuationPermission(turn, sessionID, req.ToolCallID, req.Options); finish != nil {
 		defer func() { finish(response, err) }()
 	}
-	turn := a.currentPromptTurn()
 	var capacityPermissionTracked bool
 	if sessionID == fallbackSessionID {
 		capacityPermissionTracked = true

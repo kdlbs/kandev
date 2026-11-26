@@ -108,7 +108,9 @@ renders off. Duplicate exact entries resolve to enabled if any row is enabled;
 save collapses them into one row and keeps unrelated flags. Apply the flag only
 after runtime selection for a supported CLI launch whose session policy permits
 blanket tool approval. Reuse that eligibility check for preview, model and
-profile inference, utilities, initial spawn, resume, and context reset. The
+profile inference, utilities, initial spawn, resume, and context reset. Persist
+the trusted MCP surface with launch metadata and restore it for context resets
+after backend recovery. Missing or invalid surface metadata omits the flag. The
 existing CLI Flags card serves desktop and phone. Follow the
 [injected MCP approval design](injected-mcp-approval.md).
 

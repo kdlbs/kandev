@@ -51,6 +51,9 @@ The correction covers Kandev Core on qualified CLI runtimes. Usual permission po
 ```bash
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/server/process -run '^Test(AntigravityInjectedKandevPermissionACPFlow|AntigravityHumanInputNeverAutoApproves|InjectedKandevPermissionACPFlow|InjectedKandevPermissionOptions|BuiltinPermissionRequiresRegisteredToolAndExactEndpoint|CoordinatorModeIgnoresBlanketApprovalAndGenericInjectedPolicy)$' -count=1)
 node scripts/validate-public-docs.mjs
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
 ```
 
 ## Files likely touched
@@ -87,13 +90,17 @@ checks. The ACP peer fixture covers fresh and resumed requests, including an
 omitted permission name, and preserves ordinary flow for shell, third-party,
 ambiguous, unknown, mismatched, and no-allow cases.
 
-The process manager scans the global and workspace `mcp_config.json` files and
-plugin MCP configs using the plugin manifest name rule. The ACP peer fixture
-configures `HOME`, creates native workspace and plugin registrations outside
-the Kandev-supplied server list, then uses production `NewManager` inventory
-loading. Both collisions remain pending. The positive fresh and resumed cases
+The process manager scans the global `mcp_config.json`, effective workspace
+customization roots through the nearest repository root, and plugin MCP
+configs using Antigravity's plugin namespace rule. A global or effective
+workspace `plugins.json` discovery manifest keeps inventory incomplete because
+it can reference plugin paths outside the scanned roots. Configs and plugin
+JSON manifests must be regular, non-symlink files no larger than 1 MiB. ACP
+peer fixtures create native workspace and plugin registrations outside the
+Kandev-supplied server list, then use production `NewManager` inventory
+loading. Both collisions remain pending. Positive fresh and resumed calls
 bind `BuiltinCatalog` from a real MCP server instance; legacy Core profiles
-also validate the actual registered tool names.
+verify the actual registered tool names.
 
 The retained session log has typed `mcp_kandev_<tool>` notifications with
 session and tool-call IDs, but it has no `session/request_permission` frame.
@@ -108,6 +115,9 @@ Verification passed:
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/server/process ./internal/agentctl/server/adapter/transport/acp ./internal/agent/antigravityruntime -run '^(TestAntigravityInjectedKandevPermissionACPFlow|TestAntigravityHumanInputNeverAutoApproves|TestInjectedKandevPermissionACPFlow|TestInjectedKandevPermissionOptions|TestBuiltinPermissionRequiresRegisteredToolAndExactEndpoint|TestCoordinatorModeIgnoresBlanketApprovalAndGenericInjectedPolicy|TestAntigravityCallIdentityPublishesWithActiveCall|TestAntigravityCallIdentityConflictSurvivesTypedName|TestAntigravityPermissionIdentityWaitUsesSessionAndCallBoundary|TestScanNativeMCPServerNames.*)$' -count=1)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
 ```
 
 Review follow-up validation also passed: the ACP identity regressions under

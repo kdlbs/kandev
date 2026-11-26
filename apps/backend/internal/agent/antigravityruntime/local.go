@@ -147,27 +147,18 @@ func RequireWorkerMode(args []string) []string {
 	if len(args) == 0 {
 		return nil
 	}
-	optionEnd := len(args)
 	workerEnabled := false
 	workerOptionIndex := -1
-	for index := 1; index < len(args); index++ {
-		argument := args[index]
-		if argument == "--" {
-			optionEnd = index
-			break
-		}
+	optionEnd := scanAntigravityOptionArguments(args, 1, func(index int, argument string) {
 		option, value, hasValue := strings.Cut(argument, "=")
 		if isAntigravityValueOption(option) {
-			if !hasValue && index+1 < len(args) {
-				index++
-			}
-			continue
+			return
 		}
 		if option == workerModeFlag {
 			workerEnabled = !hasValue || isTrueValue(value)
 			workerOptionIndex = index
 		}
-	}
+	})
 	if workerEnabled && workerOptionIndex == optionEnd-1 {
 		return slices.Clone(args)
 	}
@@ -188,6 +179,21 @@ func isAntigravityValueOption(option string) bool {
 	default:
 		return false
 	}
+}
+
+func scanAntigravityOptionArguments(args []string, start int, visit func(index int, argument string)) int {
+	for index := start; index < len(args); index++ {
+		argument := args[index]
+		if argument == "--" {
+			return index
+		}
+		visit(index, argument)
+		option, _, hasValue := strings.Cut(argument, "=")
+		if isAntigravityValueOption(option) && !hasValue && index+1 < len(args) {
+			index++
+		}
+	}
+	return len(args)
 }
 
 func isTrueValue(value string) bool {
@@ -314,27 +320,32 @@ func hasDeclaredACPFlag(output, flag string) bool {
 // FilterDangerouslySkipPermissions removes the provider-wide approval bypass
 // unless the selected CLI supports it and the caller's session policy allows it.
 func FilterDangerouslySkipPermissions(args []string, permitted bool) []string {
+	return filterDangerouslySkipPermissions(args, 1, permitted)
+}
+
+// FilterDangerouslySkipPermissionTokens strips the curated option from a profile-token list.
+func FilterDangerouslySkipPermissionTokens(tokens []string) []string {
+	return filterDangerouslySkipPermissions(tokens, 0, false)
+}
+
+func filterDangerouslySkipPermissions(args []string, start int, permitted bool) []string {
 	if permitted || len(args) == 0 {
 		return args
 	}
-	result := make([]string, 0, len(args))
-	for index := 0; index < len(args); index++ {
-		arg := args[index]
-		if arg == "--" {
-			result = append(result, args[index:]...)
-			return result
+	remove := make(map[int]struct{})
+	scanAntigravityOptionArguments(args, start, func(index int, argument string) {
+		option, _, _ := strings.Cut(argument, "=")
+		if option == dangerouslySkipPermissionsFlag {
+			remove[index] = struct{}{}
 		}
-		option, _, hasValue := strings.Cut(arg, "=")
-		if isAntigravityValueOption(option) {
-			result = append(result, arg)
-			if !hasValue && index+1 < len(args) {
-				index++
-				result = append(result, args[index])
-			}
-			continue
-		}
-		if arg != dangerouslySkipPermissionsFlag && !strings.HasPrefix(arg, dangerouslySkipPermissionsFlag+"=") {
-			result = append(result, arg)
+	})
+	if len(remove) == 0 {
+		return args
+	}
+	result := make([]string, 0, len(args)-len(remove))
+	for index, argument := range args {
+		if _, shouldRemove := remove[index]; !shouldRemove {
+			result = append(result, argument)
 		}
 	}
 	return result

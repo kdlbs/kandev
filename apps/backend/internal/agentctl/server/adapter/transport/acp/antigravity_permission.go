@@ -94,18 +94,15 @@ func (a *Adapter) waitForAntigravityPermissionToolCall(
 		a.mu.RLock()
 		identity, tracked := a.antigravityPermissionToolNames[key]
 		a.mu.RUnlock()
-		if tracked {
-			if identity.ambiguous {
-				return true, nil, true
-			}
-			if identity.name == "" {
-				return true, nil, false
-			}
+		if tracked && identity.ambiguous {
+			return true, nil, true
+		}
+		if tracked && identity.name != "" {
 			name := identity.name
 			return true, &name, false
 		}
 		if time.Now().After(deadline) {
-			return false, nil, false
+			return tracked, nil, false
 		}
 		select {
 		case <-ctx.Done():

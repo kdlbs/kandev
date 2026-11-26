@@ -62,16 +62,8 @@ func Provide(log *logger.Logger, codexAppServerEnabled ...bool) (*Registry, func
 			}
 			configureMockAgent(reg, agents.CopilotACPAgentID, log)
 		}
-		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
-			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_ANTIGRAVITY"), "true") {
-			// Browser coverage needs Antigravity's curated profile settings
-			// without requiring the native CLI or standalone server.
-			antigravity := agents.NewMockAgentWithID(agents.AntigravityACPAgentID, "Antigravity ACP Agent", "Antigravity")
-			antigravity.SetDisplayOrder(1003)
-			if err := reg.Register(antigravity); err != nil {
-				return nil, nil, err
-			}
-			configureMockAgent(reg, agents.AntigravityACPAgentID, log)
+		if err := registerAntigravityMockAgent(reg, log); err != nil {
+			return nil, nil, err
 		}
 		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
 			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_DEVIN"), "true") {
@@ -120,6 +112,21 @@ func Provide(log *logger.Logger, codexAppServerEnabled ...bool) (*Registry, func
 	reg.MarkLoaded()
 
 	return reg, func() error { return nil }, nil
+}
+
+func registerAntigravityMockAgent(reg *Registry, log *logger.Logger) error {
+	if !strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") ||
+		!strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_ANTIGRAVITY"), "true") {
+		return nil
+	}
+	// Browser coverage needs Antigravity's curated profile settings without a native install.
+	agent := agents.NewMockAgentWithID(agents.AntigravityACPAgentID, "Antigravity ACP Agent", "Antigravity")
+	agent.SetDisplayOrder(1003)
+	if err := reg.Register(agent); err != nil {
+		return err
+	}
+	configureMockAgent(reg, agents.AntigravityACPAgentID, log)
+	return nil
 }
 
 // validateMockProviders logs an error if any provider listed in the raw

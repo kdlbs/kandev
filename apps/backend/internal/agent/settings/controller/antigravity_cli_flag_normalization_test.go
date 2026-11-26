@@ -40,7 +40,7 @@ func TestAntigravityProfileCollapsesDuplicateSkipFlagAndAllowsTurningItOff(t *te
 			profile.CLIFlags = []models.CLIFlag{
 				{Flag: skipFlag, Enabled: false},
 				{Flag: "--profile-flag", Enabled: true},
-				{Flag: skipFlag, Enabled: true},
+				{Flag: "--verbose " + skipFlag, Enabled: true},
 			}
 		}
 	}
@@ -52,6 +52,7 @@ func TestAntigravityProfileCollapsesDuplicateSkipFlagAndAllowsTurningItOff(t *te
 	disabledFlags := []dto.CLIFlagDTO{
 		{Flag: skipFlag, Enabled: false},
 		{Flag: "--profile-flag", Enabled: true},
+		{Flag: "--verbose", Enabled: true},
 	}
 	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
 		ID: created.ID, CLIFlags: &disabledFlags,
@@ -69,16 +70,40 @@ func TestAntigravityProfileCollapsesDuplicateSkipFlagAndAllowsTurningItOff(t *te
 	if err != nil {
 		t.Fatalf("Resolve stored CLI flags: %v", err)
 	}
-	if slices.Contains(args, skipFlag) || !slices.Contains(args, "--profile-flag") {
-		t.Fatalf("effective launch args = %q, want skip flag off and unrelated flag retained", args)
+	if slices.Contains(args, skipFlag) || !slices.Contains(args, "--profile-flag") || !slices.Contains(args, "--verbose") {
+		t.Fatalf("effective launch args = %q, want skip flag off and unrelated flags retained", args)
+	}
+}
+
+func TestAntigravityProfileProbeStripsProviderWideApprovalFlag(t *testing.T) {
+	const skipFlag = "--dangerously-skip-permissions"
+	controller := newTestController(map[string]agents.Agent{
+		agents.AntigravityACPAgentID: agents.NewAntigravityACP(),
+	})
+	envVars := []dto.ProfileEnvVarDTO{}
+	cliFlags := []dto.CLIFlagDTO{
+		{Flag: skipFlag, Enabled: true},
+		{Flag: "--profile-flag", Enabled: true},
+	}
+	commandPrefix := ""
+	launch, err := controller.resolveProfileProbeLaunchSettings(
+		context.Background(),
+		agents.NewAntigravityACP(),
+		nil,
+		&dto.ProfileLaunchSettingsRequest{
+			EnvVars: &envVars, CLIFlags: &cliFlags, CommandPrefix: &commandPrefix,
+		},
+	)
+	if err != nil {
+		t.Fatalf("resolveProfileProbeLaunchSettings: %v", err)
+	}
+	if slices.Contains(launch.cliTokens, skipFlag) || !slices.Contains(launch.cliTokens, "--profile-flag") {
+		t.Fatalf("profile probe CLI tokens = %q, want skip flag omitted and unrelated flag retained", launch.cliTokens)
 	}
 }
 
 func assertNormalizedAntigravityFlags(t *testing.T, flags []dto.CLIFlagDTO, wantEnabled bool) {
 	t.Helper()
-	if len(flags) != 2 {
-		t.Fatalf("profile CLI flags = %+v, want one skip flag and one unrelated flag", flags)
-	}
 	var skipCount int
 	for _, flag := range flags {
 		if flag.Flag != "--dangerously-skip-permissions" {

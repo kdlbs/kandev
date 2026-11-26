@@ -35,7 +35,10 @@ test.describe("Antigravity runtime setup on phone", () => {
       await flagSwitch.tap();
       await expect(flagSwitch).toHaveAttribute("data-state", "checked");
 
-      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      const saveButton = testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: /^Save( changes)?$/i });
+      await expect(saveButton).toHaveCount(1);
       await saveButton.tap();
       await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
       await expect
@@ -53,6 +56,7 @@ test.describe("Antigravity runtime setup on phone", () => {
         caption: "Antigravity CLI permission switch on the phone profile page",
       });
       await flagSwitch.tap();
+      await expect(saveButton).toHaveCount(1);
       await saveButton.tap();
       await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
       await testPage.reload();

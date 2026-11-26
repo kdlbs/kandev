@@ -9,6 +9,7 @@ package cliflags
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/settings/models"
@@ -162,33 +163,74 @@ func NormalizeExactFlag(flags []models.CLIFlag, exactFlag string) []models.CLIFl
 	if len(flags) == 0 || exactFlag == "" {
 		return flags
 	}
-	firstIndex := -1
+	result := make([]models.CLIFlag, 0, len(flags))
+	firstMatch := -1
 	enabled := false
 	description := ""
-	for index, entry := range flags {
-		if strings.TrimSpace(entry.Flag) != exactFlag {
+	for _, entry := range flags {
+		tokens, err := Tokenise(entry.Flag)
+		if err != nil {
+			result = append(result, entry)
 			continue
 		}
-		if firstIndex < 0 {
-			firstIndex = index
+		if !slices.Contains(tokens, exactFlag) {
+			result = append(result, entry)
+			continue
 		}
 		enabled = enabled || entry.Enabled
 		if entry.Description != "" {
 			description = entry.Description
 		}
+		var remaining []string
+		flush := func() {
+			if len(remaining) == 0 {
+				return
+			}
+			result = append(result, models.CLIFlag{
+				Flag:        serializeTokens(remaining),
+				Description: entry.Description,
+				Enabled:     entry.Enabled,
+			})
+			remaining = nil
+		}
+		for _, token := range tokens {
+			if token != exactFlag {
+				remaining = append(remaining, token)
+				continue
+			}
+			flush()
+			if firstMatch < 0 {
+				firstMatch = len(result)
+				result = append(result, models.CLIFlag{})
+			}
+		}
+		flush()
 	}
-	if firstIndex < 0 {
+	if firstMatch < 0 {
 		return flags
 	}
-	result := make([]models.CLIFlag, 0, len(flags))
-	for index, entry := range flags {
-		if strings.TrimSpace(entry.Flag) == exactFlag {
-			if index == firstIndex {
-				result = append(result, models.CLIFlag{Flag: exactFlag, Description: description, Enabled: enabled})
-			}
-			continue
-		}
-		result = append(result, entry)
-	}
+	result[firstMatch] = models.CLIFlag{Flag: exactFlag, Description: description, Enabled: enabled}
 	return result
+}
+
+func serializeTokens(tokens []string) string {
+	serialized := make([]string, len(tokens))
+	for index, token := range tokens {
+		serialized[index] = serializeToken(token)
+	}
+	return strings.Join(serialized, " ")
+}
+
+func serializeToken(token string) string {
+	if token != "" && !strings.ContainsAny(token, " \t\n'\"\\") {
+		return token
+	}
+	if !strings.Contains(token, "'") {
+		return "'" + token + "'"
+	}
+	if !strings.Contains(token, `"`) {
+		return `"` + token + `"`
+	}
+	quoted := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(token)
+	return `"` + quoted + `"`
 }

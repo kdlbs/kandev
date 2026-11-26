@@ -52,7 +52,7 @@ Use the existing Settings card, save action, and phone scroll behavior. [Full pr
 ## Verification
 
 ```bash
-(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/settings/controller ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run '^Test(AntigravityACP_PermissionAndBillingDefaults|AntigravityCommandPreviewUsesSelectedLocalRuntime|AntigravityLocalLaunchUsesCLIAndPreservesProfileArgs|AntigravityHostLaunchPolicy)$' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/settings/controller ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run '^Test(AntigravityACP_PermissionAndBillingDefaults|AntigravityCommandPreviewUsesSelectedLocalRuntime|AntigravityLocalLaunchUsesCLIAndPreservesProfileArgs|AntigravityHostLaunchPolicy|AntigravityProfileCollapsesDuplicateSkipFlagAndAllowsTurningItOff)$' -count=1)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm e2e:run --project chromium tests/settings/agent-profile-cli-flags.spec.ts -- --grep 'Antigravity CLI permission flag')
 (cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/settings/mobile-antigravity-runtime-setup.spec.ts -- --grep 'Antigravity CLI permission flag')
@@ -90,14 +90,17 @@ Profile data can predate the catalog. Use the current fallback switch state and 
 
 The Antigravity-specific CLI flag is curated and disabled by default. Exact
 duplicates are reconciled into one effective profile choice on settings and
-backend writes. Preview, model/probe and utility launches, initial spawn, and
-context reset use the same support and session-eligibility checks. Desktop and
-phone settings tests cover default state, touch, save, reload, and disable.
+backend writes, including quoted and bundled flag tokens while retaining
+neighboring arguments. Preview checks CLI support. Profile inference and
+host-utility launches always strip the provider-wide bypass; initial spawn and
+context reset retain it only for a supported Antigravity CLI and an ordinary
+task surface without coordinator or managed-tool policy. Desktop and phone
+settings tests cover default state, touch, save, reload, and disable.
 
 Verification passed:
 
 ```bash
-(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/antigravityruntime ./internal/agent/settings/controller ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run '^Test(AntigravityACP_PermissionAndBillingDefaults|SeedCLIFlags_AntigravitySkipPermissionsOffByDefault|ResolveLocalReportsDangerousPermissionFlagSupport|FilterDangerouslySkipPermissions|AntigravityCommandPreviewUsesSelectedLocalRuntime|AntigravityLocalLaunchUsesCLIAndPreservesProfileArgs|AntigravitySkipPermissionsLaunchPolicy|AntigravityHostLaunchPolicy|MockAgent_AntigravityIdentityUsesCuratedProfileSettings)$' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/antigravityruntime ./internal/agent/settings/controller ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run '^Test(AntigravityACP_PermissionAndBillingDefaults|SeedCLIFlags_AntigravitySkipPermissionsOffByDefault|ResolveLocalReportsDangerousPermissionFlagSupport|FilterDangerouslySkipPermissions|AntigravityCommandPreviewUsesSelectedLocalRuntime|AntigravityLocalLaunchUsesCLIAndPreservesProfileArgs|AntigravitySkipPermissionsLaunchPolicy|AntigravityHostLaunchPolicy|AntigravityProfileCollapsesDuplicateSkipFlagAndAllowsTurningItOff|MockAgent_AntigravityIdentityUsesCuratedProfileSettings)$' -count=1)
 (cd apps/web && pnpm run typecheck && pnpm run i18n:check)
 (cd apps/web && pnpm e2e:run --project chromium tests/settings/agent-profile-cli-flags.spec.ts -- --grep 'Antigravity CLI permission flag')
 (cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/settings/mobile-antigravity-runtime-setup.spec.ts -- --grep 'Antigravity CLI permission flag')

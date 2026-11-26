@@ -48,7 +48,9 @@ async function waitForFiniteAnimations(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const finiteAnimations = document.getAnimations({ subtree: true }).filter((animation) => {
       const iterations = animation.effect?.getComputedTiming().iterations;
-      return iterations !== undefined && Number.isFinite(iterations);
+      return (
+        animation.playState === "running" && iterations !== undefined && Number.isFinite(iterations)
+      );
     });
     await Promise.all(
       finiteAnimations.map((animation) => animation.finished.catch(() => undefined)),

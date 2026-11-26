@@ -79,22 +79,31 @@ identity and the active-call entry while holding the same adapter lock. Keep
 conflicting notification names as an ambiguous state; a typed request name
 does not override that conflict. The wait for identity uses the same
 session-and-call key, so an active call with a reused ID in another session
-cannot satisfy it. Free-form titles and tool arguments cannot establish a
-server identity.
+cannot satisfy it. If a notification arrives without a name, continue waiting
+for a named or conflicting update until the correlation window expires.
+Free-form titles and tool arguments cannot establish a server identity.
 
 Before resolving `mcp_<server>_<tool>`, the process manager builds a
-conservative inventory from Antigravity's documented CLI sources: global
-`~/.gemini/config/mcp_config.json`, workspace
-`<workspace>/.agents/mcp_config.json`, and installed plugin MCP configs under
-`~/.gemini/config/plugins`. Include a plugin's actual machine name from its
-`plugin.json` (`.antigravity-plugin/plugin.json` takes precedence; a missing
-name uses the plugin folder name), then join it to each server key with `_`,
-matching the provider's plugin server namespace rule. The workspace plugin
-directory is also inspected when present. This inventory includes disabled
-plugin candidates as a safe superset; unreadable configs or an unresolvable
-plugin name make the inventory incomplete and disable implicit approval. See
-Google's [MCP configuration](https://antigravity.google/docs/mcp#global-and-workspace-server-configs)
-and [plugin naming](https://antigravity.google/docs/build-plugins) documentation.
+conservative inventory from Antigravity's documented CLI sources. Read the
+global `~/.gemini/config/mcp_config.json` and installed plugin MCP configs
+under `~/.gemini/config/plugins`. For workspaces, inspect `mcp_config.json`
+and plugin MCP configs under `.agents` and recognized legacy customization
+directory names from the work directory through the nearest repository root.
+Include each plugin's actual machine name from `plugin.json`
+(`.antigravity-plugin/plugin.json` takes precedence; a missing name uses the
+plugin folder name), then join it to each server key with `_`, matching the
+provider's plugin server namespace rule. This includes disabled plugin
+candidates as a safe superset.
+
+Antigravity's `plugins.json` discovery manifests can register plugins from
+paths outside these default directories. If a global or effective workspace
+manifest is present, keep the inventory incomplete and leave requests in the
+ordinary permission flow. Also fail closed on malformed, unreadable, oversized,
+symlinked, or special-file sources. Read only regular JSON files up to 1 MiB.
+See Google's [MCP configuration](https://antigravity.google/docs/mcp#global-and-workspace-server-configs),
+[plugin naming](https://antigravity.google/docs/build-plugins), and
+[customization discovery](https://antigravity.google/docs/customization-discovery/)
+documentation.
 
 An alias is eligible only when no configured Kandev or native server name can
 produce its `mcp_<server>_` prefix, the exact tool exists in the live Core

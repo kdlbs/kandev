@@ -73,7 +73,10 @@ test.describe("Agent profile — CLI flags", () => {
 
       await flagSwitch.click();
       await expect(flagSwitch).toHaveAttribute("data-state", "checked");
-      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      const saveButton = testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: /^Save( changes)?$/i });
+      await expect(saveButton).toHaveCount(1);
       await saveButton.click();
       await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
       await expect
@@ -94,6 +97,7 @@ test.describe("Agent profile — CLI flags", () => {
       });
       await flagSwitch.click();
       await expect(flagSwitch).toHaveAttribute("data-state", "unchecked");
+      await expect(saveButton).toHaveCount(1);
       await saveButton.click();
       await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
       await testPage.reload();
@@ -135,7 +139,10 @@ test.describe("Agent profile — CLI flags", () => {
       await flagSwitch.click();
       await expect(flagSwitch).toHaveAttribute("data-state", "unchecked");
 
-      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      const saveButton = testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: /^Save( changes)?$/i });
+      await expect(saveButton).toHaveCount(1);
       await saveButton.click();
       await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
       await testPage.reload();
@@ -179,8 +186,11 @@ test.describe("Agent profile — CLI flags", () => {
       );
 
       // Save via the dirty-state save button; wait for unsaved badge to clear.
-      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      const saveButton = testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: /^Save( changes)?$/i });
       await expect(saveButton).toBeEnabled({ timeout: 10_000 });
+      await expect(saveButton).toHaveCount(1);
       await saveButton.click();
       await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
 
@@ -225,8 +235,11 @@ test.describe("Agent profile — CLI flags", () => {
       await toggle.click();
       await expect(toggle).toHaveAttribute("data-state", "unchecked");
 
-      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      const saveButton = testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: /^Save( changes)?$/i });
       await expect(saveButton).toBeEnabled({ timeout: 10_000 });
+      await expect(saveButton).toHaveCount(1);
       await saveButton.click();
       await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
 
@@ -272,8 +285,11 @@ test.describe("Agent profile — CLI flags", () => {
       await testPage.getByTestId("cli-flag-remove-1").click();
       await expect(testPage.getByTestId("cli-flag-row-1")).toBeHidden();
 
-      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      const saveButton = testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: /^Save( changes)?$/i });
       await expect(saveButton).toBeEnabled({ timeout: 10_000 });
+      await expect(saveButton).toHaveCount(1);
       await saveButton.click();
       await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
 

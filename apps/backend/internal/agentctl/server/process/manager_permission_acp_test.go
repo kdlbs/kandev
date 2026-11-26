@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -448,7 +449,11 @@ func (a *permissionFlowAgent) Prompt(ctx context.Context, req acpsdk.PromptReque
 		}); err != nil {
 			return acpsdk.PromptResponse{}, err
 		}
-		<-a.permissionGate
+		select {
+		case <-a.permissionGate:
+		case <-ctx.Done():
+			return acpsdk.PromptResponse{}, ctx.Err()
+		}
 	}
 
 	options := a.options
@@ -582,6 +587,9 @@ func newPermissionACPFlow(t *testing.T, test permissionACPCase) (*Manager, *perm
 	}
 	manager := NewManager(cfg, newTestLogger(t))
 	boundMCPServer := mcpserver.NewWithProfile(nil, permissionFlowSessionID, taskID, cfg.Port, newTestLogger(t), "", false, mcpProfile)
+	if !slices.Contains(boundMCPServer.BuiltinCatalog()[profile.PackageCore], "step_complete_kandev") {
+		t.Fatal("production-bound MCP catalog does not expose the registered Core tool")
+	}
 	manager.SetBuiltinToolCatalog(boundMCPServer.BuiltinCatalog)
 	_, nativeMCPInventoryKnown := manager.antigravityMCPInventorySnapshot()
 	if test.authPolicy != nil && !nativeMCPInventoryKnown {

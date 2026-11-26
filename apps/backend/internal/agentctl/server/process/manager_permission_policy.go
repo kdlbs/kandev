@@ -110,6 +110,13 @@ func (m *Manager) resolveInjectedKandevPermission(req *adapter.PermissionRequest
 	if !parsed {
 		return "", "", adapter.PermissionOption{}, false
 	}
+	if server == injectedKandevMCPServerName && m.usesAntigravityCLI() {
+		nativeNames, inventoryKnown := m.antigravityMCPInventorySnapshot()
+		flattenedName := "mcp_" + server + "_" + tool
+		if !inventoryKnown || !m.antigravityMCPRegistrationIsUnambiguous(flattenedName, nativeNames) {
+			return "", "", adapter.PermissionOption{}, false
+		}
+	}
 	if m.cfg.McpProfile != nil && m.cfg.McpProfile.BuiltinPackages != nil {
 		if !m.builtinPermissionAllowed(server, tool) {
 			return "", "", adapter.PermissionOption{}, false
@@ -127,6 +134,11 @@ func (m *Manager) resolveInjectedKandevPermission(req *adapter.PermissionRequest
 		return "", "", adapter.PermissionOption{}, false
 	}
 	return server, tool, option, true
+}
+
+func (m *Manager) usesAntigravityCLI() bool {
+	return m != nil && m.cfg != nil && m.cfg.AgentType == acpcompat.AntigravityAgentID &&
+		m.cfg.AuthPolicy != nil && m.cfg.AuthPolicy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI
 }
 
 func injectedKandevMCPConfigured(cfg *config.InstanceConfig) bool {

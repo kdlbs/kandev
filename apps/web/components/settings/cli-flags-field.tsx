@@ -154,7 +154,21 @@ export function CLIFlagsField({
     onChange(flags.map((f, i) => (i === index ? next : f)));
   };
   const removeAt = (index: number) => onChange(flags.filter((_, i) => i !== index));
-  const appendCustom = (next: CLIFlag) => onChange([...flags, next]);
+  const appendCustom = (next: CLIFlag) => {
+    const matchingCurated = curated.find((setting) => isCuratedFlagMatch(next.flag, setting.flag));
+    if (matchingCurated) {
+      onChange(
+        setCuratedFlagEnabled(
+          [...flags, next],
+          matchingCurated.flag,
+          matchingCurated.description,
+          next.enabled,
+        ),
+      );
+      return;
+    }
+    onChange([...flags, next]);
+  };
 
   return (
     <div className={isCompact ? "space-y-3" : "space-y-4"} data-testid="cli-flags-field">

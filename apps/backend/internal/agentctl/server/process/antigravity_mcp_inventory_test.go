@@ -9,7 +9,10 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -113,9 +116,74 @@ func TestManagerDisablesAntigravityImplicitApprovalWhenInventoryRefreshFails(t *
 	}
 }
 
+func TestAntigravityAliasWithExternalPluginManifestStaysInPermissionFlow(t *testing.T) {
+	workDir := t.TempDir()
+	home := t.TempDir()
+	pluginRoot := filepath.Join(t.TempDir(), "external-plugin")
+	pluginManifest, err := json.Marshal(map[string]string{"name": "kandev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pluginRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginRoot, "plugin.json"), pluginManifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeNativeMCPConfig(t, filepath.Join(pluginRoot, "mcp_config.json"), "step_complete")
+	discoveryManifest, err := json.Marshal(map[string]any{
+		"entries": []map[string]string{{"path": pluginRoot}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	discoveryPath := filepath.Join(home, ".gemini", "config", "plugins.json")
+	if err := os.MkdirAll(filepath.Dir(discoveryPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(discoveryPath, discoveryManifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := antigravityPermissionManager(t, &config.InstanceConfig{
+		AgentType: acpcompat.AntigravityAgentID,
+		AuthPolicy: &acpcompat.AuthPolicy{
+			RuntimeVariant: acpcompat.AntigravityRuntimeCLI,
+		},
+		AgentEnv:          []string{"HOME=" + home},
+		WorkDir:           workDir,
+		Port:              43210,
+		InjectedKandevMCP: true,
+		McpServers:        injectedKandevMCPServers(43210),
+	})
+	manager.builtinCatalog = func() map[mcpprofile.PackageID][]string {
+		return map[mcpprofile.PackageID][]string{
+			mcpprofile.PackageCore: {"step_complete_kandev"},
+		}
+	}
+	manager.refreshAntigravityMCPInventory()
+
+	_, inventoryKnown := manager.antigravityMCPInventorySnapshot()
+	if inventoryKnown {
+		t.Fatal("external plugin discovery manifest left the native inventory complete")
+	}
+	toolName := "mcp_kandev_step_complete_kandev"
+	_, approved := manager.autoApproveInjectedKandevPermission(&adapter.PermissionRequest{
+		ToolName: &toolName,
+		Options: []adapter.PermissionOption{{
+			OptionID: "allow-once",
+			Kind:     streams.PermissionOptionKindAllowOnce,
+		}},
+	})
+	if approved {
+		t.Fatal("unverified external plugin alias was implicitly approved")
+	}
+}
+
 func newAntigravityInventoryTestManager(t *testing.T, workDir, home string) *Manager {
 	t.Helper()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	manager := NewManager(&config.InstanceConfig{
 		AgentType: acpcompat.AntigravityAgentID,
 		AuthPolicy: &acpcompat.AuthPolicy{

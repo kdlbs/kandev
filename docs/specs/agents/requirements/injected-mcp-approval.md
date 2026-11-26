@@ -36,7 +36,7 @@ It does not adopt the issue's separate proposal for selective approval and a new
 - **AC-AGENTS-INJECTED-MCP-APPROVAL-001.8:** Existing Codex approval and blanket approval behavior shall remain unchanged. Unknown provider naming formats shall retain normal permission behavior.
 - **AC-AGENTS-INJECTED-MCP-APPROVAL-001.9:** With blanket approval disabled, identifiable calls to the injected Kandev Core server shall proceed without permission prompts in supported Antigravity CLI ACP sessions.
   A tool identity that could belong to another server shall follow the ordinary permission policy.
-- **AC-AGENTS-INJECTED-MCP-APPROVAL-001.10:** If the Antigravity CLI's configured global, workspace, or plugin MCP sources cannot be inventoried, or a source can produce the same flattened server alias, the request shall follow the ordinary permission policy.
+- **AC-AGENTS-INJECTED-MCP-APPROVAL-001.10:** If the Antigravity CLI's global MCP source, workspace customization roots through the nearest repository root, or plugin MCP sources cannot be inventoried, the request shall follow the ordinary permission policy. A global or effective workspace `plugins.json` discovery manifest shall make the inventory incomplete until its external plugin registrations can be verified. A source that can produce the same flattened server alias shall also follow the ordinary permission policy.
 
 ## Out of scope
 

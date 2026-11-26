@@ -36,3 +36,34 @@ func TestNormalizeExactFlagPreservesPositionBeforeDelimiter(t *testing.T) {
 		t.Fatalf("NormalizeExactFlag() = %+v, want original option and positional order %+v", got, flags)
 	}
 }
+
+func TestNormalizeExactFlagFindsQuotedAndBundledTokens(t *testing.T) {
+	const skipFlag = "--dangerously-skip-permissions"
+	flags := []models.CLIFlag{
+		{
+			Flag:        "--verbose '" + skipFlag + "' --profile 'two words'",
+			Description: "legacy bundle",
+			Enabled:     true,
+		},
+		{Flag: skipFlag, Enabled: false},
+	}
+
+	got := NormalizeExactFlag(flags, skipFlag)
+	want := []models.CLIFlag{
+		{Flag: "--verbose", Description: "legacy bundle", Enabled: true},
+		{Flag: skipFlag, Description: "legacy bundle", Enabled: true},
+		{Flag: "--profile 'two words'", Description: "legacy bundle", Enabled: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("NormalizeExactFlag() = %+v, want %+v", got, want)
+	}
+
+	args, err := Resolve(got)
+	if err != nil {
+		t.Fatalf("Resolve normalized flags: %v", err)
+	}
+	wantArgs := []string{"--verbose", skipFlag, "--profile", "two words"}
+	if !reflect.DeepEqual(args, wantArgs) {
+		t.Fatalf("resolved args = %q, want %q", args, wantArgs)
+	}
+}

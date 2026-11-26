@@ -360,6 +360,10 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 		delete(metadata, MetadataKeyTerminalCausingRunID)
 	}
 	delete(metadata, mcpprofile.ManagedToolPolicyMetadataKey)
+	delete(metadata, mcpprofile.SurfaceMetadataKey)
+	if req.McpProfile != nil {
+		metadata[mcpprofile.SurfaceMetadataKey] = string(req.McpProfile.Surface)
+	}
 	if req.McpProfile != nil && req.McpProfile.ManagedToolPolicy != nil {
 		encoded, err := mcpprofile.MarshalManagedToolPolicy(*req.McpProfile.ManagedToolPolicy)
 		if err != nil {
@@ -2758,6 +2762,8 @@ func (m *Manager) buildExecutionFromInstance(
 	if req.McpProfile != nil {
 		profile := mcpprofile.Normalize(*req.McpProfile)
 		execution.McpProfile = &profile
+	} else {
+		execution.McpProfile = restoreMcpProfileContext(execution.metadata)
 	}
 	execution.WorkspaceID = req.WorkspaceID
 	execution.RunID = req.Owner.RunID
