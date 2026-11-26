@@ -8,3 +8,13 @@ export function isDetachedManagedConversation(
     task.metadata["kandev.detached"] === true
   );
 }
+
+export function managedConversationBlocksQueueDelivery(
+  task: Pick<Task, "metadata"> | null | undefined,
+): boolean {
+  const metadata = task?.metadata;
+  return (
+    metadata?.["kandev.managed_retained"] === true &&
+    (metadata["kandev.desired_paused"] !== false || isDetachedManagedConversation(task))
+  );
+}

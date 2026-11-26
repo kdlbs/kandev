@@ -1121,6 +1121,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			}
 			queueMetadata["user_message_recorded"] = true
 			queueMetadata[messagequeue.MetadataDurableTranscriptMessageID] = capacityMessageID
+			queueMetadata[messagequeue.MetadataAdmissionReason] = messagequeue.AdmissionReasonSessionCapacity
 			queueMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed] = true
 			queued := &messagequeue.QueuedMessage{
 				ID: capacityMessageID, SessionID: req.TaskSessionID, TaskID: req.TaskID,
@@ -2199,6 +2200,7 @@ func (h *MessageHandlers) queuePromptIfCapacityRefused(
 	queueMetadata["user_message_recorded"] = true
 	queueMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed] = true
 	queueMetadata[messagequeue.MetadataDurableTranscriptMessageID] = deliverySubmissionID
+	queueMetadata[messagequeue.MetadataAdmissionReason] = messagequeue.AdmissionReasonSessionCapacity
 	if queueErr := h.orchestrator.QueueUserPrompt(
 		ctx, taskID, sessionID, content, model, planMode, attachments, queueMetadata, true,
 	); queueErr != nil {

@@ -242,6 +242,8 @@ export type QueuedMessage = {
   metadata?: QueuedMessageMetadata;
   queued_at: string;
   queued_by?: string;
+  /** Server-owned reason recorded when the message entered the queue. */
+  admission_reason?: string;
   /** Response-only: the accepted prompt could not retire the observed turn-error badge. */
   turn_error_acknowledgement_failed?: boolean;
 };
