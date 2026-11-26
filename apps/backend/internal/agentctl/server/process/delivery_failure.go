@@ -86,7 +86,10 @@ func (m *Manager) recordDeliveryWriteFailure(err error, update adapter.AgentEven
 }
 
 func shouldPreserveDeliveryFailure(previous, next *agenttypes.DeliveryFailureSnapshot) bool {
-	if previous == nil || next == nil || previous.Storage == nil || next.Storage != nil || previous.Revision == 0 {
+	if next == nil || next.Reason == agenttypes.DeliveryFailureStorageCorrupt {
+		return false
+	}
+	if previous == nil || previous.Storage == nil || next.Storage != nil || previous.Revision == 0 {
 		return false
 	}
 	return sameDeliveryFailureProcessOwner(previous, next) && sameDeliveryFailurePromptOwner(previous, next)

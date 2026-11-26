@@ -137,4 +137,5 @@ Review regression verification also passed:
 cd apps/backend
 go test -trimpath ./internal/orchestrator -run 'TestDeliverySessionState(WriterRecoveryLeavesBusyGuardToSettlement|ConvergesFromWriterRecovery|LeavesLiveSuccessorRunning)$' -count=1
 go test -trimpath -race ./internal/orchestrator -run 'TestDeliverySessionState(WriterRecoveryLeavesBusyGuardToSettlement|ConvergesFromWriterRecovery|LeavesLiveSuccessorRunning)$' -count=1
+go test -trimpath ./internal/agent/runtime/lifecycle -run '^TestDeliveryHealthRetriesUnstartedFailureAfterCancelledStop$' -count=1
 ```

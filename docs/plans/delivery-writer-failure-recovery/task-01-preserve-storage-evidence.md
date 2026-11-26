@@ -88,10 +88,11 @@ GREEN: The snapshot keeps prior typed evidence and its revision when the next
 write has no typed storage evidence and the process, session, incarnation,
 harness, stream, submission, and prompt owner still matches. Host errors use
 their tracked generation binding. Backend logs include the closed cause and
-known retained/limit bytes. The child relay accepts the closed delivery and
-storage reasons, including `event_too_large`, in `reason`; the existing
-`error_class` vocabulary is unchanged. Unknown, duplicate, raw, and invalid
-fields remain omitted.
+known retained/limit bytes. A newer typed corruption cause replaces the saved
+storage evidence and advances the revision. The child relay accepts the closed
+delivery and storage reasons, including `event_too_large`, in `reason`; the
+existing `error_class` vocabulary is unchanged. Unknown, duplicate, raw, and
+invalid fields remain omitted.
 
 Verification passed:
 

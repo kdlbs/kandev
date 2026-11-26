@@ -145,13 +145,17 @@ pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/session/d
 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/session/mobile-delivery-storage-diagnostics.spec.ts tests/session/mobile-resilient-output-delivery.spec.ts
 pnpm --dir apps/web run typecheck
 pnpm --dir apps/web exec oxlint components/task/chat/session-delivery-storage-notice.tsx components/task/chat/session-delivery-storage-notice.test.tsx
+python3 scripts/lint-spec-files.py --all
 node scripts/validate-public-docs.mjs
+git diff --check
 ```
 
 The component suite passed 19 tests. Desktop E2E passed 8 tests and built the
 backend fixtures and Vite assets. Phone E2E passed 6 tests. Typecheck, targeted
 Oxlint, localization, and public-doc validation passed. The public-doc
 validator checked 56 pages.
+
+The specification lint and final diff check passed after the review updates.
 
 The review regression uses warning state at 95% and 88%, then normal state at
 80%. Details retains the high-usage label and local Storage link at 88%; both

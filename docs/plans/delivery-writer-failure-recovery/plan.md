@@ -1,6 +1,6 @@
 ---
 created: 2026-11-25
-status: complete
+status: implemented
 requirements:
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002
@@ -123,11 +123,11 @@ the component suite, desktop and phone E2E, web typecheck, localization checks,
 and public-doc validation passed. PostgreSQL-specific cases were not run because
 `KANDEV_TEST_POSTGRES_DSN` was not configured.
 
-Changed-Go lint did not complete. `golangci-lint` timed out while analyzing the
-affected packages and returned a timeout error with a zero-issues summary, so
-the full lint result is inconclusive. The focused `cyclop` check passed for the
-affected process package with zero issues. `gofmt` reported no changes, and the
-targeted backend tests, race test, and production build passed.
+An earlier full changed-Go scan timed out while analyzing the affected
+packages. The final changed-file lint passed with zero issues, as did the
+focused `cyclop` check for the affected process package. `gofmt` reported no
+changes, and the targeted backend tests, race test, and production build
+passed.
 
 ## Risks
 
@@ -143,7 +143,43 @@ targeted backend tests, race test, and production build passed.
 
 ## Verification results
 
-The investigation ran six temporary Go cases and one temporary browser
-component case. Six reproduced defects covered by this package. The remaining
-case showed the status available during a capacity wait. Eight existing Go
-control cases passed, including ACK recovery and proven cancellation.
+All three work orders passed their targeted checks. The commands below record
+the product, browser, localization, specification, and documentation checks
+that passed. PostgreSQL-specific cases were not run because
+`KANDEV_TEST_POSTGRES_DSN` was not configured. An earlier full changed-Go scan
+timed out; the final changed-file scan and the focused cyclop check passed
+with zero issues.
+
+Backend regression and recovery tests passed:
+
+```bash
+(cd apps/backend && go test -trimpath ./internal/agentctl/server/process ./internal/agent/runtime/agentctl/launcher ./internal/agent/runtime/lifecycle -run 'Test(DeliveryStorage|DeliveryFailure|PipeOutput)' -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle ./internal/orchestrator -run 'Test(DeliveryHealth|DeliveryReconcile|DeliverySessionState|DeliveryWriterFailure|AgentctlDisconnect)' -count=1)
+(cd apps/backend && go test -trimpath ./internal/task/repository/sqlite -run 'Test(SQLiteDeliverySessionState|DeliverySessionStatePostgres)' -count=1)
+(cd apps/backend && go test -trimpath ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process -run '^(TestDeliveryHealthRetriesUnstartedFailureAfterCancelledStop|TestDeliveryStorageSecondaryErrorPreservesSnapshot)$' -count=1)
+bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/delivery_health_monitor.go apps/backend/internal/agent/runtime/lifecycle/delivery_health_monitor_test.go apps/backend/internal/agentctl/server/process/delivery_failure.go apps/backend/internal/agentctl/server/process/delivery_failure_storage_test.go
+```
+
+The storage notice component suite passed 19 tests. Desktop E2E passed 8
+tests; phone E2E passed 6 tests. Web typecheck, targeted Oxlint, localization,
+and public-documentation validation passed. The public-doc test suite passed
+63 tests, and its validator checked 56 pages:
+
+```bash
+pnpm --dir apps/web exec vitest run components/task/chat/session-delivery-storage-notice.test.tsx
+pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/session/delivery-storage-diagnostics.spec.ts tests/session/resilient-output-delivery.spec.ts
+scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/session/mobile-delivery-storage-diagnostics.spec.ts tests/session/mobile-resilient-output-delivery.spec.ts
+pnpm --dir apps/web run typecheck
+pnpm --dir apps/web exec oxlint components/task/chat/session-delivery-storage-notice.tsx components/task/chat/session-delivery-storage-notice.test.tsx
+pnpm --dir apps/web run i18n:zh-hant
+pnpm --dir apps/web run i18n:pseudo
+pnpm --dir apps/web run i18n:check
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+git diff --check
+```
+
+The listed specification and diff gates were rerun after the review updates
+and passed.

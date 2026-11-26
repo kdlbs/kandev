@@ -46,6 +46,13 @@ func TestDeliveryStorageSecondaryErrorPreservesSnapshot(t *testing.T) {
 	require.EqualValues(t, 32768, *closed.Storage.RetainedBytes)
 	require.EqualValues(t, 4096, *closed.Storage.LimitBytes)
 
+	manager.recordDeliveryWriteFailure(journal.ErrJournalCorrupt, update, 4096)
+	corrupt := manager.DeliveryHealth().Failure
+	require.NotNil(t, corrupt)
+	require.Equal(t, agenttypes.DeliveryFailureStorageCorrupt, corrupt.Reason)
+	require.Equal(t, first.Revision+1, corrupt.Revision)
+	require.Nil(t, corrupt.Storage)
+
 	manager.cfg.DeliveryIncarnationID = "replacement-incarnation"
 	manager.recordDeliveryWriteFailure(errors.New("replacement writer failed"), update, 4096)
 	replacement := manager.DeliveryHealth().Failure

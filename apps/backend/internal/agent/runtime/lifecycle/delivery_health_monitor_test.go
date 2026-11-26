@@ -260,6 +260,48 @@ func TestDeliveryHealthRecoveryDoesNotResend(t *testing.T) {
 	}
 }
 
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.2
+func TestDeliveryHealthRetriesUnstartedFailureAfterCancelledStop(t *testing.T) {
+	execution := newDeliveryReconciliationTestExecution()
+	sm := newDeliveryHealthTestManager()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	failure := correlatedFailure(execution)
+	probes, reconciles := 0, 0
+	owner := deliveryHealthOwner{
+		execution: execution,
+		probe: func(context.Context) (*agentctl.StatusResponse, error) {
+			probes++
+			return deliveryFailureStatus(failure), nil
+		},
+		current: func() bool { return true },
+		reconcile: func(context.Context) DeliveryReconciliationResult {
+			reconciles++
+			if reconciles == 1 {
+				return DeliveryReconciliationResult{
+					Outcome: DeliveryReconciliationTransportUnavailable,
+					Err:     context.Canceled,
+				}
+			}
+			cancel()
+			return DeliveryReconciliationResult{Outcome: DeliveryReconciliationBlocked, Attempts: 1}
+		},
+		submission:       func() string { return "submission-1" },
+		promptGeneration: func() uint64 { return 1 },
+	}
+	sm.deliveryHealthWait = func(context.Context, time.Duration) error {
+		if probes >= 2 {
+			cancel()
+		}
+		return nil
+	}
+
+	sm.monitorDeliveryHealth(ctx, owner)
+	if probes < 2 || reconciles != 2 {
+		t.Fatalf("probes=%d reconciles=%d, want a later probe and retry after the stop is released", probes, reconciles)
+	}
+}
+
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.4
 func TestDeliveryHealthPersistentFailureRunsOneCycle(t *testing.T) {
 	execution := newDeliveryReconciliationTestExecution()
