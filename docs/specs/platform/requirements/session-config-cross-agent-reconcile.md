@@ -17,27 +17,30 @@ agent rejects them, the user sees a startup warning, and the model/mode selector
 disappears from the chat input, leaving the user unable to change model or mode
 for the resumed session.
 
+A model change within one agent can also change which options are available.
+For example, Cursor can remove Fast and Grok can remove Reasoning Effort.
+A cold resume must use the running provider's options for the effective model
+in that attempt.
+
 ## Requirements
 
 ### REQ-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001: Session Config Reconciliation Across Agent Types
 
-**Intent:** A task session persists its runtime configuration options globally (model, mode, and
-provider-defined options like reasoning effort). When a session that ran earlier under one agent
-type is resumed under a different agent type, options that only the earlier agent understood are
-replayed onto the new agent. The new agent rejects them, the user sees a startup warning, and the
-model/mode selector disappears from the chat input, leaving the user unable to change model or mode
-for the resumed session.
+**Intent:** Restore supported session settings when the active agent or model
+changes. Keep the model and mode controls available and report genuine failures
+to apply supported settings.
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.1:** On session startup and resume, Kandev SHALL only apply persisted runtime config options that the currently running agent advertises. Options the current agent does not advertise are dropped, not sent to the agent.
+- **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.1:** On session startup and resume, Kandev SHALL apply only persisted runtime options that the running agent advertises. For model-dependent options, the advertisement must identify the effective model for that attempt. Kandev SHALL defer unverified options when the catalog is missing or partial.
 - **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.2:** Dropping an unsupported option SHALL NOT be surfaced to the user as a failure warning. The startup config warning is reserved for options the agent *does* advertise but fails to apply.
-- **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.3:** Persisted options that the current agent still advertises SHALL continue to be applied unchanged, including provider-defined options such as reasoning effort, context, and fast.
+- **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.3:** On startup or resume, Kandev SHALL apply the saved value of each restorable option that the active catalog verifies. This includes provider options such as reasoning effort, context, and Fast.
 - **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.4:** The chat model/mode selector SHALL render for a resumed session whenever the current agent has reported its model list and config options, even if the session's persisted metadata still records option keys the current agent does not advertise. Un-advertised persisted keys SHALL NOT be treated as required for the selector to render.
-- **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.5:** Switching model within a single agent (where the agent re-advertises a different option set for the new model) continues to work through the existing live `session.models_updated` path and is unchanged by this repair.
-- **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.6:** Backend: the startup/resume replay filters persisted runtime config options against the current agent's advertised option catalog before sending them, so unsupported keys are neither applied nor reported as failures. The catalog is the same information used by the existing `sanitizeRuntimeConfigOptionsWithCatalog` reconciliation on the reset/restore path.
+- **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.5:** When an agent advertises different options after an in-session model change, the selector SHALL display the new model's advertised controls.
+- **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.6:** Startup and resume SHALL filter saved runtime options against the active catalog before sending them to the provider. A catalog for a previous model cannot authorize a write to the effective model.
 - **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.7:** Frontend: `requiredConfigKeys` / `hasCompleteDynamicConfig` do not require a persisted key that the current agent's advertised config options (`sessionModelsData.configOptions`) do not include. The selector renders from the agent's live advertised options.
 - **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.8:** **GIVEN** a session whose persisted `runtime_config.config_options` contains `effort` and `thinking` (written by a prior agent) plus `model`, `reasoning`, and `fast`, **WHEN** the session is resumed under an agent that advertises only `mode, model, context, reasoning, fast`, **THEN** the backend applies `reasoning` and `fast`, does not call `SetConfigOption` for `effort` or `thinking`, and emits no "could not be applied at startup" warning for them.
+- **AC-PLATFORM-SESSION-CONFIG-CROSS-AGENT-RECONCILE-001.9:** When any provider supplies a complete option catalog for its confirmed active model, Kandev SHALL remove absent IDs from the saved effective runtime options. For supported IDs, Kandev SHALL save provider-reported values and retain saved values where the provider supplies no value. A missing or partial catalog SHALL preserve saved options that it omits. Profile settings, explicit session selections, and original settings remain separate sources.
 
 ## Migrated source detail
 
@@ -67,11 +70,9 @@ for the resumed session.
   session's persisted metadata still records option keys the current agent does
   not advertise. Un-advertised persisted keys SHALL NOT be treated as required
   for the selector to render.
-- Switching model within a single agent (where the agent re-advertises a
-  different option set for the new model) continues to work through the existing
-  live `session.models_updated` path and is unchanged by this repair.
+- The selector follows the agent's live advertisement after a model switch.
 
-## Broken behavior (regression being fixed)
+## Earlier cross-agent regression
 
 1. Backend replay path `applyRuntimeSessionLayers`
    (`apps/backend/internal/agent/runtime/lifecycle/session.go`) sanitizes
@@ -109,8 +110,9 @@ No schema change. Existing session metadata keys are unchanged:
 - `runtime_config_overrides` -> same shape
 
 `config_options` remains a flat `map[string]string` of `{optionId: value}`.
-Stale keys already written to metadata are tolerated (filtered on read/apply),
-not required to be migrated away.
+Older sessions remain readable. Replay filters stale keys before applying
+settings. A complete catalog for the confirmed active model also reconciles the
+saved effective options.
 
 ## API surface
 
@@ -127,16 +129,17 @@ changes only in that it no longer lists keys the current agent never advertised.
   chose not to send.
 - **Agent advertises the option but rejects the value:** this remains a real
   failure and is still reported in the startup warning (unchanged).
-- **Persisted metadata retains stale keys:** tolerated. The frontend gate and
-  backend replay both ignore keys the current agent does not advertise.
+- **Persisted metadata retains stale keys:** the selector and startup replay
+  filter them against the active catalog. Kandev reconciles them when the running
+  provider reports a complete catalog for the confirmed model.
 
 ## Persistence guarantees
 
-- No change to what survives a restart. Persisted `runtime_config` and
-  `runtime_config_overrides` are unchanged on disk.
-- This repair does not rewrite or delete persisted stale keys; it makes read and
-  apply paths resilient to them. Any future cleanup of persisted stale keys is
-  out of scope.
+- The session keeps the same metadata keys and value shapes across restarts.
+- Startup filters stored settings for legacy rows as well as new rows.
+  A complete active-model catalog also removes absent keys from the effective
+  settings for that session. Explicit overrides and original settings keep their
+  own values.
 
 ## Scenarios
 
@@ -157,11 +160,15 @@ changes only in that it no longer lists keys the current agent never advertised.
   still appears in the startup warning (real failure preserved).
 - **GIVEN** a running session under one agent, **WHEN** the user switches model
   and the agent re-advertises a different option set, **THEN** the live
-  `session.models_updated` path updates the selector as it does today (unchanged).
+  `session.models_updated` path updates the selector. A complete report also
+  removes absent keys from the effective settings saved for the next resume.
+- **GIVEN** a provider acknowledges a model switch and supplies only a partial
+  report, **WHEN** Kandev restores the settings, **THEN** it uses only the
+  options verified for that model and retains saved values for omitted keys.
 
 ## Out of scope
 
-- Migrating or deleting stale option keys already persisted in session metadata.
+- A database-wide migration of saved option keys.
 - Changing how provider option catalogs are discovered or the sessionless
   resolver in `docs/specs/agents/requirements/dynamic-provider-options.md`.
 - Per-model nesting of persisted config options.
@@ -178,6 +185,9 @@ changes only in that it no longer lists keys the current agent never advertised.
 ## Implementation plans
 
 - [Original cross-agent reconciliation](../../../plans/session-config-cross-agent-reconcile/plan.md).
+- [Model change and resume fix](../../../plans/cursor-model-option-reconciliation/plan.md).
 - [Selector availability with stale config](../../../plans/model-selector-stale-config-availability/plan.md).
   This package restores the selector availability criteria for catalogs without
   a true settlement marker. The acceptance criteria remain unchanged.
+- [Cursor model option reconciliation](../../../plans/cursor-model-option-reconciliation/plan.md).
+  This package covers model-dependent replay and effective runtime persistence.

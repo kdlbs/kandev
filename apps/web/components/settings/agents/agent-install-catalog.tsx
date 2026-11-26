@@ -237,7 +237,7 @@ function useInstallAgent(onSuccess: () => Promise<void>) {
 }
 
 /** The install catalogue: every not-yet-installed agent and companion tool. */
-export function AgentInstallCatalog() {
+export function AgentInstallCatalog({ agentHint }: { agentHint?: string }) {
   const { t } = useTranslation();
   const { copiedValue, copy } = useCopyCommand();
   const { items: availableAgents, tools } = useAvailableAgents();
@@ -263,6 +263,13 @@ export function AgentInstallCatalog() {
     () => availableAgents.filter((a: AvailableAgent) => !a.available && canInstallAgent(a)),
     [availableAgents],
   );
+  const orderedNotInstalledAgents = useMemo(() => {
+    if (!agentHint) return notInstalledAgents;
+    const preferredAgent = notInstalledAgents.find((agent) => agent.name === agentHint);
+    return preferredAgent
+      ? [preferredAgent, ...notInstalledAgents.filter((agent) => agent.name !== agentHint)]
+      : notInstalledAgents;
+  }, [agentHint, notInstalledAgents]);
   const notInstalledTools = tools.filter((tool: ToolStatus) => !tool.available);
 
   if (notInstalledAgents.length === 0 && notInstalledTools.length === 0) {
@@ -277,7 +284,7 @@ export function AgentInstallCatalog() {
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-      {notInstalledAgents.map((agent) => (
+      {orderedNotInstalledAgents.map((agent) => (
         <InstallCard
           key={agent.name}
           agent={agent}

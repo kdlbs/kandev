@@ -64,23 +64,23 @@ func NormalizeSessionConfig(
 		}
 	}
 	if !hasOption(out, GrokReasoningEffortOptionID) {
-		if effort := buildReasoningOption(models, currentModelID, ""); effort != nil {
+		if effort, _ := buildReasoningOption(models, currentModelID, ""); effort != nil {
 			out = append(out, *effort)
 		}
 	}
 	return out
 }
 
-// ConfigAfterModelChange rebuilds model-dependent Grok options after a model
-// switch. Other agents pass through unchanged.
+// ConfigAfterModelChange rebuilds model-dependent Grok options and identifies
+// values confirmed by the successful switch or advertised for the target model.
 func ConfigAfterModelChange(
 	agentID string,
 	config []streams.ConfigOption,
 	models []Model,
 	modelID string,
-) []streams.ConfigOption {
+) ([]streams.ConfigOption, []string) {
 	if agentID != GrokAgentID {
-		return config
+		return config, nil
 	}
 	previousEffort := ""
 	out := make([]streams.ConfigOption, 0, len(config))
@@ -91,10 +91,14 @@ func ConfigAfterModelChange(
 		}
 		out = append(out, option)
 	}
-	if effort := buildReasoningOption(models, modelID, previousEffort); effort != nil {
+	effort, verified := buildReasoningOption(models, modelID, previousEffort)
+	if effort != nil {
 		out = append(out, *effort)
 	}
-	return out
+	if verified {
+		return out, []string{GrokReasoningEffortOptionID}
+	}
+	return out, nil
 }
 
 // ValidateGrokReasoningEffort resolves a UI selection to Grok's canonical
@@ -176,16 +180,16 @@ func buildModelOption(models []Model, currentModelID string) *streams.ConfigOpti
 	}
 }
 
-func buildReasoningOption(models []Model, modelID, selected string) *streams.ConfigOption {
+func buildReasoningOption(models []Model, modelID, selected string) (*streams.ConfigOption, bool) {
 	model := findModel(models, modelID)
 	if model == nil || !getBool(model.Meta, grokSupportsReasoning) {
-		return nil
+		return nil, false
 	}
 	options, defaultEffort := parseReasoningEfforts(model.Meta)
 	if len(options) == 0 {
-		return nil
+		return nil, false
 	}
-	current := resolveEffort(selected, options, defaultEffort, model.Meta)
+	current, verified := resolveEffort(selected, options, defaultEffort, model.Meta)
 	return &streams.ConfigOption{
 		Type:         "select",
 		ID:           GrokReasoningEffortOptionID,
@@ -193,7 +197,7 @@ func buildReasoningOption(models []Model, modelID, selected string) *streams.Con
 		Name:         grokReasoningName,
 		CurrentValue: current,
 		Options:      options,
-	}
+	}, verified
 }
 
 func parseReasoningEfforts(meta map[string]any) ([]streams.ConfigOptionValue, string) {
@@ -231,13 +235,16 @@ func parseReasoningEfforts(meta map[string]any) ([]streams.ConfigOptionValue, st
 	return out, defaultEffort
 }
 
-func resolveEffort(selected string, options []streams.ConfigOptionValue, fallback string, meta map[string]any) string {
-	for _, candidate := range []string{selected, getString(meta, GrokReasoningEffortMetaKey), fallback, "medium"} {
+func resolveEffort(selected string, options []streams.ConfigOptionValue, defaultEffort string, meta map[string]any) (string, bool) {
+	for _, candidate := range []string{selected, getString(meta, GrokReasoningEffortMetaKey), defaultEffort} {
 		if value := matchEffort(candidate, options); value != "" {
-			return value
+			return value, true
 		}
 	}
-	return options[0].Value
+	if value := matchEffort("medium", options); value != "" {
+		return value, false
+	}
+	return options[0].Value, false
 }
 
 func matchEffort(token string, options []streams.ConfigOptionValue) string {

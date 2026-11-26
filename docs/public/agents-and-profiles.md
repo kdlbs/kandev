@@ -418,6 +418,12 @@ OpenCode has two runtime families. Fresh Kandev installations use the managed
 v2 package `@opencode/cli`. Kandev keeps an existing v1 selection on
 `opencode-ai` until you choose the v2 migration action.
 
+If a configured, managed OpenCode runtime is missing and you have agent
+management permission, open **Settings > Agents** and select **Reinstall** on
+its card. This opens **Install agents** with OpenCode first. Select **Install**
+to prepare the selected package and version. If installation fails, select
+**Retry** on the OpenCode card.
+
 #### Move OpenCode from v1 to v2
 
 Use this action only after you review the shared-data boundary. OpenCode v1 and

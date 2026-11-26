@@ -164,12 +164,16 @@ func TestTaskInterruptionPromptAcceptance(t *testing.T) {
 	t.Run("accepted prompt preserves a newer legacy marker", func(t *testing.T) {
 		ctx := context.Background()
 		repo, svc, manager, session := newInterruptionPromptFixture(t, "task-new-legacy", "session-new-legacy")
-		legacy := "2026-11-24T10:00:00Z"
-		newer := time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+		const (
+			legacy               = "2026-11-24T10:00:00Z"
+			targetInterruptedAt  = "2026-11-25T10:00:00Z"
+			siblingInterruptedAt = "2026-11-25T11:00:00Z"
+			newer                = "2026-11-26T10:00:00Z"
+		)
 		require.NoError(t, repo.SetTaskMetadataKey(ctx, "task-new-legacy", models.MetaKeyInterruptedAt, legacy))
 		sibling := createInterruptionPromptSession(t, repo, "task-new-legacy", "session-new-legacy-sibling")
-		targetMarker := addInterruptedSessionMarker(t, repo, "task-new-legacy", session)
-		siblingMarker := addInterruptedSessionMarker(t, repo, "task-new-legacy", sibling)
+		targetMarker := addInterruptedSessionMarkerAt(t, repo, "task-new-legacy", session, targetInterruptedAt)
+		siblingMarker := addInterruptedSessionMarkerAt(t, repo, "task-new-legacy", sibling, siblingInterruptedAt)
 		manager.promptAgentFunc = func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error) {
 			require.NoError(t, repo.SetTaskMetadataKey(ctx, "task-new-legacy", models.MetaKeyLegacyInterruptedAt, newer))
 			return &executor.PromptResult{}, nil
@@ -252,9 +256,20 @@ func addInterruptedSessionMarker(
 	session *models.TaskSession,
 ) models.InterruptedSessionMarker {
 	t.Helper()
+	return addInterruptedSessionMarkerAt(t, repo, taskID, session, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+func addInterruptedSessionMarkerAt(
+	t *testing.T,
+	repo *sqliterepo.Repository,
+	taskID string,
+	session *models.TaskSession,
+	interruptedAt string,
+) models.InterruptedSessionMarker {
+	t.Helper()
 	marker := models.InterruptedSessionMarker{
 		IncarnationID: session.QueueIncarnationID,
-		InterruptedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		InterruptedAt: interruptedAt,
 		Token:         "interruption-" + session.ID,
 	}
 	changed, err := repo.SetTaskInterruptedSessionIfNotArchived(context.Background(), taskID, session.ID, marker)
