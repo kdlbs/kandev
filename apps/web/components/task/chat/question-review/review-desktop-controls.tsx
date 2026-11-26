@@ -126,12 +126,12 @@ type ClusterProps = {
   changes?: { status: ChangesStatus; onClick: () => void };
 };
 
-/** Zoom controls on the image, like a map viewer. */
+/** Zoom controls on the image, like a map viewer; `StageBottomRow` places them. */
 export function ZoomCluster({ scale, onZoom, onFit, onScale, changes }: ClusterProps) {
   const { t } = useTranslation();
   return (
     <div
-      className="pointer-events-auto absolute right-2 bottom-2 z-10 flex items-center gap-0.5 rounded-full border border-border bg-background/90 p-0.5 shadow-sm"
+      className="flex items-center gap-0.5 rounded-full border border-border bg-background/90 p-0.5 shadow-sm"
       data-testid="question-review-zoom"
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}

@@ -794,8 +794,8 @@ export function ClarificationInputOverlay({
     pendingId: group.pendingId,
     available: isQuestionReviewAvailable({
       hasImages: reviewSegments.some((segment) => segment.images.length > 0),
-      lateInteraction,
-      submitState: group.submitState,
+      lateStatus: lateMode ? effectiveLateStatus : group.lateAnswerState,
+      submitState: lateMode ? "idle" : group.submitState,
     }),
   });
   const {
@@ -1010,6 +1010,16 @@ export function ClarificationInputOverlay({
           }}
         />
       )}
+      {lateInteraction &&
+        ((lateMode && effectiveLateStatus === "error") ||
+          (!lateMode && group.lateAnswerState === "error")) && (
+          <ClarificationStatusBanner
+            state="error"
+            onRetry={() => {
+              if (attachmentsReady) void retryLateAnswer(enrichAnswers(group.answers));
+            }}
+          />
+        )}
       {sharedContext && (
         <div data-testid="clarification-context" className="mx-4 mt-3 mb-2 text-[13px]">
           <ClarificationMarkdown variant="context">{sharedContext}</ClarificationMarkdown>
@@ -1077,16 +1087,6 @@ export function ClarificationInputOverlay({
         canExpandPanel={canExpandPanel}
         collapseContentId={collapseContentId}
       />
-      {lateInteraction &&
-        ((lateMode && effectiveLateStatus === "error") ||
-          (!lateMode && group.lateAnswerState === "error")) && (
-          <ClarificationStatusBanner
-            state="error"
-            onRetry={() => {
-              if (attachmentsReady) void retryLateAnswer(enrichAnswers(group.answers));
-            }}
-          />
-        )}
       {review.open ? <QuestionReviewPlaceholder /> : form}
       {review.open && group.pendingId && (
         <QuestionReviewDialog
@@ -1099,7 +1099,8 @@ export function ClarificationInputOverlay({
           sessionId={sortedMessages[0]?.session_id ?? ""}
           form={form}
           submit={{
-            show: !lateInteraction && (total > 1 || !allowCustomText),
+            show: lateInteraction || total > 1 || !allowCustomText,
+            label: lateInteraction ? "late" : "submit",
             enabled: allAnswered && attachmentsReady,
             submitting: isSubmitting,
             onSubmit: handleSubmit,

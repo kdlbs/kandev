@@ -326,6 +326,7 @@ test("steps candidates, keeps the mode, zooms to changes, and holds to compare",
   );
   await session.clarificationOverlay().getByTestId("question-review-open").click();
   const dialog = testPage.getByTestId("question-review-dialog");
+  await dialog.getByTestId("question-review-compare-images").click();
   await expect(dialog.getByRole("img", { name: reviewImages.before.alt })).toBeVisible();
   await expect(dialog.getByTestId("question-review-pick-b")).toContainText("after");
   await dialog.getByTestId("question-review-pick-a").click();

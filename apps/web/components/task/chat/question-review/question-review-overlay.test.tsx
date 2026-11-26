@@ -46,6 +46,7 @@ const REGION_POPOVER = "question-review-region-popover";
 const REGION_ITEM = "question-review-region-item";
 const REGION_TEXT = "question-review-region-text";
 const ZOOM_LEVEL = "question-review-zoom-level";
+const FLIP = "question-review-flip";
 const SUBMIT = "question-review-submit";
 const IMAGE = "question-review-image";
 const ANNOTATE = "question-review-annotate";
@@ -111,8 +112,10 @@ function renderOverlay(messages: Message[]) {
   return { ...utils, onDismiss, scopeRef };
 }
 
+const pairGroup = (a: string, b: string) => [{ kind: "pair" as const, image_ids: [a, b] }];
+
 const imageBundle = () => [
-  message(0, 2, { images: [before, after] }),
+  message(0, 2, { images: [before, after], image_groups: pairGroup("before", "after") }),
   message(1, 2, { images: [spacing] }),
 ];
 
@@ -366,11 +369,11 @@ describe("question image review comparison", () => {
   it("starts in Toggle on A and flips by control and stage key", async () => {
     const dialog = await openCompare();
     const announcement = within(dialog).getByTestId("question-review-announcement");
-    expect(announcement.textContent).toBe("Showing A: Before");
-    fireEvent.click(within(dialog).getByTestId("question-review-flip"));
-    expect(announcement.textContent).toBe("Showing B: After");
+    expect(announcement.textContent).toBe("Showing A · 1, Before");
+    fireEvent.click(within(dialog).getByTestId(FLIP));
+    expect(announcement.textContent).toBe("Showing B · 2, After");
     fireEvent.keyDown(within(dialog).getByTestId(STAGE), { key: "t" });
-    expect(announcement.textContent).toBe("Showing A: Before");
+    expect(announcement.textContent).toBe("Showing A · 1, Before");
     const [before, after] = within(dialog).getAllByTestId(IMAGE);
     expect(after.className).toContain("invisible");
     expect(before.className).not.toContain("invisible");
@@ -387,7 +390,7 @@ describe("question image review comparison", () => {
       pickMode(dialog, mode);
       expect(within(dialog).getByTestId(ZOOM_LEVEL).textContent).toBe("200%");
     }
-    fireEvent.click(within(dialog).getByTestId("question-review-swap"));
+    fireEvent.click(within(dialog).getByTestId(FLIP));
     expect(within(dialog).getByTestId(ZOOM_LEVEL).textContent).toBe("200%");
   });
 
@@ -446,7 +449,13 @@ describe("question image review comparison", () => {
 });
 
 async function openAnnotatable() {
-  renderOverlay([message(0, 1, { images: [before, after], allow_custom_text: false })]);
+  renderOverlay([
+    message(0, 1, {
+      images: [before, after],
+      image_groups: pairGroup("before", "after"),
+      allow_custom_text: false,
+    }),
+  ]);
   const dialog = openReview();
   await waitFor(() => expect(within(dialog).getAllByTestId(IMAGE)).toHaveLength(2));
   for (const image of within(dialog).getAllByTestId(IMAGE)) {
@@ -524,7 +533,7 @@ describe("question image review regions", () => {
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-007.5
   it("keeps regions across close and submits them with the answer", async () => {
     const dialog = await openAnnotatable();
-    fireEvent.click(within(dialog).getByTestId("question-review-flip"));
+    fireEvent.click(within(dialog).getByTestId(FLIP));
     drawRegionByKeyboard(dialog);
     commentRegion(dialog, "Label contrast too low");
     fireEvent.click(within(dialog).getAllByTestId(OPTION)[1]);
@@ -579,9 +588,13 @@ const labelled = [
 async function openThree() {
   renderOverlay([
     message(0, 2, { images: labelled }),
-    message(1, 2, { images: [spacing, { id: "spacing2", path: "s2.png", alt: "Spacing 2" }] }),
+    message(1, 2, {
+      images: [spacing, { id: "spacing2", path: "s2.png", alt: "Spacing 2" }],
+      image_groups: pairGroup("spacing", "spacing2"),
+    }),
   ]);
   const dialog = openReview();
+  fireEvent.click(within(dialog).getByTestId("question-review-compare-images"));
   await waitFor(() => expect(within(dialog).getAllByTestId(IMAGE)).toHaveLength(2));
   return dialog;
 }
@@ -651,14 +664,14 @@ describe("review usability round", () => {
 
   it("shows A while Space is held", async () => {
     const dialog = await openThree();
-    fireEvent.click(within(dialog).getByTestId("question-review-flip"));
+    fireEvent.click(within(dialog).getByTestId(FLIP));
     const announcement = within(dialog).getByTestId("question-review-announcement");
-    expect(announcement.textContent).toBe("Showing B: After");
+    expect(announcement.textContent).toBe("Showing B · after, After");
     const stage = within(dialog).getByTestId(STAGE);
     fireEvent.keyDown(stage, { key: " " });
-    expect(announcement.textContent).toBe("Showing A: Before");
+    expect(announcement.textContent).toBe("Showing A · before, Before");
     fireEvent.keyUp(stage, { key: " " });
-    expect(announcement.textContent).toBe("Showing B: After");
+    expect(announcement.textContent).toBe("Showing B · after, After");
   });
 
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-007.1

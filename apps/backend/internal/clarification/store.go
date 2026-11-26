@@ -652,7 +652,8 @@ func questionsEqual(a, b []Question) bool {
 	}
 	imageBearing := protocol.HasQuestionImages(a) || protocol.HasQuestionImages(b)
 	for i := range a {
-		if !slices.Equal(a[i].Images, b[i].Images) || (imageBearing && a[i].ID != b[i].ID) {
+		if !slices.Equal(a[i].Images, b[i].Images) || !a[i].ImageGroups.Equal(b[i].ImageGroups) ||
+			(imageBearing && a[i].ID != b[i].ID) {
 			return false
 		}
 		if a[i].Prompt != b[i].Prompt {

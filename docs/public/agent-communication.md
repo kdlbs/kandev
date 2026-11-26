@@ -335,21 +335,61 @@ illustrated choice retains its label and a **Show images** control.
 
 ### Ask for a visual comparison
 
-For before and after reviews, put one screen in each question. List the baseline
-image first and the candidates after it, up to four images per question. Give
-each image a short `label`, one word such as `before`, `after`, or `alt`, so the
-image pickers show names instead of numbers. Labels must be unique within a
-question. A bundle
-can carry up to 16 distinct images, so four questions can each have their own set.
+For before and after reviews, put one screen in each question, with up to four
+images per question. Give each image a short `label`, one word such as `before`,
+`after`, or `alt`, so the review view shows names instead of numbers. Labels must
+be unique within a question. A bundle can carry up to 16 distinct images, so four
+questions can each have their own set.
 
-The operator can select **Review images** to open a large view. It shows the
-active question's images above the same answer form. The operator can zoom up to
-800%, move between questions, and compare two images with **Toggle**, **Wipe**,
-**Side by side**, **Onion skin**, or **Difference**. Difference highlights changed
-pixels at full resolution and counts them. Opening or closing the view never
-answers the question. Write a specific prompt, such as "Is the new header spacing
-acceptable, and is the secondary label contrast sufficient?", because the prompt
-stays visible during the comparison.
+Use `image_groups` to say which images belong together:
+
+- A **pair** lists exactly two different image IDs that show two versions of the
+  same view, such as before and after. The first is the baseline.
+- A **single** lists exactly one image ID for an image with no counterpart, such
+  as a new screen. It is shown alone, without comparison tools.
+
+Groups refer to images on the question or its choices, in review order. Each image
+can be in at most one group. Images that no group lists are shown alone after the
+groups. Without `image_groups`, the images show as a gallery, and the operator can
+still pick two of them to compare. Parent questions do not accept `image_groups`.
+
+```json
+{
+  "id": "screens",
+  "prompt": "Approve the settings change and the two new screens?",
+  "images": [
+    {"id": "before", "path": "shots/settings-before.png", "alt": "Settings before", "label": "before"},
+    {"id": "after", "path": "shots/settings-after.png", "alt": "Settings after", "label": "after"},
+    {"id": "billing", "path": "shots/billing.png", "alt": "New billing screen", "label": "billing"},
+    {"id": "invoices", "path": "shots/invoices.png", "alt": "New invoices screen", "label": "invoices"}
+  ],
+  "image_groups": [
+    {"kind": "pair", "image_ids": ["before", "after"]},
+    {"kind": "single", "image_ids": ["billing"]},
+    {"kind": "single", "image_ids": ["invoices"]}
+  ],
+  "options": [
+    {"label": "Approve", "description": "Ship all three"},
+    {"label": "Revise", "description": "Request changes"}
+  ]
+}
+```
+
+A pair with other than two different IDs, a single with other than one ID, an
+unknown ID, or an ID in two groups fails the call with an error that names the
+question.
+
+The operator can select **Review images** to open a large view, including from
+**Answer as new message** after a question timed out. It shows the active
+question's images above the same answer form, one pair, single, or gallery image
+at a time. The operator can zoom up to 800% and move between images and
+questions. On a pair, or two gallery images the operator picked, the view
+compares them with **Toggle**, **Wipe**, **Side by side**, **Onion skin**, or
+**Difference**, and always shows which image is on screen. Difference highlights
+changed pixels at full resolution and counts them. Opening or closing the view
+never answers the question. Write a specific prompt, such as "Is the new header
+spacing acceptable, and is the secondary label contrast sufficient?", because the
+prompt stays visible during the comparison.
 
 The operator can also mark regions on an image and comment on each one. Regions
 arrive in the keyed answer as `annotations`, beside the selected option or custom
