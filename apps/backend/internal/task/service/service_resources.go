@@ -785,19 +785,38 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 	}
 
 	// Create workflow steps from template if specified
-	if req.WorkflowTemplateID != nil && *req.WorkflowTemplateID != "" && s.workflowStepCreator != nil {
+	if req.WorkflowTemplateID != nil && *req.WorkflowTemplateID != "" {
+		if s.workflowStepCreator == nil {
+			initErr := errors.New("workflow step creator is not configured")
+			return nil, s.rollbackVisibleWorkflowAfterTemplateFailure(ctx, workflow, initErr)
+		}
 		if err := s.workflowStepCreator.CreateStepsFromTemplate(ctx, workflow.ID, *req.WorkflowTemplateID); err != nil {
 			s.logger.Error("failed to create workflow steps from template",
 				zap.String("workflow_id", workflow.ID),
 				zap.String("template_id", *req.WorkflowTemplateID),
 				zap.Error(err))
-			// Don't fail workflow creation, just log the error
+			initErr := fmt.Errorf("failed to create workflow steps from template: %w", err)
+			return nil, s.rollbackVisibleWorkflowAfterTemplateFailure(ctx, workflow, initErr)
 		}
 	}
 
 	s.publishWorkflowEvent(ctx, events.WorkflowCreated, workflow)
 	s.logger.Info("workflow created", zap.String("workflow_id", workflow.ID), zap.String("name", workflow.Name))
 	return workflow, nil
+}
+
+func (s *Service) rollbackVisibleWorkflowAfterTemplateFailure(
+	ctx context.Context,
+	workflow *models.Workflow,
+	initErr error,
+) error {
+	if workflow.Hidden {
+		return initErr
+	}
+	if err := s.workflows.DeleteWorkflow(ctx, workflow.ID); err != nil {
+		return errors.Join(initErr, fmt.Errorf("failed to remove workflow after template initialization failure: %w", err))
+	}
+	return initErr
 }
 
 // GetWorkflow retrieves a workflow by ID
@@ -2298,6 +2317,9 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if err := s.requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
 		return nil, err
 	}
+	if err := validateOfflineBudgetConfig(req.Config); err != nil {
+		return nil, err
+	}
 	if executor.Type == models.ExecutorTypePluginRemote {
 		return s.createPluginExecutorProfile(ctx, executor, req)
 	}
@@ -2362,6 +2384,11 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	profile.OwnershipIntent = intent
 	if executorProfileOwnershipOnly(req) {
 		return s.saveExecutorProfileOwnership(ctx, profile, req)
+	}
+	if req.Config != nil {
+		if err := validateOfflineBudgetConfig(req.Config); err != nil {
+			return nil, err
+		}
 	}
 	if executor.Type == models.ExecutorTypePluginRemote {
 		return s.updatePluginExecutorProfile(ctx, profile, executor, req)

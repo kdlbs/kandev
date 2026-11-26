@@ -50,17 +50,18 @@ const (
 
 // Manager manages agent instance lifecycles
 type Manager struct {
-	registry              *registry.Registry
-	eventBus              bus.EventBus
-	credsMgr              CredentialsManager
-	profileResolver       ProfileResolver
-	ownerAdmission        OwnerAdmission
-	worktreeMgr           *worktree.Manager
-	mcpProvider           McpConfigProvider
-	mcpResolver           MCPResolutionProvider
-	mcpStateRepo          mcpconfig.SessionMCPSelectionStateRepository
-	cursorInventoryLoader func(context.Context) (mcpconfig.CursorNativeInventory, error)
-	cursorNativeMCPRunner mcpconfig.NativeMCPCommandRunner
+	openCodeCredentialSource openCodeCredentialSource
+	registry                 *registry.Registry
+	eventBus                 bus.EventBus
+	credsMgr                 CredentialsManager
+	profileResolver          ProfileResolver
+	ownerAdmission           OwnerAdmission
+	worktreeMgr              *worktree.Manager
+	mcpProvider              McpConfigProvider
+	mcpResolver              MCPResolutionProvider
+	mcpStateRepo             mcpconfig.SessionMCPSelectionStateRepository
+	cursorInventoryLoader    func(context.Context) (mcpconfig.CursorNativeInventory, error)
+	cursorNativeMCPRunner    mcpconfig.NativeMCPCommandRunner
 	// copilotPlugins is the bounded native inventory runner. Tests inject a
 	// fake so plugin resolution never requires an installed Copilot runtime.
 	copilotPlugins copilotplugins.Runner
@@ -543,6 +544,7 @@ func NewManager(
 	}
 
 	mgr := &Manager{
+		openCodeCredentialSource:       captureOpenCodeCredentialSource(),
 		registry:                       reg,
 		eventBus:                       eventBus,
 		executorRegistry:               executorRegistry,

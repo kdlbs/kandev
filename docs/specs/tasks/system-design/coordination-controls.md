@@ -86,6 +86,13 @@ An override is one action, not a persistent bypass. Reopening retains history an
 rechecks criteria on the next completion. Tasks already complete before gates are
 introduced remain complete; criteria edits do not silently reopen them.
 
+Automatic moves outside Office commit entry into a completing step and the
+completed state together. The gate checks evidence against the source task
+revision before either change. The Office approval and status pipeline owns
+completion for Office destinations. For a completing move, apply the source
+session's plan-mode exit action after the commit and before destination session
+entry. If the move is refused, keep the source session's plan mode.
+
 ## UI and contracts
 
 The September 28 amendment removes the native task-detail controls from PR #3994.

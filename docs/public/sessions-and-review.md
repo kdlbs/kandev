@@ -15,6 +15,11 @@ A session is one agent conversation on a task. Use it to direct work, inspect ch
 
 ## Answer clarification questions
 
+After Copilot resumes a session with an interrupted tool call, Kandev adds a
+status row to the transcript. Select **Details** to read Copilot's warning.
+If the call was the pending Kandev question, skip it and send a prompt. For
+another or uncertain call, check its effects before retrying.
+
 Questions support links, bold, italic, strikethrough, inline code, paragraphs, and simple lists.
 Select an HTTP or HTTPS reference in question text to open it in another tab.
 Links inside answer choices select the choice.
@@ -23,6 +28,9 @@ To read an older question, open **Inbox > History** and expand its row.
 The expanded question supports the same formatting and reference links.
 Selecting a reference label in the collapsed summary expands the row.
 Opening a reference does not answer the question or change its status.
+
+Select **Open task** on an Inbox row for an available Quick Chat to open that
+conversation. Close Quick Chat to return to the same Inbox tab.
 
 Pending shared context supports paragraphs, line breaks, links, bold, italic,
 strikethrough, inline code, simple lists, and tables. Table overflow stays
@@ -353,7 +361,7 @@ prompt or resolve its external effects.
 
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
-The expanded queue also lets you pause or discard stale work. Its compact header places the **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
+The expanded queue also lets you pause or discard stale work. Its compact header places **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
 
 Use **Auto-run** for queue processing:
 
@@ -365,7 +373,9 @@ Use **Auto-run** for queue processing:
 - The setting belongs to the session and survives an empty queue, reload, and backend restart.
 - A pending clarification or another lifecycle guard can hold the queue while Auto-run is on.
 
-**Auto-merge** folds later compatible messages. It follows the install-wide setting until you change the session's pill. That change creates a session override that stays active for the session's lifetime.
+**Auto-merge** combines compatible adjacent messages and folds agent sub-task messages into their sender task's latest queued entry, even across other ordinary messages. User messages never move. It follows the install-wide setting, ON by default, until you change the session's pill; that change creates an override for the session's lifetime.
+
+Turning a session's Auto-merge from OFF to ON immediately compacts pending rows using both rules. OFF disables automatic folds without splitting prior content. Auto-run is unchanged, and global changes affect later messages only, never compacting the backlog. See [queue grouping rules](coordination.md#coordinate-with-targeted-messages).
 
 ### Recover from low disk space
 
@@ -375,6 +385,12 @@ continues while the warning is shown. Open **Details** for measurements, or
 **Storage** for a local session. A remote warning names the executor and does
 not link to local cleanup.
 
+Select **Dismiss** (the × button) to hide the Storage row for this task until
+the browser tab session ends. The dismissal survives reloads and task switching.
+Later storage observations do not show the row again in that tab session.
+Dismissal does not stop monitoring, clear a storage problem, or remove session
+recovery controls.
+
 Capacity and delivery pressure keep separate observation times. A fresh disk
 measurement does not make an old delivery failure current. If no delivery
 status arrives for 90 seconds, the headline changes to **Last reported** and
@@ -383,6 +399,16 @@ healthy delivery status clears the blocked-output headline without another
 prompt. A disk warning can remain after that headline clears. An older backend
 that does not report pressure freshness continues to show **Last reported**
 instead of treating capacity time as pressure time.
+
+Delivery pressure shows the cause when the runtime reports one. **Details**
+gives guidance for that cause. If the cause is unknown, the row says **Delivery
+is blocked**. Open **Details** for guidance to inspect runtime logs or use
+session recovery. The pressure headline shows disk usage only for a low-space
+guard. When the delivery cause is not a low-space guard, storage health is in
+the warning state, and a usage value is available, **Details** labels that
+usage as a separate high-usage sample. It can appear below 90%, such as at 88%,
+while the warning remains active. Its free and total values come from the
+capacity sample, not the failed write.
 
 A session that stops because storage is full shows **Session interrupted by low
 disk space**. Free space on the executor filesystem, then use **Resume
@@ -542,7 +568,7 @@ Without an explicit session ID the message goes to the primary session, and fall
 
 The default pending-message limit is 10 per session. An admin can change it live under **Settings > Preferences > Task Behavior > Runtime**; `0` removes the cap. A valid `KANDEV_QUEUE_MAX_PER_SESSION` value takes precedence and makes only the capacity field read-only; changing the environment still requires a restart. Malformed environment values are logged and ignored, so the saved setting or default applies instead. Lowering the saved limit does not delete entries already waiting. An eligible direct automatic fold may still succeed at or above capacity because it does not add a row; other admissions are rejected, and staged attachments are rejected before any fold or claim.
 
-The same card enables **Automatically merge consecutive messages** by default. Untouched sessions inherit this value and later changes to it. Changing a session's **Auto-merge** pill creates an explicit override for that session's lifetime. Compatible consecutive messages from the same strict source fold into the earlier pending entry; incompatible messages remain separate when capacity permits. The earlier entry's ID survives, and only admissions after the effective setting is read are eligible. This behavior is independent from the manual **Enable queued message merging** switch. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders always queue, and only user-origin rows may be edited or manually merged.
+The same card enables **Automatically merge queued messages** by default. Untouched sessions inherit this value and later changes to it. Changing a session's **Auto-merge** pill creates an override for that session's lifetime. Compatible adjacent messages from the same strict source fold into the earlier pending entry; agent messages also try their sender task's latest queued entry across ordinary intervening rows. Incompatible messages remain separate when capacity permits. Turning session Auto-merge from OFF to ON immediately compacts pending rows, while global changes affect later messages only. The target's ID survives. Automatic folding remains independent from manual **Enable queued message merging**. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders always queue, and only user-origin rows may be edited or manually merged.
 
 For urgent replacement work, the parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; this cancels the current approach and immediately tries to dispatch the new prompt, with a safe queued fallback. Use `stop_task_kandev` only for halt-only intent. A successful stop marks every accepted live child session `CANCELLED` and schedules graceful teardown asynchronously. Kandev then attempts to move an eligible unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states remain unchanged. A child with no live execution returns idempotent `not_running`, and its worktrees, environment, commits, task record, descendants, and queued messages are preserved. See [Coordination](coordination.md) for the complete authority and lifecycle contract.
 
@@ -613,6 +639,14 @@ and reset desktop tasks and scales them to the available workbench.
 **PR Details** is a reusable Layouts panel whose visibility follows the active task's review association. Without a linked GitHub pull request or GitLab merge request, the tab stays hidden, even when the selected layout includes it. Once a review is linked, Kandev adds PR Details as an inactive tab: beside **Agent** for the built-in Default, or in the group and tab position you configured in the Layouts editor. Closing that tab prevents it from reappearing automatically in the same session. Changing the default applies to task environments without a saved task-specific layout and **Reset Layout**, not a layout already saved for a task. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell.
 
 Each desktop split's **+** menu lists a linked review only while that exact review panel is missing from the live layout. Select a missing review there to open it in the split whose **+** you used. To move an open review to another split, drag its Dockview tab. Use **Layouts** only to change the default placement for new or reset task layouts.
+
+**Plugin panels in a layout.** **Add panel** in the Layouts editor also lists every task panel from your installed and enabled [plugins](plugins.md), such as Prompt History, by its plugin-provided name. Select a split first to add the panel there; otherwise Kandev uses the active split. A panel that is already in the layout is not listed again, and **Add panel** stays available when plugin panels are the only ones left to add.
+
+- **Preview:** the editor shows a labelled placeholder for a plugin panel and never runs the plugin, so you can arrange it without opening a task.
+- **Save and apply:** a built-in override or custom profile saves the panel's placement, tab order, selected tab, nested splits, and proportions. Fresh tasks and **Reset Layout** open the real plugin panel in that place when the plugin is available.
+- **Availability:** if the plugin is disabled, uninstalled, or still loading, the profile stays editable and keeps the saved placement with its saved title. Its row is absent from **Add panel** while unregistered. Already-open task panels are retained while registration is loading or has failed; definitive removal closes them without automatically reopening them later. Re-enable the plugin and reselect the profile or **Reset Layout** to restore the placement.
+
+Existing task-specific layouts keep their saved panels until you reselect a profile or use **Reset Layout**. Phone settings edit the same desktop profiles; choose a row with a separate tap after opening **Add panel**.
 
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
 

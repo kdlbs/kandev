@@ -203,6 +203,7 @@ func TestUpdateTaskStatus_TerminalStepLookupError_AbortsWithoutPersistingRedirec
 	log := logger.Default()
 	svc := dashboard.NewDashboardService(wrapped, log, shared.NewActivityLogger(deps.repo, log), deps.agents, &stubCostChecker{})
 	svc.SetTaskStateWriter(directTaskStateWriter{db: deps.db})
+	svc.SetTaskStateChangePublisher(statusStateChangePublisher{})
 
 	err := svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
 		TaskID:    "lookup-err",
@@ -236,7 +237,6 @@ func TestUpdateTaskStatus_AutomaticCompletionRejectsStateMismatch(t *testing.T) 
 	err := deps.svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
 		TaskID:                 "auto-state",
 		NewStatus:              "done",
-		SuppressStatusActivity: true,
 		ExpectedCurrentState:   "TODO",
 		ExpectedWorkflowStepID: "step-auto-state",
 	})
@@ -272,7 +272,6 @@ func TestUpdateTaskStatus_AutomaticCompletionRejectsGateStepMismatch(t *testing.
 	err := deps.svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
 		TaskID:                 "auto-step",
 		NewStatus:              "done",
-		SuppressStatusActivity: true,
 		ExpectedCurrentState:   "IN_PROGRESS",
 		ExpectedWorkflowStepID: "step-observed-before-the-gate",
 	})
@@ -299,7 +298,6 @@ func TestUpdateTaskStatus_AutomaticCompletionAppliesWhenStateAndStepMatch(t *tes
 	err := deps.svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
 		TaskID:                 "auto-match",
 		NewStatus:              "done",
-		SuppressStatusActivity: true,
 		ExpectedCurrentState:   "TODO",
 		ExpectedWorkflowStepID: "step-auto-match",
 	})

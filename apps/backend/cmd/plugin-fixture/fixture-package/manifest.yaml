@@ -6,7 +6,7 @@
 # cmd/plugin-pack into apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz.
 id: "kandev-plugin-e2e"
 api_version: 2
-min_kandev_version: "0.91.1"
+min_kandev_version: "0.103.0"
 version: "1.0.0"
 display_name: "Kandev E2E Fixture Plugin"
 description: "SDK-based plugin backend used by backend integration tests and Playwright e2e tests"
@@ -44,6 +44,56 @@ capabilities:
 # pull-request integration, while the host only sees generic provider IDs,
 # authenticated actions, and composer source descriptors.
 repository_providers: ["fixture-source-control"]
+
+sidebar_groupings:
+  - id: "fixture-labels"
+    label: "Fixture grouping"
+    action: "sidebar-labels"
+  - id: "fixture-option-01"
+    label: "Grouping option 01"
+    action: "sidebar-labels"
+  - id: "fixture-option-02"
+    label: "Grouping option 02"
+    action: "sidebar-labels"
+  - id: "fixture-option-03"
+    label: "Grouping option 03"
+    action: "sidebar-labels"
+  - id: "fixture-option-04"
+    label: "Grouping option 04"
+    action: "sidebar-labels"
+  - id: "fixture-option-05"
+    label: "Grouping option 05"
+    action: "sidebar-labels"
+  - id: "fixture-option-06"
+    label: "Grouping option 06"
+    action: "sidebar-labels"
+  - id: "fixture-option-07"
+    label: "Grouping option 07"
+    action: "sidebar-labels"
+  - id: "fixture-option-08"
+    label: "Grouping option 08"
+    action: "sidebar-labels"
+  - id: "fixture-option-09"
+    label: "Grouping option 09"
+    action: "sidebar-labels"
+  - id: "fixture-option-10"
+    label: "Grouping option 10"
+    action: "sidebar-labels"
+  - id: "fixture-option-11"
+    label: "Grouping option 11"
+    action: "sidebar-labels"
+  - id: "fixture-option-12"
+    label: "Grouping option 12"
+    action: "sidebar-labels"
+  - id: "fixture-option-13"
+    label: "Grouping option 13"
+    action: "sidebar-labels"
+  - id: "fixture-option-14"
+    label: "Grouping option 14"
+    action: "sidebar-labels"
+  - id: "fixture-wrap"
+    label: "Wrapping grouping label with enough detail to span several lines on a narrow phone while keeping the complete provider name readable and every choice reachable inside its own scrolling region"
+    action: "sidebar-labels"
 
 executor_providers:
   - key: "remote-sandbox"
@@ -104,6 +154,12 @@ actions:
   - key: "connection-status"
     scope: "workspace"
     max_body_bytes: 4096
+  - key: "sidebar-labels"
+    scope: "workspace"
+    max_body_bytes: 16
+  - key: "sidebar-labels-write"
+    scope: "workspace"
+    max_body_bytes: 1048576
   - key: "utility-default"
     scope: "workspace"
     max_body_bytes: 4096
@@ -255,6 +311,10 @@ webhooks:
     access: public
 
 ui:
+  file_viewers:
+    - id: stl
+      title: Fixture STL viewer
+      extensions: [stl]
   bundle: "/ui/bundle.js"
   keybindings:
     - id: open-demo

@@ -32,9 +32,8 @@ func orderBundleMessages(msgs []*taskmodels.Message) []*taskmodels.Message {
 
 // bundleQuestions builds the D2/L5-ordered Question list for a bundle,
 // parsing each message's full question metadata (id, title, prompt and
-// options). Unlike questionsFromMessages (handlers.go), used only for the
-// resume-summary path, this parses options too: N8 needs them to validate
-// selected_options membership and N3a rule 2 needs their order.
+// options). Validation, answer application, and resume summaries use this
+// representation; N8 checks option membership and N3a rule 2 needs option order.
 //
 // A message with unparseable `question` metadata (L15) yields a Question
 // carrying only its question_id, with empty title/prompt and no options. A

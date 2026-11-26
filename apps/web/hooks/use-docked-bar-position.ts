@@ -6,7 +6,9 @@ import {
 
 export type DockContainerBounds = { left: number; width: number; bottom: number };
 
-export type DockedBarPosition = { top: number; left?: number; width?: number } | { bottom: string };
+export type DockedBarPosition =
+  | { top: number; left?: number; width?: number; clearance: number }
+  | { bottom: string; clearance: number };
 
 /**
  * Places a bottom bar at the visible bottom edge of its container, or directly
@@ -30,16 +32,22 @@ export function resolveDockedBarPosition({
     // Clamp to the visual viewport so a host taller than the screen keeps the bar visible.
     const visibleBottom =
       viewportBottom > 0 ? Math.min(container.bottom, viewportBottom) : container.bottom;
-    return { top: visibleBottom - barHeight, left: container.left, width: container.width };
+    const top = visibleBottom - barHeight;
+    return {
+      top,
+      left: container.left,
+      width: container.width,
+      clearance: Math.max(barHeight, container.bottom - top),
+    };
   }
-  if (keyboardOpen) return { top: viewportBottom - barHeight };
+  if (keyboardOpen) return { top: viewportBottom - barHeight, clearance: barHeight };
   const fallback = resolveVisualViewportPosition({
     keyboardOpen,
     viewportBottom,
     barHeight,
     baseBottomOffset,
   });
-  return { bottom: String(fallback.bottom) };
+  return { bottom: String(fallback.bottom), clearance: barHeight };
 }
 
 /**

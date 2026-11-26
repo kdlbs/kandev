@@ -34,3 +34,8 @@ export type AutomationReference = {
 };
 
 export type UtilityAgentReference = { id: string; name: string };
+
+// DynamicProfileReference points at one live dynamic profile that lists the
+// agent profile as a routing candidate. Soft-deleted dynamic profiles are
+// never reported: their routes can no longer run.
+export type DynamicProfileReference = { id: string; name: string };

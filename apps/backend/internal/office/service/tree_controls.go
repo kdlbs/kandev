@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -88,6 +89,12 @@ func (s *Service) CancelTaskTree(ctx context.Context, rootTaskID, cancelledBy st
 	if err != nil {
 		return nil, err
 	}
+	if s.taskStateBatchWriter == nil {
+		return nil, fmt.Errorf("task state batch writer is not configured")
+	}
+	if s.taskStateChangeEvents == nil {
+		return nil, fmt.Errorf("task state change publisher is not configured")
+	}
 	s.markAlreadyCancelled(members)
 	s.cancelTaskExecutions(ctx, members, "tree_cancelled")
 	if err := s.repo.CreateTreeHold(ctx, hold); err != nil {
@@ -96,11 +103,13 @@ func (s *Service) CancelTaskTree(ctx context.Context, rootTaskID, cancelledBy st
 	if err := s.repo.CreateTreeHoldMembers(ctx, hold.ID, members); err != nil {
 		return nil, fmt.Errorf("create cancel members: %w", err)
 	}
-	if err := s.repo.BulkUpdateTaskState(ctx, restorableTaskIDs(members), "CANCELLED"); err != nil {
+	changes, err := s.taskStateBatchWriter.CommitTaskStateBatch(ctx, taskmodels.TaskStateBatchWrite{
+		TaskIDs:                restorableTaskIDs(members),
+		State:                  v1.TaskStateCancelled,
+		ReleaseCheckoutTaskIDs: memberTaskIDs(members),
+	})
+	if err != nil {
 		return nil, fmt.Errorf("cancel tasks: %w", err)
-	}
-	if err := s.repo.BulkReleaseTaskCheckout(ctx, memberTaskIDs(members)); err != nil {
-		return nil, fmt.Errorf("release task checkouts: %w", err)
 	}
 	cancelled, err := s.repo.CancelRunsForTasks(ctx, memberTaskIDs(members), "tree_cancelled")
 	if err != nil {
@@ -108,6 +117,9 @@ func (s *Service) CancelTaskTree(ctx context.Context, rootTaskID, cancelledBy st
 	}
 	s.recordTerminalShapesForCancelledRuns(ctx, cancelled)
 	_ = cancelledBy
+	for _, change := range changes {
+		s.taskStateChangeEvents.PublishCommittedTaskStateChange(ctx, change, false)
+	}
 	s.publishTreeHoldEvent(ctx, events.OfficeTaskTreeHoldCreated, hold)
 	return hold, nil
 }
@@ -120,6 +132,12 @@ func (s *Service) RestoreTaskTree(ctx context.Context, rootTaskID, restoredBy st
 	if hold == nil {
 		return nil, fmt.Errorf("active cancel hold not found")
 	}
+	if s.taskStateWriter == nil {
+		return nil, fmt.Errorf("task state writer is not configured")
+	}
+	if s.taskStateChangeEvents == nil {
+		return nil, fmt.Errorf("task state change publisher is not configured")
+	}
 	members, err := s.repo.ListHoldMembers(ctx, hold.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list cancel members: %w", err)
@@ -128,11 +146,24 @@ func (s *Service) RestoreTaskTree(ctx context.Context, rootTaskID, restoredBy st
 		if member.SkipReason == treeHoldSkipAlreadyCanceled {
 			continue
 		}
-		if s.taskStateWriter == nil {
-			return nil, fmt.Errorf("restore task %s: task state writer is not configured", member.TaskID)
-		}
-		if err := s.taskStateWriter.UpdateTaskState(ctx, member.TaskID, v1.TaskState(member.TaskStatus)); err != nil {
+		expectedState := v1.TaskStateCancelled
+		change, err := s.taskStateWriter.CommitTaskState(ctx, member.TaskID, taskmodels.TaskStateWrite{
+			State:                   v1.TaskState(member.TaskStatus),
+			ExpectedState:           &expectedState,
+			AcceptIfAlreadyAtTarget: true,
+		})
+		if err != nil {
 			return nil, fmt.Errorf("restore task %s: %w", member.TaskID, err)
+		}
+		if !change.Matched {
+			s.logger.Warn("tree restore skipped a task changed since cancellation",
+				zap.String("hold_id", hold.ID),
+				zap.String("task_id", member.TaskID),
+				zap.String("saved_state", member.TaskStatus))
+			continue
+		}
+		if change.Changed {
+			s.taskStateChangeEvents.PublishCommittedTaskStateChange(ctx, change, false)
 		}
 	}
 	if restoredBy == "" {

@@ -1,11 +1,12 @@
 ---
-status: draft
+status: current
 system: platform
-updated: 2026-11-09
+updated: 2026-11-25
 requirements:
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003
+  - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004
 ---
 
 # Delivery storage diagnostics system design
@@ -29,24 +30,10 @@ Existing delivery and recovery documents remain authoritative for their outcomes
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001 | Source classification; Wire and persistence; Compatibility |
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002 | Live observations; Ownership and failure behavior |
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003 | Shared presentation; Mobile composition; Recovery actions |
+| REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004 | Composer notice dismissal |
 
-## Current behavior
-
-`journal.reserveDiskCapacity` returns `ErrJournalFull` for insufficient filesystem capacity.
-Logical journal limits and oversized producer queue items can return the same sentinel.
-Oversized journal events instead use `ErrStreamFull`, which also represents a stream limit.
-
-`process.DeliveryHealth` already exposes `journal.Capacity` through `/api/v1/status`.
-The backend `agentctl.StatusResponse` currently retains only state and two control booleans.
-It drops the capacity object.
-
-`persistLastAgentError` preserves typed `AgentErrorCause` records for other failure classes.
-The shared recovery card selects its headline through `recoveryCopy`.
-Unknown failures use the generic session recovery title.
-
-The October 27 incident establishes host exhaustion and delayed cleanup.
-It does not establish the exact first recovery action or every session's capacity at failure.
-Committed artifacts must not contain that incident's private session records.
+The backend reads `journal.Capacity` and the writer's failure snapshot from authenticated status.
+The separate runtime storage sample supplies filesystem measurements to the composer.
 
 ## Source classification
 
@@ -112,6 +99,15 @@ Update cause normalization, equality, status-summary copies, and WebSocket error
 `LastAgentError.Causes` preserves the snapshot in existing session metadata.
 Transcript metadata retains the same stamp and evidence for the existing history renderer.
 No SQL schema or journal version change is required.
+
+### Evidence from a failed write
+
+Reuse `DeliveryFailureSnapshot.Storage` in `delivery_health.failure` and its existing projection to `RuntimeStorageHealth.failure_storage`.
+Associate a host error event with its recorded prompt generation before the write.
+Keep the existing typed reason, measurements, and revision when the same unresolved prompt produces an untyped follow-up.
+A different typed cause or a different verified owner gets its own snapshot.
+Capacity waits use the existing guard and pause fields.
+The [runtime log relay](runtime-diagnostic-signal.md#safe-context-allowlist) carries the closed reason and known measurements.
 
 ## Live observations
 
@@ -285,7 +281,7 @@ Rejected responses cannot renew either clock.
 Use pressure age for a blocked-output headline and capacity age for disk measurements.
 Use the existing localized last-reported label after 90 seconds or when pressure age is unknown.
 An older backend's capacity age cannot substitute for missing pressure age.
-Keep the pressure visible as last reported until a supported status proves recovery.
+Keep undismissed pressure visible as last reported until a supported status proves recovery.
 Expanded Details distinguishes the pressure observation time from the capacity observation time.
 Preserve historical failure time separately in the existing recovery card.
 
@@ -323,11 +319,16 @@ Combine matching current and terminal evidence into one visible region rather th
 | Usage falls below 85%, without write pressure | Remove the advisory | Keep normal running state and unrelated recovery controls |
 | Fresh capacity recovery after failure | Keep the historical interruption headline | Explain that capacity is available; retain normal recovery controls |
 | Old or unavailable sample | Keep its supported cause | Label numbers as last reported; do not claim current capacity |
-| Missing typed evidence | Existing generic recovery fallback | Sanitized existing details; no invented disk cause or numeric values |
+| Missing typed evidence during write pressure | Delivery is blocked | Details explains that the cause is unknown and points to session recovery or runtime logs |
+| Journal limit, stream limit, or oversized event | Specific delivery cause | Details gives the existing cause-specific guidance |
+| Filesystem allocation or quota exhaustion | Specific filesystem cause | Details gives guidance for the allocation or quota failure |
 
 Quota, retention, and oversized-event reasons use their own localized explanations.
 An absent sample never displays `0 B available`.
 Format byte values and observation times with the existing locale helpers.
+Show disk usage in the pressure row only for `disk_space_low`.
+During another kind of pressure, show an independent high-usage warning's measurements under a labeled Details entry.
+Use the existing Storage link for an eligible local capacity issue or high-usage advisory.
 
 ## Recovery actions
 
@@ -408,3 +409,34 @@ Use provider/client fixtures for this matrix. No real cloud account is required 
 Exercise the actual advisory route to prove twenty concurrent shared-instance requests perform one capacity read.
 Verify that it never invokes per-journal pressure refresh, and that legacy-delivery Sprites still report workspace capacity.
 Verify that inactive remote environments cause no restore, launch, wake, or new proxy creation for capacity polling.
+
+## Composer notice dismissal
+
+This extension implements requirement 004. Platform retains ownership because dismissal controls presentation of its runtime diagnostics.
+The [dismissal package](../../../plans/storage-notice-dismissal/plan.md) owns implementation. Earlier packages retain their existing results.
+
+Pass the resolved task identity from `ComposerStatusNotices` to `SessionDeliveryStorageNotice`.
+Use `panelState.taskId`, with the session's task identity as a fallback when available.
+Never persist a shared empty task key. Without a task identity, allow only mounted local dismissal.
+
+Follow the PR banner's task-scoped `sessionStorage` pattern in `lib/local-storage.ts`.
+Add dedicated read/write helpers and a separate prefix. Include the prefix in existing storage cleanup ownership.
+Read failures mean undismissed. Write failures do not prevent the local state update.
+Key or reset the notice's dismissal state when task identity changes, including same-instance prop changes.
+Do not key dismissal by health revision, epoch, reason, or session. Later samples do not undo the user's dismissal.
+Do not mutate runtime health or issue a backend request. Independently mounted notices read the saved value on mount.
+No new shared registry, backend preference, or dependency is needed.
+
+Add an `IconX` button after Details, with `type="button"`, `aria-label={t("task:dismiss")}`, and a stable test ID.
+Reuse the existing warning colors, rounded control treatment, focus ring, and control-sizing utilities.
+Use a compact desktop target and a target of at least 44px on phones and coarse pointers.
+The PR archive notice is the dismissal exemplar. The shipped storage notice remains the layout exemplar.
+The inline row suits a single immediate action. It needs no dialog, animation, or new scroll owner.
+Keep Storage and Details reachable. Allow the primary label to wrap while controls stay within the row.
+Preserve the existing chat scroll region and safe-area handling. Do not remount the editor when hiding the notice.
+Reuse the existing translated Dismiss key. No locale additions are expected.
+
+Component tests cover hiding, task changes, remount, later pressure samples, and storage failures.
+Storage helper tests cover key isolation and tab-session lifetime. Existing recovery tests protect independent cards and controls.
+Desktop and mobile browser tests cover dismissal, reload, task switching, draft retention, keyboard activation, and phone geometry.
+A narrow fine-pointer viewport must also retain the phone target size.

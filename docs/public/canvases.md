@@ -11,9 +11,9 @@ This guide explains how users and task agents create and manage isolated web-app
 ## Availability
 
 > [!EXPERIMENTAL]
-> Agent-authored canvases are in progress. `features.canvases` is off in every shipped profile, and this page describes the current contract.
+> Canvases are experimental and enabled by default in every shipped profile.
 
-An administrator can enable `features.canvases` in **Settings > System > Feature Toggles** or set `KANDEV_FEATURES_CANVASES=true`. Restart Kandev after changing the toggle. The restart is required because the feature changes MCP tool registration and backend composition.
+To disable canvases, turn them off in **Settings > System > Feature Toggles** or set `KANDEV_FEATURES_CANVASES=false`. Restart Kandev after you change the toggle. Kandev registers canvas tools at startup. An existing off override still applies after upgrade.
 
 With the flag off, Kandev does not expose canvas tools, routes, events, background work, or navigation. Database migrations can still exist, but Kandev does not read or change canvas data.
 
@@ -202,7 +202,7 @@ Kandev starts a normal Quick Chat with a trusted canvas target. The agent receiv
 The agent publishes through the canvas release flow. The active release changes
 only after validation and permission review. A new permission request uses the
 same review as promotion. If another edit publishes first, the stale edit is
-rejected and cannot silently replace the newer release. An expired Quick Chat
+rejected and cannot silently replace the newer release. Deleting a Quick Chat
 does not remove the active or prior release.
 
 ## Recover, archive, and remove a canvas

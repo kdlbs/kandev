@@ -1,15 +1,21 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { IconChevronDown } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { useTranslation } from "react-i18next";
 import { TaskCreateRelationshipSettings } from "@/components/task-create-dialog-relationship-settings";
 import { TaskCreateParentWorkspaceSetting } from "@/components/task-create-dialog-parent-workspace-setting";
 import { TaskCreatePrioritySelect } from "@/components/task-create-dialog-priority-select";
-import { AgentSelector } from "@/components/task-create-dialog-selectors";
-import { AgentLogo } from "@/components/agent-logo";
+import { Combobox } from "@/components/combobox";
+import {
+  TASK_CREATE_SETTING_LABEL,
+  TASK_CREATE_SETTING_ROW,
+  TASK_CREATE_SETTING_TRIGGER,
+} from "@/components/task-create-dialog-setting-field";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type {
   WorkflowAgentOverrideOption,
   WorkflowAgentOverrideRow,
@@ -83,43 +89,89 @@ function TaskCreateWorkflowAgentOverrideRow({
   onChange,
 }: WorkflowAgentOverrideRowProps) {
   const { t } = useTranslation();
+  const selectorId = useId();
+  const hintId = useId();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const touch = isMobile || !isFinePointer;
+  const heading = t("task:workflowAgents");
+  const steps = row.stepNames.join(", ");
+  const overridden = row.replacementProfileId !== "";
+  const disabled = loading || dependenciesDisabled;
+  const defaultLabel = t("task:workflowAgentDefaultSelection", { profile: row.sourceLabel });
+  const restoreLabel = t("task:workflowAgentsUseDefault");
+  const choices = [
+    {
+      value: row.sourceProfileId,
+      label: defaultLabel,
+      keywords: [restoreLabel, row.sourceLabel],
+      renderLabel: () => <span className="truncate">{restoreLabel}</span>,
+    },
+    ...replacementOptionsForRow(row, options).filter(
+      (option) => option.value !== row.sourceProfileId,
+    ),
+  ];
   return (
     <div
-      className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-center"
+      className={cn(
+        TASK_CREATE_SETTING_ROW,
+        overridden &&
+          "md:grid-cols-[var(--task-setting-label-width)_minmax(0,var(--task-setting-control-width))_auto]",
+      )}
       data-testid={`task-create-workflow-agent-override-${row.sourceProfileId}`}
     >
+      <label className={TASK_CREATE_SETTING_LABEL} htmlFor={selectorId}>
+        {steps}
+      </label>
       <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-2 text-xs text-foreground">
-          {row.sourceAgentName && (
-            <AgentLogo agentName={row.sourceAgentName} size={14} className="shrink-0" />
-          )}
-          <span className="truncate">{row.sourceLabel}</span>
-        </div>
-        <p className="mt-1 truncate text-[11px] text-muted-foreground">
-          {t("task:workflowAgentsAffectedSteps", {
-            steps: row.stepNames.join(", "),
-          })}
-        </p>
-      </div>
-      <div className="min-w-0">
-        <AgentSelector
-          options={replacementOptionsForRow(row, options)}
-          value={row.replacementProfileId}
-          onValueChange={(value) => onChange(row.sourceProfileId, value)}
-          placeholder={t("task:workflowAgentsUseDefault")}
-          disabled={loading || (dependenciesDisabled ?? false)}
-          triggerClassName="h-11 min-h-11 md:h-7 md:min-h-7"
+        <Combobox
+          options={choices}
+          value={row.replacementProfileId || row.sourceProfileId}
+          onValueChange={(value) =>
+            onChange(row.sourceProfileId, value === row.sourceProfileId ? "" : value)
+          }
+          placeholder={defaultLabel}
+          ariaLabel={steps}
+          ariaDescribedBy={overridden ? hintId : undefined}
+          dropdownLabel={touch ? undefined : heading}
+          drawerTitle={touch ? steps : undefined}
+          searchPlaceholder={t("task:searchAgents")}
+          emptyMessage={t("task:noAgentFound")}
+          disabled={disabled}
+          triggerId={selectorId}
+          triggerClassName={TASK_CREATE_SETTING_TRIGGER}
+          testId="agent-profile-selector"
+          plainTrigger
+          touchTarget={touch}
           popoverPortal
         />
-        {!row.replacementAvailable && (
-          <p
-            className="mt-1 text-[11px] text-destructive"
-            data-testid={`task-create-workflow-agent-override-error-${row.sourceProfileId}`}
-          >
-            {t("task:workflowAgentsUnavailable")}
-          </p>
-        )}
       </div>
+      {overridden && (
+        <div className="space-y-1 text-xs md:col-start-2 md:row-start-2" id={hintId}>
+          <p className="text-muted-foreground">
+            {t("task:workflowAgentDefaultHint", { profile: row.sourceLabel })}
+          </p>
+          {!row.replacementAvailable && (
+            <p
+              className="text-destructive"
+              data-testid={`task-create-workflow-agent-override-error-${row.sourceProfileId}`}
+            >
+              {t("task:workflowAgentsUnavailable")}
+            </p>
+          )}
+        </div>
+      )}
+      {overridden && (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          className={controlSizingClassName("standard", "w-fit md:col-start-3 md:row-start-1")}
+          onClick={() => onChange(row.sourceProfileId, "")}
+          data-testid="task-create-workflow-agent-override-reset"
+        >
+          {t("task:workflowAgentRestoreDefault")}
+        </Button>
+      )}
     </div>
   );
 }
@@ -197,29 +249,30 @@ function TaskCreateWorkflowAgentOverridesSection({
   onRetry,
 }: WorkflowAgentOverridesSectionProps) {
   const { t } = useTranslation();
+  const showReset = error || rows.filter((row) => row.replacementProfileId !== "").length > 1;
   return (
     <section
       className="mt-4 min-w-0 border-t border-border pt-4"
       aria-invalid={invalid || undefined}
       data-testid="task-create-workflow-agent-overrides"
     >
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-xs font-medium text-foreground">{t("task:workflowAgents")}</h3>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            {t("task:workflowAgentsTaskOnly")}
-          </p>
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+          <h3 className="text-sm font-semibold">{t("task:workflowAgents")}</h3>
+          <span className="text-xs text-muted-foreground">{t("task:workflowAgentsTaskOnly")}</span>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          className="min-h-11 shrink-0 px-2 text-[11px] md:min-h-7"
-          disabled={loading}
-          onClick={onReset}
-          data-testid="task-create-workflow-agent-overrides-reset"
-        >
-          {t("task:workflowAgentsReset")}
-        </Button>
+        {showReset && (
+          <Button
+            type="button"
+            variant="ghost"
+            className="min-h-11 shrink-0 px-2 text-[11px] md:min-h-7"
+            disabled={loading}
+            onClick={onReset}
+            data-testid="task-create-workflow-agent-overrides-reset"
+          >
+            {t("task:workflowAgentsReset")}
+          </Button>
+        )}
       </div>
       <TaskCreateWorkflowAgentOverridesBody
         rows={rows}
@@ -298,7 +351,7 @@ function normalizeAdvancedSettingsProps(
 type AdvancedSettingsContentProps = Omit<
   NormalizedAdvancedSettingsProps,
   "isEditMode" | "isTaskStarted" | keyof TaskCreateParentWorkspaceSettingProps
->;
+> & { parentWorkspaceSetting: ReactNode };
 
 function TaskCreateAdvancedSettingsContent({
   isCreateMode,
@@ -328,6 +381,7 @@ function TaskCreateAdvancedSettingsContent({
   mcpSelectionIds,
   onMcpSelectionIdsChange,
   mcpInheritedSelections,
+  parentWorkspaceSetting,
 }: AdvancedSettingsContentProps) {
   const hasWorkflowAgentOverrides =
     workflowAgentOverridesLoading ||
@@ -335,10 +389,7 @@ function TaskCreateAdvancedSettingsContent({
     workflowAgentOverrideRows.length > 0;
   return (
     <>
-      <div
-        className="grid min-w-0 grid-cols-1 gap-4 px-1 md:grid-cols-2"
-        data-testid="task-create-advanced-settings-grid"
-      >
+      <div className="grid min-w-0 gap-y-3" data-testid="task-create-advanced-settings-grid">
         <TaskCreateRelationshipSettings
           blockedBy={blockedBy}
           onBlockedByChange={onBlockedByChange}
@@ -352,12 +403,7 @@ function TaskCreateAdvancedSettingsContent({
           contextStepId={contextStepId}
           disabled={dependenciesDisabled}
         />
-        <div
-          className="md:col-start-2 md:justify-self-start"
-          data-testid="task-create-priority-setting-row"
-        >
-          <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
-        </div>
+        <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
         <TaskCreateMCPSettingRow
           builtinPackages={builtinPackages}
           definitions={mcpDefinitions}
@@ -367,6 +413,7 @@ function TaskCreateAdvancedSettingsContent({
           inherited={mcpInheritedSelections}
           disabled={dependenciesDisabled}
         />
+        {parentWorkspaceSetting}
       </div>
       {hasWorkflowAgentOverrides && (
         <TaskCreateWorkflowAgentOverridesSection
@@ -404,7 +451,7 @@ export function TaskCreateAdvancedSettings(props: TaskCreateAdvancedSettingsProp
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="min-w-0"
+      className="min-w-0 [--task-setting-label-width:9rem] [--task-setting-control-width:24rem]"
       data-testid="task-create-advanced-settings"
     >
       <CollapsibleTrigger asChild>
@@ -422,14 +469,19 @@ export function TaskCreateAdvancedSettings(props: TaskCreateAdvancedSettingsProp
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent
-        className="min-w-0 pt-1"
+        className="min-w-0 pt-3"
         data-testid="task-create-advanced-settings-content"
       >
-        <TaskCreateAdvancedSettingsContent {...settings} />
-        <TaskCreateParentWorkspaceSetting
-          initialWorkspaceLayout={initialWorkspaceLayout}
-          onInitialWorkspaceLayoutChange={onInitialWorkspaceLayoutChange}
-          initialWorkspaceLayoutMode={initialWorkspaceLayoutMode}
+        <TaskCreateAdvancedSettingsContent
+          {...settings}
+          parentWorkspaceSetting={
+            <TaskCreateParentWorkspaceSetting
+              initialWorkspaceLayout={initialWorkspaceLayout}
+              onInitialWorkspaceLayoutChange={onInitialWorkspaceLayoutChange}
+              initialWorkspaceLayoutMode={initialWorkspaceLayoutMode}
+              className="md:ml-[calc(var(--task-setting-label-width)+1rem)]"
+            />
+          }
         />
       </CollapsibleContent>
     </Collapsible>

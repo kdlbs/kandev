@@ -60,6 +60,10 @@ test.describe("worktree branch resume recovery", () => {
     expect(beforeEnvironment?.id).toBe(fixture.environment.id);
     expect(beforeRepository?.worktree_id).toBe(fixture.repository.worktree_id);
 
+    // Leave the task before stopping so background workspace reads cannot
+    // start a helper while the checkout is being deliberately removed.
+    await testPage.goto("/");
+
     const stopResponse = await apiClient.stopSession({
       session_id: sessionId,
       reason: "e2e branch recovery",
@@ -73,11 +77,11 @@ test.describe("worktree branch resume recovery", () => {
       message: "Waiting for the worktree recovery session to stop",
       timeout: 30_000,
     });
-    await expect(fixture.session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
-
     await waitForStoppedRecoveryRuntime(apiClient, backend.tmpDir, fixture);
 
     removeRecoveryBranch(seedData.repositoryPath, backend.tmpDir, fixture.repository);
+    await testPage.goto(`/t/${fixture.task.id}`);
+    await expect(fixture.session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
 
     // A normal Resume must report the lost branch and leave the environment
     // untouched. The replacement is only available from the typed failure.

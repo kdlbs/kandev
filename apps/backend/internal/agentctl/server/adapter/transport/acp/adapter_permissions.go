@@ -11,22 +11,48 @@ import (
 // Since both acpclient and adapter now use the shared types package,
 // no conversion is needed - we just forward to the handler.
 func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (response *PermissionResponse, err error) {
-	req.ToolName = a.dialect.normalizePermissionToolName(req.ToolName, req.ToolMeta, req.Title, req.ActionType)
-
 	a.mu.RLock()
 	handler := a.permissionHandler
 	fallbackSessionID := a.sessionID
 	a.mu.RUnlock()
-
-	// Prefer session ID from the request; fall back to adapter-level session ID
 	sessionID := req.SessionID
 	if sessionID == "" {
 		sessionID = fallbackSessionID
 	}
-	if finish := a.beginContinuationPermission(sessionID, req.ToolCallID, req.Options); finish != nil {
+	turn := a.currentPromptTurn()
+	var alreadyTracked bool
+	var observedName *string
+	var identityAmbiguous bool
+	if a.usesAntigravityCLI() {
+		// The identity waiter uses the same session and call key that the
+		// notification publishes under activeToolCalls' lock.
+		alreadyTracked, observedName, identityAmbiguous = a.waitForAntigravityPermissionToolCall(
+			ctx, sessionID, req.ToolCallID, syntheticToolCallRaceWindow,
+		)
+	} else {
+		alreadyTracked = a.waitForActiveToolCall(ctx, req.ToolCallID, syntheticToolCallRaceWindow)
+	}
+	if a.usesAntigravityCLI() {
+		switch {
+		case req.ToolName == nil:
+			req.ToolName = observedName
+		case observedName != nil && *observedName != *req.ToolName:
+			identityAmbiguous = true
+		}
+		if identityAmbiguous {
+			emptyName := ""
+			req.ToolName = &emptyName
+		} else {
+			req.ToolName = a.dialect.normalizePermissionToolName(req.ToolName, req.ToolMeta, req.Title, req.ActionType)
+		}
+	} else {
+		req.ToolName = a.dialect.normalizePermissionToolName(req.ToolName, req.ToolMeta, req.Title, req.ActionType)
+	}
+
+	// Prefer session ID from the request; fall back to adapter-level session ID
+	if finish := a.beginContinuationPermission(turn, sessionID, req.ToolCallID, req.Options); finish != nil {
 		defer func() { finish(response, err) }()
 	}
-	turn := a.currentPromptTurn()
 	var capacityPermissionTracked bool
 	if sessionID == fallbackSessionID {
 		capacityPermissionTracked = true
@@ -35,7 +61,6 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
 	// waitForActiveToolCall bounds the race window between a SessionUpdate.ToolCall
 	// notification and a same-id request_permission dispatched on separate goroutines.
-	alreadyTracked := a.waitForActiveToolCall(ctx, req.ToolCallID, syntheticToolCallRaceWindow)
 	if capacityPermissionTracked {
 		a.capacityPermissionStarted(turn, req.ToolCallID)
 		defer a.capacityPermissionFinished(turn)

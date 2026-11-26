@@ -7,29 +7,49 @@ import { SessionPage } from "../../pages/session-page";
 
 const PREVIEW_HTML = `<!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <title>Preview feedback fixture</title>
-    <style>
-      body { font-family: sans-serif; margin: 24px; min-height: 900px; }
-      #save {
-        margin-top: 32px;
-        padding: 14px 28px;
-        background: oklch(0.59 0.2 277);
-        color: oklch(0.96 0.02 272);
-      }
-      #runtime-total { display: block; margin-top: 360px; font-size: 24px; }
-      #route-content { padding-top: 24px; }
-    </style>
-  </head>
+  <meta charset="utf-8">
+  <title>Preview feedback fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 24px; min-height: 900px; }
+    #save {
+      margin-top: 32px;
+      padding: 14px 28px;
+      background: oklch(0.59 0.2 277);
+      color: oklch(0.96 0.02 272);
+    }
+    #runtime-total { display: block; margin-top: 360px; font-size: 24px; }
+    #route-content { padding-top: 24px; }
+  </style>
   <body>
     <nav><button id="details-route">Open details</button></nav>
     <main id="route-content">
       <h1>Checkout</h1>
       <button id="save" class="primary" aria-label="Save order">Save order</button>
+      <canvas id="gl-canvas" width="160" height="80" style="display:block;margin-top:16px"></canvas>
       <span id="runtime-total" role="status" aria-label="Cart total"></span>
+      <div id="scroller" style="height:160px;overflow:auto;margin-top:24px;border:1px solid #ccc">
+        <div id="scroll-target" style="height:60px;background:#fde68a">Scrollable panel</div>
+        <div style="height:600px"></div>
+      </div>
+      <section id="centered" style="width:240px;height:80px;margin:24px auto;background:#e0e7ff">
+        Centered card
+      </section>
+      <section id="fluid" style="width:60%;height:80px;margin-top:24px;background:#dcfce7">
+        Fluid card
+      </section>
     </main>
     <script>
+      // WebGL draws once without preserveDrawingBuffer, like Flutter's CanvasKit.
+      const gl = document.querySelector('#gl-canvas').getContext('webgl');
+      window.__kandevFixtureWebGL = Boolean(gl);
+      if (gl) {
+        gl.clearColor(0.85, 0.1, 0.1, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.enable(gl.SCISSOR_TEST);
+        gl.scissor(0, 0, 80, 80);
+        gl.clearColor(0.1, 0.2, 0.85, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
       const total = document.querySelector('#runtime-total');
       total.textContent = 'Generated total $42.00';
       document.querySelector('#details-route').addEventListener('click', () => {
@@ -57,6 +77,19 @@ export async function startPreviewServer(): Promise<PreviewServer> {
         server.close((error) => (error ? reject(error) : resolve())),
       ),
   };
+}
+
+export const COMMENT_PANEL_STORAGE_KEY = "kandev:preview-comment-panel-open";
+
+/**
+ * The comment panel overlays narrow previews; flows that click under it start
+ * with it hidden. Call before the page loads.
+ */
+export async function startWithCommentPanelHidden(page: Page): Promise<void> {
+  await page.addInitScript(
+    (key) => window.localStorage.setItem(key, "false"),
+    COMMENT_PANEL_STORAGE_KEY,
+  );
 }
 
 export async function openBrowserPreview(
@@ -93,30 +126,43 @@ export async function openBrowserPreview(
   return { session, frame };
 }
 
-export async function chooseCapture(page: Page, name: string): Promise<void> {
-  const captureMode = {
-    "Select text": "text",
-    "Select element": "element",
-    "Select screenshot region": "screenshot",
-  }[name as "Select text" | "Select element" | "Select screenshot region"];
-  if (!captureMode) throw new Error(`unsupported preview capture choice: ${name}`);
+const CAPTURE_TOOLS = {
+  "Select text": { tool: "text", mode: "text" },
+  "Select element": { tool: "element", mode: "element" },
+  "Select screenshot region": { tool: "region", mode: "screenshot" },
+} as const;
 
+/** Enters annotation mode if needed and selects a tool on the preview toolbar. */
+export async function chooseCapture(
+  page: Page,
+  name: string,
+  _frame?: FrameLocator,
+): Promise<void> {
+  const choice = CAPTURE_TOOLS[name as keyof typeof CAPTURE_TOOLS];
+  if (!choice) throw new Error(`unsupported preview capture choice: ${name}`);
   const trigger = page.getByTestId("preview-feedback-trigger");
-  const popover = page.getByTestId("preview-feedback-popover");
   await expect(async () => {
-    if ((await trigger.getAttribute("data-capture-mode")) === captureMode) return;
-    if (!(await popover.isVisible())) await trigger.click();
-    await expect(popover).toBeVisible({ timeout: 500 });
-    const choice = popover.getByRole("button", { name, exact: true });
-    await expect(choice).toBeVisible({ timeout: 500 });
-    const box = await choice.boundingBox();
-    const viewport = page.viewportSize();
-    if (!box || !viewport || box.y < 0 || box.y + box.height > viewport.height) {
-      throw new Error(`capture choice is outside viewport: ${JSON.stringify({ box, viewport })}`);
-    }
-    await choice.click();
-    await expect(trigger).toHaveAttribute("data-capture-mode", captureMode, { timeout: 750 });
+    if ((await trigger.getAttribute("data-capture-mode")) === choice.mode) return;
+    if ((await trigger.getAttribute("data-annotation-active")) !== "true") await trigger.click();
+    await page.getByTestId(`preview-tool-${choice.tool}`).click({ timeout: 1_000 });
+    await expect(trigger).toHaveAttribute("data-capture-mode", choice.mode, { timeout: 1_000 });
   }).toPass({ timeout: 12_000, intervals: [250, 500, 1_000] });
+}
+
+/** Switches the toolbar to Interact so page input passes through. */
+export async function chooseInteract(page: Page): Promise<void> {
+  const trigger = page.getByTestId("preview-feedback-trigger");
+  await page.getByTestId("preview-tool-interact").click();
+  await expect(trigger).toHaveAttribute("data-capture-mode", "none");
+}
+
+/** Leaves annotation mode with the toolbar's Exit button. */
+export async function exitAnnotation(page: Page): Promise<void> {
+  await page.getByTestId("preview-annotation-exit").click();
+  await expect(page.getByTestId("preview-feedback-trigger")).toHaveAttribute(
+    "data-annotation-active",
+    "false",
+  );
 }
 
 /** Wait until the iframe has applied screenshot mode before dispatching a drag. */
@@ -132,12 +178,36 @@ export async function waitForScreenshotCaptureMode(frame: FrameLocator): Promise
     .toBe("crosshair");
 }
 
+/** The shared selection comment surface holding the current capture draft. */
+export function draftSurface(page: Page): Locator {
+  return page.getByTestId("preview-feedback-draft");
+}
+
+export async function fillDraftComment(page: Page, comment: string): Promise<void> {
+  await page.getByTestId("preview-feedback-draft-input").fill(comment);
+}
+
+export async function submitDraft(page: Page): Promise<void> {
+  await page.getByTestId("preview-feedback-draft-save").click();
+}
+
 export async function saveDraft(page: Page, comment: string): Promise<void> {
-  const draft = page.getByTestId("preview-feedback-draft");
+  const draft = draftSurface(page);
   await expect(draft).toBeVisible({ timeout: 15_000 });
-  await draft.getByRole("textbox", { name: "Comment on selection" }).fill(comment);
-  await draft.getByRole("button", { name: "Save feedback" }).click();
+  await fillDraftComment(page, comment);
+  await submitDraft(page);
   await expect(draft).toBeHidden({ timeout: 15_000 });
+}
+
+/** Selects all of an element's text in the page, as a user's drag would. */
+export async function selectText(frame: FrameLocator, selector: string): Promise<void> {
+  await frame.locator(selector).evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
 }
 
 export async function selectGeneratedText(frame: FrameLocator): Promise<void> {
@@ -154,6 +224,11 @@ export async function selectGeneratedText(frame: FrameLocator): Promise<void> {
     selection?.addRange(range);
     element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   });
+}
+
+/** Region outlines drawn over the preview, in creation order. */
+export function regionOutlines(page: Page): Locator {
+  return page.getByTestId("preview-region");
 }
 
 export async function dragScreenshotRegion(

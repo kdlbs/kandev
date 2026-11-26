@@ -157,6 +157,7 @@ type Adapter struct {
 	// backgroundWorkEnabled is the effective shared background-work feature
 	// value resolved by the backend for this launch.
 	backgroundWorkEnabled bool
+	claudeShellOutput     *claudeShellOutputFollower
 
 	// Normalizer for converting tool data to NormalizedPayload
 	normalizer *Normalizer
@@ -237,7 +238,14 @@ type Adapter struct {
 	// During load, we capture the last Plan so we can re-emit it after load completes.
 	// AvailableCommandsUpdate is NOT suppressed — it may arrive after the replay as a
 	// "ready" signal, and the last one always wins in the frontend.
-	isLoadingSession bool
+	isLoadingSession    bool
+	copilotInterruption copilotInterruptionState
+	// Session creation buffers startup reports until the provider's returned ID is bound.
+	sessionCreationPending        bool
+	pendingSessionStartupWarnings []AgentEvent
+	// loadingSessionID identifies the restore owner before the binding barrier
+	// publishes it as sessionID.
+	loadingSessionID string
 	loadReplayPlan   *acp.SessionUpdatePlan
 
 	// nativeGeneration identifies the current native conversation within this
@@ -250,8 +258,9 @@ type Adapter struct {
 
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
-	activeToolCalls    map[string]*streams.NormalizedPayload
-	contextCompactions map[string]*streams.NormalizedPayload
+	activeToolCalls                map[string]*streams.NormalizedPayload
+	antigravityPermissionToolNames map[permissionToolNameKey]permissionToolName
+	contextCompactions             map[string]*streams.NormalizedPayload
 	// cursorTaskMetaBySession stores Cursor's non-standard `cursor/task`
 	// metadata until the matching subagent tool_call appears, keyed by session
 	// then wire tool-call ID. An entry is drained either when its tool_call
@@ -259,6 +268,7 @@ type Adapter struct {
 	// on turn end / reset (clearCursorTaskMetaLocked), so it never outlives the
 	// turn that produced it.
 	cursorTaskMetaBySession map[string]map[string]cursorTaskMeta
+	cursorShellWatches      map[string]cursorShellWatch
 	// toolCallParents preserves nested tool lineage while a handed-off
 	// predecessor continues streaming beside its human successor.
 	toolCallParents map[string]string
@@ -287,9 +297,16 @@ type Adapter struct {
 	// Claude-acp's Monitor tool runs a background script that streams events
 	// back to the LLM as `<task-notification>` envelopes. We hold this map so
 	// later agent_message_chunks carrying those envelopes can be routed back
-	// to the originating Monitor's tool_call card. Cleared on prompt completion
-	// and rebuilt during session/load replay.
+	// to the originating Monitor's tool_call card. Cleared by terminal evidence
+	// or rebuilt during session/load replay.
 	activeMonitors map[string]map[string]string
+	// claudeMonitorReaders consumes newly appended native completion records
+	// for an exact Claude session. It is retained across prompts while a Monitor
+	// is live and fenced by the session generation.
+	claudeMonitorReaders              map[string]*claudeMonitorReaderState
+	pendingClaudeMonitorCompletions   map[string]map[claudeMonitorCompletionKey]claudeMonitorCompletion
+	completedClaudeMonitorCompletions map[string]map[claudeMonitorCompletionKey]struct{}
+	claudeMonitorReaderWg             sync.WaitGroup
 
 	// ScheduleWakeup tracking. The Claude Agent SDK's ScheduleWakeup tool
 	// fires its timer inside the SDK's async-iterator, but the upstream
@@ -313,7 +330,8 @@ type Adapter struct {
 
 	// Available models from the most recent session creation/load.
 	// Used by SetModel to validate the requested model exists.
-	availableModels []modelInfo
+	availableModels            []modelInfo
+	availableCommandsBySession map[string][]streams.AvailableCommand
 
 	// usageBySession tracks the latest and previously consumed cumulative
 	// `usage_update` samples. codex-acp DOES emit a typed per-turn usage
@@ -443,6 +461,7 @@ type promptTurnState struct {
 	providerErrorCh              chan openCodeStderrDiagnostic
 	promptGeneration             uint64
 	evidenceMu                   sync.Mutex
+	configurationCommand         *configurationCommandTracker
 	codexSystemError             bool
 	codexCapacity                bool
 	codexUsageLimit              *streams.ProviderError
@@ -576,36 +595,42 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	l := log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID))
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Adapter{
-		cfg:                        cfg,
-		logger:                     l,
-		agentID:                    cfg.AgentID,
-		copilotNativeSessionEvents: cfg.CopilotNativeSessionEvents && cfg.AgentID == copilotAgentID,
-		backgroundWorkEnabled:      cfg.AgentBackgroundWorkEnabled,
-		normalizer:                 NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
-		dialect:                    newACPDialect(cfg.AgentID),
-		updatesCh:                  make(chan AgentEvent, 100),
-		notifQueue:                 make(chan notifWork, notifQueueCapacity),
-		activeToolCalls:            make(map[string]*streams.NormalizedPayload),
-		contextCompactions:         make(map[string]*streams.NormalizedPayload),
-		openCodePluginClaims:       make(map[string]opencodeplugin.Claim),
-		cursorTaskMetaBySession:    make(map[string]map[string]cursorTaskMeta),
-		toolCallParents:            make(map[string]string),
-		handoffProtectedToolCalls:  make(map[string]struct{}),
-		activeMonitors:             make(map[string]map[string]string),
-		pendingWakeups:             make(map[string]*pendingWakeup),
-		usageBySession:             make(map[string]*usageTracker),
-		contextSamples:             make(map[string]contextWindowSample),
-		nativeGaugeMaxSize:         make(map[string]int64),
-		attachMgr:                  shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
-		promptGate:                 make(chan struct{}, 1),
-		asyncTurnFinalizers:        make(map[string]*asyncTurnFinalizer),
-		cancelJoinTimeout:          cfg.PromptCancelJoinTimeout,
-		asyncTurnEpochs:            make(map[string]uint64),
-		turnStartedAt:              make(map[string]time.Time),
-		lifetimeCtx:                ctx,
-		lifetimeCancel:             cancel,
-		closedCh:                   make(chan struct{}),
+		cfg:                               cfg,
+		logger:                            l,
+		agentID:                           cfg.AgentID,
+		copilotNativeSessionEvents:        cfg.CopilotNativeSessionEvents && cfg.AgentID == copilotAgentID,
+		backgroundWorkEnabled:             cfg.AgentBackgroundWorkEnabled,
+		normalizer:                        NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
+		dialect:                           newACPDialect(cfg.AgentID),
+		updatesCh:                         make(chan AgentEvent, 100),
+		notifQueue:                        make(chan notifWork, notifQueueCapacity),
+		activeToolCalls:                   make(map[string]*streams.NormalizedPayload),
+		antigravityPermissionToolNames:    make(map[permissionToolNameKey]permissionToolName),
+		contextCompactions:                make(map[string]*streams.NormalizedPayload),
+		openCodePluginClaims:              make(map[string]opencodeplugin.Claim),
+		cursorTaskMetaBySession:           make(map[string]map[string]cursorTaskMeta),
+		cursorShellWatches:                make(map[string]cursorShellWatch),
+		toolCallParents:                   make(map[string]string),
+		handoffProtectedToolCalls:         make(map[string]struct{}),
+		activeMonitors:                    make(map[string]map[string]string),
+		claudeMonitorReaders:              make(map[string]*claudeMonitorReaderState),
+		pendingClaudeMonitorCompletions:   make(map[string]map[claudeMonitorCompletionKey]claudeMonitorCompletion),
+		completedClaudeMonitorCompletions: make(map[string]map[claudeMonitorCompletionKey]struct{}),
+		pendingWakeups:                    make(map[string]*pendingWakeup),
+		usageBySession:                    make(map[string]*usageTracker),
+		contextSamples:                    make(map[string]contextWindowSample),
+		nativeGaugeMaxSize:                make(map[string]int64),
+		attachMgr:                         shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
+		promptGate:                        make(chan struct{}, 1),
+		asyncTurnFinalizers:               make(map[string]*asyncTurnFinalizer),
+		cancelJoinTimeout:                 cfg.PromptCancelJoinTimeout,
+		asyncTurnEpochs:                   make(map[string]uint64),
+		turnStartedAt:                     make(map[string]time.Time),
+		lifetimeCtx:                       ctx,
+		lifetimeCancel:                    cancel,
+		closedCh:                          make(chan struct{}),
 	}
+	a.claudeShellOutput = newClaudeShellOutputFollower(ctx, a.sendUpdate)
 	a.shellSnapshotTimer = time.NewTimer(shellSnapshotInterval)
 	a.shellSnapshotTimer.Stop()
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
@@ -691,7 +716,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
 		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil, a.copilotNativeSessionEvents),
-		ClientInfo:         clientInfoForAgent(a.agentID),
+		ClientInfo:         clientInfoForAgent(a.agentID, a.cfg.AuthPolicy),
 	})
 	if err != nil {
 		span.RecordError(err)
@@ -909,15 +934,29 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 	defer a.updateEmitMu.Unlock()
 	a.flushShellSnapshotLocked()
 	a.shellSnapshots = shellSnapshotState{}
-	a.sendUpdateNow(event)
+	if a.sendUpdateNow(event) {
+		a.activateClaudeShellOutputForEvent(event)
+	}
 }
 
-func (a *Adapter) sendUpdateNow(event AgentEvent) {
+func (a *Adapter) activateClaudeShellOutputForEvent(event AgentEvent) {
+	if a.claudeShellOutput == nil || event.Type != streams.EventTypeToolUpdate || event.NormalizedPayload == nil {
+		return
+	}
+	background := event.NormalizedPayload.BackgroundWork()
+	if background == nil || background.Kind != streams.BackgroundWorkKindShell || background.WorkID == "" ||
+		background.Ended || background.Capabilities == nil || background.Capabilities.Output != "stream" {
+		return
+	}
+	a.claudeShellOutput.activate(event.SessionID, background.WorkID)
+}
+
+func (a *Adapter) sendUpdateNow(event AgentEvent) bool {
 	event = streams.PrepareToolEvent(event)
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
-		return
+		return false
 	}
 	updatesCh := a.updatesCh
 	lifetimeCtx := a.lifetimeCtx
@@ -936,10 +975,13 @@ func (a *Adapter) sendUpdateNow(event AgentEvent) {
 
 	select {
 	case updatesCh <- event:
+		return true
 	case <-closedCh:
+		return false
 	case <-lifetimeCtx.Done():
 		// Shutdown cancels the wait. The event is intentionally discarded after
 		// the adapter has become terminal; no later transcript can be applied.
+		return false
 	}
 }
 
@@ -968,10 +1010,16 @@ func (a *Adapter) Close() error {
 		return nil
 	}
 	a.closed = true
+	clear(a.cursorShellWatches)
+	a.clearCopilotInterruptionLocked()
 	if a.closedCh != nil {
 		close(a.closedCh)
 	}
+	claudeReaders := a.cancelClaudeMonitorReadersLocked("")
 	a.mu.Unlock()
+	for _, reader := range claudeReaders {
+		_ = reader.Close()
+	}
 
 	a.logger.Info("closing ACP adapter")
 
@@ -986,6 +1034,10 @@ func (a *Adapter) Close() error {
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
 	}
+	if a.claudeShellOutput != nil {
+		a.claudeShellOutput.clear()
+		a.claudeShellOutput.wait()
+	}
 
 	// A successful reset returns before its best-effort session/close request,
 	// but adapter shutdown owns that worker and must drain it before returning.
@@ -993,6 +1045,7 @@ func (a *Adapter) Close() error {
 	// committing its cleanup has registered the wait-group entry.
 	a.waitForSessionCleanup()
 
+	a.claudeMonitorReaderWg.Wait()
 	// Wait for the update worker to exit before closing updatesCh.
 	// handleACPUpdate may call sendUpdate, so updatesCh must remain open
 	// until the worker is gone.

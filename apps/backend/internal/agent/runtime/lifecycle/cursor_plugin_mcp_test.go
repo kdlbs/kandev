@@ -77,6 +77,7 @@ func TestCursorPluginMCPPolicy_DeniesAndProtectsReservedNames(t *testing.T) {
 		WorkspacePath:  workspaceDir,
 		standalonePort: 4567,
 	}
+	attachLegacyMCPRouteClient(exec)
 	exec.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{
 		AllowHTTP:        true,
 		DenylistServers:  []string{"blocked-srv", "denied-by-profile"},
@@ -174,6 +175,7 @@ func TestCursorPluginMCPPrecedence_Matrix(t *testing.T) {
 		WorkspacePath:  workspaceDir,
 		standalonePort: 9999,
 	}
+	attachLegacyMCPRouteClient(exec)
 	agent := agents.NewCursorACP()
 	profileInfo := &AgentProfileInfo{ProfileID: profileID, CursorPluginsMCPEnabled: true}
 
@@ -232,6 +234,7 @@ func TestCursorPluginMCPReconciliation_DisabledAndSourceRemoval(t *testing.T) {
 		WorkspacePath:  workspaceDir,
 		standalonePort: 1234,
 	}
+	attachLegacyMCPRouteClient(exec)
 	agent := agents.NewCursorACP()
 
 	// 1. Initial materialization with enabled preference
@@ -333,6 +336,7 @@ func TestCursorPluginMCPSafety_SymlinkAndMalformedIgnored(t *testing.T) {
 		WorkspacePath:  workspaceDir,
 		standalonePort: 1234,
 	}
+	attachLegacyMCPRouteClient(exec)
 	agent := agents.NewCursorACP()
 	profileInfo := &AgentProfileInfo{ProfileID: "p1", CursorPluginsMCPEnabled: true}
 
@@ -365,6 +369,7 @@ func TestCursorPluginMCPImportedIdentityMatchesSharedOAuth(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(source, "mcp-auth.json"), auth, 0o600))
 	mgr := newTestManager(t)
 	execution := &AgentExecution{WorkspacePath: t.TempDir(), standalonePort: 1234}
+	attachLegacyMCPRouteClient(execution)
 	profile := &AgentProfileInfo{CursorPluginsMCPEnabled: true, CursorMCPAuthEnabled: true}
 	agent := agents.NewCursorACP()
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), execution, agent, profile, "local"))
@@ -389,7 +394,7 @@ func TestCursorPluginMCPImportedIdentityMatchesSharedOAuth(t *testing.T) {
 func TestCursorPluginMCPNativeIdentityPreservesProjectPrecedence(t *testing.T) {
 	for _, explicitName := range []string{"atlassian", "plugin-atlassian-atlassian"} {
 		t.Run(explicitName, func(t *testing.T) {
-			servers, ownership, err := composeEffectiveMCPServers(&AgentExecution{}, nil,
+			servers, ownership, err := composeEffectiveMCPServers(&AgentExecution{}, nil, nil,
 				map[string]json.RawMessage{explicitName: json.RawMessage(`{"url":"https://explicit.example"}`)},
 				map[string]agentctltypes.McpServer{
 					"atlassian": {Name: "plugin-atlassian-atlassian", URL: "https://plugin.example"},
@@ -436,6 +441,7 @@ func TestCursorPluginMCPMigratesOwnedBareIdentity(t *testing.T) {
 		filepath.Join(projectDir, ".kandev-mcp-imports.json"), nil, oldEntries, ownership, false))
 	mgr := newTestManager(t)
 	execution := &AgentExecution{WorkspacePath: workspace, standalonePort: 1234}
+	attachLegacyMCPRouteClient(execution)
 	profile := &AgentProfileInfo{CursorPluginsMCPEnabled: true}
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), execution, agents.NewCursorACP(), profile, "local"))
 	data, err := os.ReadFile(filepath.Join(projectDir, "mcp.json"))

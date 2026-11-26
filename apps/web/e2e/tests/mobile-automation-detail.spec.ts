@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
+import { waitForFiniteAnimations } from "../helpers/pr-capture";
+import { watchWs } from "../helpers/causal-waits";
 
 /**
  * The automation detail page on a phone.
@@ -143,6 +145,79 @@ test.describe("Automation detail on mobile", () => {
     // The topbar drops the next-firing note on a phone for want of width, so
     // this is where it said it went.
     await expect(panel.getByTestId("run-detail-next-run")).not.toHaveText("");
+  });
+
+  test("supports schedule trigger recovery from the drawer with a touch-sized action", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { automation } = await seedAutomationWithRuns(
+      apiClient,
+      seedData,
+      "Mobile Schedule Recovery",
+    );
+    const future = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    const cronExpression = `17 3 ${future.getUTCDate()} ${future.getUTCMonth() + 1} *`;
+    const trigger = await apiClient.seedTrigger({
+      automationId: automation.id,
+      type: "scheduled",
+      config: { cron_expression: cronExpression, timezone: "UTC" },
+      enabled: false,
+    });
+    const watcher = watchWs(testPage);
+    await openDetail(testPage, automation.id);
+    await testPage.addStyleTag({ content: "html { font-size: 14px; }" });
+
+    await testPage.getByTestId("runs-drawer-trigger").tap();
+    const drawer = testPage.getByTestId("runs-drawer");
+    await waitForFiniteAnimations(drawer);
+    await drawer.getByTestId("run-detail-toggle").tap();
+    const nextRun = drawer.getByTestId("run-detail-next-run");
+    await expect(nextRun).toContainText("Schedule trigger is switched off");
+
+    const enable = drawer.getByTestId("enable-schedule-action");
+    await waitForFiniteAnimations(drawer);
+    const actionBox = await enable.boundingBox();
+    const drawerBox = await drawer.boundingBox();
+    expect(actionBox?.height).toBeGreaterThanOrEqual(44);
+    expect(actionBox && drawerBox && actionBox.x).toBeGreaterThanOrEqual(drawerBox.x);
+    expect(actionBox && drawerBox && actionBox.x + actionBox.width).toBeLessThanOrEqual(
+      drawerBox.x + drawerBox.width,
+    );
+    const documentWidth = await testPage.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+    expect(documentWidth.scroll).toBeLessThanOrEqual(documentWidth.client);
+
+    const scheduleUpdate = watcher.waitForResponse("automation.trigger.update", {
+      requestWhere: (payload) => payload.id === trigger.id,
+    });
+    await enable.tap();
+    await scheduleUpdate;
+    await expect(nextRun).not.toContainText("Schedule trigger is switched off", {
+      timeout: 15_000,
+    });
+    await expect(nextRun).not.toContainText("No schedule");
+    const saved = await apiClient.wsRequest<{
+      triggers: Array<{ id: string; enabled: boolean; config: Record<string, unknown> }>;
+    }>("automation.get", { id: automation.id });
+    expect(saved.triggers.find((entry) => entry.id === trigger.id)).toMatchObject({
+      id: trigger.id,
+      enabled: true,
+      config: { cron_expression: cronExpression, timezone: "UTC" },
+    });
+
+    await testPage.reload();
+    await openDetail(testPage, automation.id);
+    await testPage.getByTestId("runs-drawer-trigger").tap();
+    const refreshedDrawer = testPage.getByTestId("runs-drawer");
+    await refreshedDrawer.getByTestId("run-detail-toggle").tap();
+    await expect(refreshedDrawer.getByTestId("enable-schedule-action")).toHaveCount(0);
+    await expect(refreshedDrawer.getByTestId("run-detail-next-run")).not.toContainText(
+      "Schedule trigger is switched off",
+    );
   });
 
   test("offers a composer on a run with a conversation", async ({

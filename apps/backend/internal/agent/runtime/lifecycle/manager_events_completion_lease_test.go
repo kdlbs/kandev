@@ -218,6 +218,46 @@ func TestAgentReadyRetainsDurableTerminalIdentity(t *testing.T) {
 	t.Fatal("AgentReady was not published")
 }
 
+func TestConfigurationCommandFeedbackReady(t *testing.T) {
+	result := &streams.ConfigurationCommandResult{
+		Status: "applied", ConfigID: "model", Requested: "Mock Smart", Effective: "Mock Smart", Confirmed: true,
+	}
+	execution := createTestExecution("exec-config-command", "task-config-command", "session-config-command")
+	execution.setSessionInitialized(true)
+	mgr, eventBus := createCompletionSignalTestManager(execution)
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	promptGeneration, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin prompt: %v", err)
+	}
+	mgr.handleAgentEventWithStartupGeneration(execution, agentctl.AgentEvent{
+		Type:                       streams.EventTypeComplete,
+		SessionID:                  execution.SessionID,
+		TurnID:                     "turn-config-command",
+		PromptGeneration:           promptGeneration,
+		ConfigurationCommandResult: result,
+		Data:                       map[string]any{"stop_reason": "end_turn"},
+	}, execution.startupAttemptSnapshot())
+
+	for _, published := range eventBus.PublishedEvents {
+		if published.Subject != events.AgentReady {
+			continue
+		}
+		payload, ok := published.Event.Data.(AgentEventPayload)
+		if !ok {
+			t.Fatalf("ready payload has type %T, want AgentEventPayload", published.Event.Data)
+		}
+		if payload.TurnID != "turn-config-command" || payload.ConfigurationCommandResult == nil ||
+			*payload.ConfigurationCommandResult != *result {
+			t.Fatalf("ready payload = %+v, want numbered command result", payload)
+		}
+		return
+	}
+	t.Fatal("AgentReady was not published")
+}
+
 // Covers AC-TASKS-SESSION-TURN-SETTLEMENT-001.4.
 func TestCompletionStartupLease_StaleAndPending(t *testing.T) {
 	t.Run("stale startup callback", func(t *testing.T) {

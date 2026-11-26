@@ -282,6 +282,12 @@ type AutoMergeOverride struct {
 	Revision int64
 }
 
+type SessionPolicyResult struct {
+	AutoMerge      AutoMergePolicy
+	CompactedCount int
+	compactionRan  bool
+}
+
 // QueuedMessage represents a single FIFO entry queued for a session.
 type QueuedMessage struct {
 	ID          string                 `json:"id"`
@@ -407,6 +413,16 @@ func (m *QueuedMessage) IsDurablePlanComment() bool {
 	messageID, _ := m.Metadata[MetadataDurableTranscriptMessageID].(string)
 	messageFingerprint, _ := m.Metadata[plancomments.MetadataClientMessageFingerprint].(string)
 	return messageID != "" && messageFingerprint != ""
+}
+
+// queueOrderLess is the total FIFO order of a session's queued rows. Positions
+// can tie (a restored reservation keeps its old slot), so ID breaks ties; every
+// SQL query orders by the same (position, id) key.
+func queueOrderLess(a, b *QueuedMessage) bool {
+	if a.Position != b.Position {
+		return a.Position < b.Position
+	}
+	return a.ID < b.ID
 }
 
 // IsDurableDelivery reports whether the row must survive dequeue until its
@@ -546,6 +562,7 @@ func clearReservedMetadata(metadata map[string]interface{}) map[string]interface
 
 // MessageAttachment represents an attachment (image) in a queued message.
 type MessageAttachment struct {
+	CommentID    string `json:"comment_id,omitempty"`
 	Type         string `json:"type"`
 	Data         string `json:"data"`
 	AttachmentID string `json:"attachment_id,omitempty"`

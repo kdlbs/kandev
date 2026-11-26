@@ -57,7 +57,7 @@ it.each([
     "Resume session",
   );
   if (state === "resuming")
-    expect(document.querySelector('[role="status"]')?.textContent).toBe("Resuming...");
+    expect(document.querySelector('[role="status"]')?.textContent).toBe("Resuming session");
   if (state === "checking") {
     expect(document.querySelector('[role="status"]')?.textContent).toBe("Checking session...");
     expect(screen.getByTestId("recovery-fresh-button")).toHaveProperty("disabled", true);

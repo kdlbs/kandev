@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
@@ -25,6 +25,18 @@ vi.mock("@/hooks/domains/integrations/use-remote-repositories", () => ({
 
 import { GitHubRepoScopeSection } from "./github-repo-scope-section";
 
+const ORG_ADD = "github-organization-add";
+const SAVE_BAR = "settings-floating-save";
+const SAVE_CHANGES = "Save changes";
+const ALL_REPOSITORIES = "All repositories";
+const EXACT_REPOSITORY = "outside/tool";
+
+function expectAllRepositoriesChecked(checked: boolean) {
+  expect(screen.getByRole("switch", { name: ALL_REPOSITORIES }).getAttribute("aria-checked")).toBe(
+    String(checked),
+  );
+}
+
 function repo(owner: string, name: string): RemoteRepository {
   return {
     provider: "github",
@@ -41,11 +53,25 @@ function repo(owner: string, name: string): RemoteRepository {
 const SAVED: GitHubWorkspaceSettings = {
   workspace_id: "ws-1",
   github_host: "github.com",
-  repo_scope_mode: "repos",
+  repo_scope_mode: "selected",
   repo_scope_orgs: [],
   repo_scope_repos: [{ owner: "kdlbs", name: "kandev" }],
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+};
+
+const UNION_SAVED: GitHubWorkspaceSettings = {
+  ...SAVED,
+  repo_scope_mode: "selected",
+  repo_scope_orgs: ["acme"],
+  repo_scope_repos: [{ owner: "outside", name: "tool" }],
+};
+
+const EXACT_ONLY_SAVED: GitHubWorkspaceSettings = {
+  ...SAVED,
+  repo_scope_mode: "selected",
+  repo_scope_orgs: [],
+  repo_scope_repos: [{ owner: "outside", name: "tool" }],
 };
 
 beforeEach(() => {
@@ -113,12 +139,13 @@ describe("GitHubRepoScopeSection repositories", () => {
     expect(options).toHaveLength(2);
     fireEvent.click(options[1]!);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES }));
     await waitFor(() =>
       expect(mocks.updateGitHubWorkspaceSettings).toHaveBeenCalledWith(
         expect.objectContaining({
           workspace_id: "ws-1",
-          repo_scope_mode: "repos",
+          repo_scope_mode: "selected",
+          repo_scope_orgs: [],
           repo_scope_repos: [
             { owner: "kdlbs", name: "kandev" },
             { owner: "acme", name: "api" },
@@ -134,7 +161,7 @@ describe("GitHubRepoScopeSection repositories", () => {
     fireEvent.click(screen.getByRole("button", { name: /remove kdlbs\/kandev/i }));
     expect(screen.queryByText("kdlbs/kandev")).toBeNull();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES }));
     await waitFor(() =>
       expect(mocks.updateGitHubWorkspaceSettings).toHaveBeenCalledWith(
         expect.objectContaining({ repo_scope_repos: [] }),
@@ -146,7 +173,7 @@ describe("GitHubRepoScopeSection repositories", () => {
 describe("GitHubRepoScopeSection organizations", () => {
   const ORGS_SAVED: GitHubWorkspaceSettings = {
     ...SAVED,
-    repo_scope_mode: "orgs",
+    repo_scope_mode: "selected",
     repo_scope_orgs: ["kdlbs"],
   };
 
@@ -165,25 +192,162 @@ describe("GitHubRepoScopeSection organizations", () => {
     mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(ORGS_SAVED);
     renderSection();
     await waitFor(() =>
-      expect(screen.getByTestId<HTMLButtonElement>("github-organization-add").disabled).toBe(false),
+      expect(screen.getByTestId<HTMLButtonElement>(ORG_ADD).disabled).toBe(false),
     );
-    fireEvent.click(screen.getByTestId("github-organization-add"));
+    fireEvent.click(screen.getByTestId(ORG_ADD));
     await waitFor(() =>
       expect(screen.getAllByTestId("github-organization-option")).toHaveLength(3),
     );
     fireEvent.click(screen.getAllByTestId("github-organization-option")[2]!);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES }));
     await waitFor(() =>
       expect(mocks.updateGitHubWorkspaceSettings).toHaveBeenCalledWith(
-        expect.objectContaining({ repo_scope_mode: "orgs", repo_scope_orgs: ["kdlbs", "acme"] }),
+        expect.objectContaining({
+          repo_scope_mode: "selected",
+          repo_scope_orgs: ["kdlbs", "acme"],
+          repo_scope_repos: [{ owner: "kdlbs", name: "kandev" }],
+        }),
       ),
     );
   });
 
-  it("disables the organization picker outside orgs mode", async () => {
+  it("keeps the organization picker enabled for selected scope", async () => {
     renderSection();
     await waitForLoadedSection();
-    expect(screen.getByTestId<HTMLButtonElement>("github-organization-add").disabled).toBe(true);
+    expect(screen.getByTestId<HTMLButtonElement>(ORG_ADD).disabled).toBe(false);
+  });
+});
+
+describe("GitHubRepoScopeSection union selection", () => {
+  it("saves owner and repository scope together", async () => {
+    mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(EXACT_ONLY_SAVED);
+    renderSection();
+    expect(await screen.findByText(EXACT_REPOSITORY)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId(ORG_ADD));
+    fireEvent.click(await screen.findByRole("button", { name: "octocat" }));
+    expect(await screen.findByText("octocat")).toBeTruthy();
+
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES }));
+    await waitFor(() =>
+      expect(mocks.updateGitHubWorkspaceSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspace_id: "ws-1",
+          repo_scope_mode: "selected",
+          repo_scope_orgs: ["octocat"],
+          repo_scope_repos: [{ owner: "outside", name: "tool" }],
+        }),
+      ),
+    );
+  });
+
+  it("toggles all repositories without dropping either saved selection", async () => {
+    mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(UNION_SAVED);
+    renderSection();
+    expect(await screen.findByText(EXACT_REPOSITORY)).toBeTruthy();
+    const allRepositories = screen.getByRole("switch", { name: ALL_REPOSITORIES });
+    expectAllRepositoriesChecked(false);
+
+    fireEvent.click(allRepositories);
+    expectAllRepositoriesChecked(true);
+    expect(screen.queryByTestId("github-scope-orgs")).toBeNull();
+    expect(screen.queryByTestId("github-scope-repos")).toBeNull();
+
+    fireEvent.click(allRepositories);
+    expectAllRepositoriesChecked(false);
+    expect(await screen.findByText("acme")).toBeTruthy();
+    expect(screen.getByText(EXACT_REPOSITORY)).toBeTruthy();
+  });
+
+  it("keeps both pickers available for an empty selected scope", async () => {
+    mocks.fetchGitHubWorkspaceSettings.mockResolvedValue({
+      ...UNION_SAVED,
+      repo_scope_orgs: [],
+      repo_scope_repos: [],
+    });
+    renderSection();
+    expect(await screen.findByRole("switch", { name: ALL_REPOSITORIES })).toBeTruthy();
+    expect(screen.getByTestId<HTMLButtonElement>(ORG_ADD).disabled).toBe(false);
+    expect(screen.getByTestId<HTMLButtonElement>("github-repository-add").disabled).toBe(false);
+  });
+});
+
+describe("GitHubRepoScopeSection save state", () => {
+  it("discards unsaved changes to the combined selection", async () => {
+    mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(UNION_SAVED);
+    renderSection();
+    expect(await screen.findByText(EXACT_REPOSITORY)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: `Remove ${EXACT_REPOSITORY}` }));
+    expect(screen.queryByText(EXACT_REPOSITORY)).toBeNull();
+
+    fireEvent.click(within(screen.getByTestId(SAVE_BAR)).getByRole("button", { name: "Reset" }));
+    expect(await screen.findByText(EXACT_REPOSITORY)).toBeTruthy();
+    expect(screen.getByText("acme")).toBeTruthy();
+  });
+
+  it("preserves a combined draft for retry after a failed save", async () => {
+    mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(UNION_SAVED);
+    mocks.updateGitHubWorkspaceSettings.mockRejectedValueOnce(new Error("save failed"));
+    renderSection();
+    expect(await screen.findByText(EXACT_REPOSITORY)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: `Remove ${EXACT_REPOSITORY}` }));
+
+    fireEvent.click(
+      within(screen.getByTestId(SAVE_BAR)).getByRole("button", {
+        name: SAVE_CHANGES,
+      }),
+    );
+    await waitFor(() => expect(mocks.updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(EXACT_REPOSITORY)).toBeNull();
+    const actions = within(screen.getByTestId(SAVE_BAR)).getAllByRole("button");
+    fireEvent.click(actions[1]!);
+    await waitFor(() => expect(mocks.updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(2));
+    expect(mocks.updateGitHubWorkspaceSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        repo_scope_mode: "selected",
+        repo_scope_orgs: ["acme"],
+        repo_scope_repos: [],
+      }),
+    );
+  });
+
+  it("preserves edits made while an all-scope save is pending", async () => {
+    let resolveSave!: (settings: GitHubWorkspaceSettings) => void;
+    mocks.fetchGitHubWorkspaceSettings.mockResolvedValue(UNION_SAVED);
+    mocks.updateGitHubWorkspaceSettings.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveSave = resolve)),
+    );
+    renderSection();
+    expect(await screen.findByText(EXACT_REPOSITORY)).toBeTruthy();
+    const allRepositories = screen.getByRole("switch", { name: ALL_REPOSITORIES });
+    fireEvent.click(allRepositories);
+    fireEvent.click(
+      within(screen.getByTestId(SAVE_BAR)).getByRole("button", {
+        name: SAVE_CHANGES,
+      }),
+    );
+    await waitFor(() => expect(mocks.updateGitHubWorkspaceSettings).toHaveBeenCalledTimes(1));
+    expect(mocks.updateGitHubWorkspaceSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo_scope_mode: "all",
+        repo_scope_orgs: [],
+        repo_scope_repos: [],
+      }),
+    );
+
+    fireEvent.click(allRepositories);
+    await act(async () => {
+      resolveSave({
+        ...UNION_SAVED,
+        repo_scope_mode: "all",
+        repo_scope_orgs: [],
+        repo_scope_repos: [],
+      });
+    });
+    expectAllRepositoriesChecked(false);
+    expect(await screen.findByText("acme")).toBeTruthy();
+    expect(screen.getByText(EXACT_REPOSITORY)).toBeTruthy();
+    expect(screen.getByTestId(SAVE_BAR).getAttribute("data-status")).toBe("dirty");
   });
 });

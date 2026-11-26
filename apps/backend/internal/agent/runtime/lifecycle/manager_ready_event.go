@@ -25,6 +25,10 @@ func (m *Manager) prepareReadyEventForExecution(execution *AgentExecution, attem
 		if completion != nil {
 			payload.TurnID = completion.TurnID
 			payload.PromptGeneration = completion.PromptGeneration
+			if !completion.Recovered && completion.TurnID != "" && completion.PromptGeneration != 0 &&
+				completion.PromptGeneration == execution.promptGeneration {
+				payload.ConfigurationCommandResult = completion.ConfigurationCommandResult
+			}
 		}
 		updated = execution
 	}); err != nil {

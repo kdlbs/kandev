@@ -36,6 +36,23 @@ func (e *Executor) applyDeliveryIdentity(
 	if err != nil {
 		return err
 	}
+	if current != nil {
+		req.RuntimeAdapterVersion = current.AdapterVersion
+		if req.RuntimeAdapterVersion == "" {
+			req.RuntimeAdapterVersion = models.ACPAdapterVersionForNativeSession(
+				session.Metadata, current.NativeSessionID,
+			)
+		}
+	} else {
+		nativeSessionID := req.RequiredNativeConversationID
+		if nativeSessionID == "" {
+			nativeSessionID = req.ACPSessionID
+		}
+		if nativeSessionID == "" {
+			nativeSessionID = session.DownstreamACPSessionID
+		}
+		req.RuntimeAdapterVersion = models.ACPAdapterVersionForNativeSession(session.Metadata, nativeSessionID)
+	}
 	if current != nil && current.OriginalWorkspace != "" {
 		req.OriginalWorkspacePath = current.OriginalWorkspace
 	} else if req.OriginalWorkspacePath == "" {

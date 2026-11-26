@@ -1020,6 +1020,10 @@ type Message struct {
 	Content    string
 	Type       string // "message" default; see the MessageType vocabulary
 	CreatedAt  string // RFC3339
+	// Source is the persisted metadata.source provenance, for example
+	// "plugin:<id>" on a message a plugin sent; empty when absent. No other
+	// message metadata is exposed.
+	Source string
 }
 
 func (m Message) toProto() *pluginv1.Message {
@@ -1032,6 +1036,7 @@ func (m Message) toProto() *pluginv1.Message {
 		Content:    m.Content,
 		Type:       m.Type,
 		CreatedAt:  m.CreatedAt,
+		Source:     m.Source,
 	}
 }
 
@@ -1048,6 +1053,7 @@ func messageFromProto(p *pluginv1.Message) Message {
 		Content:    p.GetContent(),
 		Type:       p.GetType(),
 		CreatedAt:  p.GetCreatedAt(),
+		Source:     p.GetSource(),
 	}
 }
 
@@ -1121,8 +1127,11 @@ func messageFilterFromProto(p *pluginv1.MessageFilter) MessageFilter {
 // first workflow); the host returns a gRPC InvalidArgument when a default
 // cannot be resolved unambiguously.
 type CreateTaskInput struct {
-	WorkspaceID    string
-	WorkflowID     string
+	WorkspaceID string
+	WorkflowID  string
+	// ProjectID optionally selects an Office project in the task workspace.
+	// Nil omits it; an empty value is explicit and invalid.
+	ProjectID      *string `json:"project_id,omitempty"`
 	WorkflowStepID *string
 	Title          string
 	Description    string
@@ -1146,6 +1155,7 @@ func (in CreateTaskInput) toProto() (*pluginv1.CreateTaskRequest, error) {
 	return &pluginv1.CreateTaskRequest{
 		WorkspaceId:    in.WorkspaceID,
 		WorkflowId:     in.WorkflowID,
+		ProjectId:      in.ProjectID,
 		WorkflowStepId: in.WorkflowStepID,
 		Title:          in.Title,
 		Description:    in.Description,
@@ -1169,6 +1179,7 @@ func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) (CreateTaskInput, e
 	return CreateTaskInput{
 		WorkspaceID:    p.GetWorkspaceId(),
 		WorkflowID:     p.GetWorkflowId(),
+		ProjectID:      p.ProjectId,
 		WorkflowStepID: p.WorkflowStepId,
 		Title:          p.GetTitle(),
 		Description:    p.GetDescription(),

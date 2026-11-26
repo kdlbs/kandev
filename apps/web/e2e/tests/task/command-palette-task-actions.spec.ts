@@ -59,7 +59,7 @@ test("moves the current task from the keyboard and retains failed instructions",
   );
   await input.press("Control+Enter");
   await failed;
-  await expect(input).toHaveValue(MOVE_INSTRUCTIONS);
+  await expect(input).toHaveText(MOVE_INSTRUCTIONS);
   await expect(testPage.getByTestId("workflow-move-submit")).toBeEnabled();
   expect((await apiClient.getTask(fixture.taskId)).workflow_step_id).toBe(fixture.sourceStepId);
   const request = waitForMoveRequest(testPage, fixture.taskId);

@@ -195,6 +195,12 @@ one offered option with a nonempty label, `selected_label` is omitted.
 Free-text-only answers return `custom_text` without a selected label.
 Selections can also retain accompanying `custom_text`.
 
+When an answer to an active, current-turn clarification resumes the agent, a
+selected option in the resume prompt includes its quoted label and ID, for
+example `User selected: ["A" (q1_opt1)]`. If the saved question has no unique,
+nonempty label for that ID, the prompt shows the ID alone. An answer with custom
+text uses that text instead of listing selected options.
+
 An answer may also include an `attachments` array when the operator attaches
 evidence. Each entry has `attachment_id`, `type`, `name`, `mime_type`,
 `size_bytes`, `delivery_mode`, and a `path` that is readable in the current
@@ -230,9 +236,17 @@ mockup before answering. The image appears above the prompt. Select **Inspect
 image**, then use **Fit** or **Actual size**. Close inspection to return to the
 same question and draft. On a phone, inspection fills the screen.
 
-Use a workspace-relative PNG or JPEG path from the session that asks the question.
-An optional `repo` selects an attached repository by its workspace-relative path.
-Do not use an absolute path, home shortcut, external URL, or data URL.
+Use a PNG or JPEG path from the source session workspace. When the workspace
+itself is the repository, make `path` relative to its root. Omit `repo`. If the
+workspace contains child repositories, set `repo` to the child path relative to
+the workspace. Make `path` relative to that child repository. Do not use an
+absolute path, home shortcut, external URL, or data URL.
+
+For compatibility, older calls can set `repo` to the workspace folder name.
+If the root has its own `.git` entry and no child has that name, the alias
+identifies the root. A child with that name always takes precedence. A failed
+child read does not select the workspace root. For new calls, omit `repo` when
+the workspace itself is the repository.
 
 For example, pass this payload to `ask_user_question_kandev`:
 

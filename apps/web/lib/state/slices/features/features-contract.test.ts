@@ -23,8 +23,8 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags).not.toHaveProperty("officeSessionIdentity");
   });
 
-  it("keeps browser-owned LSP continuity disabled by default", () => {
-    expect(defaultFeatureFlags.lspBrowserContinuity).toBe(false);
+  it("omits the retired LSP browser continuity toggle", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("lspBrowserContinuity");
   });
 
   it("keeps dynamic agent routing disabled by default", () => {
@@ -35,7 +35,7 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags).not.toHaveProperty("dynamicCircuitBackoffEscalation");
   });
 
-  it("keeps canvases disabled by default", () => {
+  it("waits for the backend before exposing canvases", () => {
     expect(defaultFeatureFlags.canvases).toBe(false);
   });
 

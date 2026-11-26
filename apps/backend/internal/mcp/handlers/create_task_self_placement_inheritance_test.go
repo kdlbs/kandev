@@ -98,6 +98,7 @@ func TestMCPCreateTaskSelfPlacementInheritance(t *testing.T) {
 			}
 			selfPlacementWorkflowSteps(t, f, workflowProfile)
 			payload := selfPlacementCreatePayload(f, f.child.ID)
+			payload["workspace_mode"] = mcpWorkspaceModeInheritParent
 			delete(payload, "workspace_id")
 			delete(payload, "workflow_id")
 			delete(payload, "agent_profile_id")

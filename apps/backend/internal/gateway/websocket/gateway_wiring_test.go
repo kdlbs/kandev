@@ -70,7 +70,7 @@ func TestSetupRoutesRegistersOnlyWiredSurfaces(t *testing.T) {
 	}
 
 	gateway.SetLifecycleManager(nil, nil, nil)
-	gateway.SetLSPHandler(nil, nil)
+	gateway.SetLSPHandler(nil, nil, 0, nil, nil)
 	gateway.SetVscodeProxy(nil)
 	gateway.SetPortProxy(nil)
 	gateway.SetPortTunnel(nil)

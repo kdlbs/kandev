@@ -48,6 +48,7 @@ acpdbg matrix                                          # probe every ACP agent i
 - `--workdir PATH` — child cwd (default: fresh `/tmp/kandev-acpdbg-<pid>-*`)
 - `--verbose` — mirror frames to stderr
 - `--stderr` — capture child stderr into the JSONL
+- `--protocol-version 1|2` selects the requested ACP wire version. The default is 1.
 - `--client-capabilities '{"session":{"notices":{},"compaction":{}}}'` — merge a JSON object into `initialize.clientCapabilities`; nested values merge with the debugger defaults
 - `--air-capabilities "asyncTasks,..."` — advertise AIR extension capabilities in
   `clientCapabilities._meta.jetbrains.air`; omitted by default. This metadata merges with the
@@ -61,7 +62,13 @@ apps/backend/bin/acpdbg probe --client-capabilities '{"session":{"notices":{},"c
 
 For `prompt --model`, acpdbg uses a `model` category config option when available. It falls back
 to `session/set_model` when the option is absent or the agent does not implement
-`session/set_config_option`.
+`session/set_config_option` on v1.
+
+For a v2 probe, add `--protocol-version 2` before the agent name. The capture
+records the requested and selected versions. A v2 run stops before session
+setup if the peer selects v1 or returns a legacy initialization response.
+For v2 prompts, look for both the prompt acknowledgement and the terminal
+foreground state. For v2 replay, look for `session/resume` and `replay_complete`.
 
 ## Steps
 

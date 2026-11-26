@@ -176,3 +176,54 @@ func TestDeliveryWriterFailureUncertainPhasePersistsRecoveryBlock(t *testing.T) 
 		t.Fatalf("delivery admission block = %+v, %v", block, err)
 	}
 }
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
+func TestDeliveryRecoveryCancelledLabelWithoutTerminalProofKeepsSessionRunning(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-cancelled-without-proof", "session-cancelled-without-proof", "step-1")
+	seedExecutorRunning(t, repo, "session-cancelled-without-proof", "task-cancelled-without-proof", "exec-cancelled-without-proof")
+	session, err := repo.GetTaskSession(ctx, "session-cancelled-without-proof")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incarnationID := session.QueueIncarnationID
+	if err := repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID: session.ID, IncarnationID: incarnationID, Generation: 3,
+		NativeSessionID: "native-cancelled-without-proof", CreationReason: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
+		ID: "submission-cancelled-without-proof", SessionID: session.ID, IncarnationID: incarnationID,
+		HarnessGeneration: 3, OwnerGeneration: 1, PayloadHash: "hash-cancelled-without-proof",
+		Payload: []byte("prompt"), State: models.DeliverySubmissionDispatching,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := repo.TransitionAgentDeliverySubmission(
+		ctx, "submission-cancelled-without-proof", models.DeliverySubmissionDispatching,
+		models.DeliverySubmissionCancelled, "cancelled", time.Now().UTC(),
+	); err != nil || !changed {
+		t.Fatalf("cancel submission without terminal proof = %v, %v", changed, err)
+	}
+	service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return session.AgentExecutionID, nil
+		},
+		isAgentReadyFn: func(context.Context, string) bool { return true },
+	})
+	service.handleAgentctlDeliveryRecovery(ctx, lifecycle.AgentctlEventPayload{
+		TaskID: session.TaskID, SessionID: session.ID, AgentExecutionID: session.AgentExecutionID,
+		FailureCode: "DURABLE_DELIVERY_UNCERTAIN", DeliveryRecoveryPhase: models.AgentDeliveryRecoveryUncertain,
+		DeliverySubmissionID: "submission-cancelled-without-proof", DeliveryStreamID: "stream-cancelled-without-proof",
+		DeliveryIncarnationID: incarnationID, DeliveryHarnessGeneration: 3, PromptGeneration: 9,
+	})
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.State != models.TaskSessionStateRunning {
+		t.Fatalf("cancelled label without terminal proof changed session to %s", stored.State)
+	}
+}

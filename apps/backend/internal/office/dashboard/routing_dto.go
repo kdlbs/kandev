@@ -14,6 +14,71 @@ type RoutingConfigResponse struct {
 	Config            *routing.WorkspaceConfig          `json:"config"`
 	KnownProviders    []routing.ProviderID              `json:"known_providers"`
 	ExecutionProfiles []routing.ExecutionProfileSummary `json:"execution_profiles"`
+	// AuthorExclusionWarnings predicts which exclude_author_provider steps
+	// will not be enforced or can park their reviews. Never null.
+	AuthorExclusionWarnings []AuthorExclusionWarningDTO `json:"author_exclusion_warnings"`
+	// AuthorExclusionSteps lists every ensure_participant_seat action in the
+	// workspace with whether it keeps reviews off the author's provider. Never null.
+	AuthorExclusionSteps []AuthorExclusionStepDTO `json:"author_exclusion_steps"`
+}
+
+// AuthorExclusionStepDTO is one seat step row on the routing settings page.
+type AuthorExclusionStepDTO struct {
+	WorkflowID   string `json:"workflow_id"`
+	WorkflowName string `json:"workflow_name"`
+	StepID       string `json:"step_id"`
+	StepName     string `json:"step_name"`
+	Role         string `json:"role"`
+	Enabled      bool   `json:"enabled"`
+}
+
+// SeatAuthorExclusionResponse is the PUT /workspaces/:wsId/routing/author-exclusion
+// payload: the seat steps and setup warnings after the write. The write has
+// succeeded whenever this is returned; AuthorExclusionSteps is null when the
+// steps could not be read back, and the client reloads them.
+type SeatAuthorExclusionResponse struct {
+	AuthorExclusionSteps    []AuthorExclusionStepDTO    `json:"author_exclusion_steps"`
+	AuthorExclusionWarnings []AuthorExclusionWarningDTO `json:"author_exclusion_warnings"`
+}
+
+// RoutingUpdateResponse is the PUT /workspaces/:wsId/routing payload. The
+// warnings are computed after the save; they never block it.
+type RoutingUpdateResponse struct {
+	OK                      bool                        `json:"ok"`
+	AuthorExclusionWarnings []AuthorExclusionWarningDTO `json:"author_exclusion_warnings"`
+}
+
+// AuthorExclusionWarningDTO is one exclusion setup warning. Code is a closed
+// set (routing.SetupWarningCode); the client localizes it and interpolates
+// the names.
+type AuthorExclusionWarningDTO struct {
+	Code         string `json:"code"`
+	WorkflowName string `json:"workflow_name,omitempty"`
+	StepName     string `json:"step_name,omitempty"`
+	Role         string `json:"role,omitempty"`
+	ProviderID   string `json:"provider_id,omitempty"`
+	AgentName    string `json:"agent_name,omitempty"`
+}
+
+// AuthorExclusionWarningDTOs converts setup warnings for the wire. A
+// non-nil err becomes a single check_failed warning, so a failed check is
+// visible without failing the request.
+func AuthorExclusionWarningDTOs(warnings []routing.SetupWarning, err error) []AuthorExclusionWarningDTO {
+	if err != nil {
+		return []AuthorExclusionWarningDTO{{Code: string(routing.SetupWarningCheckFailed)}}
+	}
+	out := make([]AuthorExclusionWarningDTO, 0, len(warnings))
+	for _, w := range warnings {
+		out = append(out, AuthorExclusionWarningDTO{
+			Code:         string(w.Code),
+			WorkflowName: w.Declaration.WorkflowName,
+			StepName:     w.Declaration.StepName,
+			Role:         w.Declaration.Role,
+			ProviderID:   string(w.ProviderID),
+			AgentName:    w.AgentName,
+		})
+	}
+	return out
 }
 
 // RoutingRetryResponse is the POST /workspaces/:wsId/routing/retry payload.

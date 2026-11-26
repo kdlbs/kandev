@@ -34,6 +34,7 @@ executor access.
 
 ### Requirements
 
+- [HTTP repository IDs](requirements/http-task-repository-selection.md)
 - [Initial task brief](requirements/initial-task-brief.md)
 
 - [Bounded Session History Storage](requirements/bounded-session-history.md)
@@ -81,7 +82,7 @@ executor access.
 - [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
 - [Prompt attachments](requirements/prompt-attachments.md)
 - [Saved Prompt Delivery](requirements/saved-prompt-delivery.md)
-- [Quick Chat Sessions, Persistence, and Expiration](requirements/quick-chat-expiration.md)
+- [Quick Chat Sessions and Persistence](requirements/quick-chat-expiration.md)
 - [Quick Chat Agent Titles](requirements/quick-chat-agent-titles.md)
 - [Quick Chat Repository Context](requirements/quick-chat-repository-context.md)
 - [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)
@@ -130,6 +131,7 @@ executor access.
 - [User Question Turn Boundary](requirements/user-question-turn-boundary.md)
 - [WIP Limits and Visible Overflow Queues](requirements/wip-limit-pull-system.md)
 - [Tasks Without Repositories](requirements/without-repositories.md)
+- [Workspace root files](requirements/workspace-root-files.md)
 - [Workflow completion-signal payload delivery](requirements/workflow-completion-signal-payload-delivery.md)
 - [Cancelled Turn Completion](requirements/workflow-cancelled-turn-completion.md)
 - [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
@@ -155,6 +157,7 @@ executor access.
 
 ### System design
 
+- [HTTP repository IDs](system-design/http-task-repository-selection.md)
 - [Bounded Session History Storage](system-design/bounded-session-history.md)
 - [Initial task brief](system-design/initial-task-brief.md)
 
@@ -162,6 +165,7 @@ executor access.
 
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
+- [Workspace root files](system-design/workspace-root-files.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
 - [Command-panel archived task results](system-design/command-panel-archived-task-results.md)
 - [Detached Workspace Continuity](system-design/detached-workspace-continuity.md)
@@ -230,7 +234,7 @@ executor access.
 
 ## Migration record
 
-Migration remains in progress. Files that retain migration wrappers still need
+Migration is in progress. Files that retain migration wrappers still need
 extraction before this system can return to a complete migration state.
 
 ## Related systems

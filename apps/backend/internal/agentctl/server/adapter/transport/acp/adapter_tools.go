@@ -9,6 +9,7 @@ import (
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpcompat"
 	"go.uber.org/zap"
 )
 
@@ -156,6 +157,9 @@ func (a *Adapter) convertToolCallUpdateForGeneration(
 	if suppress {
 		return nil
 	}
+	if _, isMonitorCall := recognizeMonitorTaskCall(tc); isMonitorCall {
+		a.startClaudeMonitorCompletionReader(sessionID, nil)
+	}
 	a.mu.Lock()
 	a.trackClaudeSubagentCallLocked(sessionID, emittedToolCallID, promptGeneration, normalizedPayload)
 	a.mu.Unlock()
@@ -197,6 +201,35 @@ func (a *Adapter) convertToolCallUpdateForGeneration(
 	}
 }
 
+func codexMCPStartupWarningEvent(agentID, sessionID string, call *acp.SessionUpdateToolCall) (*AgentEvent, bool) {
+	if call == nil || !acpcompat.IsCodexMCPStartupReport(
+		agentID,
+		string(call.ToolCallId),
+		call.Title,
+		string(call.Kind),
+		string(call.Status),
+	) {
+		return nil, false
+	}
+
+	var details []string
+	for _, item := range call.Content {
+		if item.Content != nil && item.Content.Content.Text != nil {
+			details = append(details, item.Content.Content.Text.Text)
+		}
+	}
+	message := streams.SanitizeProviderMessage(strings.Join(details, "\n"))
+	if message == "" {
+		message = streams.SanitizeProviderMessage(call.Title)
+	}
+	return &AgentEvent{
+		Type:       streams.EventTypeMCPStartupWarning,
+		SessionID:  sessionID,
+		ToolCallID: string(call.ToolCallId),
+		Text:       message,
+	}, true
+}
+
 func (a *Adapter) trackToolCallPayload(
 	sessionID string,
 	toolCallID string,
@@ -216,10 +249,14 @@ func (a *Adapter) trackToolCallPayload(
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.isStaleClaudeNativeToolFrameLocked(sessionID) {
+		return nil, "", signal, "", "", true
+	}
 	if signal == codexSubagentSignalNone {
 		a.trackCodexSubagentControlLocked(sessionID, toolCallID, payload)
 		a.trackCopilotSubagentCallLocked(sessionID, toolCallID, payload)
 		a.applyPendingCursorTaskMetaLocked(sessionID, toolCallID, payload)
+		a.trackAntigravityPermissionToolNameLocked(sessionID, call)
 		a.activeToolCalls[toolCallID] = payload
 		return payload, eventType, signal, toolCallID, "", false
 	}
@@ -744,8 +781,24 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	supplemental := toolCallUpdateSupplemental(tcu)
 	pluginPromptGeneration := promptGeneration
 	agentName, agentVersion := a.connectedAgentIdentity()
+	outputPath, outputPathValid := "", false
+	if a.backgroundWorkEnabled && status == toolStatusComplete &&
+		verifiedClaudeTerminalBridge(a.agentID, agentName, agentVersion) {
+		outputPath, outputPathValid = claudeShellOutputPath(
+			normalizeFinalShellResult(tcu.RawOutput).stdout,
+			sessionID,
+		)
+	}
 
 	a.mu.Lock()
+	if a.isStaleClaudeNativeToolFrameLocked(sessionID) {
+		a.mu.Unlock()
+		return nil
+	}
+	if a.claudeMonitorToolCallSettledLocked(sessionID, toolCallID) {
+		a.mu.Unlock()
+		return nil
+	}
 	updateTitle := ""
 	if tcu.Title != nil {
 		updateTitle = *tcu.Title
@@ -785,13 +838,24 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 			status,
 		)
 	}
+	var earlyMonitorCompletion *claudeMonitorCompletion
+	if isMonitorRegistration {
+		if completion, ok := a.takePendingClaudeMonitorCompletionLocked(sessionID, monitorTaskID, toolCallID); ok {
+			status, _ = claudeMonitorToolStatus(completion.State)
+			statusMissing = false
+			earlyMonitorCompletion = &completion
+		}
+	}
+	var earlyMonitorSettlement *claudeMonitorSettlement
+	var taskStopMonitorSettlement *claudeMonitorSettlement
 
 	// A terminal tool_call_update for an already-tracked Monitor (the agent
 	// proactively ended the watch). NormalizeToolResult would otherwise stomp
 	// the `{monitor: …}` view in Generic.Output with the raw string body, so
 	// we suppress the normalize call and let the closing-out logic below mark
 	// the view as ended instead.
-	isTrackedMonitorTerminal := !isMonitorRegistration && isMonitorMeta(tcu.Meta) && a.isTrackedMonitorLocked(sessionID, toolCallID)
+	isTrackedMonitor := !isMonitorRegistration && isMonitorMeta(tcu.Meta) && a.isTrackedMonitorLocked(sessionID, toolCallID)
+	isTrackedMonitorTerminal := isTrackedMonitor && isTerminalToolUpdateStatus(status)
 
 	// Recognize claude-acp's async-launched subagent envelope: the Task tool
 	// successfully dispatched a background subagent. The dispatch IS terminal
@@ -812,9 +876,17 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	// view rather than getting clobbered by the rawOutput string.
 	recognizedShellUpdate := false
 	var claudeTerminalObservation *streams.WorkloadRunObservation
+	claudeOutputFinishID := ""
 	if payload != nil && payload.Kind() == streams.ToolKindShellExec {
 		recognizedShellUpdate = a.normalizer.NormalizeShellToolUpdate(payload, tcu.Meta, convertedContents, tcu.RawOutput)
 		a.normalizer.confirmBackgroundLaunch(payload, tcu.RawOutput)
+		if status == toolStatusComplete && verifiedClaudeTerminalBridge(a.agentID, agentName, agentVersion) &&
+			payload.IsDetachedBackgroundLaunch() && payload.IsVerifiedBackgroundWork() &&
+			payload.BackgroundWork().WorkID == "" {
+			background := payload.BackgroundWork()
+			payload.SetBackgroundWorkIdentity(background.Kind, toolCallID, background.Detached, background.Ended)
+		}
+		a.registerClaudeShellOutputLocked(sessionID, payload, outputPath, outputPathValid)
 		a.recordOpenCodePluginClaimLocked(string(tcu.ToolCallId), pluginPromptGeneration, payload)
 		if claudeBackgroundTerminalExit(
 			a.agentID, agentName, agentVersion, tcu.Meta, toolCallID, payload,
@@ -824,8 +896,9 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 			claudeTerminalObservation = claudeBackgroundTerminalObservation(
 				payload, emittedToolCallID, time.Now().UTC(),
 			)
+			claudeOutputFinishID = background.WorkID
 		}
-	} else if tcu.RawOutput != nil && payload != nil && !isTrackedMonitorTerminal {
+	} else if tcu.RawOutput != nil && payload != nil && !isTrackedMonitor {
 		result := tcu.RawOutput
 		if canonicalMCPUpdate {
 			if normalizedResult, ok := a.dialect.normalizeMCPToolResult(tcu.RawOutput); ok {
@@ -851,6 +924,9 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	if shellExitCode != nil && payload != nil && payload.ShellExec() != nil {
 		if background := payload.BackgroundWork(); background != nil && background.Kind == streams.BackgroundWorkKindShell {
 			payload.SetBackgroundWorkIdentity(background.Kind, background.WorkID, background.Detached, true)
+			if verifiedClaudeTerminalBridge(a.agentID, agentName, agentVersion) {
+				claudeOutputFinishID = background.WorkID
+			}
 		}
 	}
 	if claudeTerminalObservation != nil {
@@ -858,6 +934,11 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		statusMissing = false
 	}
 	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
+	if (a.agentID == claudeAgentID || a.agentID == mockAgentID) && status == toolStatusComplete && isTaskStopMeta(tcu.Meta) {
+		if taskID, confirmed := recognizeTaskStopCompletedTaskID(tcu.Meta, tcu.RawOutput, tcu.RawInput, payload); confirmed {
+			taskStopMonitorSettlement = a.settleTrackedMonitorFromTaskStopLocked(sessionID, taskID)
+		}
+	}
 
 	// Subagent (Task) result metadata is split across meta (Claude) and
 	// rawOutput (OpenCode/Cursor); enrich the stored payload from both.
@@ -874,23 +955,24 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		)
 	}
 
-	// Seed the Monitor view AFTER NormalizeToolResult so we overwrite the
-	// banner string the normalizer just stuffed into Generic.Output. The
-	// Monitor card detects itself by `output.monitor` presence — the banner
-	// would shadow it and the frontend would render this as a generic
-	// tool_call instead.
-	if isMonitorRegistration && payload != nil {
+	// Preserve and mark-ended the Monitor view on tracked-Monitor terminal
+	// updates so the card flips from "watching" to "ended" without losing
+	// the accumulated event count or recent-events tail.
+	var claudeMonitorObservation *streams.WorkloadRunObservation
+	switch {
+	case isMonitorRegistration && earlyMonitorCompletion != nil && payload != nil:
 		seedMonitorView(payload, monitorTaskID, monitorCommand)
 		if a.agentID == claudeAgentID || a.agentID == mockAgentID {
 			payload.SetMonitorIdentity(monitorTaskID, false)
 		}
-	}
-
-	// Preserve and mark-ended the Monitor view on tracked-Monitor terminal
-	// updates so the card flips from "watching" to "ended" without losing
-	// the accumulated event count or recent-events tail.
-	if isTrackedMonitorTerminal && payload != nil {
-		markMonitorEnded(payload, "exited")
+		earlyMonitorSettlement = a.settleClaudeMonitorLocked(sessionID, *earlyMonitorCompletion, payload)
+	case isMonitorRegistration && payload != nil:
+		seedMonitorView(payload, monitorTaskID, monitorCommand)
+		if a.agentID == claudeAgentID || a.agentID == mockAgentID {
+			payload.SetMonitorIdentity(monitorTaskID, false)
+		}
+	case isTrackedMonitorTerminal && isTerminal && payload != nil:
+		claudeMonitorObservation = a.settleTrackedMonitorFromACPUpdateLocked(sessionID, toolCallID, status, payload)
 	}
 
 	// Enrich modify_file payload from tool_call_contents.
@@ -917,6 +999,9 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	}
 
 	if isTerminal {
+		delete(a.antigravityPermissionToolNames, permissionToolNameKey{
+			sessionID: sessionID, toolCallID: toolCallID,
+		})
 		if payload == nil || !payload.IsActiveBackgroundWork() {
 			delete(a.activeToolCalls, emittedToolCallID)
 			a.forgetPromptHandoffToolLocked(emittedToolCallID)
@@ -930,6 +1015,11 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	}
 	emittedPayload := cloneSubagentPayload(payload)
 	a.mu.Unlock()
+	if claudeOutputFinishID != "" && a.claudeShellOutput != nil {
+		a.claudeShellOutput.finish(sessionID, claudeOutputFinishID)
+	}
+	earlyMonitorSettlement.sendBackgroundWork(a)
+	taskStopMonitorSettlement.send(a)
 	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
 
 	// ScheduleWakeup tracking: tool_call_update is where rawInput.prompt and
@@ -984,8 +1074,34 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		ToolStatusMissing: statusMissing,
 		NormalizedPayload: emittedPayload,
 		ToolCallContents:  convertedContents,
-		BackgroundWork:    claudeTerminalObservation,
+		BackgroundWork:    selectWorkloadObservation(claudeTerminalObservation, claudeMonitorObservation),
 	}
+}
+
+// registerClaudeShellOutputLocked registers a validated Claude output file and
+// advertises streaming for its verified detached shell workload.
+func (a *Adapter) registerClaudeShellOutputLocked(
+	sessionID string,
+	payload *streams.NormalizedPayload,
+	outputPath string,
+	outputPathValid bool,
+) bool {
+	if !outputPathValid || outputPath == "" || payload == nil || a.claudeShellOutput == nil ||
+		a.sessionID != sessionID || !payload.IsDetachedBackgroundLaunch() || !payload.IsVerifiedBackgroundWork() {
+		return false
+	}
+	background := payload.BackgroundWork()
+	if background == nil || background.WorkID == "" ||
+		!a.claudeShellOutput.follow(sessionID, background.WorkID, outputPath) {
+		return false
+	}
+	capabilities := streams.InspectionOnlyWorkloadCapabilities()
+	if background.Capabilities != nil {
+		capabilities = *background.Capabilities
+	}
+	capabilities.Output = "stream"
+	payload.SetBackgroundWorkCapabilities(capabilities)
+	return true
 }
 
 func (a *Adapter) enrichSubagentResultLocked(

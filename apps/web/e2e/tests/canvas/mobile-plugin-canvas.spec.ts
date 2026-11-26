@@ -13,6 +13,7 @@ import {
   expectCanvasFrameFillsHost,
   getCanvas,
   publishTaskCanvas,
+  readCanvasFeature,
   removeCanvas,
   promoteCanvas,
   seedCanvasWorkspacePreview,
@@ -90,7 +91,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
   }) => {
     test.setTimeout(180_000);
 
-    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    expect(await readCanvasFeature(apiClient)).toBe(true);
     const canvasIds: string[] = [];
     let taskId: string | undefined;
     let alternateWorkflowId: string | undefined;
@@ -343,7 +344,6 @@ test.describe("Plugin-backed canvases on mobile", () => {
       if (alternateWorkflowId)
         await apiClient.deleteWorkflow(alternateWorkflowId).catch(() => undefined);
       if (taskId) await apiClient.deleteTask(taskId).catch(() => undefined);
-      await releaseFeature();
     }
   });
 

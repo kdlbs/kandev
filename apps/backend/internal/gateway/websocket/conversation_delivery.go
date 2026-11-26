@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
@@ -59,11 +60,12 @@ type conversationChangedPayload struct {
 }
 
 type conversationChangedOperation struct {
-	Kind    models.ConversationMutationKind `json:"kind"`
-	Entity  models.ConversationEntityKind   `json:"entity"`
-	ID      string                          `json:"id"`
-	Message any                             `json:"message,omitempty"`
-	Turn    any                             `json:"turn,omitempty"`
+	Kind                       models.ConversationMutationKind     `json:"kind"`
+	Entity                     models.ConversationEntityKind       `json:"entity"`
+	ID                         string                              `json:"id"`
+	Message                    any                                 `json:"message,omitempty"`
+	Turn                       any                                 `json:"turn,omitempty"`
+	ConfigurationCommandResult *streams.ConfigurationCommandResult `json:"configuration_result,omitempty"`
 }
 
 func (c *Client) handleConversationSubscribe(msg *ws.Message) {
@@ -356,6 +358,10 @@ func projectConversationOperation(subscription conversationSubscription, operati
 			result.Turn = safePluginConversationTurn(operation.Turn)
 		} else {
 			result.Turn = safeCoreConversationTurn(operation.Turn, operation.HadOutput)
+			if operation.ConfigurationCommandResult != nil {
+				configurationResult := *operation.ConfigurationCommandResult
+				result.ConfigurationCommandResult = &configurationResult
+			}
 		}
 	default:
 		return result, false

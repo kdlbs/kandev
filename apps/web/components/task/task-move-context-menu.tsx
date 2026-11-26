@@ -23,6 +23,7 @@ import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { WorkflowMoveEntryOptions, WorkflowMoveResponse } from "@/lib/api/domains/kanban-api";
 import type { WorkflowStepProgress } from "@/hooks/domains/kanban/use-workflow-step-progress";
 import { StepProgressDetails } from "./workflow-step-progress-details";
+import { keepMoveOpenForPromptSuggestions } from "./workflow-move-surface";
 
 export type TaskMoveStep = {
   id: string;
@@ -345,7 +346,10 @@ function StepMenuSubItem({
       >
         {content}
       </ContextMenuSubTrigger>
-      <ContextMenuSubContent className={onSubmitWithOptions ? "w-72" : "w-48"}>
+      <ContextMenuSubContent
+        className={onSubmitWithOptions ? "w-72" : "w-48"}
+        onEscapeKeyDown={keepMoveOpenForPromptSuggestions}
+      >
         {onSubmitWithOptions ? (
           // Interactive fields live inside a Radix menu popup. Stop key events at
           // this wrapper (bubble phase, after the field handled them) so the

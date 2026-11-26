@@ -375,14 +375,16 @@ func TestSSHAbandonedReceiptRetainsSurvivingChildEvidence(t *testing.T) {
 	}
 }
 
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.20
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.22
-func TestSSHAbandonedReceiptRequiresPidfileProofBeforeRemoval(t *testing.T) {
+func TestSSHAbsentReceiptPreservesDirectory(t *testing.T) {
 	owner := testSSHLaunchOwner()
 
 	t.Run("pidfile names the recorded launch", func(t *testing.T) {
 		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 			sshScriptRule{match: "ps -p 4242 -o command=", result: sshFail("")},
 			sshScriptRule{match: "cat -- '" + owner.SessionDir + "/agentctl.pid'", result: sshOut("4242")},
+			sshScriptRule{match: "test -d '" + owner.SessionDir + "'", result: sshOK},
 			sshScriptRule{match: "rm -rf '" + owner.SessionDir + "'", result: sshOK},
 		).handle)
 		receipt := testSSHLaunchReceiptForServer(t, server, 4242)
@@ -395,11 +397,13 @@ func TestSSHAbandonedReceiptRequiresPidfileProofBeforeRemoval(t *testing.T) {
 			StopReason: "task cleanup", Metadata: sshLaunchStopMetadata(t, server, receipt),
 		}, true)
 		require.NoError(t, err)
-		_, removed := server.lastCommandContaining("rm -rf '" + owner.SessionDir + "'")
-		require.True(t, removed, "a pidfile that names the recorded launch proves directory ownership")
+		for _, command := range server.commands() {
+			require.NotContains(t, command, "rm -rf '"+owner.SessionDir+"'",
+				"a numeric pidfile does not prove ownership after receipt-backed absence")
+		}
 	})
 
-	t.Run("no pidfile leaves the unowned directory", func(t *testing.T) {
+	t.Run("no pidfile also preserves the directory", func(t *testing.T) {
 		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 			sshScriptRule{match: "ps -p 4242 -o command=", result: sshFail("")},
 			sshScriptRule{match: "cat -- '" + owner.SessionDir + "/agentctl.pid'", result: sshFail("")},

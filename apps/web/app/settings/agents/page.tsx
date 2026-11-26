@@ -49,7 +49,13 @@ import { AgentsRuntimeEntry } from "@/components/settings/agents-runtime-entry";
 import { RuntimeUpdateTargetActions } from "@/components/settings/runtime-update-target-actions";
 import { useAgentRuntimeUpdateManager } from "@/hooks/domains/settings/use-agent-runtime-update-manager";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import type { AgentDiscovery, Agent, AvailableAgent, RuntimeUpdate } from "@/lib/types/http";
+import type {
+  AgentDiscovery,
+  Agent,
+  AntigravityRuntimeVariant,
+  AvailableAgent,
+  RuntimeUpdate,
+} from "@/lib/types/http";
 import { useProfileOrder } from "@/hooks/domains/settings/use-profile-order";
 import { getAgentListResourceScope } from "@/hooks/domains/settings/agent-list-resource";
 
@@ -65,6 +71,8 @@ type InstalledAgentsSectionProps = {
   savedAgentsByName: Map<string, Agent>;
   resolveDisplayName: (name: string) => string;
   resolveCapabilityStatus: (name: string) => string | undefined;
+  resolveLoginCommand: (name: string) => AgentDiscovery["login_command"];
+  resolveRuntimeVariant: (name: string) => AntigravityRuntimeVariant | undefined;
   resolveRuntimeUpdate: (name: string) => RuntimeUpdate | undefined;
   resolveRuntimeUpdateStatus: (name: string) => AgentUpdateStatus | undefined;
   installJobs: Record<string, InstallJob>;
@@ -89,6 +97,22 @@ type InstalledAgentsSectionProps = {
 };
 
 type AgentCard = { key: string; agent: AgentDiscovery; detected: boolean };
+
+function createAgentSettingsResolvers<TStatus>(
+  availableAgents: AvailableAgent[],
+  statusByAgent: Record<string, TStatus | undefined>,
+) {
+  const agentsByName = new Map(availableAgents.map((agent) => [agent.name, agent]));
+  const findAgent = (name: string) => agentsByName.get(name);
+  return {
+    resolveDisplayName: (name: string) => findAgent(name)?.display_name ?? name,
+    resolveCapabilityStatus: (name: string) => findAgent(name)?.model_config?.status,
+    resolveLoginCommand: (name: string) => findAgent(name)?.login_command,
+    resolveRuntimeVariant: (name: string) => findAgent(name)?.model_config?.runtime_variant,
+    resolveRuntimeUpdate: (name: string) => findAgent(name)?.runtime_update,
+    resolveRuntimeUpdateStatus: (name: string) => statusByAgent[name],
+  };
+}
 
 /**
  * Every agent worth a card, in the backend's rank order: the ones the scan
@@ -134,6 +158,8 @@ function renderInstalledAgentCards({
   resolveDisplayName,
   nativeCodexAvailable,
   resolveCapabilityStatus,
+  resolveLoginCommand,
+  resolveRuntimeVariant,
   resolveRuntimeUpdate,
   resolveRuntimeUpdateStatus,
   installJobs,
@@ -149,6 +175,8 @@ function renderInstalledAgentCards({
   | "savedAgentsByName"
   | "resolveDisplayName"
   | "resolveCapabilityStatus"
+  | "resolveLoginCommand"
+  | "resolveRuntimeVariant"
   | "resolveRuntimeUpdate"
   | "resolveRuntimeUpdateStatus"
   | "installJobs"
@@ -172,6 +200,8 @@ function renderInstalledAgentCards({
           savedAgent={savedAgentsByName.get(agent.name)}
           displayName={resolveDisplayName(agent.name)}
           profileCreationDisabled={agent.name === "codex-app-server" && !nativeCodexAvailable}
+          runtimeVariant={resolveRuntimeVariant(agent.name)}
+          loginCommand={resolveLoginCommand(agent.name)}
           {...(detected
             ? {
                 capabilityStatus: resolveCapabilityStatus(agent.name),
@@ -208,6 +238,8 @@ function InstalledAgentsSection({
   savedAgentsByName,
   resolveDisplayName,
   resolveCapabilityStatus,
+  resolveLoginCommand,
+  resolveRuntimeVariant,
   resolveRuntimeUpdate,
   resolveRuntimeUpdateStatus,
   installJobs,
@@ -282,6 +314,8 @@ function InstalledAgentsSection({
         resolveDisplayName,
         nativeCodexAvailable,
         resolveCapabilityStatus,
+        resolveLoginCommand,
+        resolveRuntimeVariant,
         resolveRuntimeUpdate,
         resolveRuntimeUpdateStatus,
         installJobs,
@@ -294,6 +328,39 @@ function InstalledAgentsSection({
         onOpenRuntime,
       })}
     </SettingsGroup>
+  );
+}
+
+function InstalledAgentsSettingsSection({
+  state,
+  manager,
+}: {
+  state: ReturnType<typeof useAgentPageState>;
+  manager: ReturnType<typeof useAgentRuntimeUpdateManager>;
+}) {
+  return (
+    <InstalledAgentsSection
+      canManage={state.canManage}
+      installedAgents={state.installedAgents}
+      discoveryOrder={state.discoveryAgents}
+      savedAgents={state.savedAgents}
+      discoveryLoading={state.discoveryLoading}
+      rescanning={state.rescanning}
+      savedAgentsByName={state.savedAgentsByName}
+      resolveDisplayName={state.resolveDisplayName}
+      resolveCapabilityStatus={state.resolveCapabilityStatus}
+      resolveLoginCommand={state.resolveLoginCommand}
+      resolveRuntimeVariant={state.resolveRuntimeVariant}
+      resolveRuntimeUpdate={state.resolveRuntimeUpdate}
+      resolveRuntimeUpdateStatus={state.resolveRuntimeUpdateStatus}
+      installJobs={state.installJobs}
+      updateJobs={state.updateJobs}
+      previewUpdate={state.previewUpdate}
+      startUpdate={state.startUpdate}
+      setTuiDialogOpen={state.setTuiDialogOpen}
+      handleRescan={state.handleRescan}
+      onOpenRuntime={manager.openRuntime}
+    />
   );
 }
 
@@ -331,13 +398,7 @@ function useAgentPageState() {
     () => new Map(savedAgents.map((agent: Agent) => [agent.name, agent])),
     [savedAgents],
   );
-  const resolveDisplayName = (name: string) =>
-    availableAgents.find((item: AvailableAgent) => item.name === name)?.display_name ?? name;
-  const resolveCapabilityStatus = (name: string) =>
-    availableAgents.find((item: AvailableAgent) => item.name === name)?.model_config?.status;
-  const resolveRuntimeUpdate = (name: string) =>
-    availableAgents.find((item: AvailableAgent) => item.name === name)?.runtime_update;
-  const resolveRuntimeUpdateStatus = (name: string) => statusByAgent[name];
+  const agentResolvers = createAgentSettingsResolvers(availableAgents, statusByAgent);
 
   const handleRescan = async () => {
     if (rescanning) {
@@ -388,10 +449,7 @@ function useAgentPageState() {
     rescanning,
     tuiDialogOpen,
     setTuiDialogOpen,
-    resolveDisplayName,
-    resolveCapabilityStatus,
-    resolveRuntimeUpdate,
-    resolveRuntimeUpdateStatus,
+    ...agentResolvers,
     statusByAgent,
     runtimeStatusLoading,
     runtimeStatusFailed,
@@ -507,31 +565,24 @@ function AgentsRuntimeManagerOverlay({
 }
 
 export default function AgentsSettingsPage() {
+  const state = useAgentPageState();
   const {
     canManage,
-    savedAgents,
     installedAgents,
-    discoveryAgents,
-    savedAgentsByName,
-    discoveryLoading,
-    rescanning,
     tuiDialogOpen,
     setTuiDialogOpen,
     resolveDisplayName,
-    resolveCapabilityStatus,
     resolveRuntimeUpdate,
-    resolveRuntimeUpdateStatus,
     statusByAgent,
     runtimeStatusLoading,
     runtimeStatusFailed,
     refreshRuntimeUpdateStatuses,
-    handleRescan,
     handleCreateCustomTUI,
     installJobs,
     updateJobs,
     previewUpdate,
     startUpdate,
-  } = useAgentPageState();
+  } = state;
   const { isMobile } = useResponsiveBreakpoint();
   const manager = useAgentRuntimeUpdateManager();
   const statuses = useMemo(() => Object.values(statusByAgent), [statusByAgent]);
@@ -559,26 +610,7 @@ export default function AgentsSettingsPage() {
 
         <Separator />
 
-        <InstalledAgentsSection
-          canManage={canManage}
-          installedAgents={installedAgents}
-          discoveryOrder={discoveryAgents}
-          savedAgents={savedAgents}
-          discoveryLoading={discoveryLoading}
-          rescanning={rescanning}
-          savedAgentsByName={savedAgentsByName}
-          resolveDisplayName={resolveDisplayName}
-          resolveCapabilityStatus={resolveCapabilityStatus}
-          resolveRuntimeUpdate={resolveRuntimeUpdate}
-          resolveRuntimeUpdateStatus={resolveRuntimeUpdateStatus}
-          installJobs={installJobs}
-          updateJobs={updateJobs}
-          previewUpdate={previewUpdate}
-          startUpdate={startUpdate}
-          setTuiDialogOpen={setTuiDialogOpen}
-          handleRescan={handleRescan}
-          onOpenRuntime={manager.openRuntime}
-        />
+        <InstalledAgentsSettingsSection state={state} manager={manager} />
 
         <AgentsRuntimeManagerOverlay
           manager={manager}

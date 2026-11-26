@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { WorkspaceRootFile } from "@/lib/types/workspace-files";
 import { buildChangesTree } from "./changes-file-tree-model";
 
 describe("buildChangesTree", () => {
@@ -36,5 +37,17 @@ describe("buildChangesTree", () => {
 
     expect(tree.map((node) => node.path)).toEqual(["src", "z.ts"]);
     expect(tree[0].children?.map((node) => node.path)).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("retains path-bearing input records without converting their type", () => {
+    const outsideFile: WorkspaceRootFile = {
+      path: "reports/daily/summary.md",
+      size: 12,
+      modified_at: "2026-11-23T10:00:00Z",
+    };
+
+    const tree = buildChangesTree([outsideFile]);
+
+    expect(tree[0].children?.[0].children?.[0].file).toBe(outsideFile);
   });
 });

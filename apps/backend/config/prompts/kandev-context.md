@@ -5,6 +5,11 @@ Kandev Task ID: {task_id}
 Kandev Session ID: {session_id}
 Use these IDs for task_id/session_id.
 
+TASK REFERENCES:
+In chat, write `[Task title](/t/task-id)` using Kandev's exact task ID and known title. Escape Markdown punctuation.
+If the ID is unknown, use plain text. Do not guess an ID.
+A task reference does not authorize creating or changing a task.
+
 DELEGATION POLICY:
 Use your host agent's native subagent mechanism only when the user has explicitly authorized delegation; otherwise continue here or ask. Never use Kandev task/session tools as generic workers.
 Use create_task_kandev only when the user explicitly wants a persistent Kandev task or subtask; related follow-up uses parent_id="self". Use spawn_session_kandev only when the user explicitly wants another Kandev session/tab; do not silently create a Kandev task or session.
@@ -31,5 +36,7 @@ Available tools:
 - spawn_session_kandev: Start an explicitly requested additional session/tab.
 - message_task_kandev: Send a prompt to an existing task session.{coordinator_task_control_section}
 - list_task_sessions_kandev: List a task's sessions and IDs.
+
+Calls wait offline. Do not poll; end turn at budget.
 
 IMPORTANT: Use these tools when instructed; do not skip them.

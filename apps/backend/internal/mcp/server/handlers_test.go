@@ -132,7 +132,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, workspaceModeDesc, "new_workspace")
 	assert.Contains(t, workspaceModeDesc, "different non-Kubernetes executor")
 	assert.Contains(t, workspaceModeDesc, "separate child-owned workspace")
-	assert.Contains(t, workspaceModeDesc, "uncommitted parent changes are not copied")
+	assert.Contains(t, workspaceModeDesc, "does not copy uncommitted parent changes")
 	assert.Contains(t, workspaceModeDesc, "Kubernetes environments cannot be shared across tasks")
 
 	// parent_id, workspace_id, workflow_id, workflow_step_id should NOT be required

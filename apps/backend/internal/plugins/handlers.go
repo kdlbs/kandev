@@ -114,12 +114,23 @@ func RegisterRoutes(
 	api.GET("/settings", ctrl.getSettings)
 	api.PUT("/settings", authn.RequireAdmin(), ctrl.updateSettings)
 	api.POST("/host/interactions/response-receipts", ctrl.issueHumanInteractionResponseReceipt)
+	api.GET("/sidebar-groupings", func(ctx *gin.Context) {
+		ctx.JSON(http.StatusOK, gin.H{"groupings": svc.SidebarGroupingCatalog()})
+	})
 	api.GET("", ctrl.list)
 	api.GET("/:id", ctrl.get)
 	api.GET("/:id/config", ctrl.getConfig)
+	api.POST("/:id/file-previews", ctrl.prepareFilePreview)
+	api.POST("/:id/file-previews/:previewID/read", ctrl.readFilePreview)
+	api.DELETE("/:id/file-previews/:previewID", ctrl.cancelFilePreview)
+	api.GET("/:id/file-preview-policy", ctrl.getFilePreviewPolicy)
+	api.PUT("/:id/file-preview-policy", ctrl.setFilePreviewPolicy)
 	api.GET("/:id/capability-approvals", ctrl.getCapabilityApprovals)
 	api.PUT("/:id/capability-approvals", ctrl.updateCapabilityApprovals)
 	api.DELETE("/:id/capability-approvals", ctrl.revokeCapabilityApprovals)
+	api.GET("/:id/identity-links", ctrl.listIdentityLinks)
+	api.POST("/:id/identity-links/codes", ctrl.createIdentityLinkCode)
+	api.DELETE("/:id/identity-links/:link_id", ctrl.revokeIdentityLink)
 	api.PATCH("/:id", authn.RequireAdmin(), ctrl.updateConfig)
 	api.PUT("/:id/auto-update", authn.RequireAdmin(), ctrl.setAutoUpdate)
 	api.DELETE("/:id", authn.RequireAdmin(), ctrl.uninstall)
@@ -194,7 +205,23 @@ func (c *Controller) installFromRequest(ctx *gin.Context) (*store.Record, error)
 	if err := ctx.ShouldBindJSON(&req); err != nil || req.URL == "" {
 		return nil, errBadRequest("invalid payload: url required (or a multipart \"package\" upload)")
 	}
-	return c.svc.InstallFromURL(ctx.Request.Context(), req.URL)
+	return c.installFromURL(ctx, req.URL)
+}
+
+func (c *Controller) installFromURL(ctx *gin.Context, url string) (*store.Record, error) {
+	server, ok := ctx.Request.Context().Value(http.ServerContextKey).(*http.Server)
+	if !ok || server.WriteTimeout <= 0 {
+		return c.svc.InstallFromURL(ctx.Request.Context(), url)
+	}
+
+	response := http.NewResponseController(ctx.Writer)
+	if err := response.SetWriteDeadline(time.Time{}); err != nil {
+		return nil, fmt.Errorf("plugins: clear write deadline for URL install: %w", err)
+	}
+	defer func() {
+		_ = response.SetWriteDeadline(time.Now().Add(server.WriteTimeout))
+	}()
+	return c.svc.InstallFromURL(ctx.Request.Context(), url)
 }
 
 // errBadRequest is a sentinel-ish wrapper writeInstallError recognizes to

@@ -83,8 +83,12 @@ func (s *Server) registeredToolPackage(name string) mcpprofile.PackageID {
 func (s *Server) initializeBuiltinTransports(port int) {
 	for id, view := range s.builtinPackages {
 		suffix := "/packages/" + string(id)
-		view.http = server.NewStreamableHTTPServer(view.registry, server.WithEndpointPath("/mcp"+suffix), server.WithStateful(true), server.WithHTTPContextFunc(s.mcpHTTPContext))
-		view.sse = server.NewSSEServer(view.registry, server.WithBaseURL(s.sseBaseURLForPort(port)), server.WithSSEEndpoint("/sse"+suffix), server.WithMessageEndpoint("/message"+suffix))
+		view.http = server.NewStreamableHTTPServer(view.registry, server.WithEndpointPath(s.nativeRoutePath("/mcp"+suffix)), server.WithStateful(true), server.WithHTTPContextFunc(s.mcpHTTPContext))
+		sseOptions := []server.SSEOption{server.WithBaseURL(s.sseBaseURLForPort(port)), server.WithSSEEndpoint("/sse" + suffix), server.WithMessageEndpoint("/message" + suffix)}
+		if s.nativeRoutePrefix != "" {
+			sseOptions = append(sseOptions, server.WithStaticBasePath(s.nativeRoutePrefix))
+		}
+		view.sse = server.NewSSEServer(view.registry, sseOptions...)
 	}
 }
 
@@ -132,14 +136,12 @@ func (s *Server) closeBuiltinPackages(ctx context.Context) {
 	}
 }
 
-// BuiltinCatalog returns expected canonical tool names for the bound packages.
-// Registration is configuration evidence, not an observation of a connection.
+// BuiltinCatalog returns canonical names from the live Core registry and any
+// bound package registries. Registration is evidence of the server's tools,
+// not an observation of a client connection.
 func (s *Server) BuiltinCatalog() map[mcpprofile.PackageID][]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.profile.BuiltinPackages == nil {
-		return nil
-	}
 	result := make(map[mcpprofile.PackageID][]string, len(s.builtinPackages)+1)
 	result[mcpprofile.PackageCore] = registeredPackageNames(s.mcpServer)
 	for id, view := range s.builtinPackages {

@@ -1,3 +1,7 @@
+import {
+  readMoveInstructions,
+  setMoveInstructions,
+} from "./workflow-move-instructions-test-helpers";
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -46,6 +50,10 @@ vi.mock("@/components/state-provider", () => ({
       agentProfiles: { items: [] },
       availableAgents: { items: [], loading: false, loaded: true, tools: [] },
     }),
+}));
+
+vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
+  useCustomPrompts: () => ({ prompts: [], loaded: true, loading: false }),
 }));
 
 afterEach(() => {
@@ -144,9 +152,7 @@ describe("WorkflowMoveProceedButton", () => {
     renderProceed(onProceed);
     openHoverForm();
 
-    fireEvent.change(screen.getByTestId(INSTRUCTIONS_TEST_ID), {
-      target: { value: "create the PR ready for review" },
-    });
+    setMoveInstructions(screen.getByTestId(INSTRUCTIONS_TEST_ID), "create the PR ready for review");
     fireEvent.click(screen.getByTestId(SUBMIT_TEST_ID));
     await act(async () => {});
 
@@ -171,9 +177,7 @@ describe("WorkflowMoveProceedButton", () => {
     );
     openHoverForm();
 
-    fireEvent.change(screen.getByTestId(INSTRUCTIONS_TEST_ID), {
-      target: { value: "only for Review" },
-    });
+    setMoveInstructions(screen.getByTestId(INSTRUCTIONS_TEST_ID), "only for Review");
     fireEvent.click(screen.getByTestId(SUBMIT_TEST_ID));
     await act(async () => {});
 
@@ -189,7 +193,7 @@ describe("WorkflowMoveProceedButton", () => {
     );
     openHoverForm();
 
-    expect((screen.getByTestId(INSTRUCTIONS_TEST_ID) as HTMLTextAreaElement).value).toBe("");
+    expect(readMoveInstructions(screen.getByTestId(INSTRUCTIONS_TEST_ID))).toBe("");
   });
 
   it("keeps the hovered form and its draft open when the move fails", async () => {
@@ -197,15 +201,13 @@ describe("WorkflowMoveProceedButton", () => {
     renderProceed(onProceed);
     openHoverForm();
 
-    fireEvent.change(screen.getByTestId(INSTRUCTIONS_TEST_ID), {
-      target: { value: "retry after capacity opens" },
-    });
+    setMoveInstructions(screen.getByTestId(INSTRUCTIONS_TEST_ID), "retry after capacity opens");
     fireEvent.click(screen.getByTestId(SUBMIT_TEST_ID));
     await act(async () => {});
 
     expect(onProceed).toHaveBeenCalledOnce();
     expect(screen.getByTestId(HOVER_OPTIONS_TEST_ID)).toBeTruthy();
-    expect((screen.getByTestId(INSTRUCTIONS_TEST_ID) as HTMLTextAreaElement).value).toBe(
+    expect(readMoveInstructions(screen.getByTestId(INSTRUCTIONS_TEST_ID))).toBe(
       "retry after capacity opens",
     );
   });

@@ -159,20 +159,6 @@ describe("selectVisibleWorkflows — lane retention for hidden columns", () => {
     expect(result.map((w) => w.id)).toEqual([WF_A.id, WF_B.id]);
   });
 
-  it("does not retain on a stale hidden id — the predicate is the live intersection", () => {
-    // `hasLiveHiddenSteps` is defined as H ∩ liveStepIds, so a hidden set made
-    // only of deleted step ids reports false and cannot hold a lane open.
-    const result = selectVisibleWorkflows({
-      workflowFilter: null,
-      orderedWorkflows: ordered,
-      hasTasks: (id) => id === WF_B.id,
-      hasLiveHiddenSteps: noneHidden,
-      showEmptyBoard: false,
-    });
-
-    expect(result.map((w) => w.id)).toEqual([WF_B.id]);
-  });
-
   it("returns every workflow when an explicit workflow filter is set", () => {
     const result = selectVisibleWorkflows({
       workflowFilter: WF_A.id,

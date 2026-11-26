@@ -162,6 +162,23 @@ otherwise, review the current assignment and form choices before deciding whethe
 to retry. A multi-task selection keeps the separate bulk workflow action and does
 not support per-task profile mappings.
 
+## Read a task's step history
+
+Scripts and external tools can read who moved a task between workflow steps, and how, without reading Kandev's database:
+
+```text
+GET /api/v1/tasks/:id/step-transitions?limit=50&cursor=
+```
+
+The response lists the task's recorded moves oldest first. Each item has `id`, the source and destination `*_workflow_id`, `*_workflow_step_id`, and current `*_workflow_step_name`, plus `trigger`, `actor_kind`, `actor_id`, and `occurred_at`.
+
+- `trigger` says what moved the task, for example `manual_move` (a person on the board or the move API), `mcp_move` (an agent tool), or `engine_transition` (a workflow step action).
+- `actor_kind` is `human`, `agent`, `system`, `integration`, or `unknown`. `actor_id` is the user ID, session ID, or watch ID, or `null`. For REST moves, `human` means the request used a user credential. An API client can use a user credential too, so this value does not identify the board UI.
+- A removed step, or a step in another workspace, keeps its ID with a `null` name. The task-creation record (`trigger` `task_created`) has no source step.
+- `limit` defaults to 50 and is capped at 200. While `has_more` is `true`, pass `next_cursor` as `cursor` to read the next page.
+
+The read needs the same workspace access as opening the task; an unknown or inaccessible task returns `404`. History starts when Kandev began recording step transitions and is never reconstructed for older moves.
+
 ## Find a task from its conversation
 
 Open `Cmd/Ctrl+K` and enter a phrase from a user message or an assistant reply.
@@ -415,17 +432,16 @@ External MCP calls have no verified creating session. With **Creating session pr
 
 ### Choose task-specific workflow profiles
 
-When a workflow has fixed agent profiles on its steps, expand **Advanced
-settings** while creating a task to replace one or more of them for that task.
-Kandev groups steps that use the same fixed profile into one row and lists the
-affected steps. Select an enabled profile from the replacement picker, or
-choose **Use workflow profile** to keep the workflow choice.
+When you create a task, open **Advanced settings** to find **Workflow agents**.
+Each row lists the steps that share a fixed profile. The picker shows the
+workflow's default profile until you choose a replacement.
 
-These replacements belong to the task only. They do not change the workflow,
-the profile definitions, or another task in the same workflow. Kandev also
-keeps the choices out of recently used task settings. Use **Reset** to remove
-all replacements. Closing and reopening **Advanced settings** keeps the current
-choices, while changing the workflow or starting a new task clears them.
+Select an enabled profile to use for those steps. To restore the profile for
+one row, select **Use default** beside its picker. If several rows have
+replacements, select **Reset** to restore all defaults.
+
+Replacements apply only to this task. Kandev keeps them out of recently used task settings.
+Closing **Advanced settings** keeps your choices. Changing the workflow or opening a new task clears them.
 
 Explicit **Initial agent session** and earlier-step session targets keep their
 existing conversation selection. A replacement applies when a fixed step
@@ -435,6 +451,21 @@ shows the planned replacement model. A profile that becomes unavailable blocks
 creation until you choose another profile or reset the row.
 
 ### Open a task mentioned in chat
+
+Agents can also link to existing tasks in their replies. A recognized task link
+appears as a chip with a task icon and title. Click, tap, or press Enter to open
+the task directly. On desktop, hover or focus shows status and session-count
+badges, creation date, workflow, and parent when those details are loaded.
+Sidebar-loaded tasks provide these details without opening a board first.
+Chips follow the task's personal color. Changing or clearing that color updates
+visible references immediately. Tasks without a personal color use Kandev's
+accent color. On phones, long titles wrap inside the message.
+Use Back to return to the source task.
+
+The title written in the message stays unchanged after a task rename. The link
+still opens the same task. Missing or inaccessible tasks use the usual task
+error page. Raw view and copied Markdown retain the original link.
+
 
 Type `@` in the chat composer and select a task from the suggestions. After
 sending, its mention appears as a task chip with an icon. Click the chip, focus
@@ -594,7 +625,7 @@ provider session. See [Executors](executors.md#workspace-sources) and [Coordinat
 
 The task prompt supports image, audio, and resource attachments. Kandev accepts at most 10 files per submission, with a 100 MiB raw limit per file and a 100 MiB raw aggregate limit. Files are uploaded over authenticated HTTP before the task or message is submitted, so the task-create JSON and WebSocket frames carry attachment descriptors rather than base64 file contents. An upload that is still in progress or has failed must finish or be retried before the prompt can be sent. Removing a staged attachment discards its private upload; unclaimed uploads expire automatically after 24 hours. This prompt-attachment limit does not change the separate 10 MB task-document upload contract.
 
-Task-session chat uploads files to the task's workspace. It also works when you open a task from Office before a Kanban board loads. If Kandev cannot find the workspace, the draft keeps the files and text. Kandev blocks message and plan implementation actions while an attachment has no upload descriptor. You can retry the workspace lookup. You can still send plain text. A restored attachment is uploaded before use when its bytes can be recovered; remove and reattach it if they cannot. Office comments use a separate API. This change does not add file attachments to comments. Office run transcripts remain read-only.
+Task-session chat uploads files to the task's workspace. It also works when you open a task from Office before a Kanban board loads. If Kandev cannot find the workspace, the draft keeps the files and text. Kandev blocks message and plan implementation actions while an attachment has no upload descriptor. You can retry the workspace lookup. You can still send plain text. A restored attachment is uploaded before use when its bytes can be recovered; remove and reattach it if they cannot. Office thread comments use a separate API for text feedback. Office run transcripts remain read-only.
 
 During workspace preparation, the initial message shows your uploaded screenshots and file labels. You can open image previews before the agent starts. The preview survives a page reload and remains visible if preparation fails. It does not indicate successful delivery to the agent.
 
@@ -626,7 +657,9 @@ When you send the first message from Chat on a prepared task, Kandev keeps the t
 
 After a completed turn, Kandev can show a changed-files card below the agent reply. The card summarizes repository changes captured between that turn's start and end.
 
-For new accounts, this preference is off. Existing saved preferences are unchanged. To change it, open **Settings > General**. Under **Chat preferences**, set **Show changed files after each turn**, then select **Save**.
+This preference is on by default. If you saved a choice, Kandev uses that choice.
+
+To change it, open **Settings > Preferences > Task Behavior > Conversation**. Set **Show changed files after each turn**, then select **Save changes**.
 
 Each card uses retained data for that turn. Later edits, commits, or branch changes do not rewrite it. Select **Open diff** to review the full turn. Select a file row to open its historical diff. On a phone, the diff opens in a full-height drawer.
 
@@ -659,6 +692,12 @@ The chip counts only running jobs. Select it to open a running-only summary.
 Selecting a job opens its own tab in the central area on desktop, or a
 full-height detail view on a phone. **View all work** opens the Background Work
 overview. Closing a tab or view does not stop the job.
+
+Cursor shell watches also appear as Monitor entries. An explicit ACP failure
+appears as Failed. A cancelled prompt interrupts only its watches that are still
+running, and a replaced native session leaves unresolved watches as Unknown.
+These states describe the watch, not the shell process. Cursor does not provide
+shell output, controls, or an exit status in this view.
 
 The overview has two tabs. **Active** lists running and waiting jobs. **History**
 lists completed, failed, interrupted, ended, and unknown jobs. Each tab shows its
@@ -768,9 +807,10 @@ Choosing **Start agent** (or a workflow step transition) always starts the
 agent as usual, and a failed or interrupted session still shows its recovery
 actions. Other clients and direct API calls do not enforce this web preference.
 
-An interrupted task keeps a warning indicator until the agent confirms
-recovery. Opening the task or starting a recovery attempt does not clear the
-indicator; a failed attempt keeps it visible with the existing retry actions.
+An interrupted task keeps its warning until the affected session accepts a new
+prompt. Restoring the conversation does not clear the warning. A prompt that is
+rejected, remains queued, or has an unknown delivery result also keeps it. If
+another session on the task is still interrupted, the task keeps the warning.
 
 ## Use agent commands in the composer
 
@@ -791,6 +831,20 @@ only when the session has confirmed that mode. A command can also show its
 advertised argument hint, such as `/goal`'s supported arguments. These labels
 and hints describe the command; they do not apply it until you send the draft.
 Pasted rich text does not create a command chip; Kandev uses its visible plain text.
+
+In task Chat, confirmed changes appear in one muted system message, such as
+“Changed model `Sonnet`, mode `Plan`.” Changes before the next turn share that
+message, with the latest result for each setting. Unconfirmed changes appear
+in red with a message that explains the outcome.
+
+Settings you choose before the agent starts appear as “Saved … for agent
+startup.” When the agent starts, later changes appear in a new message.
+
+A supported configuration command such as `/model <id>` can also report the
+setting that the agent applied. Kandev shows that result beneath the command
+for a short time. If the agent does not report a clear change, the message
+says that the requested setting could not be confirmed. Reloading the page
+clears these feedback messages.
 
 ## Recover from provider errors
 
@@ -1085,6 +1139,31 @@ Expand **Task row** in sidebar filters to choose the details shown below each ti
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 
+An active plugin can add **Plugin groupings** to the saved-view selector. On a
+phone, open the navigation menu's **Tasks** section and tap **Plugin groupings**;
+the same chooser is available in the task switcher. Selecting a grouping creates
+a normal saved view or reuses its unchanged generated view. Save or discard an
+existing draft before selecting one. Renamed/custom views are not overwritten.
+
+Plugin grouping covers all authorized matching roots before pagination, not just
+the currently loaded page. A root with multiple values appears in each matching
+colored group, with its subtasks beneath each occurrence. **Untagged** contains
+roots without a value. The footer reports unique tasks separately from pages of
+display occurrences; repeated rows still navigate, select, and act on the same
+task. Group collapse belongs to the saved workspace view, while subtask collapse
+applies to the canonical task.
+
+Changing a draft's grouping starts its groups expanded. Collapse choices made
+in that preview belong to the draft: **Discard** leaves the saved view unchanged,
+while **Save** and **Save as** retain the preview's choices. A copied view's
+collapse choices remain independent of its source.
+
+If the plugin is disabled, unavailable, or returns an incomplete classification,
+the saved view remains selected with its original grouping. Enable the plugin,
+use **Retry**, or choose another view. Recovery restores the grouping without
+rewriting your settings. This is separate from plugin Sort/Group choices in the
+main **List** view, which still apply only to its loaded page.
+
 Views already covered by the current homepage data appear immediately, without
 another sidebar request. Larger covered views also page through the data already
 loaded. Archived views and incomplete data use bounded server pages.
@@ -1222,6 +1301,8 @@ If you add a composer instruction when starting implementation, Kandev clears
 that draft only after acceptance and while its text and attachments still match.
 Edits made while implementation starts remain available when you return to that
 session. Starting from the Plan panel leaves an unsent composer draft intact.
+
+To attach evidence, open the paperclip in the plan comment and choose **Add files**. Wait for the upload to finish before saving. The files stay with the saved comment when you switch sessions. When you send or run the comment, the receiving agent gets a readable path for each file.
 
 Each plan comment supports up to 64 KiB of feedback and 256 KiB of selected
 text. A plan supports up to 100 pending comments and 1 MiB of combined feedback
@@ -1403,8 +1484,7 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 - If normal verified deletion cannot confirm that the agent stopped, the task remains available and deletion reports an error. Retry after resolving the reported problem.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
 
-Deleting or expiring an ordinary Quick Chat also attempts to remove its Claude Code or Codex
-session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
+Deleting an ordinary Quick Chat also attempts to remove its Claude Code or Codex session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
 leaves other conversations and the agent's shared indexes and history databases in place.
 It uses the host's home and config-directory settings; overrides set only in an agent or
 executor profile are outside this cleanup.

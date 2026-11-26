@@ -135,6 +135,9 @@ func (r *Repository) DeleteTaskPlan(ctx context.Context, taskID string) error {
 	if rows == 0 {
 		return fmt.Errorf("task plan not found for task: %s", taskID)
 	}
+	if err := releaseDetachedPlanCommentFiles(ctx, tx, taskID); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit task plan deletion: %w", err)
 	}

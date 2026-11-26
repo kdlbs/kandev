@@ -7,6 +7,7 @@ import {
   E2E_MCP_SERVER_ID,
   E2E_MCP_LONG_DIAGNOSTIC,
   installAgentMcpRecoveryRoutes,
+  seedCursorMcpDiscoveryPreparation,
   seedMcpDiagnosticPreparation,
 } from "../../helpers/agent-mcp-preparation";
 
@@ -37,7 +38,7 @@ test("phone recovery opens the exact MCP sign-in terminal in the terminal panel"
     const preparation = testPage.getByTestId("prepare-progress-panel");
     await expect(preparation).toHaveAttribute("data-status", "completed_with_warnings");
     await expect(preparation).toHaveAttribute("data-expanded", "true");
-    await expect(preparation).toContainText("Discover servers: plugin-atlassian-jira");
+    await expect(preparation).toContainText("Discover Cursor MCP servers: plugin-atlassian-jira");
     await expect(preparation).toContainText("Verify connection: plugin-atlassian-jira");
 
     await testPage.reload();
@@ -137,6 +138,60 @@ test("phone wraps retained MCP command details and keeps recovery actions reacha
     await expect(primaryRow.getByRole("status").last()).toHaveText("Connection ready.");
     await expect(primaryRow.getByTestId("agent-mcp-diagnostic")).toHaveCount(0);
     expect(requests.retry).toEqual([{ server_id: E2E_MCP_SERVER_ID }]);
+  } finally {
+    await destroyMcpRecoveryTerminals(apiClient, fixture);
+  }
+});
+
+test("opens Cursor MCP discovery timeout details on phone", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(90_000);
+  const fixture = await createMcpRecoveryFixture(
+    apiClient,
+    seedData,
+    "Mobile Cursor MCP Discovery Feedback",
+  );
+  await seedCursorMcpDiscoveryPreparation(apiClient, seedData, fixture);
+
+  try {
+    await testPage.goto(`/t/${fixture.taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const preparation = testPage.getByTestId("prepare-progress-panel");
+    await expect(preparation).toHaveAttribute("data-status", "completed_with_error");
+    await preparation.getByRole("button", { name: "Show preparation details" }).tap();
+    await expect(preparation).toContainText("Discover Cursor MCP servers");
+    await expect(preparation).toContainText("Verify connection: kandev-diagnostics");
+
+    const details = preparation.getByTestId("cursor-mcp-discovery-details");
+    const trigger = details.getByRole("button", { name: "Details" });
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+    await trigger.tap();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(details).toContainText(
+      "Checking enabled Cursor Marketplace plugins timed out (5-second limit).",
+    );
+    await expect(details).toContainText(
+      "Kandev skipped Marketplace plugin imports for this setup attempt. If setup completes, other configured MCP servers can still connect.",
+    );
+
+    const copy = details.getByTestId("cursor-mcp-discovery-copy");
+    const copyBox = await copy.boundingBox();
+    const detailsBox = await details.boundingBox();
+    expect(copyBox).not.toBeNull();
+    expect(detailsBox).not.toBeNull();
+    expect(copyBox!.x).toBeGreaterThanOrEqual(detailsBox!.x);
+    expect(copyBox!.x + copyBox!.width).toBeLessThanOrEqual(detailsBox!.x + detailsBox!.width + 1);
+    expect(await copy.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("normal");
+    expect(await copy.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await trigger.tap();
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await expect(trigger).toBeFocused();
   } finally {
     await destroyMcpRecoveryTerminals(apiClient, fixture);
   }
