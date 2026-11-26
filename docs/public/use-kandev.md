@@ -49,7 +49,7 @@ npm install -g kandev@latest
 kandev
 ```
 
-On Windows, install and start Kandev from PowerShell.
+On Windows, install [Scoop](https://scoop.sh/) first. Then run these commands in PowerShell.
 
 ```powershell
 scoop bucket add kandev https://github.com/kdlbs/scoop-kandev

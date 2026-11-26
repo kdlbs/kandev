@@ -153,6 +153,8 @@ kandev
 
 ### Scoop (Windows)
 
+Install [Scoop](https://scoop.sh/) first.
+
 ```powershell
 scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
 scoop install kandev

@@ -10,10 +10,10 @@ owners:
 
 ## Overview
 
-A person who starts Kandev on their computer expects local access. Without a
-configured bind address, the CLI currently listens on every network interface.
-Authentication is off by default. The launcher owns the startup contract and
-uses the shared configuration system to resolve the effective bind.
+Standalone Kandev listens on `127.0.0.1` when no bind address is configured.
+This limits network exposure while authentication is off by default.
+The launcher owns the startup contract and uses the shared configuration
+system to resolve the effective bind.
 
 ## Requirements
 
