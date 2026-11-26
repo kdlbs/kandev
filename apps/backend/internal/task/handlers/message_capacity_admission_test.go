@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"sync"
 	"testing"
 	"time"
@@ -68,6 +69,7 @@ func (r *messageAddSwitchRepo) CreateMessageAndQueueOnce(
 	return true, nil
 }
 
+// @covers AC-AGENTS-SESSION-CEILING-003.9
 // TestMessageCapacityAdmission_QueuesOrdinaryMessageAtFullCapacity verifies
 // the direct request acceptance boundary: the handler reserves or persists
 // before returning success, and no asynchronous prompt is dispatched.
@@ -114,6 +116,7 @@ func TestMessageCapacityAdmission_QueuesOrdinaryMessageAtFullCapacity(t *testing
 	require.NotNil(t, repo.queuedMessage, "accepted input must persist a queue receipt before success")
 	require.Equal(t, "client-cap-1", repo.queuedMessage.ID)
 	require.Equal(t, "wait for capacity", repo.queuedMessage.Content)
+	require.Equal(t, "session_capacity", repo.queuedMessage.Metadata["admission_reason"])
 	require.Equal(t, true, repo.queuedMessage.Metadata["user_message_recorded"])
 	require.Equal(t, true, repo.queuedMessage.Metadata[orchestrator.MetaKeyTurnStartAlreadyProcessed])
 
@@ -214,7 +217,58 @@ func TestMessageCapacityAdmission_SteerFallbackQueuesInsteadOfFailing(t *testing
 	require.Equal(t, true, orch.queuedMetadata["user_message_recorded"])
 	require.Equal(t, true, orch.queuedMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed])
 	require.Equal(t, "message-1", orch.queuedMetadata[messagequeue.MetadataDurableTranscriptMessageID])
+	require.Equal(t, "session_capacity", orch.queuedMetadata["admission_reason"])
 	require.Equal(t, "t1", orch.registeredTaskID)
 	require.Equal(t, "s1", orch.registeredSessionID)
 	require.Zero(t, repo.messageCount(), "the fallback must not create a duplicate transcript or failure message")
+}
+
+type sqliteCapacityBlockedOrchestrator struct {
+	*feedbackAdmissionCoordinator
+}
+
+func (*sqliteCapacityBlockedOrchestrator) ReserveMessageTurn(
+	context.Context, string, string, string,
+) (*orchestrator.MessageTurnReservation, bool) {
+	return nil, false
+}
+
+// @covers AC-AGENTS-SESSION-CEILING-003.9, AC-AGENTS-SESSION-CEILING-003.10
+func TestMessageCapacityAdmission_QueueFullRollbackAndReplay(t *testing.T) {
+	fixture := newFeedbackAdmissionFixture(t, "")
+	ctx := t.Context()
+	fixture.coordinator.maxQueuedPrompts = 1
+	h := NewMessageHandlers(fixture.handler.service, &sqliteCapacityBlockedOrchestrator{fixture.coordinator}, fixture.handler.logger)
+	queue := fixture.coordinator.queue
+	ordinary, err := queue.QueueMessage(ctx, feedbackSessionID, feedbackTaskID, "ordinary queued input", "", messagequeue.QueuedByUser, false, nil)
+	require.NoError(t, err)
+	request, err := ws.NewRequest("capacity-request", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id": feedbackTaskID, "session_id": feedbackSessionID,
+		"client_message_id": "capacity-message", "content": "Wait for capacity",
+	})
+	require.NoError(t, err)
+
+	refused, err := h.wsAddMessage(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, refused.Type, string(refused.Payload))
+	require.Contains(t, string(refused.Payload), messagequeue.QueueFullErrorCode)
+	_, err = fixture.repo.GetMessage(ctx, "capacity-message")
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	status := queue.GetStatus(ctx, feedbackSessionID)
+	require.Len(t, status.Entries, 1)
+	require.Equal(t, ordinary.ID, status.Entries[0].ID)
+	require.NotContains(t, status.Entries[0].Metadata, "admission_reason")
+
+	require.NoError(t, queue.RemoveEntry(ctx, feedbackSessionID, ordinary.ID))
+	accepted, err := h.wsAddMessage(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, accepted.Type, string(accepted.Payload))
+	replayed, err := h.wsAddMessage(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, replayed.Type, string(replayed.Payload))
+	require.JSONEq(t, string(accepted.Payload), string(replayed.Payload))
+	status = queue.GetStatus(ctx, feedbackSessionID)
+	require.Len(t, status.Entries, 1)
+	require.Equal(t, "capacity-message", status.Entries[0].ID)
+	require.Equal(t, "session_capacity", status.Entries[0].Metadata["admission_reason"])
 }

@@ -559,6 +559,22 @@ function PreviewFeedbackFallbackSurface({
   );
 }
 
+function blocksQueueAutoDelivery(
+  panelState: ChatPanelState,
+  { planActions, executor, composerProps }: ReturnType<typeof useChatInputDerived>,
+): boolean {
+  return (
+    panelState.hasPendingClarification ||
+    Boolean(panelState.task?.queuedForStepId) ||
+    panelState.session?.route_state === "action_required" ||
+    composerProps.needsRecovery ||
+    composerProps.uncertainDelivery ||
+    executor.unavailable ||
+    planActions.isMoving ||
+    composerProps.isRestarting
+  );
+}
+
 /**
  * The chat composer: input box, submit/cancel handling, plan-mode toggle,
  * clarification banner, and the {@link ChatStatusBar} above it.
@@ -581,7 +597,8 @@ export function ChatInputArea(props: ChatInputAreaProps) {
   } = props;
   const { resolvedSessionId, taskId, isAgentBusy } = panelState;
   const disclosure = useComposerDisclosureContext();
-  const { planActions, executor, composerProps } = useChatInputDerived(props);
+  const derived = useChatInputDerived(props);
+  const { planActions, executor, composerProps } = derived;
   const { proceedStepName, proceed, isMoving } = planActions;
   return (
     <div
@@ -610,6 +627,7 @@ export function ChatInputArea(props: ChatInputAreaProps) {
         <QueueAffordance
           sessionId={resolvedSessionId}
           detailActive={panelState.detailActive}
+          autoDeliveryBlocked={blocksQueueAutoDelivery(panelState, derived)}
           renderStatusBar={(queueChip) => (
             <ChatStatusBar
               todoItems={panelState.todoItems}

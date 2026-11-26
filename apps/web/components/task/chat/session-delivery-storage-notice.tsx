@@ -17,6 +17,8 @@ import {
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { formatDateTime } from "@/lib/i18n/formats";
 
+import { ComposerWarning, ComposerWarningRow } from "./composer-warning";
+
 type StorageTranslate = ReturnType<typeof useTranslation>["t"];
 
 type NoticeView = {
@@ -194,12 +196,11 @@ function TaskStorageNotice({ health, taskId }: StorageNoticeProps) {
   const primaryLabel = view.pressure ? pressureReasonLabel(health, t) : usageLabel;
   if (!primaryLabel) return null;
   return (
-    <div
+    <ComposerWarning
       data-testid="session-delivery-storage-notice"
       data-storage-state={health.state}
       data-pressure={view.pressure ? "true" : "false"}
       data-stale={stale ? "true" : "false"}
-      className="border-border/60 bg-amber-500/5 my-1 flex flex-col gap-1 rounded-md border px-2 py-2"
     >
       <StorageNoticeRow
         health={health}
@@ -210,7 +211,7 @@ function TaskStorageNotice({ health, taskId }: StorageNoticeProps) {
         onToggleDetails={() => setDetailsOpen((open) => !open)}
         onDismiss={dismiss}
       />
-    </div>
+    </ComposerWarning>
   );
 }
 
@@ -235,8 +236,7 @@ function StorageNoticeRow({
   const usageLabel = view.usage ? t("task:storageAdvisoryUsage", { usage: view.usage }) : null;
   return (
     <>
-      <div className="flex min-w-0 items-center gap-2">
-        <IconAlertTriangle className="size-4 shrink-0 text-amber-600" aria-hidden="true" />
+      <ComposerWarningRow icon={IconAlertTriangle}>
         <span className="flex min-w-0 flex-1 items-baseline gap-1 overflow-hidden text-xs">
           {stale && (
             <span className="shrink-0 font-medium">{t("task:storageAdvisoryLastReported")}:</span>
@@ -302,7 +302,7 @@ function StorageNoticeRow({
             <IconX className="size-3" aria-hidden="true" />
           </button>
         </span>
-      </div>
+      </ComposerWarningRow>
       {detailsOpen && <NoticeDetails health={health} view={view} />}
     </>
   );
