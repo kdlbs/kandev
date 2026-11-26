@@ -1,5 +1,16 @@
 ---
 status: done
+requirements:
+  - REQ-TASKS-SIDEBAR-FLAGS-001
+system_design:
+  - ../../specs/tasks/system-design/sidebar-task-flags.md
+plan: plan.md
+acceptance_criteria:
+  - AC-TASKS-SIDEBAR-FLAGS-001.1
+  - AC-TASKS-SIDEBAR-FLAGS-001.2
+  - AC-TASKS-SIDEBAR-FLAGS-001.3
+  - AC-TASKS-SIDEBAR-FLAGS-001.4
+  - AC-TASKS-SIDEBAR-FLAGS-001.5
 ---
 
 # Add, read, edit, and remove a sidebar task flag

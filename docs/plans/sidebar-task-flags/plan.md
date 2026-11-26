@@ -1,5 +1,9 @@
 ---
 status: completed
+requirements:
+  - REQ-TASKS-SIDEBAR-FLAGS-001
+system_design:
+  - ../../specs/tasks/system-design/sidebar-task-flags.md
 ---
 
 # Sidebar task flags
