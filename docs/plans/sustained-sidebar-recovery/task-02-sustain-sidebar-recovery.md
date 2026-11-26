@@ -67,6 +67,7 @@ Phone surfaces follow the same states in their existing containers. No layout or
 Run from the repository root. Run E2E projects sequentially.
 
 ```bash
+(cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm exec vitest run lib/sidebar/sidebar-task-page-recovery.test.ts lib/sidebar/sidebar-task-page-cache.test.ts lib/sidebar/sidebar-task-page-cache-cooldown.test.ts hooks/domains/kanban/use-sidebar-task-page.test.tsx hooks/domains/kanban/use-sidebar-task-page.recovery.test.tsx hooks/domains/kanban/use-sidebar-task-page.disclosure.test.tsx hooks/domains/kanban/use-sidebar-task-page.removal.test.tsx lib/state/task-navigation-reads-budget.test.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run lint)

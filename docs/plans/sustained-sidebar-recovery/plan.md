@@ -7,8 +7,6 @@ requirements:
 system_design:
   - ../../specs/platform/system-design/interactive-read-availability.md
   - ../../specs/platform/system-design/postgres-domain-store-parity.md
-decisions:
-  - ../../decisions/2026-11-25-confirm-contention-health-failures.md
 legacy_specs: []
 ---
 

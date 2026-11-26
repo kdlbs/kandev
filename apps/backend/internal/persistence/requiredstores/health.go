@@ -444,48 +444,52 @@ func (h *Health) run(ctx context.Context, interval time.Duration, done chan stru
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || !h.runProbeCycle(ctx) {
 				return
-			}
-			checkCtx, cancel := context.WithTimeout(ctx, probeTimeout)
-			deferred, result, release, err := h.probeRuntime(checkCtx)
-			cancel()
-			if deferred {
-				continue
-			}
-			if err != nil {
-				if release != nil {
-					release()
-				}
-				h.logProbeFailure(result.diagnostic)
-				continue
-			}
-			if h.shouldConfirm(result) {
-				if release != nil {
-					release()
-				}
-				h.logUnconfirmedDeadline(result.diagnostic)
-				if !waitForConfirmation(ctx, h.confirmationDelayDuration()) {
-					return
-				}
-				confirmCtx, confirmCancel := context.WithTimeout(ctx, probeTimeout)
-				deferred, result, release, err = h.probeRuntime(confirmCtx)
-				confirmCancel()
-				if deferred {
-					continue
-				}
-			}
-			if err == nil {
-				err = h.record(result)
-			}
-			if release != nil {
-				release()
-			}
-			if err != nil {
-				h.logProbeFailure(result.diagnostic)
 			}
 		}
 	}
+}
+
+func (h *Health) runProbeCycle(ctx context.Context) bool {
+	checkCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	deferred, result, release, err := h.probeRuntime(checkCtx)
+	cancel()
+	if deferred {
+		return true
+	}
+	if err != nil {
+		if release != nil {
+			release()
+		}
+		h.logProbeFailure(result.diagnostic)
+		return true
+	}
+	if h.shouldConfirm(result) {
+		if release != nil {
+			release()
+		}
+		h.logUnconfirmedDeadline(result.diagnostic)
+		if !waitForConfirmation(ctx, h.confirmationDelayDuration()) || ctx.Err() != nil {
+			return false
+		}
+		confirmCtx, confirmCancel := context.WithTimeout(ctx, probeTimeout)
+		deferred, result, release, err = h.probeRuntime(confirmCtx)
+		confirmCancel()
+		if deferred {
+			return true
+		}
+	}
+	if err == nil {
+		err = h.record(result)
+	}
+	if release != nil {
+		release()
+	}
+	if err != nil {
+		h.logProbeFailure(result.diagnostic)
+	}
+	return true
 }
 
 // Stop terminates the periodic probe loop.
