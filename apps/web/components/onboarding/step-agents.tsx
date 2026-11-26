@@ -11,8 +11,13 @@ import {
   IconExternalLink,
   IconLock,
 } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import Link from "@/components/routing/app-link";
+import { canInstallAgent } from "@/components/settings/install-agent-card";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
+import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import { AgentLogo } from "@/components/agent-logo";
 import { AgentSetupFields } from "@/components/onboarding/agent-setup-fields";
 import type { AgentSetting, OnboardingAgentDraft } from "@/components/onboarding/agent-settings";
@@ -286,6 +291,7 @@ export function StepAgents({
   onModelResolutionChange?: (profileId: string, pending: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const canManage = useIsAdmin();
   const [openAgent, setOpenAgent] = useState<string | null>(null);
 
   if (loading) {
@@ -303,6 +309,19 @@ export function StepAgents({
 
   return (
     <div className="space-y-3">
+      {installedAgents.length === 0 && availableAgents.some(canInstallAgent) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3">
+          <p className="text-sm">{t("common:onboardingNoInstalledAgents")}</p>
+          {canManage && (
+            <Button asChild>
+              <Link href={AGENTS_BROWSE_SETTINGS_HREF}>
+                <IconDownload aria-hidden="true" />
+                {t("agents:installAgents")}
+              </Link>
+            </Button>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-2">
         {installedAgents.map((agent) => (
           <InstalledAgentRow

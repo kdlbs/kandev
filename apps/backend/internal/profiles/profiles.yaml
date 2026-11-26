@@ -52,14 +52,6 @@ features:
     dev:  "false"
     e2e:  "false"
 
-  # Retains supported language-server leases across browser disconnects. The
-  # bounded task-host lifecycle is enabled by default; this restart-required
-  # flag remains the operator kill switch.
-  KANDEV_FEATURES_LSP_BROWSER_CONTINUITY:
-    prod: "true"
-    dev:  "true"
-    e2e:  "true"
-
   # Office (autonomous agent surface). Off in prod until the feature
   # is user-ready; on in dev/e2e so contributors and tests exercise it.
   KANDEV_FEATURES_OFFICE:
@@ -77,12 +69,12 @@ features:
     dev:  "false"
     e2e:  "false"
 
-  # Agent-authored plugin web applications. Off in every shipped profile until
-  # the isolated runtime and lifecycle are ready for opt-in use.
+  # Agent-authored plugin web applications. The runtime toggle acts as the
+  # installation-wide off switch during rollout.
   KANDEV_FEATURES_CANVASES:
-    prod: "false"
-    dev:  "false"
-    e2e:  "false"
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
 
   # Organizations: a tenant boundary above users. Requires KANDEV_FEATURES_AUTH;
   # the backend refuses to start with this on and auth off. Off everywhere until

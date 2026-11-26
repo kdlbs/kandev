@@ -9,7 +9,7 @@ kandev:
 
 # Mobile Parity
 
-Use this skill before planning or changing UI. Goal: desktop and mobile deliver the same user value, while each viewport gets an intentional composition and tests prove the mobile path.
+Use this skill before planning or changing UI. First read [Layout in DESIGN.md](../../../DESIGN.md#layout) for shared workbench and settings composition. Goal: desktop and mobile deliver the same user value, while each viewport gets an intentional composition and tests prove the mobile path.
 
 Before proposing a mobile design, read [Kandev Mobile UI Language](references/kandev-mobile-ui-language.md) and inspect the closest shipped mobile surface. Responsive CSS alone does not establish mobile parity.
 

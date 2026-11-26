@@ -231,6 +231,18 @@ func TestPluginsTaskWriter_CreateMapsSourceToMetadata(t *testing.T) {
 	require.Equal(t, "critical", svc.lastCreate.Priority)
 }
 
+// @covers AC-PLUGINS-PLUGINS-001.17
+func TestPluginsTaskWriter_CreateMapsProjectSelection(t *testing.T) {
+	svc := &fakePluginTaskWriteService{}
+	projectID := "project-1"
+	_, err := (pluginsTaskWriterAdapter{svc: svc}).CreateTask(context.Background(), plugins.TaskCreateInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Project task", ProjectID: projectID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, projectID, svc.lastCreate.ProjectID)
+	require.True(t, svc.lastCreate.RequireProjectWorkspaceValidation)
+}
+
 func TestPluginsTaskWriter_FindTaskByExternalID(t *testing.T) {
 	svc := &fakePluginTaskWriteService{externalTask: &taskmodels.Task{ID: "task-existing", WorkspaceID: "ws-1"}}
 	task, found, err := (pluginsTaskWriterAdapter{svc: svc}).FindTaskByExternalID(

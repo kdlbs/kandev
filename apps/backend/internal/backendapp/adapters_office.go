@@ -33,6 +33,7 @@ type officeCommentWindowReader interface {
 
 type officeProjectRepositoryReader interface {
 	GetProject(ctx context.Context, id string) (*officemodels.Project, error)
+	GetProjectWorkspaceID(ctx context.Context, projectID string) (string, error)
 }
 
 // officeProjectRepositorySourceAdapter keeps Office project models outside the
@@ -51,10 +52,13 @@ func (a *officeProjectRepositorySourceAdapter) ReadProjectRepositorySources(
 	}
 	project, err := a.reader.GetProject(ctx, projectID)
 	if err != nil {
+		if errors.Is(err, officesqlite.ErrProjectNotFound) {
+			return taskservice.ProjectRepositorySources{}, fmt.Errorf("%w: %s", taskservice.ErrProjectNotFound, projectID)
+		}
 		return taskservice.ProjectRepositorySources{}, err
 	}
 	if project == nil {
-		return taskservice.ProjectRepositorySources{}, fmt.Errorf("office project %q was not found", projectID)
+		return taskservice.ProjectRepositorySources{}, fmt.Errorf("%w: %s", taskservice.ErrProjectNotFound, projectID)
 	}
 	sources, err := officemodels.DecodeRepositories(project.Repositories)
 	if err != nil {
@@ -63,14 +67,29 @@ func (a *officeProjectRepositorySourceAdapter) ReadProjectRepositorySources(
 	return taskservice.ProjectRepositorySources{WorkspaceID: project.WorkspaceID, Sources: sources}, nil
 }
 
+// GetProjectWorkspaceID exposes the Office membership lookup without decoding
+// repository sources.
+func (a *officeProjectRepositorySourceAdapter) GetProjectWorkspaceID(
+	ctx context.Context,
+	projectID string,
+) (string, error) {
+	if a == nil || a.reader == nil {
+		return "", errors.New("office project workspace reader is unavailable")
+	}
+	return a.reader.GetProjectWorkspaceID(ctx, projectID)
+}
+
 func wireOfficeProjectRepositorySources(taskSvc *taskservice.Service, reader officeProjectRepositoryReader) {
 	if taskSvc == nil || reader == nil {
 		return
 	}
-	taskSvc.SetProjectRepositorySourceReader(&officeProjectRepositorySourceAdapter{reader: reader})
+	adapter := &officeProjectRepositorySourceAdapter{reader: reader}
+	taskSvc.SetProjectRepositorySourceReader(adapter)
+	taskSvc.SetProjectWorkspaceReader(adapter)
 }
 
 var _ taskservice.ProjectRepositorySourceReader = (*officeProjectRepositorySourceAdapter)(nil)
+var _ taskservice.ProjectWorkspaceReader = (*officeProjectRepositorySourceAdapter)(nil)
 
 // officeCommentReaderAdapter keeps Office persistence models at the backend
 // composition boundary. The task service receives its own neutral records.

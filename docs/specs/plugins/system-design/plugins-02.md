@@ -360,6 +360,46 @@ undeclared capability returns gRPC `PermissionDenied` with message
 service instance is bound to the plugin's own ID at spawn time, the check
 evaluates directly against that plugin's installed manifest.
 
+#### Office project selection on task creation
+
+`CreateTaskRequest` uses optional string field 12 for `project_id`.
+`CreateTaskExactRequest.task` embeds the same request. The Go SDK carries
+presence on `CreateTaskInput.ProjectID` with a string pointer. Both RPCs map
+the explicit ID into `taskservice.CreateTaskRequest.ProjectID` through the
+shared Host preparation and writer adapter. Workspace and workflow selection
+use their existing rules. See `AC-PLUGINS-PLUGINS-001.17` and `.20`.
+
+Use the existing authorization on each method. Ordinary create checks
+`api_write: tasks`. Exact create also checks its `host.v2.write:tasks` grant
+in the requested workspace. See `AC-PLUGINS-PLUGINS-001.18`.
+
+Look up the explicit project by ID with Office's `WorkspaceIDForProject`
+after workspace authorization and before allocating an identifier or
+resolving repositories. This check also applies when the plugin specifies a
+parent or repositories. The task insert transaction rechecks project
+membership. SQLite uses the existing writer admission. PostgreSQL takes a
+shared lock on the project row inside that transaction. If the project
+disappears after validation, return the existing conflict status.
+The task service continues to select repositories and publish `task.created`.
+See `AC-PLUGINS-PLUGINS-001.10` and `.19`.
+[Project repository context](../../tasks/system-design/project-repository-context.md)
+
+The ordinary RPC returns `InvalidArgument` for empty, missing, or foreign
+project IDs. Exact create reports `INVALID` for the same inputs. Missing and
+foreign IDs share one error and reveal no project details. An unavailable
+project lookup is retryable.
+
+Exact create includes a present project in the canonical payload digest and
+omits an absent project from its JSON input. This preserves historical digests
+and makes a changed project selection a payload conflict. After authorization,
+receipt lookup and external-ID recovery precede validation that depends on a
+live project. A recovered task retains its stored project. Validation failures
+return a typed result with no task. See `AC-PLUGINS-PLUGINS-001.21`.
+
+Plugins that use the field declare a host minimum that supports it under the
+published SDK baseline. Older hosts can silently drop an unknown protobuf
+field. [SDK distribution](sdk-distribution.md)
+
 ### Generic Host boundary
 
 Manifest declaration remains the package-authored maximum capability set. A

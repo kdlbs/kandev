@@ -51,11 +51,21 @@ func (s *Service) settleExecutionLessSessionStop(ctx context.Context, sessionID 
 	if !executor.IsNoExecutionForSessionError(err) {
 		return false, err
 	}
-	return s.settleExecutionLessSessionTurn(ctx, sessionID)
+	taskID, settled, err := s.settleExecutionLessSessionTurn(ctx, sessionID)
+	if err != nil || !settled {
+		return settled, err
+	}
+	cleanupCtx, cancel := backgroundWorkCleanupContext(ctx)
+	defer cancel()
+	for _, executionID := range s.executionIDsWithActivity(sessionID) {
+		s.retireExecutionActivityAndPublish(cleanupCtx, taskID, sessionID, executionID)
+	}
+	s.settleBackgroundWorkLocked(cleanupCtx, sessionID, "")
+	return true, nil
 }
 
 // settleExecutionLessSessionTurn requires lifecycle and prompt admission ownership.
-func (s *Service) settleExecutionLessSessionTurn(ctx context.Context, sessionID string) (bool, error) {
+func (s *Service) settleExecutionLessSessionTurn(ctx context.Context, sessionID string) (string, bool, error) {
 	var turn *models.Turn
 	if s.turnService != nil {
 		active, err := s.turnService.GetActiveTurn(ctx, sessionID)
@@ -63,18 +73,18 @@ func (s *Service) settleExecutionLessSessionTurn(ctx context.Context, sessionID 
 		case err == nil:
 			turn = active
 		case !isNoActiveTurnError(err):
-			return false, err
+			return "", false, err
 		}
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if errors.Is(err, models.ErrTaskSessionNotFound) {
-		return true, nil
+		return "", true, nil
 	}
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	if session == nil {
-		return true, nil
+		return "", true, nil
 	}
 	switch session.State {
 	case models.TaskSessionStateWaitingForInput,
@@ -82,13 +92,13 @@ func (s *Service) settleExecutionLessSessionTurn(ctx context.Context, sessionID 
 		models.TaskSessionStateFailed,
 		models.TaskSessionStateCancelled:
 	default:
-		return false, nil
+		return "", false, nil
 	}
 	if turn == nil {
-		return true, nil
+		return session.TaskID, true, nil
 	}
 	if err := s.completeTurnForTaskSessionCheckedOwned(ctx, session.TaskID, sessionID, turn.ID); err != nil {
-		return false, err
+		return "", false, err
 	}
-	return true, nil
+	return session.TaskID, true, nil
 }
