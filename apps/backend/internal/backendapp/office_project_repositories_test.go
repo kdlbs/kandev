@@ -6,8 +6,17 @@ import (
 	"go/ast"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	officemodels "github.com/kandev/kandev/internal/office/models"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/plugins"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 type emptyOfficeProjectSourceReader struct{}
@@ -30,6 +39,17 @@ func (r *fakeOfficeProjectRepositoryReader) GetProject(_ context.Context, id str
 	return r.project, r.err
 }
 
+func (r *fakeOfficeProjectRepositoryReader) GetProjectWorkspaceID(_ context.Context, id string) (string, error) {
+	r.gotID = id
+	if r.err != nil {
+		return "", r.err
+	}
+	if r.project == nil || r.project.ID != id {
+		return "", nil
+	}
+	return r.project.WorkspaceID, nil
+}
+
 func TestOfficeProjectRepositorySourceAdapterReadsExactProject(t *testing.T) {
 	encoded, err := officemodels.EncodeRepositories([]string{"/repos/first", "https://github.com/acme/second.git"})
 	if err != nil {
@@ -44,6 +64,10 @@ func TestOfficeProjectRepositorySourceAdapterReadsExactProject(t *testing.T) {
 	}
 	if reader.gotID != "project-exact" {
 		t.Fatalf("project ID = %q, want exact ID", reader.gotID)
+	}
+	workspaceID, err := (&officeProjectRepositorySourceAdapter{reader: reader}).GetProjectWorkspaceID(context.Background(), "project-exact")
+	if err != nil || workspaceID != "workspace-exact" {
+		t.Fatalf("GetProjectWorkspaceID = %q, err = %v; want exact workspace", workspaceID, err)
 	}
 	if result.WorkspaceID != "workspace-exact" || len(result.Sources) != 2 || result.Sources[0] != "/repos/first" || result.Sources[1] != "https://github.com/acme/second.git" {
 		t.Fatalf("result = %#v, want workspace and ordered sources", result)
@@ -65,6 +89,9 @@ func TestOfficeProjectRepositorySourceAdapterRejectsReadAndDecodeFailures(t *tes
 			_, err := (&officeProjectRepositorySourceAdapter{reader: tc.reader}).ReadProjectRepositorySources(context.Background(), "project-bad")
 			if err == nil {
 				t.Fatal("ReadProjectRepositorySources succeeded, want error")
+			}
+			if tc.name == "missing project" && !errors.Is(err, taskservice.ErrProjectNotFound) {
+				t.Fatalf("missing project error = %v, want ErrProjectNotFound", err)
 			}
 			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
 				t.Fatalf("error = %v, want wrapped %v", err, tc.wantErr)
@@ -107,6 +134,112 @@ func TestOfficeProjectRepositoryReaderWiring(t *testing.T) {
 	if len(repositories) != 1 || repositories[0].RemoteURL != "https://github.com/acme/project-repo.git" {
 		t.Fatalf("workspace repositories = %#v, want resolved project remote", repositories)
 	}
+}
+
+// @covers AC-PLUGINS-PLUGINS-001.17, AC-PLUGINS-PLUGINS-001.19
+func TestPluginsTaskWriter_CreateTaskInProject(t *testing.T) {
+	ctx := context.Background()
+	_, taskSvc, officeRepo, taskRepo, testDB := newOfficeTaskAdapterHarnessWithTestDB(t)
+	wireOfficeProjectRepositorySources(taskSvc, officeRepo)
+	project := func(id, workspaceID string) {
+		t.Helper()
+		repositories, err := officemodels.EncodeRepositories(nil)
+		require.NoError(t, err)
+		require.NoError(t, officeRepo.CreateProject(ctx, &officemodels.Project{
+			ID: id, WorkspaceID: workspaceID, Name: id,
+			Status: officemodels.ProjectStatusActive, Repositories: repositories,
+		}))
+	}
+	project("project-plugin-create", "ws-1")
+
+	created, err := (pluginsTaskWriterAdapter{svc: taskSvc}).CreateTask(ctx, plugins.TaskCreateInput{
+		WorkspaceID: "ws-1", Title: "Create in project",
+		ProjectID: "project-plugin-create",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "project-plugin-create", created.ProjectID)
+	require.NotEmpty(t, created.WorkflowID, "project creates resolve the Office workflow")
+	require.Empty(t, created.ParentID)
+
+	require.NoError(t, taskRepo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "ws-other", Name: "Other workspace"}))
+	project("project-plugin-foreign", "ws-other")
+	for _, tc := range []struct {
+		name      string
+		projectID string
+	}{
+		{name: "missing project", projectID: "missing-project"},
+		{name: "foreign workspace", projectID: "project-plugin-foreign"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := (pluginsTaskWriterAdapter{svc: taskSvc}).CreateTask(ctx, plugins.TaskCreateInput{
+				WorkspaceID: "ws-1", Title: "Reject project",
+				ProjectID:    tc.projectID,
+				Repositories: []pluginsdk.PluginTaskRepository{{RepositoryID: "must-not-resolve"}},
+			})
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+		})
+	}
+
+	project("project-plugin-delete-before-sources", "ws-1")
+	deleteBeforeSources := projectDeleteAfterWorkspaceRead{Repository: officeRepo}
+	wireOfficeProjectRepositorySources(taskSvc, deleteBeforeSources)
+	_, err = (pluginsTaskWriterAdapter{svc: taskSvc}).CreateTask(ctx, plugins.TaskCreateInput{
+		WorkspaceID: "ws-1", Title: "Project deleted before source read",
+		ProjectID: "project-plugin-delete-before-sources",
+	})
+	require.Error(t, err)
+	require.Equal(t, codes.Aborted, status.Code(err))
+	assertNoProjectTask(t, ctx, testDB, "Project deleted before source read")
+
+	project("project-plugin-race", "ws-1")
+	racingReader := projectDeleteAfterRead{Repository: officeRepo}
+	wireOfficeProjectRepositorySources(taskSvc, racingReader)
+	_, err = (pluginsTaskWriterAdapter{svc: taskSvc}).CreateTask(ctx, plugins.TaskCreateInput{
+		WorkspaceID: "ws-1", Title: "Project membership race",
+		ProjectID: "project-plugin-race",
+	})
+	require.Error(t, err)
+	require.Equal(t, codes.Aborted, status.Code(err))
+	assertNoProjectTask(t, ctx, testDB, "Project membership race")
+}
+
+func assertNoProjectTask(t *testing.T, ctx context.Context, database *sqlx.DB, title string) {
+	t.Helper()
+	var taskCount int
+	require.NoError(t, database.GetContext(ctx, &taskCount,
+		database.Rebind(`SELECT COUNT(*) FROM tasks WHERE title = ?`), title))
+	require.Zero(t, taskCount, "a project deleted during creation must not leave a task row")
+}
+
+type projectDeleteAfterRead struct {
+	*officesqlite.Repository
+}
+
+func (r projectDeleteAfterRead) GetProject(ctx context.Context, id string) (*officemodels.Project, error) {
+	project, err := r.Repository.GetProject(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.DeleteProject(ctx, id); err != nil {
+		return nil, err
+	}
+	return project, nil
+}
+
+type projectDeleteAfterWorkspaceRead struct {
+	*officesqlite.Repository
+}
+
+func (r projectDeleteAfterWorkspaceRead) GetProjectWorkspaceID(ctx context.Context, id string) (string, error) {
+	workspaceID, err := r.Repository.GetProjectWorkspaceID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if err := r.DeleteProject(ctx, id); err != nil {
+		return "", err
+	}
+	return workspaceID, nil
 }
 
 func TestRegisterRoutesWiresOfficeProjectRepositorySources(t *testing.T) {

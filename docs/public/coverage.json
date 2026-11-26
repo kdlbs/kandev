@@ -172,6 +172,7 @@
         "apps/backend/internal/mcp/server/dependency_handlers.go",
         "apps/backend/internal/mcp/handlers/dependency_handlers.go",
         "apps/backend/internal/task/service/service_dependencies.go",
+        "apps/backend/internal/task/handlers/task_http_handlers.go",
         "apps/backend/internal/orchestrator/event_handlers_dependencies.go",
         "apps/backend/internal/gateway/websocket/client.go"
       ],
@@ -187,6 +188,7 @@
         "apps/backend/internal/integration/mcp_stop_task_test.go",
         "apps/backend/internal/gateway/websocket/client_mcp_actions_test.go",
         "apps/backend/internal/task/service/service_dependencies_test.go",
+        "apps/backend/internal/task/handlers/task_http_repository_ids_test.go",
         "apps/backend/internal/orchestrator/event_handlers_dependencies_test.go"
       ],
       "mcpTools": [

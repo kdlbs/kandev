@@ -1176,7 +1176,20 @@ Dedicated `/terminal/*target` and `/lsp/:sessionId` WebSockets, plus `/vscode/:s
 
 Browser terminal streams at `/terminal/*target` and `/api/v1/agent-login/sessions/:sessionId/stream` use WebSocket control pings to stay active through idle proxies. Kandev sends a ping every 54 seconds and closes a connection if it receives no pong for 60 seconds. Configure proxy idle timeouts to at least 60 seconds. The socket continues reading pongs while it forwards terminal input and buffers up to 256 pending messages with a combined payload of 1 MiB. A single larger message can use an otherwise empty buffer. If the pending queue fills, Kandev closes the stream and the existing reconnect behavior applies. These control frames do not contain terminal data and do not change the `/ws` JSON envelope or its 32 MiB message limit.
 
-The browser language-server socket at `/lsp/:sessionId?language=...` carries raw LSP JSON-RPC plus private Kandev control frames. Browser continuity is on by default in shipped profiles. The restart-required `features.lspBrowserContinuity` flag remains as a kill switch; an explicit false value restores browser-owned cleanup. With continuity enabled, a browser close or temporary network loss detaches the window while its task-host lease keeps running for up to one hour. Reopening the task within that hour can reattach to that lease without another `initialize`; each window and duplicated tab has its own lease. **Stop**, two minutes with no open editor, one hour detached, task-runtime shutdown, backend shutdown, or capacity eviction releases a lease. Reattachment cancels the detached deadline; an attached lease does not expire. `KANDEV_LSP_MAX_CONNECTIONS` counts attached and detached leases; at capacity, Kandev evicts the least-recently detached lease, or rejects a new request when all leases are attached. When continuity is disabled, closing the browser socket stops its process as before.
+The browser language-server socket at `/lsp/:sessionId?language=...` carries raw
+LSP JSON-RPC and Kandev control frames. Closing the browser or losing its network
+connection detaches the window from its task-host lease. The lease stays active
+for up to one hour. Reopening the task within that hour can reattach to the lease
+without a second `initialize`. Each window or duplicate tab has its own lease.
+
+**Stop** releases the lease. Two minutes without an open editor, detached
+expiry, capacity eviction, task-runtime shutdown, or backend shutdown also
+releases it. Reattachment cancels the detached deadline. An attached lease has
+no expiry deadline.
+
+`KANDEV_LSP_MAX_CONNECTIONS` counts attached and detached leases. If the limit
+is reached, Kandev evicts the lease that has been detached longest. If all
+leases are attached, Kandev rejects the new request.
 
 The browser shows **Reconnecting** for an uncertain transport loss and retries attachment. A browser-reported `1005` or `1006`, graceful backend restart close `1001`, or backend transport close `4009` does not confirm that the language-server process exited. Close `4006` means the task-host process exited; the editor clears that generation's providers and diagnostics and offers **Retry**. Close `4010` means the task runtime stopped, so the editor ends the lease without reconnecting it. A backend restart releases leases, so the next connection starts a fresh process and repeats project analysis.
 

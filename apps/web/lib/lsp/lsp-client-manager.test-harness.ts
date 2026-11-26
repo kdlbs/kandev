@@ -16,7 +16,6 @@ export class FakeWebSocket extends EventTarget {
   readyState = FakeWebSocket.CONNECTING;
   onopen: ((event: Event) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
-  onerror: ((event: Event) => void) | null = null;
   readonly sent: string[] = [];
 
   constructor(readonly url: string) {
@@ -47,6 +46,16 @@ export class FakeWebSocket extends EventTarget {
     this.onclose?.(event);
     this.dispatchEvent(event);
   }
+}
+
+export function acknowledgeRelease(socket: FakeWebSocket, reason: "stop" | "editor_idle"): void {
+  const release = socket.sent
+    .map((message) => JSON.parse(message))
+    .findLast((message) => message.kandev === "lsp" && message.action === "release");
+  expect(release).toMatchObject({ reason, requestId: expect.any(String) });
+  socket.emitMessage(
+    JSON.stringify({ kandev: "lsp", action: "released", requestId: release.requestId }),
+  );
 }
 
 function parseUri(value: string) {
