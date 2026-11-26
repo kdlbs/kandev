@@ -40,6 +40,7 @@ import { useIsTitleTruncated } from "@/hooks/use-is-title-truncated";
 
 type TaskItemProps = {
   title: string;
+  flag?: ReactNode;
   autopilot?: boolean;
   priority?: TaskPriority;
   state?: TaskState;
@@ -227,6 +228,7 @@ function TaskItemTitle({ title }: { title: string }) {
 
 type TaskItemContentProps = {
   title: string;
+  flag?: ReactNode;
   autopilot?: boolean;
   priority?: TaskPriority;
   taskId?: string;
@@ -253,6 +255,7 @@ type TaskItemContentProps = {
 
 function TaskItemContent({
   title,
+  flag,
   autopilot,
   priority,
   taskId,
@@ -281,6 +284,7 @@ function TaskItemContent({
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         <TaskItemTitle title={title} />
+        {flag}
         <TaskItemLeadingBadges
           autopilot={autopilot}
           priority={priority}
@@ -378,6 +382,7 @@ function TaskItemActions({
 // eslint-disable-next-line max-lines-per-function
 export const TaskItem = memo(function TaskItem({
   title,
+  flag,
   autopilot,
   priority,
   state,
@@ -481,6 +486,7 @@ export const TaskItem = memo(function TaskItem({
       />
       <TaskItemContent
         title={title}
+        flag={flag}
         autopilot={autopilot}
         priority={priority}
         taskId={taskId}

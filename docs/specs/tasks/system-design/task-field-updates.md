@@ -35,6 +35,7 @@ WorkflowStepID is service-only; no new transport field. Paths are task-relative 
 | --- | --- |
 | `Title *string` | Set only when present. Preserve current title otherwise. Explicit title removes `agent_title_pending` and `agent_title_owner_session_id` after metadata processing. Existing length check and REST/WS trimming remain. |
 | `Description *string` | Present replaces, including empty. No title/owner mutation when omitted or description-only. |
+| `FlagNote *string` | Trim if supplied. Empty clears the flag. |
 | `Priority *string` | Present replaces after enum validation. Genuine priority-only requests retain scalar path. Add `AssigneeUserID == nil` to the fast-path guard: priority plus assignee currently drops the assignee. |
 | `State *TaskState` | Present applies to current state; absent retains it. Completion guard evaluates actual current-to-requested transition. Return prior locked state for event bookkeeping. |
 | `WorkflowStepID *string` | Service-level present applies to current workflow context. Absent retains current step, queue/WIP fields, workflow identity/overrides and runner projection. Existing transition/entry rules remain; no new WIP admission policy. |
@@ -47,7 +48,7 @@ WorkflowStepID is service-only; no new transport field. Paths are task-relative 
 ## Typed repository boundary
 
 Introduce `models.TaskFieldUpdate` and `models.TaskFieldUpdateResult` in a small model file.
-The patch contains eight scalar pointers (title, description, priority, state, workflow step,
+The patch contains nine scalar pointers (title, description, flag note, priority, state, workflow step,
 position, assignee, parent) and the nullable metadata map, using the existing types.
 It carries the resolved assignee pointer, not an early
 complete `Task`. It contains no repository inputs, policy callback, revision, or opaque field

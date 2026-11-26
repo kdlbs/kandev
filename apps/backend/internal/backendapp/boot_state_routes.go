@@ -864,6 +864,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"identifier":                  nullString(task.Identifier),
 		"title":                       task.Title,
 		"description":                 task.Description,
+		"flagNote":                    task.FlagNote,
 		"position":                    task.Position,
 		"state":                       task.State,
 		"repositoryId":                primaryRepositoryID,

@@ -66,6 +66,7 @@ export function createTask(input: Record<string, unknown>): DemoHttpResponse {
 export function updateTask(task: Task, input: Record<string, unknown>): DemoHttpResponse {
   if (typeof input.title === "string") task.title = input.title;
   if (typeof input.description === "string") task.description = input.description;
+  if (typeof input.flag_note === "string") task.flag_note = input.flag_note.trim();
   if (typeof input.workflow_step_id === "string") task.workflow_step_id = input.workflow_step_id;
   if (typeof input.state === "string") task.state = input.state as Task["state"];
   task.updated_at = new Date().toISOString();

@@ -917,6 +917,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 		stmt string
 	}{
 		{"execution_grade", `ALTER TABLE tasks ADD COLUMN execution_grade TEXT NOT NULL DEFAULT ''`},
+		{"flag_note", `ALTER TABLE tasks ADD COLUMN flag_note TEXT NOT NULL DEFAULT ''`},
 		{"archived_by_cascade_id", `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`},
 		{"initial_workspace_layout", `ALTER TABLE tasks ADD COLUMN initial_workspace_layout TEXT NOT NULL DEFAULT ''`},
 		{"wip_admitted", `ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`},
@@ -970,6 +971,7 @@ func taskPriorityMigrationStatements() []string {
 			workflow_agent_overrides TEXT,
 			title TEXT NOT NULL,
 			description TEXT DEFAULT '',
+			flag_note TEXT NOT NULL DEFAULT '',
 			state TEXT DEFAULT 'TODO',
 			priority TEXT NOT NULL DEFAULT 'medium'
 				CHECK (priority IN ('critical','high','medium','low')),
@@ -1010,7 +1012,7 @@ func taskPriorityMigrationStatements() []string {
 		// recreate dance. external_id is not COALESCEd — NULL is its
 		// meaningful "no identity" state.
 		`INSERT INTO tasks_priority_new (
-			executor_actor_user_id, id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description,
+			executor_actor_user_id, id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, flag_note,
 			state, priority, execution_grade, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled,
 			archived_at, archived_by_cascade_id, created_at, updated_at,
 			origin, project_id,
@@ -1019,7 +1021,7 @@ func taskPriorityMigrationStatements() []string {
 			external_id, external_id_settled_at, assignee_user_id, assignment_generation
 		) SELECT
 			COALESCE(executor_actor_user_id,''), id, COALESCE(workspace_id,''), COALESCE(initial_workspace_layout,''), COALESCE(workflow_id,''),
-			COALESCE(workflow_step_id,''), workflow_agent_overrides, title, COALESCE(description,''),
+			COALESCE(workflow_step_id,''), workflow_agent_overrides, title, COALESCE(description,''), flag_note,
 			COALESCE(state,'TODO'), 'medium', execution_grade, COALESCE(position,0),
 			COALESCE(wip_admitted,1), COALESCE(queued_for_step_id,''), queued_at,
 			COALESCE(metadata,'{}'), COALESCE(is_ephemeral,0),

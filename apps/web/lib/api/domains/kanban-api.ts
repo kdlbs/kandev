@@ -157,6 +157,7 @@ export async function createTask(
 export async function updateTask(
   taskId: string,
   payload: {
+    flag_note?: string;
     title?: string;
     description?: string;
     position?: number;
