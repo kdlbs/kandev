@@ -36,6 +36,9 @@ func (s *Service) handleAgentctlDeliveryRecovery(ctx context.Context, payload ag
 			zap.String("submission_state", string(owner.submission.State)))
 		_ = s.clearAgentDeliveryRecoveryNotice(ctx, payload.SessionID, payload.DeliveryIncarnationID,
 			payload.DeliverySubmissionID, int64(payload.DeliveryHarnessGeneration))
+		if owner.submission.State == models.DeliverySubmissionCancelled {
+			s.convergeCancelledDeliveryRecovery(ctx, payload)
+		}
 		return
 	}
 	if !s.agentDeliveryRecoveryCursorMatches(ctx, payload, owner.submissions) {
@@ -47,6 +50,44 @@ func (s *Service) handleAgentctlDeliveryRecovery(ctx context.Context, payload ag
 		return
 	}
 	s.persistAgentDeliveryRecoveryNotice(ctx, payload, owner, recovery)
+}
+
+func (s *Service) convergeCancelledDeliveryRecovery(
+	ctx context.Context,
+	payload agentruntime.AgentctlEventPayload,
+) {
+	settlements, ok := s.repo.(repository.AgentDeliverySettlementRepository)
+	if !ok {
+		return
+	}
+	terminal, found, err := settlements.LoadCurrentSettledAgentDeliveryTerminal(ctx, payload.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to load settled cancellation for delivery recovery",
+			zap.String("session_id", payload.SessionID),
+			zap.String("submission_id", payload.DeliverySubmissionID), zap.Error(err))
+		return
+	}
+	if !found || !settledDeliveryRecoveryMatchesPayload(terminal, payload) {
+		return
+	}
+	ctx = withSettledDeliverySessionStateTryGuard(ctx)
+	if err := s.convergeSettledDeliverySessionState(ctx, payload.SessionID, terminal); err != nil {
+		s.logger.Warn("failed to converge settled cancellation from delivery recovery",
+			zap.String("session_id", payload.SessionID),
+			zap.String("submission_id", payload.DeliverySubmissionID), zap.Error(err))
+	}
+}
+
+func settledDeliveryRecoveryMatchesPayload(
+	terminal *models.AgentDeliverySessionStateRequest,
+	payload agentruntime.AgentctlEventPayload,
+) bool {
+	return terminal != nil && terminal.SessionID == payload.SessionID &&
+		terminal.TaskID == payload.TaskID && terminal.ExecutionID == payload.AgentExecutionID &&
+		terminal.IncarnationID == payload.DeliveryIncarnationID &&
+		terminal.HarnessGeneration == int64(payload.DeliveryHarnessGeneration) &&
+		terminal.StreamID == payload.DeliveryStreamID && terminal.SubmissionID == payload.DeliverySubmissionID &&
+		terminal.Outcome == string(models.DeliverySubmissionCancelled)
 }
 
 type agentDeliveryRecoveryEventOwner struct {
