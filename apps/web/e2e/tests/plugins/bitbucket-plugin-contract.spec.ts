@@ -142,7 +142,9 @@ test.describe("Bitbucket plugin contract", () => {
     await linkDialog.getByRole("button", { name: "Save" }).click();
     await expect(linkDialog).toBeHidden();
     await expect(
-      testPage.getByText("Bitbucket pull request linked", { exact: true }),
+      testPage
+        .getByTestId("toast-message")
+        .getByText("Bitbucket pull request linked", { exact: true }),
     ).toBeVisible();
 
     // Desktop sessions expose provider reviews as Dockview panels. The mobile

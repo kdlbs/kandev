@@ -586,9 +586,9 @@ test("deletes the displayed session through the phone picker and follows its pro
     testPage.locator(`[data-testid="session-chat"][data-session-id="${old.session_id}"]`),
   ).toHaveCount(0);
   expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
-  await expect(testPage.getByText("Deleting session successful", { exact: true })).toBeHidden({
-    timeout: 10_000,
-  });
+  await expect(
+    testPage.getByTestId("toast-message").getByText("Deleting session successful", { exact: true }),
+  ).toBeHidden({ timeout: 10_000 });
   await testPage.screenshot({ path: test.info().outputPath("phone-local-session-removed.png") });
 });
 
