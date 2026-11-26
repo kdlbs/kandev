@@ -72,7 +72,14 @@ Run from the repository root. Write the plan's named RED tests first.
 (cd apps/backend && go test -trimpath ./internal/agentctl/server/adapter/transport/acp -run 'Test.*(CursorPromptStreamClosed|Retriable|PromptError|Continuation)' -count=1)
 (cd apps/backend && go test -trimpath ./internal/agent/runtime/routingerr -count=1)
 (cd apps/backend && go test -trimpath ./internal/orchestrator -run 'Test.*(Interruption|Continuation|CursorPromptStreamClosed)' -count=1)
-bash scripts/lint-go-changed <changed Go paths>
+bash scripts/lint-go-changed \
+  apps/backend/internal/agent/runtime/routingerr/runtime_rules.go \
+  apps/backend/internal/agent/runtime/routingerr/cursor_prompt_stream_closed_test.go \
+  apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_prompt.go \
+  apps/backend/internal/agentctl/server/adapter/transport/acp/dialect_cursor.go \
+  apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_cursor_prompt_error.go \
+  apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_cursor_prompt_error_test.go \
+  apps/backend/internal/orchestrator/event_handlers_transient_retained_runtime_test.go
 python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --all
 ```
 
@@ -113,6 +120,7 @@ classification. Added adapter evidence coverage and a concrete-profile
 orchestrator regression proving a no-output/no-tools failure uses replay mode,
 dispatches the cached original prompt once for the admitted attempt, and never
 sends `continue`. Removed the speculative `json.RawMessage` branch and redundant
-cancel guard. The ACP, routing, and orchestrator suites, agentctl build, changed-
-file Go lint (0 issues), and specification validation all passed. See the plan's
-verification results for exact commands.
+cancel guard. Post-review verification on 2026-11-26 passed: the ACP, routing,
+and orchestrator Go suites, agentctl build, changed-file Go lint (0 issues),
+documentation catalog validation, and specification lint. The plan records the
+exact commands and their results.

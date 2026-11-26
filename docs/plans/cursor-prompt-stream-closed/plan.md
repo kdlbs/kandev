@@ -132,9 +132,23 @@ regressions above cover the distinct pre-result replay disposition.
 
 ## E2E tests
 
-None. The change is confined to adapter projection and classification. The
-mock-agent dialect does not exercise the Cursor predicate. Existing desktop and
-mobile continuation specs cover the notice, Cancel, and hidden `continue`.
+No new E2E test was added. The existing
+[`provider-interruption-continuation.spec.ts`](../../apps/web/e2e/tests/session/provider-interruption-continuation.spec.ts)
+runs in the `chromium` project. Its mock-agent `read`, `write`, and `shell`
+scenarios cover completed foreground tools and same-conversation continuation
+(criteria `001.2` and `001.3`); `pending-v3` covers pending-tool continuation
+(criteria `001.8` and `001.9`). Other desktop cases cover same-conversation
+reload, hidden `continue`, Cancel, and refusal behavior (criteria `001.2`,
+`001.3`, `001.6`, and `002.2`).
+
+[`mobile-provider-interruption-continuation.spec.ts`](../../apps/web/e2e/tests/session/mobile-provider-interruption-continuation.spec.ts)
+runs in the `mobile-chrome` project with the Pixel 5 profile. It covers mixed
+completed and pending tools, same-conversation behavior, hidden `continue`, and
+Cancel behavior (criteria `001.3`, `001.6`, `001.8`, `001.9`, and `002.2`). Both
+specs use the mock-agent fixture;
+neither sends Cursor ACP's exact `-32603` envelope or exercises its predicate.
+The exact-envelope behavior in criterion `001.10`, including no-output original
+prompt replay, is covered by the adapter and orchestrator Go regressions above.
 
 ## Work orders
 

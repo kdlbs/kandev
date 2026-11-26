@@ -136,9 +136,14 @@ completion owner and emits one `EventTypeError` with these fields:
 - `ContinuationSafety` from `continuationSafetySnapshot(turn)`.
 - The retained disposition.
 
-The diagnostic text is a Kandev constant, so raw `Data` never reaches display,
-logs, or persistence. Use the same event shape as the terminal `RetriableError`
-branch through a shared emit helper.
+The normalized error event uses only the Kandev constant; raw `Data` is excluded
+from the user-facing display, ordinary logs, and normal event persistence.
+Optional ACP diagnostics are separate: when
+`KANDEV_DEBUG_AGENT_MESSAGES=true`, raw protocol frames are written to
+per-session `raw-acp-*.jsonl` files, and configured OTel protocol spans can
+include the raw frame. Those debug captures may retain the original `Data`; the
+normalized event does not. Use the same event shape as the terminal
+`RetriableError` branch through a shared emit helper.
 
 The `routingerr` catalogue adds the provider-scoped rule
 `cursor.prompt_stream_closed.v1`, keyed to `cursor-acp`. It matches that exact
