@@ -87,7 +87,9 @@ test("adds a GitHub PR to the merge queue from mobile Review", async ({
   expect((await requireBox(merge, "mobile merge queue action")).height).toBeGreaterThanOrEqual(44);
   await assertNoDocumentHorizontalOverflow(testPage);
   await merge.tap();
-  await expect(testPage.getByText("PR added to merge queue", { exact: true })).toBeVisible();
+  await expect(
+    testPage.getByTestId("toast-message").getByText("PR added to merge queue", { exact: true }),
+  ).toBeVisible();
 });
 
 async function seedEligiblePRFeedback(apiClient: ApiClient) {
