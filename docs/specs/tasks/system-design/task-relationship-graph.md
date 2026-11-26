@@ -414,10 +414,11 @@ environment, because applying an environment layout replaces the panels; a
 session that still belongs to the previous task counts as not ready. A first
 visit can create the environment after the request is fulfilled, so the
 component re-adds the tab once when that environment's layout is adopted. It then replaces the URL
-without the param so reloads and back navigation do not reopen it. The sidebar
-context menu (`TaskShowInGraphItem` in the relationships group) and the Kanban
-card menu (`buildShowGraphEntry`) push that link. The status-row button and
-the chip action call the same open path for the current task.
+without the param so reloads and back navigation do not reopen it. The sidebar and Kanban card menus use this task link on phones. On larger
+screens, Show in graph opens the [focused board Graph view](#board-graph-view).
+Home defers first-run onboarding for that destination as specified in the
+[first-run dialog design](../../ui/system-design/first-run-dialog-availability.md).
+The status-row button and chip action open the current task graph.
 
 ## Board Graph view
 
