@@ -14,6 +14,7 @@ import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { SettingsFieldLabel } from "@/components/settings/settings-typography";
 import {
   curatedFlagEnabled,
+  isCuratedFlagMatch,
   setCuratedFlagEnabled,
 } from "@/components/settings/cli-flags-field-model";
 import {
@@ -133,12 +134,15 @@ export function CLIFlagsField({
   const isCompact = variant === "compact";
 
   const curated = useMemo(() => extractCuratedSettings(permissionSettings), [permissionSettings]);
-  const curatedFlagTexts = useMemo(() => new Set(curated.map((s) => s.flag)), [curated]);
+  const curatedFlagTexts = useMemo(() => curated.map((s) => s.flag), [curated]);
   const customFlags = useMemo(
     () =>
       flags
         .map((f, i) => ({ flag: f, index: i }))
-        .filter((e) => !curatedFlagTexts.has(e.flag.flag)),
+        .filter(
+          (e) =>
+            !curatedFlagTexts.some((curatedFlag) => isCuratedFlagMatch(e.flag.flag, curatedFlag)),
+        ),
     [flags, curatedFlagTexts],
   );
 
@@ -440,14 +444,17 @@ export function CustomCLIFlagsCard({
 }: CustomCLIFlagsCardProps) {
   const { t } = useTranslation();
   const curatedFlagTexts = useMemo(
-    () => new Set(extractCuratedSettings(permissionSettings).map((s) => s.flag)),
+    () => extractCuratedSettings(permissionSettings).map((s) => s.flag),
     [permissionSettings],
   );
   const customFlags = useMemo(
     () =>
       flags
         .map((f, i) => ({ flag: f, index: i }))
-        .filter((e) => !curatedFlagTexts.has(e.flag.flag)),
+        .filter(
+          (e) =>
+            !curatedFlagTexts.some((curatedFlag) => isCuratedFlagMatch(e.flag.flag, curatedFlag)),
+        ),
     [flags, curatedFlagTexts],
   );
   const enabledCount = customFlags.filter((e) => e.flag.enabled).length;

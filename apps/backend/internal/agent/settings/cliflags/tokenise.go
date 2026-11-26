@@ -162,23 +162,33 @@ func NormalizeExactFlag(flags []models.CLIFlag, exactFlag string) []models.CLIFl
 	if len(flags) == 0 || exactFlag == "" {
 		return flags
 	}
-	result := make([]models.CLIFlag, 0, len(flags))
-	found := false
+	firstIndex := -1
 	enabled := false
 	description := ""
-	for _, entry := range flags {
+	for index, entry := range flags {
 		if strings.TrimSpace(entry.Flag) != exactFlag {
-			result = append(result, entry)
 			continue
 		}
-		found = true
+		if firstIndex < 0 {
+			firstIndex = index
+		}
 		enabled = enabled || entry.Enabled
 		if entry.Description != "" {
 			description = entry.Description
 		}
 	}
-	if !found {
+	if firstIndex < 0 {
 		return flags
 	}
-	return append(result, models.CLIFlag{Flag: exactFlag, Description: description, Enabled: enabled})
+	result := make([]models.CLIFlag, 0, len(flags))
+	for index, entry := range flags {
+		if strings.TrimSpace(entry.Flag) == exactFlag {
+			if index == firstIndex {
+				result = append(result, models.CLIFlag{Flag: exactFlag, Description: description, Enabled: enabled})
+			}
+			continue
+		}
+		result = append(result, entry)
+	}
+	return result
 }

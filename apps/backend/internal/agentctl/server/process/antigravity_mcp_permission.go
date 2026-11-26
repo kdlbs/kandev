@@ -9,8 +9,9 @@ import (
 )
 
 func (m *Manager) resolveAntigravityMCPToolAlias(name string) (string, string, bool) {
+	nativeMCPNames, inventoryKnown := m.antigravityMCPInventorySnapshot()
 	tool, ok := m.antigravityMCPToolCandidate(name)
-	if !ok || !m.antigravityMCPRegistrationIsUnambiguous(name) {
+	if !ok || !inventoryKnown || !m.antigravityMCPRegistrationIsUnambiguous(name, nativeMCPNames) {
 		return "", "", false
 	}
 	return injectedKandevMCPServerName, tool, true
@@ -19,9 +20,6 @@ func (m *Manager) resolveAntigravityMCPToolAlias(name string) (string, string, b
 func (m *Manager) antigravityMCPToolCandidate(name string) (string, bool) {
 	if m.cfg == nil || m.cfg.AgentType != acpcompat.AntigravityAgentID || m.cfg.AuthPolicy == nil ||
 		m.cfg.AuthPolicy.RuntimeVariant != acpcompat.AntigravityRuntimeCLI {
-		return "", false
-	}
-	if !m.antigravityMCPNamesKnown {
 		return "", false
 	}
 	const injectedPrefix = "mcp_kandev_"
@@ -35,7 +33,7 @@ func (m *Manager) antigravityMCPToolCandidate(name string) (string, bool) {
 	return tool, true
 }
 
-func (m *Manager) antigravityMCPRegistrationIsUnambiguous(name string) bool {
+func (m *Manager) antigravityMCPRegistrationIsUnambiguous(name string, nativeMCPNames []string) bool {
 	hasInjectedRegistration := false
 	for _, server := range m.cfg.McpServers {
 		if server.Name == injectedKandevMCPServerName {
@@ -49,7 +47,7 @@ func (m *Manager) antigravityMCPRegistrationIsUnambiguous(name string) bool {
 			return false
 		}
 	}
-	for _, serverName := range m.antigravityMCPNames {
+	for _, serverName := range nativeMCPNames {
 		if serverName != "" && strings.HasPrefix(name, "mcp_"+serverName+"_") {
 			return false
 		}

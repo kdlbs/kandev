@@ -128,20 +128,21 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
-	filePreviewOnce          sync.Once
-	filePreviews             *filePreviewPool
-	processManagerID         string
-	questionImageWorkDir     string
-	questionImageOnce        sync.Once
-	questionImageSlots       chan struct{}
-	cfg                      *config.InstanceConfig
-	antigravityMCPNames      []string
-	antigravityMCPNamesKnown bool
-	builtinCatalogMu         sync.RWMutex
-	builtinCatalog           func() map[mcpprofile.PackageID][]string
-	logger                   *logger.Logger
-	managedGitTools          installedManagedGitTools
-	materializeGitHelperPath string
+	filePreviewOnce           sync.Once
+	filePreviews              *filePreviewPool
+	processManagerID          string
+	questionImageWorkDir      string
+	questionImageOnce         sync.Once
+	questionImageSlots        chan struct{}
+	cfg                       *config.InstanceConfig
+	antigravityMCPInventoryMu sync.RWMutex
+	antigravityMCPNames       []string
+	antigravityMCPNamesKnown  bool
+	builtinCatalogMu          sync.RWMutex
+	builtinCatalog            func() map[mcpprofile.PackageID][]string
+	logger                    *logger.Logger
+	managedGitTools           installedManagedGitTools
+	materializeGitHelperPath  string
 
 	// deliveryJournal is opened before any agent process starts. A configured
 	// but unreadable journal is an admission error, never a legacy fallback.
@@ -560,13 +561,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		workspaceExcludedRoots:     canonicalWorkspaceSourceRoots(cfg.WorkspaceExcludedRoots),
 		trackerGitEnv:              append([]string(nil), cfg.AgentEnv...),
 	}
-	if cfg.AgentType == acpcompat.AntigravityAgentID && cfg.AuthPolicy != nil &&
-		cfg.AuthPolicy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI {
-		m.antigravityMCPNames, m.antigravityMCPNamesKnown = scanAntigravityNativeMCPNames(cfg)
-		if !m.antigravityMCPNamesKnown {
-			m.logger.Warn("Antigravity native MCP registrations are unavailable; implicit tool approval is disabled")
-		}
-	}
+	m.refreshAntigravityMCPInventory()
 	if cfg.HomeDir != "" {
 		exclusions := append([]string{cfg.WorkDir}, cfg.WorkspaceSourceRoots...)
 		store, storeErr := managedruntime.OpenRepairStore(cfg.HomeDir, exclusions...)
@@ -2400,6 +2395,7 @@ func (m *Manager) startWithGeneration(
 	// starts a replacement agent must replace them before the process reads or
 	// streams workspace state again.
 	m.renewWorkspaceTrackersForStart(ctx)
+	m.refreshAntigravityMCPInventory()
 
 	m.logger.Info("starting agent process",
 		zap.String("protocol", string(m.cfg.Protocol)),

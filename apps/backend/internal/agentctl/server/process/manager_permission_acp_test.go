@@ -583,7 +583,8 @@ func newPermissionACPFlow(t *testing.T, test permissionACPCase) (*Manager, *perm
 	manager := NewManager(cfg, newTestLogger(t))
 	boundMCPServer := mcpserver.NewWithProfile(nil, permissionFlowSessionID, taskID, cfg.Port, newTestLogger(t), "", false, mcpProfile)
 	manager.SetBuiltinToolCatalog(boundMCPServer.BuiltinCatalog)
-	if test.authPolicy != nil && !manager.antigravityMCPNamesKnown {
+	_, nativeMCPInventoryKnown := manager.antigravityMCPInventorySnapshot()
+	if test.authPolicy != nil && !nativeMCPInventoryKnown {
 		t.Fatal("Antigravity native MCP inventory was not available for the test workspace")
 	}
 	if err := manager.buildAdapterConfig(); err != nil {
