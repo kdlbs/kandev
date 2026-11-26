@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ListAvailableAgentsResponse } from "../../../lib/types/http";
 import { serializeInlineScriptJSON } from "../../helpers/inline-script-json";
+import { installOpenCodeReinstallFixture } from "./agents-opencode-reinstall-helpers";
 
 // The default mock-agent is discovered as already available (it has an
 // InstallScript, but the catalog filters on !available && install_script), so
@@ -41,6 +42,45 @@ const AVAILABLE_AGENTS = {
 } satisfies ListAvailableAgentsResponse;
 
 test.describe("Agents browse page", () => {
+  test("reinstalls managed OpenCode from its configured card", async ({ testPage }) => {
+    // @covers AC-AGENTS-OPENCODE-V2-001.14
+    const fixture = await installOpenCodeReinstallFixture(testPage);
+    await testPage.goto("/settings/agents");
+
+    const card = testPage.getByTestId("agent-group-opencode-acp");
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await expect(card.getByText("Saved OpenCode profile", { exact: true })).toBeVisible();
+    await expect(card.getByText("Not installed", { exact: true })).toBeVisible();
+    const reinstall = card.getByTestId("reinstall-opencode-acp");
+    await expect(reinstall).toBeVisible();
+    await expect(reinstall).toHaveAttribute("href", "/settings/agents/browse?agent=opencode-acp");
+
+    await reinstall.click();
+    await expect(testPage).toHaveURL(/\/settings\/agents\/browse\?agent=opencode-acp$/);
+    const installCards = testPage.locator('[data-testid^="install-card-"]');
+    await expect(installCards.first()).toHaveAttribute("data-testid", "install-card-opencode-acp");
+    await testPage.getByTestId("install-button-opencode-acp").click();
+    await expect.poll(fixture.installRequests).toBe(1);
+    await expect(testPage.getByTestId("install-card-opencode-acp")).toHaveCount(0);
+
+    await testPage.goBack();
+    await expect(card).toBeVisible();
+    await expect(card.getByText("Saved OpenCode profile", { exact: true })).toBeVisible();
+    await expect(card.getByText("Not installed", { exact: true })).toHaveCount(0);
+    await expect(card.getByTestId("reinstall-opencode-acp")).toHaveCount(0);
+  });
+
+  test("does not offer Reinstall for a native-only OpenCode runtime", async ({ testPage }) => {
+    // @covers AC-AGENTS-OPENCODE-V2-001.14
+    await installOpenCodeReinstallFixture(testPage, { runtimeSource: "native" });
+    await testPage.goto("/settings/agents");
+
+    const card = testPage.getByTestId("agent-group-opencode-acp");
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await expect(card.getByText("Saved OpenCode profile", { exact: true })).toBeVisible();
+    await expect(card.getByTestId("reinstall-opencode-acp")).toHaveCount(0);
+  });
+
   test("renders the heading and install cards statically, without a collapsible toggle", async ({
     testPage,
   }) => {
