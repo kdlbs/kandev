@@ -86,10 +86,11 @@ Phone bottom bar ([UI-04](plan.md#ui-04-phone-review-view)):
 ## Verification
 
 ```bash
+(cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm exec vitest run lib/question-review components/task/chat/question-review)
 (cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check && pnpm run i18n:ratchet)
-(cd apps/web && pnpm e2e:run --project chromium tests/chat/question-image-review.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-question-image-review.spec.ts)
+(cd apps/web && pnpm e2e:run --project chromium e2e/tests/chat/question-image-review.spec.ts)
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome e2e/tests/chat/mobile-question-image-review.spec.ts)
 ```
 
 Update existing E2E cases that assumed a flat two-image question opens in

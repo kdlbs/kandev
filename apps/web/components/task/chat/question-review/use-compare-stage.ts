@@ -10,7 +10,7 @@ import {
   type ReviewImage,
   type ReviewSegment,
 } from "@/lib/question-review/segments";
-import type { Size } from "@/lib/question-review/viewport";
+import { measuredPairSize, type Size } from "@/lib/question-review/viewport";
 import { useReviewLayout } from "./review-layout";
 import type { StageImages } from "./review-stage-shared";
 import type { ReviewAnnotationController } from "./use-review-annotations";
@@ -138,7 +138,6 @@ function stageFlags(
 }
 
 /** Everything one comparison stage needs: images, view, comparison, regions, and input. */
-// eslint-disable-next-line max-lines-per-function -- one place composes the stage's interacting inputs.
 export function useCompareStage(props: CompareItemProps) {
   const { segment, annotations, images, compareImages, items } = props;
   const layout = useReviewLayout();
@@ -160,26 +159,15 @@ export function useCompareStage(props: CompareItemProps) {
   const hold = useHoldToCompare(!marking && Boolean(a));
   const stageRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLDivElement>(null);
-  const imageSize = unionSize(images.sizes[state.aId], images.sizes[state.bId]);
-  const viewport = useReviewViewport(stageRef, imageSize, {
+  const viewport = useCompareViewport({
+    stageRef,
     areaRef,
-    panEnabled: !marking,
+    sizes: [images.sizes[state.aId], images.sizes[state.bId]],
+    marking,
     pinned,
-    pinnedAt: state.wipe,
-  });
-  // Entering pinned Wipe fits the view with the line at the carried split;
-  // leaving it drops the scrubbed offset.
-  const fitView = viewport.fit;
-  useEffect(() => {
-    fitView();
-  }, [pinned, fitView]);
-  useRememberedView(viewport, props.carry, stageViewKey(segment.questionId, props), imageSize);
-  useCarryPinnedSplit({
-    pinned,
-    measured: viewport.stage.width > 0 && imageSize.width > 0,
-    fraction: viewport.pinnedFraction,
-    wipe: state.wipe,
-    dispatch: compare.dispatch,
+    compare,
+    carry: props.carry,
+    viewKey: stageViewKey(segment.questionId, props),
   });
   const effective = effectiveCompareState(state, hold.holding);
   const shown = effective.showB ? b : a;
@@ -205,20 +193,7 @@ export function useCompareStage(props: CompareItemProps) {
     zoomToRect: viewport.zoomToRect,
   });
   const diff = changes.diff;
-  const wipeValue = pinned ? viewport.pinnedFraction : state.wipe;
-  const reveal = useWipeNamesReveal();
-  const { view } = viewport;
-  usePulseOnSplitMove(
-    reveal,
-    effective.mode === "wipe",
-    `${wipeValue}:${view.x}:${view.y}:${view.scale}`,
-  );
-  const wipe = {
-    value: wipeValue,
-    onChange: (value: number) =>
-      pinned ? viewport.setPinnedFraction(value) : compare.dispatch({ type: "wipe", value }),
-    reveal,
-  };
+  const wipe = useStageWipe(viewport, compare, pinned, effective.mode === "wipe");
   const urls = Object.fromEntries(
     Object.entries(images.states).map(([id, image]) => [
       id,
@@ -261,6 +236,66 @@ export function useCompareStage(props: CompareItemProps) {
       viewport.handleKey(event) ||
       compare.handleKey(event),
     onStageKeyUp: (event: { key: string }) => hold.keyUp(event),
+  };
+}
+
+type CompareViewportOptions = {
+  stageRef: RefObject<HTMLDivElement | null>;
+  areaRef: RefObject<HTMLDivElement | null>;
+  sizes: [Size | undefined, Size | undefined];
+  marking: boolean;
+  pinned: boolean;
+  compare: ReturnType<typeof useReviewCompare>;
+  carry: ReviewCarry | undefined;
+  viewKey: string;
+};
+
+/**
+ * The comparison's zoom and pan: sized to both images, fitted on entering or
+ * leaving pinned Wipe (with the line at the carried split), remembered per
+ * stage once both images are measured, and carrying a scrubbed pinned split.
+ */
+function useCompareViewport(options: CompareViewportOptions) {
+  const { stageRef, areaRef, sizes, marking, pinned, compare } = options;
+  const imageSize = unionSize(sizes[0], sizes[1]);
+  const wipe = compare.state.wipe;
+  const viewport = useReviewViewport(stageRef, imageSize, {
+    areaRef,
+    panEnabled: !marking,
+    pinned,
+    pinnedAt: wipe,
+  });
+  const fitView = viewport.fit;
+  useEffect(() => {
+    fitView();
+  }, [pinned, fitView]);
+  useRememberedView(viewport, options.carry, options.viewKey, measuredPairSize(sizes[0], sizes[1]));
+  useCarryPinnedSplit({
+    pinned,
+    measured: viewport.stage.width > 0 && imageSize.width > 0,
+    fraction: viewport.pinnedFraction,
+    wipe,
+    dispatch: compare.dispatch,
+  });
+  return viewport;
+}
+
+/** The Wipe divider: its value and setter, and when the handle shows the names. */
+function useStageWipe(
+  viewport: ReturnType<typeof useReviewViewport>,
+  compare: ReturnType<typeof useReviewCompare>,
+  pinned: boolean,
+  wiping: boolean,
+) {
+  const value = pinned ? viewport.pinnedFraction : compare.state.wipe;
+  const reveal = useWipeNamesReveal();
+  const { view } = viewport;
+  usePulseOnSplitMove(reveal, wiping, `${value}:${view.x}:${view.y}:${view.scale}`);
+  return {
+    value,
+    onChange: (next: number) =>
+      pinned ? viewport.setPinnedFraction(next) : compare.dispatch({ type: "wipe", value: next }),
+    reveal,
   };
 }
 

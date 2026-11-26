@@ -4,10 +4,13 @@ import {
   expectTouchTargets,
   openLateAnswerForm,
   openReviewQuestions,
+  removeReviewImages,
   reviewImages,
   reviewScript,
   seedReviewImages,
 } from "./question-image-review-helpers";
+
+test.afterEach(({ seedData }) => removeReviewImages(seedData.repositoryPath));
 
 test("phone late-answer form opens review and sends from it", async ({
   testPage,

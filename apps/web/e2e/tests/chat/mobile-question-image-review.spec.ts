@@ -7,11 +7,14 @@ import {
   expectWithinViewport,
   openPhoneMore,
   openReviewQuestions,
+  removeReviewImages,
   reviewImages,
   reviewScript,
   seedReviewImages,
   touchDrag,
 } from "./question-image-review-helpers";
+
+test.afterEach(({ seedData }) => removeReviewImages(seedData.repositoryPath));
 
 const threeImages = [reviewImages.before, reviewImages.after, reviewImages.taller];
 

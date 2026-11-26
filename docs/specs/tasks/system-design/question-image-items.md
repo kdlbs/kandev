@@ -247,8 +247,10 @@ they read the latest values directly, and dragging a slider re-renders only the
 stage, not the dialog and its answer form. `useRememberedView` recalls a view
 once, when the image size is first known: the view kept for the stage's key
 (`questionId` plus the single image, the pair's two images, or `compare` for an
-operator comparison), or else the last view when the image size matches; Fit
-clears a stage's view. The holder lives as long as the dialog.
+operator comparison), or else the last view when the image size matches. Fit is
+kept as a stage's view, so a stage left at Fit returns at Fit. A comparison
+recalls only once both of its images are measured (`measuredPairSize`). The
+holder lives as long as the dialog.
 
 **Choice images.** In the dialog's answer form, `ClarificationOptions` renders
 `ChoiceStageImageHint` inside each choice that has an image: a photo icon and the

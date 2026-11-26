@@ -56,9 +56,10 @@ Choices outside the review view keep their thumbnails and do not move anything.
 ## Verification
 
 ```bash
-cd apps/web && pnpm exec vitest run components/task/chat/question-review components/task/chat/clarification
-cd apps/web && pnpm e2e:run --project chromium e2e/tests/chat/question-image-items.spec.ts
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome e2e/tests/chat/mobile-question-image-items.spec.ts
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm exec vitest run components/task/chat/question-review components/task/chat/clarification)
+(cd apps/web && pnpm e2e:run --project chromium e2e/tests/chat/question-image-items.spec.ts)
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome e2e/tests/chat/mobile-question-image-items.spec.ts)
 ```
 
 ## Likely files

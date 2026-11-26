@@ -31,6 +31,15 @@ describe("createReviewCarry", () => {
     expect(carry.recallView("q1:next", screen)).toBeNull();
   });
 
+  // @covers AC-TASKS-QUESTION-IMAGE-ITEMS-003.9
+  it("keeps a stage left at Fit at Fit after another same-size image is zoomed", () => {
+    const carry = createReviewCarry();
+    carry.rememberView("q1:a", screen, null);
+    carry.rememberView("q1:b", screen, zoomed);
+    expect(carry.recallView("q1:a", screen)).toBeNull();
+    expect(carry.recallView("q1:c", screen)).toEqual(zoomed);
+  });
+
   it("keeps the comparison settings for the next stage", () => {
     const carry = createReviewCarry();
     expect(carry.read()).toBeUndefined();

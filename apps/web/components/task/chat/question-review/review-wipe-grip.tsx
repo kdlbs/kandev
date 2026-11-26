@@ -30,21 +30,21 @@ const LIFT_EDGE_PX = 8;
  * Names and props for the Wipe handle. Both names share one height so they sit
  * level along the line; letters are stacked elements rather than a vertical
  * writing mode, which some browsers fail to paint when clipped. Dragging the
- * handle moves it up or down to uncover the image (and calls `onDrag`, for a
- * divider that also moves sideways); it stays inside the stage, also after a
+ * handle moves it up or down to uncover the image (and calls `onDrag` with the
+ * horizontal travel since the press, for a divider that also moves sideways); it stays inside the stage, also after a
  * resize, and keeps its height for the rest of the question round.
  */
 export function useWipeGrip(
   names: WipeNames,
   reveal: WipeNamesReveal,
-  onDrag?: (event: PointerEvent<HTMLElement>) => void,
+  onDrag?: (event: PointerEvent<HTMLElement>, dx: number) => void,
 ) {
   const a = names.a ? wipeNameLetters(names.a, names.maxLetters) : [];
   const b = names.b ? wipeNameLetters(names.b, names.maxLetters) : [];
   const height = `max(2.75rem, calc(${Math.max(a.length, b.length)} * 1em + 1rem))`;
   const round = useContext(WipeLiftContext);
   const [bottom, setBottom] = useState(round?.value ?? LIFT_DEFAULT_PX);
-  const drag = useRef<{ y: number; bottom: number; max: number } | null>(null);
+  const drag = useRef<{ x: number; y: number; bottom: number; max: number } | null>(null);
   const end = () => {
     if (drag.current) round?.set(bottom);
     drag.current = null;
@@ -62,14 +62,14 @@ export function useWipeGrip(
       handle.setPointerCapture?.(event.pointerId);
       const stageHeight = handle.parentElement?.clientHeight ?? 0;
       const max = Math.max(LIFT_EDGE_PX, stageHeight - handle.offsetHeight - LIFT_EDGE_PX);
-      drag.current = { y: event.clientY, bottom: Math.min(bottom, max), max };
+      drag.current = { x: event.clientX, y: event.clientY, bottom: Math.min(bottom, max), max };
       reveal.hold("handle", true);
     },
     onPointerMove: (event: PointerEvent<HTMLElement>) => {
       const start = drag.current;
       if (!start || !event.currentTarget.hasPointerCapture?.(event.pointerId)) return;
       event.stopPropagation();
-      onDrag?.(event);
+      onDrag?.(event, event.clientX - start.x);
       const next = start.bottom + start.y - event.clientY;
       setBottom(Math.min(start.max, Math.max(LIFT_EDGE_PX, next)));
     },

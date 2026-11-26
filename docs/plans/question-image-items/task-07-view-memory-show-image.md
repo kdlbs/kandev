@@ -51,9 +51,10 @@ Keeping views after the review view closes.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web exec vitest run components/task/chat lib/question-review
-cd apps/web && pnpm e2e:run --project chromium tests/chat/question-image-items.spec.ts tests/chat/question-image-review.spec.ts
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/chat/mobile-question-image-items.spec.ts tests/chat/mobile-question-image-review.spec.ts
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm exec vitest run components/task/chat lib/question-review)
+(cd apps/web && pnpm e2e:run --project chromium e2e/tests/chat/question-image-items.spec.ts e2e/tests/chat/question-image-review.spec.ts)
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome e2e/tests/chat/mobile-question-image-items.spec.ts e2e/tests/chat/mobile-question-image-review.spec.ts)
 ```
 
 ## Likely files

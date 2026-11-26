@@ -7,11 +7,14 @@ import {
   expectWithinViewport,
   itemsScript,
   openReviewQuestions,
+  removeReviewImages,
   reviewImages,
   seedReviewImages,
   touchDrag,
   touchPress,
 } from "./question-image-review-helpers";
+
+test.afterEach(({ seedData }) => removeReviewImages(seedData.repositoryPath));
 
 test("phone moves between a pair and singles with the bar, not by dragging the image", async ({
   testPage,

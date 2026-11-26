@@ -70,10 +70,10 @@ Dialog header in late mode:
 ## Verification
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/task/chat/question-review/use-question-review.test.ts components/task/chat/question-review/question-review-overlay.test.tsx components/task/chat/clarification-input-overlay.test.tsx)
+(cd apps/web && pnpm exec vitest run components/task/chat/question-review/use-question-review.test.ts components/task/chat/question-review/question-review-overlay.test.tsx components/task/chat/question-review/question-review-late.test.tsx components/task/chat/clarification-input-overlay.test.tsx)
 (cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check && pnpm run i18n:ratchet)
-(cd apps/web && pnpm e2e:run --project chromium tests/chat/question-image-review.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-question-image-review.spec.ts)
+(cd apps/web && pnpm e2e:run --project chromium e2e/tests/chat/question-image-review.spec.ts e2e/tests/chat/question-image-review-late.spec.ts)
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome e2e/tests/chat/mobile-question-image-review.spec.ts e2e/tests/chat/mobile-question-image-review-late.spec.ts)
 ```
 
 Add an E2E case to `question-image-review.spec.ts`: skip an image question with a

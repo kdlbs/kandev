@@ -2,10 +2,13 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   openLateAnswerForm,
   openReviewQuestions,
+  removeReviewImages,
   reviewImages,
   reviewScript,
   seedReviewImages,
 } from "./question-image-review-helpers";
+
+test.afterEach(({ seedData }) => removeReviewImages(seedData.repositoryPath));
 
 test("reviews images from the late-answer form and sends a new message", async ({
   testPage,

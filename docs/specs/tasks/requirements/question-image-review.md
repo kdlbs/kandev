@@ -120,7 +120,8 @@ so that small questions stay quick and visual questions stay reviewable.
   segments and show an image-free stage state.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-003.5:** Moving to another segment or item shall
   keep the comparison mode and its slider values (wipe position, opacity,
-  tolerance). Image choices and zoom shall start fresh for the new segment or item.
+  tolerance). Image choices shall start fresh for the new segment or item; zoom and
+  pan follow AC-TASKS-QUESTION-IMAGE-ITEMS-003.9.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-003.2:** A segment's images shall be its question
   images in authored order, then its choice images in option order. Each image
   shall show its agent-authored description, and each choice image shall also show

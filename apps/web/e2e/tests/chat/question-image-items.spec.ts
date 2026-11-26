@@ -1,13 +1,17 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import {
   chooseZoom,
   expectNoOverlap,
   itemsScript,
   openReviewQuestions,
   recordImageRequests,
+  removeReviewImages,
   reviewImages,
   seedReviewImages,
 } from "./question-image-review-helpers";
+
+test.afterEach(({ seedData }) => removeReviewImages(seedData.repositoryPath));
 
 test("reviews a pair with comparison tools and singles alone, item by item", async ({
   testPage,
@@ -51,6 +55,7 @@ test("reviews a pair with comparison tools and singles alone, item by item", asy
   await expect(dialog.getByRole("img", { name: reviewImages.before.alt })).toBeVisible();
 
   // The view reads each segment image once; moving between items reads none again.
+  await dwell(testPage, 500, "negative-assertion", "item navigation must not reread images");
   const counts = new Map<string, number>();
   for (const id of requested) counts.set(id, (counts.get(id) ?? 0) + 1);
   for (const [id, count] of counts) expect(count, `${id} read once`).toBe(1);

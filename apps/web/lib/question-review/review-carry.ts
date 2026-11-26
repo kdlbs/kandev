@@ -10,7 +10,7 @@ import type { ReviewView, Size } from "./viewport";
 export type ReviewCarry = {
   read: () => CompareSettings | undefined;
   write: (settings: CompareSettings) => void;
-  /** The view a stage was left at, or else the last view when the image size matches. */
+  /** The view a stage was left at (Fit included), or else the last view when the image size matches. */
   recallView: (key: string, image: Size) => ReviewView | null;
   /** `null` records Fit. */
   rememberView: (key: string, image: Size, view: ReviewView | null) => void;
@@ -22,7 +22,7 @@ function sameSize(a: Size, b: Size): boolean {
 
 export function createReviewCarry(): ReviewCarry {
   let settings: CompareSettings | undefined;
-  const views = new Map<string, ReviewView>();
+  const views = new Map<string, ReviewView | null>();
   let last: { image: Size; view: ReviewView | null } | null = null;
   return {
     read: () => settings,
@@ -30,13 +30,11 @@ export function createReviewCarry(): ReviewCarry {
       settings = next;
     },
     recallView: (key, image) => {
-      const kept = views.get(key);
-      if (kept) return kept;
+      if (views.has(key)) return views.get(key) ?? null;
       return last && sameSize(last.image, image) ? last.view : null;
     },
     rememberView: (key, image, view) => {
-      if (view) views.set(key, view);
-      else views.delete(key);
+      views.set(key, view);
       last = { image, view };
     },
   };

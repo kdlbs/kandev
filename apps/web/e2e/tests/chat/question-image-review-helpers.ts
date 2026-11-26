@@ -100,6 +100,18 @@ export function seedReviewImages(repositoryPath: string) {
   }
 }
 
+/** Removes what `seedReviewImages` wrote, so the worker's checkout stays clean. */
+export function removeReviewImages(repositoryPath: string) {
+  for (const image of [
+    reviewImages.before,
+    reviewImages.after,
+    reviewImages.taller,
+    reviewImages.spacing,
+  ]) {
+    fs.rmSync(path.join(repositoryPath, image.path), { force: true });
+  }
+}
+
 const options = [
   { label: "Approve", description: "Accept" },
   { label: "Revise", description: "Request changes" },

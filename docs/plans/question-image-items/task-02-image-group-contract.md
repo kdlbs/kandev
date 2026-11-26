@@ -59,9 +59,10 @@ All review-view behavior (work order 03). No answer change.
 
 ```bash
 make -C apps/backend fmt
-(cd apps/backend && go test ./internal/clarification/... ./internal/mcp/... ./internal/backendapp/ -run 'Image|Question|Parent|Schema')
+(cd apps/backend && go test -trimpath ./internal/clarification/... ./internal/mcp/... ./internal/backendapp/ -run 'Image|Question|Parent|Schema')
 (cd apps/backend && go vet ./internal/clarification/... ./internal/mcp/...)
 make -C apps/backend lint
+(cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm run typecheck)
 python3 scripts/list-docs.py validate
 ```

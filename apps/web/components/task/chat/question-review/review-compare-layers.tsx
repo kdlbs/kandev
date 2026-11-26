@@ -4,7 +4,7 @@ import { useEffect, useRef, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { CompareState } from "@/lib/question-review/compare";
 import type { ReviewView, Size } from "@/lib/question-review/viewport";
-import { wipeFromPointer } from "@/lib/question-review/wipe";
+import { wipeFromDrag } from "@/lib/question-review/wipe";
 import { cn } from "@/lib/utils";
 import { ReviewImage } from "./review-canvas";
 import { ChangeOutline } from "./review-compare-controls";
@@ -127,11 +127,12 @@ export function WipeHandle({
   reveal: WipeNamesReveal;
 }) {
   const { t } = useTranslation();
-  const handle = useWipeGrip(names, reveal, (event) => {
+  const dragStart = useRef(value);
+  const handle = useWipeGrip(names, reveal, (event, dx) => {
     const stage = event.currentTarget.parentElement;
     if (!stage) return;
     const rect = stage.getBoundingClientRect();
-    onChange(wipeFromPointer(event.clientX, { left: rect.left, width: rect.width }));
+    onChange(wipeFromDrag(dragStart.current, dx, { left: rect.left, width: rect.width }));
   });
   const percent = Math.round(value * 100);
   const onKeyDown = (event: React.KeyboardEvent) => {
@@ -161,6 +162,10 @@ export function WipeHandle({
         data-testid="question-review-wipe-handle"
         className="group absolute w-6 -translate-x-1/2 cursor-move touch-none text-xs outline-none [--wipe-half:12px] max-md:w-11 max-md:[--wipe-half:22px] [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:[--wipe-half:22px]"
         {...handle.props}
+        onPointerDown={(event) => {
+          dragStart.current = value;
+          handle.props.onPointerDown(event);
+        }}
         style={{
           // At the ends the grip stays fully inside the stage, beside the line.
           left: `clamp(var(--wipe-half), ${value * 100}%, calc(100% - var(--wipe-half)))`,

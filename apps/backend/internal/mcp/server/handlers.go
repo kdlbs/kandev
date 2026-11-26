@@ -902,9 +902,6 @@ func emitKeepAlivePings(ctx context.Context, stop <-chan struct{}, interval time
 	}
 }
 
-// parseQuestions extracts and validates the "questions" array from the request.
-// Returns the normalized question payloads (with auto-assigned ids) on success
-// or a tool-result error describing the first validation failure.
 // parentQuestionsCarryImages reports image fields on raw parent questions,
 // before validation, so parents get one clear rejection for any image field.
 func parentQuestionsCarryImages(questions []map[string]interface{}) bool {
@@ -927,6 +924,9 @@ func parentQuestionsCarryImages(questions []map[string]interface{}) bool {
 	return false
 }
 
+// parseQuestions extracts and validates the "questions" array from the request.
+// Returns the normalized question payloads (with auto-assigned ids) on success
+// or a tool-result error describing the first validation failure.
 func parseQuestions(req mcp.CallToolRequest) ([]map[string]interface{}, *mcp.CallToolResult) {
 	questions, errResult := decodeQuestionsArg(req)
 	if errResult != nil {
