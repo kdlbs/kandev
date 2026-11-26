@@ -64,7 +64,7 @@ func grokConfigAfterModelChange(
 	config []streams.ConfigOption,
 	models []modelInfo,
 	modelID string,
-) []streams.ConfigOption {
+) ([]streams.ConfigOption, []string) {
 	return acpcompat.ConfigAfterModelChange(grokAgentID, config, toCompatModels(models), modelID)
 }
 

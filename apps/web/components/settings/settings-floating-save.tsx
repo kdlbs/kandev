@@ -15,7 +15,7 @@ import { Button } from "@kandev/ui/button";
 import { IconAlertCircle, IconCheck, IconDeviceFloppy, IconLoader2 } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 
-import { useConfigChatFloatingActionsHost } from "@/components/config-chat/config-chat-provider";
+import { useConfigChatFloatingActionsHost } from "@/components/shared/config-chat-floating-actions-host";
 import type { NavigationIntent } from "@/lib/routing/navigation-guard";
 import { cn } from "@/lib/utils";
 import { settingsActionClassName } from "@/components/settings/settings-control";
