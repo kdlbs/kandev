@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,8 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kdlbs/kandev/pluginsdk"
 	_ "github.com/mattn/go-sqlite3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type fakeExactTaskCreateWriter struct {
@@ -31,14 +34,20 @@ type fakeExactTaskCreateWriter struct {
 	lastUpdate   ExactTaskUpdateInput
 	lastMove     ExactTaskMoveInput
 	failOnce     bool
+	createErr    error
 }
 
 func (f *fakeExactTaskCreateWriter) CreateTaskExact(_ context.Context, input ExactTaskCreateInput) (*taskmodels.Task, bool, error) {
 	f.calls++
 	f.externalID = input.ExternalID
+	if f.createErr != nil {
+		return nil, false, f.createErr
+	}
+	alreadyApplied := f.committed != nil && f.committed[input.ExternalID] != nil
 	f.lastTask = &taskmodels.Task{
 		ID: "task-created", WorkspaceID: input.Task.WorkspaceID,
-		Title: input.Task.Title, UpdatedAt: time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC),
+		Title: input.Task.Title, ProjectID: input.Task.ProjectID,
+		UpdatedAt: time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC),
 	}
 	if f.committed == nil {
 		f.committed = make(map[string]*taskmodels.Task)
@@ -48,7 +57,86 @@ func (f *fakeExactTaskCreateWriter) CreateTaskExact(_ context.Context, input Exa
 		f.failOnce = false
 		return nil, false, context.DeadlineExceeded
 	}
-	return f.lastTask, f.calls > 1, nil
+	return f.lastTask, alreadyApplied, nil
+}
+
+func TestExactTaskCreatePersistsProjectRejections(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status pluginsdk.CommandStatus
+	}{
+		{name: "invalid project", err: status.Error(codes.InvalidArgument, "project is not in workspace"), status: pluginsdk.CommandInvalid},
+		{name: "project membership changed", err: status.Error(codes.Aborted, "project membership changed"), status: pluginsdk.CommandConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host, writer := newExactTaskCommandHost(t)
+			writer.createErr = tc.err
+			manager, ok := pluginsdk.HostTaskCommands(host)
+			if !ok {
+				t.Fatal("plugin Host does not expose exact task commands")
+			}
+			input := pluginsdk.ExactTaskCreate{
+				RequestID: "request-project-rejection", WorkspaceID: "workspace-task-commands",
+				IdempotencyKey: "create-project-rejection", ExternalID: "coordinator:project-rejection",
+				ApprovalRevision: 1,
+				ManifestDigest:   ManifestCapabilityDigest(host.service.installedRecordByInstallationID(host.installationID).Manifest),
+				Task: pluginsdk.CreateTaskInput{
+					WorkspaceID: "workspace-task-commands", WorkflowID: "workflow-task-commands",
+					Title: "Create with a rejected project", ProjectID: stringPointer("project-rejected"),
+				},
+			}
+			result, task, err := manager.CreateTask(context.Background(), input)
+			if err != nil || result == nil || result.Status != tc.status || task != nil {
+				t.Fatalf("CreateTaskExact rejection = result:%+v task:%+v err:%v, want %s without task data", result, task, err, tc.status)
+			}
+			if result.Receipt == nil || result.Receipt.Status != tc.status {
+				t.Fatalf("rejection receipt = %+v, want completed %s receipt", result.Receipt, tc.status)
+			}
+			if writer.calls != 1 {
+				t.Fatalf("task writer calls = %d, want 1", writer.calls)
+			}
+
+			host.taskData = &fakeTaskDataSource{tasksByID: map[string]*taskmodels.Task{
+				input.ExternalID: {ID: input.ExternalID, WorkspaceID: input.WorkspaceID},
+			}}
+			replayed, replayedTask, err := manager.CreateTask(context.Background(), input)
+			if err != nil || replayed == nil || replayed.Status != tc.status || replayedTask != nil {
+				t.Fatalf("replayed project rejection = result:%+v task:%+v err:%v, want same refusal without task data", replayed, replayedTask, err)
+			}
+			if replayed.Receipt == nil || replayed.Receipt.ID != result.Receipt.ID || writer.calls != 1 {
+				t.Fatalf("replayed receipt/calls = %+v/%d, want original receipt and no second write", replayed.Receipt, writer.calls)
+			}
+		})
+	}
+}
+
+func TestExactTaskCreateRetriesTemporaryWriterFailure(t *testing.T) {
+	host, writer := newExactTaskCommandHost(t)
+	writer.createErr = errors.New("temporary project lookup failure")
+	manager, ok := pluginsdk.HostTaskCommands(host)
+	if !ok {
+		t.Fatal("plugin Host does not expose exact task commands")
+	}
+	input := pluginsdk.ExactTaskCreate{
+		RequestID: "request-project-retry", WorkspaceID: "workspace-task-commands",
+		IdempotencyKey: "create-project-retry", ExternalID: "coordinator:project-retry",
+		ApprovalRevision: 1,
+		ManifestDigest:   ManifestCapabilityDigest(host.service.installedRecordByInstallationID(host.installationID).Manifest),
+		Task: pluginsdk.CreateTaskInput{
+			WorkspaceID: "workspace-task-commands", WorkflowID: "workflow-task-commands",
+			Title: "Retry after a temporary project failure", ProjectID: stringPointer("project-retry"),
+		},
+	}
+	first, task, err := manager.CreateTask(context.Background(), input)
+	if err != nil || first == nil || first.Status != pluginsdk.CommandUnavailable || task != nil || writer.calls != 1 {
+		t.Fatalf("temporary create failure = result:%+v task:%+v calls:%d err:%v, want retryable unavailable", first, task, writer.calls, err)
+	}
+	writer.createErr = nil
+	retried, created, err := manager.CreateTask(context.Background(), input)
+	if err != nil || retried == nil || retried.Status != pluginsdk.CommandApplied || created == nil || writer.calls != 2 {
+		t.Fatalf("retried create = result:%+v task:%+v calls:%d err:%v, want successful second write", retried, created, writer.calls, err)
+	}
 }
 
 func (f *fakeExactTaskCreateWriter) FindTaskByExternalID(_ context.Context, _, externalID string) (*taskmodels.Task, bool, error) {
@@ -166,6 +254,7 @@ func newExactTaskCommandHost(t *testing.T) (*pluginHost, *fakeExactTaskCreateWri
 	return host, writer
 }
 
+// @covers AC-PLUGINS-PLUGINS-001.21
 func TestExactTaskCommands(t *testing.T) {
 	host, writer := newExactTaskCommandHost(t)
 	input := pluginsdk.ExactTaskCreate{
@@ -173,6 +262,10 @@ func TestExactTaskCommands(t *testing.T) {
 		ExternalID: "coordinator:proposal-17", ApprovalRevision: 1,
 		ManifestDigest: ManifestCapabilityDigest(host.service.installedRecordByInstallationID(host.installationID).Manifest),
 		Task:           pluginsdk.CreateTaskInput{WorkspaceID: "workspace-task-commands", WorkflowID: "workflow-task-commands", Title: "Add coordinator API"},
+	}
+	legacyDigest, err := exactTaskCreateDigest(input)
+	if err != nil || legacyDigest != "sha256:c2f23e35215828fd8af686096239277eafe8163493c91565632b10dce853041c" {
+		t.Fatalf("omitted-project exact payload digest = %q, err = %v; want historical digest", legacyDigest, err)
 	}
 
 	manager, ok := pluginsdk.HostTaskCommands(host)
@@ -262,6 +355,21 @@ func TestExactTaskCommands(t *testing.T) {
 	if writer.calls != 1 {
 		t.Fatalf("changed-payload conflict called task service %d times, want 1", writer.calls)
 	}
+	projectConflict := input
+	projectConflict.Task.ProjectID = stringPointer("project-changed")
+	projectConflictResult, _, err := manager.CreateTask(context.Background(), projectConflict)
+	if err != nil || projectConflictResult == nil || projectConflictResult.Status != pluginsdk.CommandConflict {
+		t.Fatalf("same idempotency key with changed project = result:%+v err:%v", projectConflictResult, err)
+	}
+	emptyProject := input
+	emptyProject.RequestID = "request-empty-project"
+	emptyProject.IdempotencyKey = "create-empty-project"
+	emptyProject.ExternalID = "coordinator:empty-project"
+	emptyProject.Task.ProjectID = stringPointer("")
+	emptyResult, _, err := manager.CreateTask(context.Background(), emptyProject)
+	if err != nil || emptyResult == nil || emptyResult.Status != pluginsdk.CommandInvalid {
+		t.Fatalf("explicit empty project id = result:%+v err:%v, want invalid", emptyResult, err)
+	}
 
 	wireHost := dialPluginHostOverWire(t, host)
 	wireManager, ok := pluginsdk.HostTaskCommands(wireHost)
@@ -271,9 +379,20 @@ func TestExactTaskCommands(t *testing.T) {
 	wireInput := input
 	wireInput.RequestID = "request-wire"
 	wireInput.IdempotencyKey = "create-wire"
+	wireInput.ExternalID = "coordinator:proposal-wire"
+	wireInput.Task.ProjectID = stringPointer("project-wire")
 	wireResult, wireTask, err := wireManager.CreateTask(context.Background(), wireInput)
-	if err != nil || wireTask == nil || wireResult == nil || wireResult.Status != pluginsdk.CommandAlreadyApplied {
+	if err != nil || wireTask == nil || wireResult == nil || wireResult.Status != pluginsdk.CommandApplied || wireTask.ProjectID != "project-wire" {
 		t.Fatalf("wire CreateTaskExact = result:%+v task:%+v err:%v", wireResult, wireTask, err)
+	}
+	wireEmptyProject := wireInput
+	wireEmptyProject.RequestID = "request-wire-empty-project"
+	wireEmptyProject.IdempotencyKey = "create-wire-empty-project"
+	wireEmptyProject.ExternalID = "coordinator:wire-empty-project"
+	wireEmptyProject.Task.ProjectID = stringPointer("")
+	wireEmptyResult, _, err := wireManager.CreateTask(context.Background(), wireEmptyProject)
+	if err != nil || wireEmptyResult == nil || wireEmptyResult.Status != pluginsdk.CommandInvalid {
+		t.Fatalf("wire exact create with explicit empty project = result:%+v err:%v, want invalid", wireEmptyResult, err)
 	}
 	wireLabels := labels
 	wireLabels.RequestID = "request-labels-wire"

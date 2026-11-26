@@ -195,6 +195,12 @@ one offered option with a nonempty label, `selected_label` is omitted.
 Free-text-only answers return `custom_text` without a selected label.
 Selections can also retain accompanying `custom_text`.
 
+When an answer to an active, current-turn clarification resumes the agent, a
+selected option in the resume prompt includes its quoted label and ID, for
+example `User selected: ["A" (q1_opt1)]`. If the saved question has no unique,
+nonempty label for that ID, the prompt shows the ID alone. An answer with custom
+text uses that text instead of listing selected options.
+
 An answer may also include an `attachments` array when the operator attaches
 evidence. Each entry has `attachment_id`, `type`, `name`, `mime_type`,
 `size_bytes`, `delivery_mode`, and a `path` that is readable in the current

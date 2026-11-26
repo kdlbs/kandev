@@ -13,6 +13,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpcompat"
 	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -37,10 +38,13 @@ const (
 // generation — so no concurrent generation reset can interleave with a single
 // invocation of this handler in the ordinary dispatch flow.
 func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	if event.Role == "user" || event.Text == "" {
+	if event.Role == "user" || (event.Text == "" && !event.ReplaceMessageContent) {
 		return
 	}
 	m.publishStreamEvidence(execution, event)
+	if m.publishCanonicalMessageSnapshot(execution, event, "message_streaming", event.Text) {
+		return
+	}
 	m.appendAssistantHistoryChunk(execution, event.Text)
 	if event.CanonicalProjection {
 		trackCanonicalResponseAttemptMessage(execution, event.CanonicalMessageID, event.CanonicalMessageAppend)
@@ -108,10 +112,13 @@ func (m *Manager) publishStreamEvidence(execution *AgentExecution, event agentct
 // below resolves its own fresh promptGenerationSnapshot() rather than reusing
 // one value across the call.
 func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	if event.ReasoningText == "" {
+	if event.ReasoningText == "" && !event.ReplaceMessageContent {
 		return
 	}
 	m.publishStreamEvidence(execution, event)
+	if m.publishCanonicalMessageSnapshot(execution, event, thinkingStreamingEventType, event.ReasoningText) {
+		return
+	}
 	if event.CanonicalProjection {
 		trackCanonicalResponseAttemptMessage(execution, event.CanonicalMessageID, event.CanonicalMessageAppend)
 		m.publishCanonicalStreamingContent(
@@ -148,6 +155,22 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 	if strings.TrimSpace(toFlush) != "" {
 		m.publishStreamingThinking(execution, toFlush, execution.promptGenerationSnapshot(), event.AttemptID)
 	}
+}
+
+func (m *Manager) publishCanonicalMessageSnapshot(execution *AgentExecution, event agentctl.AgentEvent, eventType, text string) bool {
+	if !event.CanonicalProjection || !event.ReplaceMessageContent {
+		return false
+	}
+	m.flushStreamCoalescer(execution)
+	trackCanonicalResponseAttemptMessage(execution, event.CanonicalMessageID, event.CanonicalMessageAppend)
+	if event.PromptGeneration == 0 {
+		event.PromptGeneration = execution.promptGenerationSnapshot()
+	}
+	m.publishStreamingContentNowWithProjection(
+		execution, eventType, event.CanonicalMessageID, text, event.CanonicalMessageAppend,
+		event.AttemptID, true, false, event.PromptGeneration, decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
+	)
+	return true
 }
 
 // extractErrorMessage returns the best error message from an agent event.
@@ -350,6 +373,11 @@ func (m *Manager) claimPromptCompletion(
 		claim.readyPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 		claim.readyPayload.AttemptID = event.AttemptID
 		copyDeliveryTerminalIdentity(&claim.readyPayload, event, current)
+		if !event.Recovered && event.TurnID != "" && event.PromptGeneration != 0 &&
+			event.PromptGeneration == current.promptGeneration && event.ConfigurationCommandResult != nil {
+			result := *event.ConfigurationCommandResult
+			claim.readyPayload.ConfigurationCommandResult = &result
+		}
 		// The Office cause belongs to the launch's first turn. Preserve it on
 		// that completion event, then clear it so later user turns on this
 		// session cannot inherit stale run causation.
@@ -1443,10 +1471,10 @@ func (m *Manager) handleAgentEventWithAttempt(
 	m.handleAgentEventAtContextResetBoundary(execution, event, true, attemptID)
 }
 
-// handleAgentEventAfterContextReset replays setup events after the lifecycle
-// manager has committed the replacement session while the exclusive reset
-// lease is still held. The event has already crossed the reset boundary and
-// must not be buffered again.
+// handleAgentEventAfterContextReset replays accepted reset events after the
+// lifecycle manager commits the replacement session while the exclusive reset
+// lease is held. The event has already crossed the reset boundary and must not
+// be buffered again.
 func (m *Manager) handleAgentEventAfterContextReset(execution *AgentExecution, event agentctl.AgentEvent) {
 	startupGeneration := execution.startupAttemptSnapshot()
 	execution.withStartupAttempt(startupGeneration, func(attemptID string) {
@@ -1529,6 +1557,19 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 	if m.handleMCPAttachmentEvent(execution, &event, attemptID) {
 		return
 	}
+	if m.handleCodexMCPStartupWarningEvent(execution, &event, attemptID) {
+		return
+	}
+	if streams.CopilotInterruptionNoticeType(event.Data) != "" {
+		if event.TurnID == "" && event.PromptGeneration != 0 {
+			event.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
+		}
+		if event.TurnID != "" {
+			m.handleCopilotInterruptionNoticeEvent(execution, event, attemptID)
+			return
+		}
+		event.Data = withoutCopilotInterruptionNotice(event.Data)
+	}
 	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != toolStatusError) {
 		m.recordActivity(execution, event)
 	}
@@ -1544,7 +1585,95 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 	}
 
 	event = m.handleAgentEventState(execution, event)
+	if shouldDeferStartupSessionModels(execution, event) {
+		return
+	}
 	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
+}
+
+func (m *Manager) handleCopilotInterruptionNoticeEvent(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	attemptID string,
+) {
+	if event.CanonicalProjection {
+		m.publishCanonicalStreamingContent(
+			execution,
+			"message_streaming",
+			event.CanonicalMessageID,
+			event.Text,
+			event.CanonicalMessageAppend,
+			false,
+			decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
+		)
+		return
+	}
+	event.Type = streams.EventTypeCopilotInterruptionNotice
+	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
+}
+
+func shouldDeferStartupSessionModels(execution *AgentExecution, event agentctl.AgentEvent) bool {
+	if event.Type != streams.EventTypeSessionModels ||
+		event.SessionSettingsPolicy == streams.SessionSettingsPolicyProviderRestored ||
+		execution.deliveryStartupSnapshot() == nil {
+		return false
+	}
+	if settled, _ := event.Data["config_options_settled"].(bool); settled {
+		return false
+	}
+	// The stream can deliver a setup snapshot after the execution becomes ready.
+	return !execution.isSessionInitialized() ||
+		agentEventDataString(event.Data, streams.ConfigOptionsSourceKey) == streams.ConfigOptionsSourceSessionSetup
+}
+
+func (m *Manager) handleCodexMCPStartupWarningEvent(
+	execution *AgentExecution,
+	event *agentctl.AgentEvent,
+	attemptID string,
+) bool {
+	if event.Type != streams.EventTypeMCPStartupWarning && !isCodexMCPStartupToolCall(execution, *event) {
+		return false
+	}
+
+	event.Type = streams.EventTypeMCPStartupWarning
+	event.PromptGeneration = 0
+	event.DeliverySubmissionID = ""
+	event.Text = codexMCPStartupWarningText(*event)
+	event.ToolName = ""
+	event.ToolTitle = ""
+	event.ToolStatus = ""
+	event.ToolStatusMissing = false
+	event.ToolCallContents = nil
+	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, *event, attemptID)
+	return true
+}
+
+func isCodexMCPStartupToolCall(execution *AgentExecution, event agentctl.AgentEvent) bool {
+	return execution != nil && event.Type == streams.EventTypeToolCall && acpcompat.IsCodexMCPStartupReport(
+		execution.AgentID,
+		event.ToolCallID,
+		event.ToolTitle,
+		event.ToolName,
+		event.ToolStatus,
+	)
+}
+
+func codexMCPStartupWarningText(event agentctl.AgentEvent) string {
+	message := strings.TrimSpace(event.Text)
+	if message == "" {
+		var details []string
+		for _, item := range event.ToolCallContents {
+			if item.Content != nil && item.Content.Type == "text" {
+				details = append(details, item.Content.Text)
+			}
+		}
+		message = strings.Join(details, "\n")
+	}
+	message = streams.SanitizeProviderMessage(message)
+	if message != "" {
+		return message
+	}
+	return streams.SanitizeProviderMessage(event.ToolTitle)
 }
 
 func (m *Manager) handleMCPAttachmentEvent(
@@ -1574,6 +1703,19 @@ func (m *Manager) handleMCPAttachmentEvent(
 	// ownership. They flow directly to the orchestrator for persistence.
 	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, *event, attemptID)
 	return true
+}
+
+func withoutCopilotInterruptionNotice(data map[string]any) map[string]any {
+	if len(data) <= 1 {
+		return nil
+	}
+	clean := make(map[string]any, len(data)-1)
+	for key, value := range data {
+		if key != streams.AgentEventDataCopilotInterruptionNotice {
+			clean[key] = value
+		}
+	}
+	return clean
 }
 
 func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, event *agentctl.AgentEvent) bool {
@@ -1624,6 +1766,10 @@ func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentct
 				event.TurnID = execution.promptTurnIDForEvent(event)
 			}
 		}
+	case streams.EventTypeBackgroundWorkUpdated:
+		if event.BackgroundWork != nil && event.BackgroundWork.OriginTurnID == "" {
+			event.BackgroundWork.OriginTurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
+		}
 	case "tool_call":
 		// ACP tool_call events do not carry the lifecycle prompt generation
 		// either (same gap as message_chunk/reasoning). Neither this dispatch
@@ -1655,7 +1801,7 @@ func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentct
 			CurrentModelID: event.CurrentModelID,
 			Models:         event.SessionModels,
 			ConfigOptions:  event.ConfigOptions,
-			ConfigSource:   agentEventDataString(event.Data, "config_options_source"),
+			ConfigSource:   agentEventDataString(event.Data, streams.ConfigOptionsSourceKey),
 			ConfigID:       agentEventDataString(event.Data, "config_options_config_id"),
 		})
 		if settled {

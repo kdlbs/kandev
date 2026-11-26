@@ -1,3 +1,4 @@
+import { TASK_FLAG_NOTE_MAX_LENGTH } from "@/lib/task-flag-note";
 import { type Task } from "@/lib/types/http";
 import { cancelSessionRun, startAgent } from "./agent-run-runtime";
 import { routeDemoDiscovery } from "./discovery-runtime";
@@ -64,8 +65,16 @@ export function createTask(input: Record<string, unknown>): DemoHttpResponse {
 }
 
 export function updateTask(task: Task, input: Record<string, unknown>): DemoHttpResponse {
+  const flagNote = typeof input.flag_note === "string" ? input.flag_note.trim() : undefined;
+  if (flagNote !== undefined && flagNote.length > TASK_FLAG_NOTE_MAX_LENGTH) {
+    return json(
+      { error: `Flag notes must be ${TASK_FLAG_NOTE_MAX_LENGTH} UTF-16 code units or fewer` },
+      400,
+    );
+  }
   if (typeof input.title === "string") task.title = input.title;
   if (typeof input.description === "string") task.description = input.description;
+  if (flagNote !== undefined) task.flag_note = flagNote;
   if (typeof input.workflow_step_id === "string") task.workflow_step_id = input.workflow_step_id;
   if (typeof input.state === "string") task.state = input.state as Task["state"];
   task.updated_at = new Date().toISOString();

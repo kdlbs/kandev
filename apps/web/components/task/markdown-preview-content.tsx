@@ -33,7 +33,8 @@ import { ResizableMarkdownTable } from "@/components/shared/resizable-markdown-t
 import { cn, toRelativePath } from "@/lib/utils";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { FileViewerDownloadButton } from "@/components/task/file-viewer-header";
-import { EditorCommentPopover } from "@/components/task/editor-comment-popover";
+import { SelectionCommentSurface } from "@/components/shared/selection-comment/selection-comment-surface";
+import { lineRangeLabel } from "@/components/shared/selection-comment/line-range-label";
 import { EditorSelectionCommentTrigger } from "@/components/editors/editor-selection-comment-trigger";
 import { CommentViewPopover } from "@/components/task/comment-view-popover";
 import { useMarkdownPreviewComments } from "@/hooks/domains/comments/use-markdown-preview-comments";
@@ -361,21 +362,26 @@ function MarkdownPreviewCommentOverlays({
       )}
       {commentState.textSelection && (
         <div data-markdown-comment-popover>
-          <EditorCommentPopover
+          <SelectionCommentSurface
+            key={`${commentState.attachmentTaskId}:${commentState.textSelection.startLine}:${commentState.textSelection.endLine}:${commentState.textSelection.selectedText}`}
+            attachmentOptions={
+              commentState.attachmentTaskId ? { taskId: commentState.attachmentTaskId } : undefined
+            }
             selectedText={commentState.textSelection.selectedText}
-            lineRange={{
-              start: commentState.textSelection.startLine,
-              end: commentState.textSelection.endLine,
-            }}
+            contextLabel={lineRangeLabel(
+              commentState.textSelection.startLine,
+              commentState.textSelection.endLine,
+            )}
             position={commentState.textSelection.position}
-            onSubmit={commentState.submitComment}
-            onSubmitAndRun={commentState.submitAndRunComment}
+            onAdd={commentState.submitComment}
+            onAddAndRun={commentState.submitAndRunComment}
             onClose={commentState.closeComposer}
           />
         </div>
       )}
       {commentState.commentView && (
         <CommentViewPopover
+          taskId={commentState.attachmentTaskId}
           comments={commentState.commentView.comments}
           position={commentState.commentView.position}
           onDelete={commentState.removeComment}

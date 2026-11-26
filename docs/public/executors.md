@@ -83,32 +83,25 @@ Choose Remote Docker over a single-node Kubernetes cluster when you want a conta
 
 ## Docker log and temporary storage limits
 
-New containers created by the Docker client use rotating `json-file` logs with
-`max-size=100m` and `max-file=3`. This applies to normal and interactive creation,
-including a remote Docker daemon. Existing containers keep their storage
-configuration when Kandev reconnects to them.
+Storage values apply when Kandev creates a Docker container. Existing containers keep their original storage settings when Kandev reconnects.
 
-This per-container choice overrides the daemon's default logging driver and
-rotation limits. Collectors that require another driver do not receive these
-containers' output through that driver.
+By default, Kandev does not set a logging driver or rotation options. Docker uses the driver and defaults configured for its daemon. Kandev does not add a `/tmp` mount, so the image keeps its own `/tmp` contents and settings.
 
-The default `/tmp` is a 2 GiB executable tmpfs with mode 1777, `nosuid`, and
-`nodev`. Agents and package managers can run temporary launchers from this
-directory. An explicit task mount at `/tmp`, including an equivalent path such
-as `/tmp/`, keeps its own storage policy. The tmpfs hides files that the image
-supplies under `/tmp`.
+To set limits, open a Local Docker or Remote Docker profile. Enter values in **Storage limits**, then save the profile. Leave a field blank to use Docker or image defaults.
 
-Tmpfs uses host memory and swap. Its use counts against the container's memory
-limit. The 2 GiB capacity does not increase that limit, so temporary writes can
-cause an out-of-memory termination before the tmpfs is full.
+| Profile field | Example | Effect |
+| --- | --- | --- |
+| Temporary storage (`/tmp`) | `2g` | Mounts an executable tmpfs at `/tmp` with mode `1777`, `nosuid`, and `nodev`. |
+| Maximum log file size | `100m` | Sends Docker the `max-size` log option. |
+| Maximum log files | `3` | Sends Docker the `max-file` log option. |
 
-Tmpfs contents disappear when the container stops, including before a restart
-of that same container. A session stop that leaves the container running does
-not clear its tmpfs. Write required outputs and evidence to persistent task
-storage.
+Docker selects the logging driver from its daemon configuration. It can reject container creation when the driver does not support supplied rotation options. For example, the `journald` driver can reject them. A file count needs an effective maximum file size to rotate logs.
 
-These limits do not bound the writable layer, workspaces, other bind mounts, or
-evidence archives; those still need their own retention and cleanup.
+The `/tmp` tmpfs hides content supplied by the image. It uses host memory and swap. Its use counts against the container's memory limit. The tmpfs size does not increase that limit. Temporary writes can cause an out-of-memory termination before the tmpfs is full.
+
+If a task mount targets `/tmp`, including `/tmp/`, Kandev does not add the configured tmpfs. The task mount keeps its own storage policy. Tmpfs content disappears when Docker stops the container. A session stop that leaves the container running does not clear it. Store required outputs in persistent task storage.
+
+These options do not limit the writable layer, workspace, other bind mounts, or evidence archives. Those need separate retention and cleanup.
 
 ## Plugin-managed remote executors
 
@@ -117,6 +110,8 @@ Plugin remote providers appear in **Settings > Executors** when an installed, ac
 The plugin provisions and removes provider compute. Kandev owns agentctl, agent lifecycle, workspace materialization, task authorization, and durable resource inventory. A provider must support recovery with the original operation identity. Kandev keeps unresolved cleanup inventory when a provider is unavailable or removal is not confirmed.
 
 Review each provider's retention and expiry before launch. `persistent` means the provider reports no fixed expiry. `bounded` includes a maximum lifetime. `ephemeral` means workspace data ends with the compute environment. `unknown` makes no retention promise. The task environment disclosure reports effective retention, known expiry, current status, and available cleanup actions.
+
+A backend restart preserves the attachment record for an established provider resource so recovery can retry with the original operation identity. This does not extend the lifetime reported by the provider.
 
 Remote environments need outbound access to the Kandev API. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to a non-local HTTPS URL of this Kandev; plugin launches fail without it. Select agent credentials on the profile page as for other remote executors: Kandev copies the selected credential files into the environment and passes selected secrets as agent environment variables. When the profile sets both a Git name and email, Kandev writes them to the same effective global Git configuration that the agent uses, before the agent starts. Providers return short-lived HTTPS connection leases for agentctl. Do not place provider credentials in endpoint URLs, task metadata, or resource state. See [Authoring plugins](plugins-authoring.md#remote-executor-providers) and the [plugin manifest reference](plugins-manifest.md#remote-executor-providers).
 
@@ -271,6 +266,27 @@ Provider expiration and external process termination can still stop a remote
 agent. Backend tools and credential services require connectivity to Kandev.
 If the retained journal is unavailable, Kandev blocks unsafe prompt admission.
 It does not silently use a less durable path.
+
+### Offline budget
+
+While an agent cannot reach Kandev, its Kandev tool calls wait for the
+connection instead of failing, and nothing is queued or replayed. Each call
+sends a periodic keepalive so the harness does not time it out. If a call was
+already sent when the connection dropped, the agent receives an "outcome
+unknown" error and should check the result before retrying.
+
+The wait is limited by an offline budget of 15 minutes. To change it for an
+executor profile, set the key `offline_budget_minutes` to a whole number from
+1 to 1440. Any other value fails the profile save or launch with an error that
+names the key. When the budget runs out, Kandev cancels the running turn and
+records a "paused" notice in the conversation when the connection returns. A
+turn that ends while Kandev is unreachable is also marked with a notice.
+
+Upgrade note: for agents with a managed harness tool timeout, Kandev sets it
+to the offline budget plus 10 minutes so the budget elapses first. A profile
+that sets `MCP_TOOL_TIMEOUT` explicitly must exceed the budget by at least one
+minute (16 minutes at the default budget). A smaller or invalid value now fails
+launch; raise it or remove it.
 
 ### Model selection in remote executors
 
@@ -538,7 +554,7 @@ Docker profiles can inject resolved environment secrets. For agent file-based au
 
 A container is a useful boundary, not a hostile-code security sandbox. The Docker daemon has host-level power, bind mounts expose their sources, the agent can use every injected secret, and the default image has outbound network access. Kandev does **not** mount the Docker socket into agent containers automatically.
 
-Plain Stop preserves a healthy container for resume. Recoverable agent failure also retains the established container and workspace, including when the container was stopped externally. A failed resume that attached to an existing container follows the same rule; a failed fresh allocation still rolls back. This does not resend an interrupted prompt. A later launch reconnects to an existing running container, or starts one in a stopped/exited state; if reconnect fails, it creates a fresh container. Stale execution cleanup stops the container and preserves it for resume. Archive, delete, explicit force-stop, removal in the profile page, and **Reset Environment** can remove it. Inspect matching containers before manual cleanup:
+Plain Stop preserves a healthy container for resume. For Remote Docker, a backend restart preserves the established container and workspace for resume, even when the agent has stopped or Kandev cannot restore the native conversation. Recoverable agent failure also retains the established container and workspace, including when the container was stopped externally. A failed resume that attached to an existing container follows the same rule; a failed fresh allocation still rolls back. This does not resend an interrupted prompt. A later launch reconnects to an existing running container, or starts one in a stopped/exited state; if reconnect fails, it creates a fresh container. Stale execution cleanup stops the container and preserves it for resume. Archive, delete, explicit force-stop, removal in the profile page, and **Reset Environment** can remove it. Inspect matching containers before manual cleanup:
 
 ```bash
 docker ps -a --filter label=kandev.managed=true
@@ -673,13 +689,26 @@ For Claude, the card offers two independent stored-secret choices: `CLAUDE_CODE_
 
 Kandev checks the selected binding when it previews or applies a guarded workflow change, using the current user's Global secret visibility. A missing, deleted, workspace-scoped, unreadable, or empty binding blocks the change before the task moves. An agent-profile `ANTHROPIC_API_KEY` binding satisfies this check without a duplicate executor binding. This check validates configuration only. It does not contact Anthropic and does not prove that the provider accepts the credential.
 
-OpenCode credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and reports the credential-copy error.
+OpenCode V1 credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and reports the credential-copy error.
+
+For managed OpenCode V2, **Copy auth files** bootstraps an empty session credential store through the CLI before ACP starts. This method requires managed V2 2.1.2 or newer and an agentctl worker advertising the credential-bootstrap capability. Native/custom V2 launchers are unsupported for this method. These requirements do not raise the minimum version for launches without credential provisioning.
+
+Sign in with V2 under the Kandev controller's OS account and its configured `HOME`/XDG environment before the first bootstrap. The controller captures that environment at startup. The destination uses the session's effective environment, including its credential-store overrides. Existing accounts, refreshed tokens, and active-account selections belong to the destination: restarting an already provisioned session does not export controller credentials, and changing the controller's active account does not switch existing sessions. A saved account is not proof that the provider still accepts it.
+
+An interrupted import leaves a secret-free pending marker beside the CLI's credential database. Retry the launch with controller credentials available to complete the merge; partial imports cannot count as completed bootstrap. Unknown status, unreadable state, incompatible workers, and import errors stop launch. Do not remove the marker to bypass recovery. Retaining a workspace alone does not retain provider history or recover a lost Kubernetes bootstrap environment.
+
+To reauthenticate or switch accounts in an existing session:
+
+1. Stop the agent and open an executor shell using that session's effective `HOME`, XDG variables, and any `OPENCODE_DB` override.
+2. Use the same pinned managed OpenCode V2 version as the session. Run `auth login --standalone` to authenticate, or `auth switch <integration> <credential> --standalone` to select an existing credential by ID or label. These are subcommands of that pinned CLI, not a different system-installed OpenCode.
+3. If a revoked account must be removed, explicitly choose it with `auth logout <integration> <credential> --standalone`, then log in again. Preserve unrelated accounts and session history.
+4. Restart the session. If a pending bootstrap still exists, first retry its import successfully; account recovery does not bypass that state.
+
+Legacy file transfers write sensitive material under the remote user's home and are best-effort; selected V2 provisioning must succeed before launch. Verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
 Pi credential copies merge `~/.pi/agent/auth.json` the same way, by provider. Pi can also take an API key for Anthropic, OpenAI, Gemini or OpenRouter from a stored secret; a credential in the remote `auth.json` takes precedence over it. The **Copy Pi settings and models** bundle copies `settings.json` and `models.json` from `~/.pi/agent`; `models.json` can hold inline API keys, which the copy carries. Kandev reads the default agent directory and ignores `PI_CODING_AGENT_DIR`.
 
 Kandev copies selected bundle files during fresh provisioning or environment reset. A warm resume keeps remote edits to these files.
-
-These transfers write sensitive material under the remote user's home and are best-effort. Verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
 </details>
 

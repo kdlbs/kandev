@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, memo, type ReactElement } from "react";
+import { useEffect, useState, memo, type ReactElement } from "react";
 import {
   IconAlertTriangle,
   IconInfoCircle,
@@ -12,8 +12,14 @@ import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { StatusMetadata } from "@/components/task/chat/types";
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
+import { useAppStore } from "@/components/state-provider";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import {
+  MutedConfigurationStatus,
+  PickerConfigurationStatus,
+} from "./configuration-feedback-status";
+import { CopilotInterruptionMessage } from "./copilot-interruption-message";
 
 const UNKNOWN_TASK_KEY = "task:unknown";
 
@@ -34,6 +40,10 @@ interface ErrorMetadata extends StatusMetadata {
   executor_type?: string;
   executor_profile_id?: string;
   remediation?: string[];
+  configuration_command_feedback?: boolean;
+  configuration_picker_feedback?: boolean;
+  feedback_status?: "applied" | "clamped" | "unconfirmed";
+  dismissible?: boolean;
   original_branch?: string;
   new_branch?: string;
   base_branch?: string;
@@ -160,6 +170,12 @@ function parseStatusMetadata(comment: Message) {
   };
 }
 
+function detachedEpisodeNotice(kind: string | undefined): string | null {
+  if (kind === "turn_ended_detached") return t("task:turnEndedDetached");
+  if (kind === "paused_offline_budget") return t("task:pausedOfflineBudget");
+  return null;
+}
+
 function getStatusMessage(
   comment: Message,
   metadata: ErrorMetadata | undefined,
@@ -178,6 +194,8 @@ function getStatusMessage(
       : t("task:providerRestoredResumeSuccess");
   }
   if (metadata?.kind === "model_selection_warning") return t("task:modelSelectionWarning");
+  const episodeNotice = detachedEpisodeNotice(metadata?.kind);
+  if (episodeNotice) return episodeNotice;
   return metadata?.message || comment.content || statusLine || t("task:statusUpdate");
 }
 
@@ -362,6 +380,67 @@ function ProviderRestoredResumeStatus({ message }: { message: string }) {
   );
 }
 
+function ConfigurationCommandStatus({
+  comment,
+  message,
+  metadata,
+}: {
+  comment: Message;
+  message: string;
+  metadata: ErrorMetadata;
+}) {
+  const removeMessage = useAppStore((state) => state.removeMessage);
+  const positive = metadata.feedback_status === "applied" || metadata.feedback_status === "clamped";
+  const dismissible = metadata.dismissible === true;
+
+  useEffect(() => {
+    if (!positive || dismissible) return;
+
+    let remaining = 5_000;
+    let startedAt = 0;
+    let timer: number | undefined;
+    const pause = () => {
+      if (timer === undefined) return;
+      window.clearTimeout(timer);
+      timer = undefined;
+      remaining = Math.max(0, remaining - (Date.now() - startedAt));
+    };
+    const resume = () => {
+      if (timer !== undefined || document.visibilityState !== "visible") return;
+      if (remaining <= 0) {
+        removeMessage(comment.session_id, comment.id);
+        return;
+      }
+      startedAt = Date.now();
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        if (document.visibilityState === "visible") {
+          removeMessage(comment.session_id, comment.id);
+        }
+      }, remaining);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") resume();
+      else pause();
+    };
+
+    resume();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      pause();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [comment.id, comment.session_id, dismissible, positive, removeMessage]);
+
+  return (
+    <MutedConfigurationStatus
+      message={message}
+      testId="configuration-command-feedback"
+      dismiss={dismissible ? () => removeMessage(comment.session_id, comment.id) : undefined}
+    />
+  );
+}
+
 function CancelledStatusMessage({ message }: { message: string }) {
   return (
     <div className="flex items-center gap-3 w-full py-2">
@@ -375,21 +454,48 @@ function CancelledStatusMessage({ message }: { message: string }) {
   );
 }
 
-function renderSpecialStatusMessage({
-  metadata,
-  progress,
-  statusLine,
-  message,
-  isError,
-  isWarning,
-}: {
+type SpecialStatusArguments = {
+  comment: Message;
   metadata: ErrorMetadata | undefined;
   progress: number | null;
   statusLine: string | undefined;
   message: string;
   isError: boolean;
   isWarning: boolean;
-}): ReactElement | null {
+};
+
+function renderSpecialStatusMessage(args: SpecialStatusArguments): ReactElement | null {
+  return renderConfigurationCommandStatus(args) ?? renderBaseSpecialStatusMessage(args);
+}
+
+function renderConfigurationCommandStatus({
+  comment,
+  metadata,
+  message,
+}: SpecialStatusArguments): ReactElement | null {
+  if (metadata?.configuration_picker_feedback) {
+    return <PickerConfigurationStatus comment={comment} />;
+  }
+  if (metadata?.configuration_command_feedback && metadata.feedback_status) {
+    return <ConfigurationCommandStatus comment={comment} message={message} metadata={metadata} />;
+  }
+  return null;
+}
+
+function renderBaseSpecialStatusMessage({
+  comment,
+  metadata,
+  progress,
+  statusLine,
+  message,
+  isError,
+  isWarning,
+}: SpecialStatusArguments): ReactElement | null {
+  if (metadata?.copilot_interruption_notice) {
+    return (
+      <CopilotInterruptionMessage comment={comment} kind={metadata.copilot_interruption_notice} />
+    );
+  }
   if (metadata?.kind === "branch_recreated") return <BranchRecreatedWarning metadata={metadata} />;
   if (metadata?.variant === "resume_settings_provider_restored") {
     return <ProviderRestoredResumeStatus message={message} />;
@@ -461,6 +567,7 @@ export const StatusMessage = memo(function StatusMessage({ comment }: { comment:
   const { metadata, progress, statusLine, message, isError, isWarning } =
     parseStatusMetadata(comment);
   const specialStatus = renderSpecialStatusMessage({
+    comment,
     metadata,
     progress,
     statusLine,

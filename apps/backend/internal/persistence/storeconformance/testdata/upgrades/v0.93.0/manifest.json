@@ -29,7 +29,7 @@
           "table": "tasks",
           "key_column": "id",
           "key_value": "fixture-v0930-task",
-          "values": {"execution_grade": ""}
+          "values": {"execution_grade": "", "flag_note": ""}
         },
         {
           "owner": "task",
@@ -244,7 +244,7 @@
           "table": "tasks",
           "key_column": "id",
           "key_value": "fixture-v0930-task",
-          "values": {"execution_grade": ""}
+          "values": {"execution_grade": "", "flag_note": ""}
         },
         {
           "owner": "task",
@@ -449,6 +449,7 @@
     "plugin-state",
     "plugin-instance-state",
     "plugin-user-state",
+    "plugin-command-receipts",
     "canvas",
     "github",
     "gitlab",
@@ -457,6 +458,7 @@
     "notification",
     "sentry",
     "workflow-sync",
+    "prompt-sync",
     "office-config-sync",
     "automation",
     "coordinator"

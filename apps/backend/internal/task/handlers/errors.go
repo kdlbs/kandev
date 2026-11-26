@@ -39,6 +39,8 @@ const (
 // human-readable message.
 const errorDetailKeyErrorCode = "error_code"
 
+const requestFailedMessage = "request failed"
+
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
 	if handleBuiltinCreationHTTPError(c, err) {
 		return
@@ -101,8 +103,8 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusBadRequest, taskErrorBody(err))
 		return
 	}
-	log.Error("request failed", append(cleanupInspectionFields(err), zap.Error(err))...)
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+	log.Error(requestFailedMessage, append(cleanupInspectionFields(err), zap.Error(err))...)
+	c.JSON(http.StatusInternalServerError, gin.H{"error": requestFailedMessage})
 }
 
 func cleanupInspectionFields(err error) []zap.Field {
@@ -370,7 +372,7 @@ func isValidationError(err error) bool {
 	if errors.Is(err, service.ErrInvalidWorkflowChange) {
 		return true
 	}
-	if errors.Is(err, service.ErrTaskTitleTooLong) {
+	if errors.Is(err, service.ErrTaskTitleTooLong) || errors.Is(err, service.ErrTaskFlagNoteTooLong) {
 		return true
 	}
 	if errors.Is(err, service.ErrExternalIDInvalid) || errors.Is(err, service.ErrReservedMetadata) {

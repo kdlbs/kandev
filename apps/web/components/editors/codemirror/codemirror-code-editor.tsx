@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
 import { vscodeDark } from "@uiw/codemirror-theme-vscode";
-import { EditorCommentPopover } from "@/components/task/editor-comment-popover";
+import { SelectionCommentSurface } from "@/components/shared/selection-comment/selection-comment-surface";
+import { lineRangeLabel } from "@/components/shared/selection-comment/line-range-label";
 import { CommentViewPopover } from "@/components/task/comment-view-popover";
 import { registerCodeMirrorCursorRevealer } from "@/hooks/file-editor-cursor";
 import { useCodeMirrorEditorState } from "./use-codemirror-editor-state";
@@ -71,17 +72,22 @@ function CodeMirrorOverlays({
         />
       )}
       {state.textSelection && (
-        <EditorCommentPopover
+        <SelectionCommentSurface
+          key={`${state.commentScope}:${state.textSelection.startLine}:${state.textSelection.endLine}:${state.textSelection.text}`}
+          attachmentOptions={
+            state.attachmentTaskId ? { taskId: state.attachmentTaskId } : undefined
+          }
           selectedText={state.textSelection.text}
-          lineRange={{ start: state.textSelection.startLine, end: state.textSelection.endLine }}
+          contextLabel={lineRangeLabel(state.textSelection.startLine, state.textSelection.endLine)}
           position={state.textSelection.position}
-          onSubmit={state.handleCommentSubmit}
-          onSubmitAndRun={state.handleCommentSubmitAndRun}
+          onAdd={state.handleCommentSubmit}
+          onAddAndRun={state.handleCommentSubmitAndRun}
           onClose={state.handlePopoverClose}
         />
       )}
       {state.commentView && (
         <CommentViewPopover
+          taskId={state.attachmentTaskId}
           comments={state.commentView.comments}
           position={state.commentView.position}
           onDelete={state.handleDeleteComment}

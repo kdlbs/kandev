@@ -205,6 +205,7 @@ type TaskDTO struct {
 	WorkflowAgentOverrides      *models.WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
 	Title                       string                         `json:"title"`
 	Description                 string                         `json:"description"`
+	FlagNote                    string                         `json:"flag_note"`
 	State                       v1.TaskState                   `json:"state"`
 	Priority                    string                         `json:"priority"`
 	WIPAdmitted                 bool                           `json:"wip_admitted"`
@@ -426,21 +427,22 @@ type TaskSessionDTO struct {
 	// ExecutionRuntime is the observed runtime recorded for the same
 	// executors_running row as AgentExecutionID/ContainerID. Null means
 	// unknown; it is never inferred from the selected executor.
-	ExecutionRuntime   *string `json:"execution_runtime"`
-	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
-	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
-	RouteGeneration    int64   `json:"route_generation,omitempty"`
-	RouteState         string  `json:"route_state,omitempty"`
-	RouteReason        string  `json:"route_reason,omitempty"`
-	ExecutorID         string  `json:"executor_id,omitempty"`
-	ExecutorProfileID  string  `json:"executor_profile_id,omitempty"`
-	EnvironmentID      string  `json:"environment_id,omitempty"`
-	RepositoryID       string  `json:"repository_id,omitempty"`
-	BaseBranch         string  `json:"base_branch,omitempty"`
-	BaseCommitSHA      string  `json:"base_commit_sha,omitempty"`
-	WorktreeID         string  `json:"worktree_id,omitempty"`
-	WorktreePath       string  `json:"worktree_path,omitempty"`
-	WorktreeBranch     string  `json:"worktree_branch,omitempty"`
+	ExecutionRuntime      *string `json:"execution_runtime"`
+	AgentProfileID        string  `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID    string  `json:"execution_profile_id,omitempty"`
+	RuntimeAdapterVersion string  `json:"runtime_adapter_version,omitempty"`
+	RouteGeneration       int64   `json:"route_generation,omitempty"`
+	RouteState            string  `json:"route_state,omitempty"`
+	RouteReason           string  `json:"route_reason,omitempty"`
+	ExecutorID            string  `json:"executor_id,omitempty"`
+	ExecutorProfileID     string  `json:"executor_profile_id,omitempty"`
+	EnvironmentID         string  `json:"environment_id,omitempty"`
+	RepositoryID          string  `json:"repository_id,omitempty"`
+	BaseBranch            string  `json:"base_branch,omitempty"`
+	BaseCommitSHA         string  `json:"base_commit_sha,omitempty"`
+	WorktreeID            string  `json:"worktree_id,omitempty"`
+	WorktreePath          string  `json:"worktree_path,omitempty"`
+	WorktreeBranch        string  `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
@@ -574,6 +576,9 @@ func EnrichSessionRecoveryBlocks(
 	if generation == nil || generation.Generation < 1 {
 		return nil
 	}
+	if generation.AdapterVersion != "" {
+		result.RuntimeAdapterVersion = generation.AdapterVersion
+	}
 	blocks, err := reader.ListOpenSessionRecoveryBlocks(ctx, session.ID, incarnationID, generation.Generation)
 	if err != nil {
 		return err
@@ -635,21 +640,22 @@ type TaskSessionSummaryDTO struct {
 	// ExecutionRuntime is the observed runtime recorded for the same
 	// executors_running row as AgentExecutionID/ContainerID. Null means
 	// unknown; it is never inferred from the selected executor.
-	ExecutionRuntime   *string `json:"execution_runtime"`
-	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
-	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
-	RouteGeneration    int64   `json:"route_generation,omitempty"`
-	RouteState         string  `json:"route_state,omitempty"`
-	RouteReason        string  `json:"route_reason,omitempty"`
-	ExecutorID         string  `json:"executor_id,omitempty"`
-	ExecutorProfileID  string  `json:"executor_profile_id,omitempty"`
-	EnvironmentID      string  `json:"environment_id,omitempty"`
-	RepositoryID       string  `json:"repository_id,omitempty"`
-	BaseBranch         string  `json:"base_branch,omitempty"`
-	BaseCommitSHA      string  `json:"base_commit_sha,omitempty"`
-	WorktreeID         string  `json:"worktree_id,omitempty"`
-	WorktreePath       string  `json:"worktree_path,omitempty"`
-	WorktreeBranch     string  `json:"worktree_branch,omitempty"`
+	ExecutionRuntime      *string `json:"execution_runtime"`
+	AgentProfileID        string  `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID    string  `json:"execution_profile_id,omitempty"`
+	RuntimeAdapterVersion string  `json:"runtime_adapter_version,omitempty"`
+	RouteGeneration       int64   `json:"route_generation,omitempty"`
+	RouteState            string  `json:"route_state,omitempty"`
+	RouteReason           string  `json:"route_reason,omitempty"`
+	ExecutorID            string  `json:"executor_id,omitempty"`
+	ExecutorProfileID     string  `json:"executor_profile_id,omitempty"`
+	EnvironmentID         string  `json:"environment_id,omitempty"`
+	RepositoryID          string  `json:"repository_id,omitempty"`
+	BaseBranch            string  `json:"base_branch,omitempty"`
+	BaseCommitSHA         string  `json:"base_commit_sha,omitempty"`
+	WorktreeID            string  `json:"worktree_id,omitempty"`
+	WorktreePath          string  `json:"worktree_path,omitempty"`
+	WorktreeBranch        string  `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
@@ -1193,6 +1199,7 @@ func FromTaskWithSessionInfo(
 		WorkflowAgentOverrides:      workflowAgentOverrides,
 		Title:                       task.Title,
 		Description:                 task.Description,
+		FlagNote:                    task.FlagNote,
 		State:                       task.State,
 		Priority:                    task.Priority,
 		ExecutionGrade:              task.ExecutionGrade,
@@ -1275,6 +1282,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		ExecutionRuntime:            observedExecutionRuntimePtr(session.ExecutionRuntime),
 		AgentProfileID:              session.AgentProfileID,
 		ExecutionProfileID:          session.ExecutionProfileID,
+		RuntimeAdapterVersion:       models.ACPAdapterVersionForNativeSession(session.Metadata, session.DownstreamACPSessionID),
 		RouteGeneration:             session.RouteGeneration,
 		RouteState:                  session.RouteState,
 		RouteReason:                 session.RouteReason,
@@ -1576,16 +1584,17 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 
 // TaskPlanCommentDTO is pending feedback attached to a task's current plan.
 type TaskPlanCommentDTO struct {
-	ID           string    `json:"id"`
-	TaskID       string    `json:"task_id"`
-	PlanID       string    `json:"plan_id"`
-	Body         string    `json:"body"`
-	SelectedText string    `json:"selected_text"`
-	AnchorFrom   int       `json:"anchor_from"`
-	AnchorTo     int       `json:"anchor_to"`
-	Version      int64     `json:"version"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Attachments  []v1.MessageAttachment `json:"attachments,omitempty"`
+	ID           string                 `json:"id"`
+	TaskID       string                 `json:"task_id"`
+	PlanID       string                 `json:"plan_id"`
+	Body         string                 `json:"body"`
+	SelectedText string                 `json:"selected_text"`
+	AnchorFrom   int                    `json:"anchor_from"`
+	AnchorTo     int                    `json:"anchor_to"`
+	Version      int64                  `json:"version"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
 }
 
 // TaskPlanCommentSnapshotDTO is a complete, versioned replacement snapshot.
@@ -1607,7 +1616,8 @@ func TaskPlanCommentSnapshotFromModel(snapshot *models.TaskPlanCommentSnapshot) 
 	}
 	for _, comment := range snapshot.Comments {
 		out.Comments = append(out.Comments, &TaskPlanCommentDTO{
-			ID: comment.ID, TaskID: comment.TaskID, PlanID: comment.PlanID,
+			Attachments: comment.Attachments,
+			ID:          comment.ID, TaskID: comment.TaskID, PlanID: comment.PlanID,
 			Body: comment.Body, SelectedText: comment.SelectedText,
 			AnchorFrom: comment.AnchorFrom, AnchorTo: comment.AnchorTo, Version: comment.Version,
 			CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt,

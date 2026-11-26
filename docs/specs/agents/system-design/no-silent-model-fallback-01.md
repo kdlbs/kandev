@@ -54,6 +54,43 @@ explicit fallback/compatible selection. This preserves values across toggling
 and avoids destructive normalization. UI prevents simultaneous active modes;
 API precedence makes combinations deterministic without extra booleans.
 
+### Claude profile save validation
+
+AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.11 and .12 use one settings check for
+`claude-acp` and the four bare family aliases. Match the alias and the
+`ANTHROPIC_MODEL` key case-sensitively. Trim the literal value for blank and
+equality checks and preserve stored input bytes. The existing
+`profileenv.Validate` rejects duplicate keys before new entries reach this
+check. `default` and `opusplan` have default and mode-dependent selection
+behavior. Bracketed variants carry a context choice. These selectors follow
+the existing exact-model policy.
+
+- In `CreateProfile`, run the check after `validateProfileEnvVarDTOs`.
+- In `CreateAgent`, run it for each nested profile after
+  `validateCreateProfileRequest`, before the agent insert.
+- In `UpdateProfile`, capture the saved strictness, Start model, and literal
+  `ANTHROPIC_MODEL` before applying the patch. Run the check after
+  `profile.EnvVars = envVarsFromDTO(...)`, outside the `req.EnvVars` block and
+  before setting `UserModified` or writing the profile. Resolve the canonical
+  agent ID with `agentNameForProfile` if the selection change can trigger
+  the check. The enabled-only fast path can return earlier because it changes
+  none of the selection inputs.
+
+Compare the saved and merged selection inputs on update. An identical
+conflicting pair allows other edits, even if the request repeats those
+fields. An omitted field keeps its saved value. An empty environment list
+removes the entry.
+
+Return HTTP 400 with `error_code: claude_exact_model_alias_conflict` and a
+fixed message. Use the same response shape at all three settings endpoints.
+Keep environment values out of the error and logs. An omitted, blank,
+matching, or secret-backed entry follows existing validation. Evaluate no
+inherited values or discovery results in this check.
+
+The runtime still applies the exact catalog policy below. A valid settings
+save cannot attest executor availability. See the accepted
+[Claude model validation decision](../../../decisions/2026-11-20-claude-exact-model-alias-validation.md).
+
 ## Profile transport
 
 Propagate the field through `settings/dto`, handlers/controller mappings,

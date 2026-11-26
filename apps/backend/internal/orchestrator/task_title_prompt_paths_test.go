@@ -185,7 +185,10 @@ func TestBuildWorkflowPrompt_TaskTitle_ExpandsWithAcceptedEmptyPromptContext(t *
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.promptExpander = promptService
 	got, trustedContext := svc.buildWorkflowPromptWithTrustedContextOptions(
-		ctx, preparedPrompt, step, "task-ttp-7", "session-1", false, false, acceptedContext, false, true,
+		ctx, preparedPrompt, step, "task-ttp-7", "session-1", false, workflowPromptOptions{
+			trustedPromptContext:     acceptedContext,
+			promptReferencesPrepared: true,
+		},
 	)
 
 	if !strings.Contains(trustedContext, "Apply the task title guidance.") {
@@ -232,7 +235,10 @@ func TestBuildWorkflowPrompt_TaskTitle_ExtendsAcceptedPromptContext(t *testing.T
 	svc := createTestService(repo, stepGetter, newMockTaskRepo())
 	svc.promptExpander = promptService
 	got, trustedContext := svc.buildWorkflowPromptWithTrustedContextOptions(
-		ctx, preparedPrompt, step, "task-ttp-8", "session-1", false, false, acceptedContext, false, true,
+		ctx, preparedPrompt, step, "task-ttp-8", "session-1", false, workflowPromptOptions{
+			trustedPromptContext:     acceptedContext,
+			promptReferencesPrepared: true,
+		},
 	)
 
 	if !strings.Contains(trustedContext, "The accepted guide version.") {
@@ -267,7 +273,9 @@ func TestBuildWorkflowPrompt_TaskTitle_DoesNotExpandPassthroughReferences(t *tes
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.promptExpander = promptService
 	got, trustedContext := svc.buildWorkflowPromptWithTrustedContextOptions(
-		ctx, "Start", step, "task-ttp-9", "session-1", true, false, "", false, true,
+		ctx, "Start", step, "task-ttp-9", "session-1", true, workflowPromptOptions{
+			promptReferencesPrepared: true,
+		},
 	)
 
 	if trustedContext != "" {

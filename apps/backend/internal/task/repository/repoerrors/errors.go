@@ -27,6 +27,10 @@ var ErrWorkflowAllocationStaleEntry = errors.New("workflow allocation entry is n
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrProjectMembershipChanged reports that an Office project no longer has
+// the workspace membership admitted before task creation.
+var ErrProjectMembershipChanged = errors.New("project workspace membership changed")
+
 // ErrTurnChangeSetNotFound reports that no historical turn-change summary
 // matched the task, session, and server-owned change-set identity.
 var ErrTurnChangeSetNotFound = errors.New("turn change set not found")

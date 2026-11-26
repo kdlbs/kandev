@@ -2,6 +2,138 @@
 
 All notable changes to Kandev.
 
+## 0.104.0 - 2026-11-26
+
+### Features
+
+- add flags to sidebar tasks ([#5536](https://github.com/kdlbs/kandev/pull/5536))
+- simplify task creation advanced settings ([#5511](https://github.com/kdlbs/kandev/pull/5511))
+- enable canvases and retire LSP continuity flag ([#5512](https://github.com/kdlbs/kandev/pull/5512))
+- add project selection to plugin task creation ([#5491](https://github.com/kdlbs/kandev/pull/5491)) ([#5501](https://github.com/kdlbs/kandev/pull/5501))
+- support Copilot model context length selection ([#5479](https://github.com/kdlbs/kandev/pull/5479)) by @yuanqiuye
+- add opt-in ACP v2 preview ([#5451](https://github.com/kdlbs/kandev/pull/5451))
+- add saved prompts to one-time move instructions ([#5465](https://github.com/kdlbs/kandev/pull/5465))
+- list the STL viewer in the marketplace ([#5466](https://github.com/kdlbs/kandev/pull/5466))
+- attach files to feedback comments ([#5435](https://github.com/kdlbs/kandev/pull/5435))
+- host API for chat-bridge plugins (linked accounts, CancelTurn, step approval) ([#5438](https://github.com/kdlbs/kandev/pull/5438)) by @Fclem
+
+### Bug Fixes
+
+- require exact HTTP 200 for startup probes ([#5516](https://github.com/kdlbs/kandev/pull/5516))
+- recover delivery diagnostics after writer failures ([#5513](https://github.com/kdlbs/kandev/pull/5513)) ([#5531](https://github.com/kdlbs/kandev/pull/5531))
+- preserve task interruption warnings until prompt acceptance ([#5527](https://github.com/kdlbs/kandev/pull/5527))
+- replay retained cancellation on restart ([#5506](https://github.com/kdlbs/kandev/pull/5506)) ([#5525](https://github.com/kdlbs/kandev/pull/5525))
+- preserve URL plugin install responses past write timeout ([#5519](https://github.com/kdlbs/kandev/pull/5519)) ([#5526](https://github.com/kdlbs/kandev/pull/5526))
+- preserve managed OpenCode availability after pin bumps ([#5530](https://github.com/kdlbs/kandev/pull/5530))
+- project ACP v2 background work ([#5507](https://github.com/kdlbs/kandev/pull/5507)) ([#5524](https://github.com/kdlbs/kandev/pull/5524))
+- confirm SQLite health and sustain sidebar recovery ([#5532](https://github.com/kdlbs/kandev/pull/5532))
+- settle Claude Monitor lifecycle completions ([#5528](https://github.com/kdlbs/kandev/pull/5528))
+- harden Antigravity approvals and profile controls ([#5529](https://github.com/kdlbs/kandev/pull/5529))
+- remove misleading download icons from onboarding agent rows ([#5514](https://github.com/kdlbs/kandev/pull/5514))
+- reserve the pending update before cloning its handle ([#5517](https://github.com/kdlbs/kandev/pull/5517))
+- bind interrupted recovery notices to the resolved submission ([#5515](https://github.com/kdlbs/kandev/pull/5515))
+- keep task launch active after workspace refusals ([#5523](https://github.com/kdlbs/kandev/pull/5523))
+- settle orphaned work after execution-less stop ([#4459](https://github.com/kdlbs/kandev/pull/4459)) ([#5522](https://github.com/kdlbs/kandev/pull/5522))
+- accept repository_ids on REST task creation ([#5503](https://github.com/kdlbs/kandev/pull/5503)) ([#5510](https://github.com/kdlbs/kandev/pull/5510))
+- link first-run agent setup to the install catalog ([#5502](https://github.com/kdlbs/kandev/pull/5502))
+- accept verified PATs on Office API ([#5497](https://github.com/kdlbs/kandev/pull/5497))
+- track Cursor ACP shell watches in Background Work ([#5492](https://github.com/kdlbs/kandev/pull/5492))
+- keep session queue admission free while lifecycle work runs ([#5484](https://github.com/kdlbs/kandev/pull/5484)) by @point-source
+- resolve pull requests in repositoryless workspaces ([#5499](https://github.com/kdlbs/kandev/pull/5499))
+- add horizontal padding to installed plugin rows ([#5498](https://github.com/kdlbs/kandev/pull/5498))
+- preserve Copilot interruption notices on resume ([#5476](https://github.com/kdlbs/kandev/pull/5476)) ([#5493](https://github.com/kdlbs/kandev/pull/5493))
+- refuse gated moves into a completing step ([#5488](https://github.com/kdlbs/kandev/pull/5488))
+- retire foreground idle delivery receipts ([#5477](https://github.com/kdlbs/kandev/pull/5477)) ([#5487](https://github.com/kdlbs/kandev/pull/5487))
+- require worker mode for Antigravity CLI ([#5489](https://github.com/kdlbs/kandev/pull/5489))
+- keep Quick Chat text sharp in WebKit ([#5483](https://github.com/kdlbs/kandev/pull/5483))
+- discover nvm-managed Node tools on macOS ([#5482](https://github.com/kdlbs/kandev/pull/5482))
+- prevent session admission hangs on lifecycle locks ([#5469](https://github.com/kdlbs/kandev/pull/5469)) ([#5481](https://github.com/kdlbs/kandev/pull/5481))
+- let automatic syncs wait out GitHub admission ([#5471](https://github.com/kdlbs/kandev/pull/5471)) by @point-source
+- support Antigravity CLI ACP sessions ([#5475](https://github.com/kdlbs/kandev/pull/5475))
+- reveal the first walkthrough range in Monaco ([#5458](https://github.com/kdlbs/kandev/pull/5458))
+- recover disabled automation schedules in run detail ([#5455](https://github.com/kdlbs/kandev/pull/5455)) ([#5459](https://github.com/kdlbs/kandev/pull/5459))
+- align the chart animation switch ([#5462](https://github.com/kdlbs/kandev/pull/5462))
+- apply thinking levels for the selected model ([#5418](https://github.com/kdlbs/kandev/pull/5418))
+- fill the coordinator Needs you pane ([#5463](https://github.com/kdlbs/kandev/pull/5463))
+- open matching Quick Chat conversations ([#5461](https://github.com/kdlbs/kandev/pull/5461))
+- hide viewer discovery for supported files ([#5460](https://github.com/kdlbs/kandev/pull/5460))
+- add option labels to resume prompts ([#5452](https://github.com/kdlbs/kandev/pull/5452))
+- report invalid repository IDs for task links ([#5454](https://github.com/kdlbs/kandev/pull/5454))
+- refresh rich-output previews on reopen ([#5453](https://github.com/kdlbs/kandev/pull/5453))
+- stream Claude background shell output ([#5445](https://github.com/kdlbs/kandev/pull/5445))
+
+### Documentation
+
+- link Quick Start to the first-task guide ([#5500](https://github.com/kdlbs/kandev/pull/5500))
+- align settings layout guidance ([#5504](https://github.com/kdlbs/kandev/pull/5504)) ([#5509](https://github.com/kdlbs/kandev/pull/5509))
+
+## 0.103.1 - 2026-11-23
+
+### Features
+
+- add outside-repository file tree ([#5446](https://github.com/kdlbs/kandev/pull/5446))
+- hold issue watch dispatch until Linear blockers are done ([#4584](https://github.com/kdlbs/kandev/pull/4584)) by @qwent71
+
+### Bug Fixes
+
+- use the selected managed runtime for session inference ([#5441](https://github.com/kdlbs/kandev/pull/5441)) by @mulatta
+- refresh built-in prompts on PostgreSQL ([#5440](https://github.com/kdlbs/kandev/pull/5440))
+- prevent false fork review gating ([#5443](https://github.com/kdlbs/kandev/pull/5443))
+
+## 0.103.0 - 2026-11-22
+
+### Features
+
+- list the Step History canvas in the registry ([#4516](https://github.com/kdlbs/kandev/pull/4516)) by @sharifndlovu123
+- complete plugin grouping for saved sidebar views ([#5427](https://github.com/kdlbs/kandev/pull/5427)) by @Fclem
+- report session configuration outcomes ([#5376](https://github.com/kdlbs/kandev/pull/5376)) ([#5411](https://github.com/kdlbs/kandev/pull/5411))
+- support file viewers in panels and rich previews ([#5367](https://github.com/kdlbs/kandev/pull/5367))
+- sync saved prompts from a repository with prompt sync ([#5394](https://github.com/kdlbs/kandev/pull/5394)) by @point-source
+- make Kandev MCP calls wait while detached, with offline budget ([#4809](https://github.com/kdlbs/kandev/pull/4809)) by @nova28
+- read API for task step transitions ([#4591](https://github.com/kdlbs/kandev/pull/4591)) by @qwent71
+- clarify workspace access and enable turn summaries ([#5406](https://github.com/kdlbs/kandev/pull/5406))
+- compact expandable rows for the workflows settings list ([#5396](https://github.com/kdlbs/kandev/pull/5396)) by @point-source
+- auto-merge sub-task messages into their sender's queued entry ([#5397](https://github.com/kdlbs/kandev/pull/5397)) by @Fclem
+- add web preview annotation mode with the shared comment surface ([#5392](https://github.com/kdlbs/kandev/pull/5392)) by @point-source
+- retry a transient launch failure once ([#5386](https://github.com/kdlbs/kandev/pull/5386)) by @EmersonHenriique
+- keep reviewers off the author's provider ([#5375](https://github.com/kdlbs/kandev/pull/5375)) by @point-source
+- show OMP's native update check in Settings ([#5390](https://github.com/kdlbs/kandev/pull/5390)) by @Fclem
+- classify the devin-acp free-model rate limit ([#5381](https://github.com/kdlbs/kandev/pull/5381)) by @EmersonHenriique
+- show workspace root files in Changes ([#5372](https://github.com/kdlbs/kandev/pull/5372)) ([#5379](https://github.com/kdlbs/kandev/pull/5379))
+- list the Azure DevOps plugin in the registry ([#5267](https://github.com/kdlbs/kandev/pull/5267)) by @JnManso
+
+### Bug Fixes
+
+- keep Codex MCP startup reports out of turns ([#5419](https://github.com/kdlbs/kandev/pull/5419)) ([#5434](https://github.com/kdlbs/kandev/pull/5434))
+- bootstrap OpenCode v2 session credentials ([#4995](https://github.com/kdlbs/kandev/pull/4995)) by @mysticfall
+- preserve Claude shell exits after Stop ([#5421](https://github.com/kdlbs/kandev/pull/5421)) ([#5431](https://github.com/kdlbs/kandev/pull/5431))
+- improve mobile terminal keybar discoverability ([#5423](https://github.com/kdlbs/kandev/pull/5423)) ([#5432](https://github.com/kdlbs/kandev/pull/5432))
+- preserve coordinator goal's first edit ([#5425](https://github.com/kdlbs/kandev/pull/5425)) ([#5430](https://github.com/kdlbs/kandev/pull/5430))
+- keep session package caches off the memory-backed auth volume ([#5428](https://github.com/kdlbs/kandev/pull/5428))
+- harden Prompt Sync quota and override handling ([#5416](https://github.com/kdlbs/kandev/pull/5416)) ([#5429](https://github.com/kdlbs/kandev/pull/5429))
+- recover retained remote executor sessions ([#5422](https://github.com/kdlbs/kandev/pull/5422))
+- settle Claude background jobs from provider evidence ([#5405](https://github.com/kdlbs/kandev/pull/5405))
+- settle stale delivery recovery blocks ([#5408](https://github.com/kdlbs/kandev/pull/5408))
+- reject conflicting Claude exact-model aliases ([#5410](https://github.com/kdlbs/kandev/pull/5410))
+- explain Cursor MCP discovery failures ([#5407](https://github.com/kdlbs/kandev/pull/5407)) ([#5409](https://github.com/kdlbs/kandev/pull/5409))
+- bound the recovered-delivery replay agentctl lease ([#4796](https://github.com/kdlbs/kandev/pull/4796)) by @nova28
+- retain managed Git credentials on relaunch ([#5403](https://github.com/kdlbs/kandev/pull/5403))
+- settle root status and recover capture and retention progress ([#5402](https://github.com/kdlbs/kandev/pull/5402))
+- bound utility request context and settle cancelled calls ([#5384](https://github.com/kdlbs/kandev/pull/5384)) by @EmersonHenriique
+- stop deleted dynamic profiles from blocking their candidates ([#5383](https://github.com/kdlbs/kandev/pull/5383)) by @EmersonHenriique
+- let a step profile switch supersede an in-flight launch ([#5385](https://github.com/kdlbs/kandev/pull/5385)) by @EmersonHenriique
+- open Windows no-follow paths from the volume root ([#5382](https://github.com/kdlbs/kandev/pull/5382)) by @EmersonHenriique
+- declare items for every array tool parameter ([#5380](https://github.com/kdlbs/kandev/pull/5380)) by @EmersonHenriique
+- start coordinator dream session before prompting, closes #5388 ([#5395](https://github.com/kdlbs/kandev/pull/5395))
+- make Docker storage limits opt-in ([#5240](https://github.com/kdlbs/kandev/pull/5240)) ([#5387](https://github.com/kdlbs/kandev/pull/5387))
+- prevent Improve Kandev bootstrap timeouts ([#5327](https://github.com/kdlbs/kandev/pull/5327)) ([#5389](https://github.com/kdlbs/kandev/pull/5389))
+- repair MCP subtask workspace reuse ([#5370](https://github.com/kdlbs/kandev/pull/5370)) ([#5378](https://github.com/kdlbs/kandev/pull/5378))
+- resolve the requested workspace on PostgreSQL and Linear issue routes ([#5341](https://github.com/kdlbs/kandev/pull/5341)) by @calltelemetry-jason
+
+### Documentation
+
+- add pinned server extension example ([#4749](https://github.com/kdlbs/kandev/pull/4749)) by @yattdev
+
 ## 0.102.0 - 2026-11-19
 
 ### Features

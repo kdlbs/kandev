@@ -2,13 +2,33 @@ import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
 
+const CANARY_LATEST = "18.22.0-canary.3";
+
+// @covers AC-AGENTS-RUNTIME-NATIVE-CHECK-002.3, AC-AGENTS-RUNTIME-NATIVE-CHECK-002.4
 test.describe("OMP harness-owned updates", () => {
-  test("previews the reference, approves an empty request, streams output, and reports the actual channel version", async ({
+  test("shows the native canary result, approves an empty request, streams output, and reports the actual channel version", async ({
     testPage,
     prCapture,
   }) => {
-    const runtime = await installRuntimeUpdateFixture(testPage, { mode: "self_update" });
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      mode: "self_update",
+      currentVersion: "18.13.3",
+      native: { checkState: "update_available", latestVersion: CANARY_LATEST, channel: "canary" },
+    });
     await testPage.goto("/settings/agents");
+    await testPage.getByTestId("runtime-updates-button").click();
+    const overview = testPage.getByTestId("runtime-manager-dialog");
+    const row = overview.getByTestId(`runtime-manager-row-${runtime.agentName}`);
+    await expect(row).toContainText(`18.13.3 → ${CANARY_LATEST}`);
+    await expect(row.getByTestId(`runtime-update-channel-${runtime.agentName}`)).toHaveText(
+      "Channel: canary",
+    );
+    await prCapture.screenshot("desktop-omp-native-row", {
+      caption: "OMP row shows its own canary update check result",
+    });
+    await testPage.keyboard.press("Escape");
+    await expect(overview).toBeHidden();
+
     const trigger = testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`);
     await expect(trigger).toBeVisible();
     await expect(
@@ -16,36 +36,41 @@ test.describe("OMP harness-owned updates", () => {
     ).toBeVisible();
     await trigger.click();
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
-    await expect(dialog).toContainText("Installed version: 18.3.1");
+    await expect(dialog).toContainText("Installed version: 18.13.3");
+    await expect(
+      dialog.getByTestId(`agent-update-native-check-${runtime.agentName}`),
+    ).toContainText(CANARY_LATEST);
+    await expect(dialog.getByTestId(`agent-update-channel-${runtime.agentName}`)).toContainText(
+      "canary",
+    );
     await expect(
       dialog.getByTestId(`agent-update-stable-reference-${runtime.agentName}`),
-    ).toContainText("18.3.2");
-    await expect(dialog).toContainText("configured channel and may install a different version");
+    ).toHaveCount(0);
+    await expect(dialog).toContainText("own update check for its configured channel");
     await expect(dialog).toContainText("omp update");
     await expect(
       dialog.getByTestId(`agent-update-version-picker-${runtime.agentName}`),
     ).toHaveCount(0);
     await prCapture.screenshot("desktop-omp-update-preview", {
-      caption: "OMP stable latest is reference-only",
+      caption: "OMP update dialog shows the native canary latest",
     });
-
     const approvalResponse = waitForHttp(testPage, "POST", /\/api\/v1\/agent-update\/omp-acp$/);
     await dialog.getByTestId(`agent-update-confirm-${runtime.agentName}`).click();
     await approvalResponse;
     expect(runtime.postBodies()).toEqual([{}]);
-    await runtime.emitOutput("Updated to 18.3.4 on canary channel\n");
+    await runtime.emitOutput(`Updated to ${CANARY_LATEST} on canary channel\n`);
     await expect(dialog.getByTestId(`agent-update-log-${runtime.agentName}`)).toContainText(
-      "18.3.4",
+      CANARY_LATEST,
     );
-    runtime.setPersistedRuntimeVersion("18.3.4");
+    runtime.setPersistedRuntimeVersion(CANARY_LATEST);
     await runtime.emitUpdate(
       updateJob({
         update_mode: "self_update",
         agent_name: runtime.agentName,
-        current_version: "18.3.4",
+        current_version: CANARY_LATEST,
         target_version: "",
         status: "succeeded",
-        output: "Updated to 18.3.4 on canary channel\n",
+        output: `Updated to ${CANARY_LATEST} on canary channel\n`,
         finished_at: "2026-09-26T12:01:00Z",
       }),
     );
@@ -54,14 +79,40 @@ test.describe("OMP harness-owned updates", () => {
       "Runtime updated successfully",
     );
     await expect(dialog.getByTestId(`agent-update-current-${runtime.agentName}`)).toContainText(
-      "18.3.4",
+      CANARY_LATEST,
+    );
+    await expect(dialog.getByTestId(`agent-update-native-check-${runtime.agentName}`)).toHaveCount(
+      0,
+    );
+    await prCapture.screenshot("desktop-omp-update-result", {
+      caption: "OMP post-update version comes from the configured channel",
+    });
+  });
+
+  test("explains an unknown native check in the row and the dialog", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      mode: "self_update",
+      currentVersion: "18.13.3",
+      native: { checkState: "unknown", reason: "check_failed" },
+    });
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId("runtime-updates-button").click();
+    const overview = testPage.getByTestId("runtime-manager-dialog");
+    const row = overview.getByTestId(`runtime-manager-row-${runtime.agentName}`);
+    await expect(row).toContainText("The update check failed.");
+    await expect(row).not.toContainText("Latest version could not be checked.");
+    await testPage.keyboard.press("Escape");
+    await expect(overview).toBeHidden();
+
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+    const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
+    await expect(dialog.getByTestId(`agent-update-native-check-${runtime.agentName}`)).toHaveText(
+      "The update check failed.",
     );
     await expect(
       dialog.getByTestId(`agent-update-stable-reference-${runtime.agentName}`),
-    ).toContainText("18.3.2");
-    await prCapture.screenshot("desktop-omp-update-result", {
-      caption: "OMP post-update version differs from stable reference",
-    });
+    ).toHaveCount(0);
+    await expect(dialog.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toBeEnabled();
   });
 
   test("shows updater failure without claiming a published version", async ({ testPage }) => {

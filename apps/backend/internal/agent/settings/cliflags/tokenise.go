@@ -9,11 +9,14 @@ package cliflags
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
+
+const AntigravitySkipPermissionsFlag = "--dangerously-skip-permissions"
 
 // Tokenise returns the argv tokens for a single CLIFlag entry. An empty or
 // whitespace-only input yields no tokens. Unterminated quotes and trailing
@@ -151,4 +154,83 @@ func Resolve(flags []models.CLIFlag) ([]string, error) {
 		out = append(out, tokens...)
 	}
 	return out, nil
+}
+
+// NormalizeExactFlag collapses duplicate rows for one curated flag. An
+// enabled duplicate keeps the effective choice enabled so an old profile
+// cannot silently lose a saved opt-in until the user changes it.
+func NormalizeExactFlag(flags []models.CLIFlag, exactFlag string) []models.CLIFlag {
+	if len(flags) == 0 || exactFlag == "" {
+		return flags
+	}
+	result := make([]models.CLIFlag, 0, len(flags))
+	firstMatch := -1
+	enabled := false
+	description := ""
+	for _, entry := range flags {
+		tokens, err := Tokenise(entry.Flag)
+		if err != nil {
+			result = append(result, entry)
+			continue
+		}
+		if !slices.Contains(tokens, exactFlag) {
+			result = append(result, entry)
+			continue
+		}
+		enabled = enabled || entry.Enabled
+		if entry.Description != "" {
+			description = entry.Description
+		}
+		var remaining []string
+		flush := func() {
+			if len(remaining) == 0 {
+				return
+			}
+			result = append(result, models.CLIFlag{
+				Flag:        serializeTokens(remaining),
+				Description: entry.Description,
+				Enabled:     entry.Enabled,
+			})
+			remaining = nil
+		}
+		for _, token := range tokens {
+			if token != exactFlag {
+				remaining = append(remaining, token)
+				continue
+			}
+			flush()
+			if firstMatch < 0 {
+				firstMatch = len(result)
+				result = append(result, models.CLIFlag{})
+			}
+		}
+		flush()
+	}
+	if firstMatch < 0 {
+		return flags
+	}
+	result[firstMatch] = models.CLIFlag{Flag: exactFlag, Description: description, Enabled: enabled}
+	return result
+}
+
+func serializeTokens(tokens []string) string {
+	serialized := make([]string, len(tokens))
+	for index, token := range tokens {
+		serialized[index] = serializeToken(token)
+	}
+	return strings.Join(serialized, " ")
+}
+
+func serializeToken(token string) string {
+	if token != "" && !strings.ContainsAny(token, " \t\n'\"\\") {
+		return token
+	}
+	if !strings.Contains(token, "'") {
+		return "'" + token + "'"
+	}
+	if !strings.Contains(token, `"`) {
+		return `"` + token + `"`
+	}
+	quoted := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(token)
+	return `"` + quoted + `"`
 }

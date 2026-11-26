@@ -37,6 +37,7 @@ export type TaskLike = {
   title?: string;
   identifier?: string;
   description?: string | null;
+  flag_note?: string;
   autopilot?: boolean;
   position?: number;
   state?: TaskState;
@@ -293,6 +294,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     title: source.title ?? "",
     identifier: source.identifier ?? undefined,
     description: source.description ?? undefined,
+    ...(source.flag_note === undefined ? {} : { flagNote: source.flag_note }),
     autopilot: source.autopilot,
     priority: source.priority,
     origin: source.origin,

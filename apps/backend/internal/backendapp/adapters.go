@@ -460,6 +460,7 @@ func buildLifecycleLaunchRequest(
 		TaskScope:                     req.TaskScope,
 		SessionSettingsPolicy:         lifecycleSessionSettingsPolicy(req.SessionSettingsPolicy),
 		RequiredNativeConversationID:  req.RequiredNativeConversationID,
+		RuntimeAdapterVersion:         req.RuntimeAdapterVersion,
 		InterruptedSubmissionID:       req.InterruptedSubmissionID,
 		InterruptedStreamID:           req.InterruptedStreamID,
 		InterruptedHarnessGeneration:  req.InterruptedHarnessGeneration,
@@ -633,7 +634,7 @@ func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecyc
 	result := make([]lifecycle.MessageAttachment, len(attachments))
 	for i, att := range attachments {
 		result[i] = lifecycle.MessageAttachment{
-			AttachmentID: att.AttachmentID,
+			CommentID: att.CommentID, AttachmentID: att.AttachmentID,
 			Type:         att.Type,
 			Data:         att.Data,
 			MimeType:     att.MimeType,
@@ -1090,6 +1091,12 @@ func (a *lifecycleAdapter) BindResumeAttempt(ctx context.Context, sessionID, att
 // IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 func (a *lifecycleAdapter) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsPassthroughSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) PrepareRemotePassthroughCommentPrompt(
+	ctx context.Context, sessionID, prompt string, files []v1.MessageAttachment,
+) (string, bool, error) {
+	return a.mgr.PrepareRemotePassthroughCommentPrompt(ctx, sessionID, prompt, files)
 }
 
 func (a *lifecycleAdapter) WritePassthroughStdin(ctx context.Context, sessionID string, data string) error {

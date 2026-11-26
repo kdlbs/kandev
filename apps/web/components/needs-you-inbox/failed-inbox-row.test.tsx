@@ -1,6 +1,7 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FailedInboxRow as FailedInboxRowData } from "@/lib/types/failed-inbox";
+import { StateProvider, useAppStore } from "@/components/state-provider";
 import { FailedInboxRow } from "./failed-inbox-row";
 
 const ORIGIN_MARKER_TESTID = "failed-inbox-origin-marker";
@@ -17,7 +18,10 @@ function row(overrides: Partial<FailedInboxRowData> = {}): FailedInboxRowData {
   };
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("FailedInboxRow", () => {
   it("renders the title, reason, and an open-task control (AC .18)", () => {
@@ -102,3 +106,32 @@ describe("FailedInboxRow", () => {
     expect(link.getAttribute("href")).not.toContain("sessionId");
   });
 });
+
+// @covers AC-UI-INBOX-OPEN-TASK-001.1
+it("opens the failed row's existing Quick Chat and stays in Inbox", () => {
+  window.history.replaceState({}, "", "/needs-you-inbox?tab=failed");
+  const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+  render(
+    <StateProvider
+      initialState={{
+        workspaces: { items: [], activeId: "w1" },
+        quickChat: {
+          sessions: [{ kind: "chat", taskId: "t1", sessionId: "s1", workspaceId: "w1" }],
+        },
+      }}
+    >
+      <FailedInboxRow row={row()} />
+      <QuickChatSelection />
+    </StateProvider>,
+  );
+  fireEvent.click(screen.getByTestId("failed-inbox-open-task"));
+
+  expect(window.location.pathname + window.location.search).toBe("/needs-you-inbox?tab=failed");
+  expect(screen.getByTestId("quick-chat-selection").textContent).toBe("s1");
+  expect(scrollTo).not.toHaveBeenCalled();
+});
+
+function QuickChatSelection() {
+  const { isOpen, activeSessionId } = useAppStore((state) => state.quickChat);
+  return <output data-testid="quick-chat-selection">{isOpen && activeSessionId}</output>;
+}

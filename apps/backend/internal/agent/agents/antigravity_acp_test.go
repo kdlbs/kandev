@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"os"
 	"path/filepath"
@@ -212,14 +213,45 @@ func TestAntigravityACP_RemoteAuth(t *testing.T) {
 
 func TestAntigravityACP_LogosNonEmpty(t *testing.T) {
 	a := NewAntigravityACP()
-	if len(a.Logo(LogoLight)) == 0 {
-		t.Error("Logo(LogoLight) is empty")
+	type svgLogo struct {
+		XMLName xml.Name `xml:"svg"`
+		Fill    string   `xml:"fill,attr"`
+		ViewBox string   `xml:"viewBox,attr"`
+		Title   string   `xml:"title"`
+		Paths   []struct {
+			Data string `xml:"d,attr"`
+		} `xml:"path"`
 	}
-	if len(a.Logo(LogoDark)) == 0 {
-		t.Error("Logo(LogoDark) is empty")
+	var logos [2]svgLogo
+	variants := []struct {
+		variant LogoVariant
+		fill    string
+	}{
+		{variant: LogoLight, fill: "#000000"},
+		{variant: LogoDark, fill: "#FFFFFF"},
 	}
-	if !strings.Contains(string(a.Logo(LogoLight)), "<svg") {
-		t.Error("Logo(LogoLight) is not SVG")
+	for i, tc := range variants {
+		if err := xml.Unmarshal(a.Logo(tc.variant), &logos[i]); err != nil {
+			t.Fatalf("Logo(%v) must be valid SVG: %v", tc.variant, err)
+		}
+		if logos[i].XMLName.Local != "svg" {
+			t.Errorf("Logo(%v) root = %q, want svg", tc.variant, logos[i].XMLName.Local)
+		}
+		if logos[i].Fill != tc.fill {
+			t.Errorf("Logo(%v) fill = %q, want %q", tc.variant, logos[i].Fill, tc.fill)
+		}
+		if logos[i].ViewBox != "0 0 100 100" {
+			t.Errorf("Logo(%v) viewBox = %q, want 0 0 100 100", tc.variant, logos[i].ViewBox)
+		}
+		if logos[i].Title != "Antigravity" {
+			t.Errorf("Logo(%v) title = %q, want Antigravity", tc.variant, logos[i].Title)
+		}
+		if len(logos[i].Paths) != 1 || logos[i].Paths[0].Data == "" {
+			t.Errorf("Logo(%v) must contain one non-empty arch path", tc.variant)
+		}
+	}
+	if len(logos[0].Paths) == 1 && len(logos[1].Paths) == 1 && logos[0].Paths[0].Data != logos[1].Paths[0].Data {
+		t.Error("light and dark logos must use matching arch geometry")
 	}
 	// Any other variant falls back to the light logo (AC-001.5).
 	if !slices.Equal(a.Logo(LogoVariant(99)), a.Logo(LogoLight)) {
@@ -248,8 +280,13 @@ func TestAntigravityACP_DisplayOrderUnique(t *testing.T) {
 
 func TestAntigravityACP_PermissionAndBillingDefaults(t *testing.T) {
 	a := NewAntigravityACP()
-	if len(a.PermissionSettings()) != 0 {
-		t.Errorf("PermissionSettings() = %#v, want empty", a.PermissionSettings())
+	setting, ok := a.PermissionSettings()[PermissionKeyAntigravitySkipPermissions]
+	if !ok {
+		t.Fatal("PermissionSettings() missing Antigravity CLI permission flag")
+	}
+	if !setting.Supported || setting.Default || setting.ApplyMethod != PermissionApplyMethodCLIFlag ||
+		setting.CLIFlag != "--dangerously-skip-permissions" {
+		t.Errorf("Antigravity permission setting = %+v, want supported, off-by-default CLI flag", setting)
 	}
 	if got := a.BillingType(); got != usage.BillingTypeSubscription {
 		t.Errorf("BillingType() = %q, want %q", got, usage.BillingTypeSubscription)
@@ -261,6 +298,9 @@ func TestAntigravityACP_PermissionAndBillingDefaults(t *testing.T) {
 	}
 	if auto.ApplyMethod != PermissionApplyMethodAgentctlAutoApprove {
 		t.Errorf("auto_approve ApplyMethod = %q, want agentctl auto-approve", auto.ApplyMethod)
+	}
+	if catalog[PermissionKeyAntigravitySkipPermissions].CLIFlag != "--dangerously-skip-permissions" {
+		t.Errorf("catalog omitted Antigravity CLI flag: %+v", catalog)
 	}
 }
 
@@ -285,16 +325,17 @@ func writeFakeHarness(t *testing.T, dir, name string) {
 }
 
 func TestAntigravityACP_LocalRuntimeEnvironment(t *testing.T) {
-	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	isolateAntigravityHome(t)
 	t.Setenv("ANTIGRAVITY_HARNESS_PATH", "")
 	binDir := t.TempDir()
 	server := writeFakeAntigravityBinary(t, binDir)
 	writeFakeHarness(t, binDir, wantAntigravityHarnessNames()[0])
 	t.Setenv("PATH", binDir)
-	command, env, err := NewAntigravityACP().ResolveLocalRuntime(context.Background())
+	selection, err := NewAntigravityACP().ResolveLocalRuntime(context.Background())
 	if err != nil {
 		t.Fatalf("ResolveLocalRuntime: %v", err)
 	}
+	command, env := selection.Command, selection.Env
 	if command.Args()[0] != server {
 		t.Fatalf("command = %v, want %s", command.Args(), server)
 	}
@@ -312,7 +353,7 @@ func TestAntigravityACP_RemoteStripEnvPreservesAPIKeys(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryRequiresGlobalBinary(t *testing.T) {
-	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	isolateAntigravityHome(t)
 	binDir := t.TempDir()
 	t.Setenv("PATH", binDir)
 
@@ -328,8 +369,28 @@ func TestAntigravityACP_DiscoveryRequiresGlobalBinary(t *testing.T) {
 	}
 }
 
+func TestAntigravityACP_DiscoveryRejectsOldCLIWithoutStandalone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX shell")
+	}
+	isolateAntigravityHome(t)
+	binDir := t.TempDir()
+	cli := filepath.Join(binDir, "agy")
+	if err := os.WriteFile(cli, []byte("#!/bin/sh\necho 'agy 1.4.9'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	result, err := NewAntigravityACP().IsInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("IsInstalled error: %v", err)
+	}
+	if result.Available || result.MatchedPath != "" {
+		t.Fatalf("discovery = %+v, want unavailable when CLI is too old and standalone is missing", result)
+	}
+}
+
 func TestAntigravityACP_DiscoveryFailsClosedWithoutHarness(t *testing.T) {
-	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	isolateAntigravityHome(t)
 	binDir := t.TempDir()
 	path := writeFakeAntigravityBinary(t, binDir)
 	t.Setenv("PATH", binDir)
@@ -348,7 +409,7 @@ func TestAntigravityACP_DiscoveryFailsClosedWithoutHarness(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryAvailableWithHarnessSibling(t *testing.T) {
-	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	isolateAntigravityHome(t)
 	for _, harnessName := range wantAntigravityHarnessNames() {
 		t.Run(harnessName, func(t *testing.T) {
 			binDir := t.TempDir()
@@ -385,7 +446,7 @@ func TestAntigravityACP_DiscoveryAvailableWithHarnessSibling(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryHarnessMustBeRegularFile(t *testing.T) {
-	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	isolateAntigravityHome(t)
 	binDir := t.TempDir()
 	writeFakeAntigravityBinary(t, binDir)
 	// A directory named like the harness must not count as a match.
@@ -405,7 +466,7 @@ func TestAntigravityACP_DiscoveryHarnessMustBeRegularFile(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryRejectsNonExecutableHarness(t *testing.T) {
-	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	isolateAntigravityHome(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("unix execute bits do not control windows executability")
 	}
@@ -432,7 +493,7 @@ func TestAntigravityACP_DiscoveryRejectsNonExecutableHarness(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryHarnessDanglingSymlinkDoesNotMatch(t *testing.T) {
-	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	isolateAntigravityHome(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation needs elevated privileges on windows")
 	}
@@ -455,7 +516,7 @@ func TestAntigravityACP_DiscoveryHarnessDanglingSymlinkDoesNotMatch(t *testing.T
 }
 
 func TestAntigravityACP_DiscoveryHarnessPathEnvValidated(t *testing.T) {
-	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	isolateAntigravityHome(t)
 	binDir := t.TempDir()
 	writeFakeAntigravityBinary(t, binDir)
 	harness := filepath.Join(t.TempDir(), "harness-elsewhere")
@@ -491,7 +552,7 @@ func TestAntigravityACP_DiscoveryContextCancellation(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryDeterministic(t *testing.T) {
-	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	isolateAntigravityHome(t)
 	binDir := t.TempDir()
 	writeFakeAntigravityBinary(t, binDir)
 	writeFakeHarness(t, binDir, wantAntigravityHarnessNames()[0])
@@ -509,4 +570,12 @@ func TestAntigravityACP_DiscoveryDeterministic(t *testing.T) {
 	if first.Available != second.Available || first.MatchedPath != second.MatchedPath {
 		t.Errorf("repeated calls diverged: %+v vs %+v", first, second)
 	}
+}
+
+func isolateAntigravityHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("KANDEV_HOME_DIR", filepath.Join(home, ".kandev"))
 }

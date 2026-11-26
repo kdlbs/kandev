@@ -4,6 +4,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { GroupKey } from "@/lib/state/slices/ui/sidebar-view-types";
 import { useTranslation } from "react-i18next";
 
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import { isSidebarPluginGrouping } from "@/lib/sidebar/sidebar-plugin-grouping";
 // `labelKey` holds a catalog key, not copy: this table is module scope, so a
 // resolved `t()` here would freeze at the boot locale. `key` is a persisted
 // grouping value and stays in English.
@@ -47,12 +49,16 @@ type Props = {
 
 export function GroupPicker({ value, onChange }: Props) {
   const { t } = useTranslation();
+  const registry = usePluginRegistry();
+  const providers = registry.getSidebarGroupings();
+  const missingProvider =
+    isSidebarPluginGrouping(value) && !providers.some((provider) => provider.reference === value);
   return (
     <Select value={value} onValueChange={(v) => onChange(v as GroupKey)}>
       <SelectTrigger className="w-full text-xs" data-testid="group-key-select">
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className="max-w-[calc(100vw-2rem)]">
         {GROUP_OPTIONS.map((opt) => {
           const label = t(opt.labelKey);
           return (
@@ -67,6 +73,27 @@ export function GroupPicker({ value, onChange }: Props) {
             </SelectItem>
           );
         })}
+        {providers.map((provider) => {
+          const label = provider.labelKey
+            ? t(provider.labelKey, { defaultValue: provider.label })
+            : provider.label;
+          return (
+            <SelectItem
+              key={provider.reference}
+              value={provider.reference}
+              aria-label={label}
+              description={t("sidebar:pluginGroupDescription")}
+              className="text-xs min-h-7 wrap-anywhere [@media(any-pointer:coarse)]:min-h-[44px] max-md:min-h-[44px]"
+            >
+              {label}
+            </SelectItem>
+          );
+        })}
+        {missingProvider && (
+          <SelectItem value={value} disabled className="wrap-anywhere">
+            {t("sidebar:pluginGroupingUnavailableLabel", { name: value })}
+          </SelectItem>
+        )}
       </SelectContent>
     </Select>
   );

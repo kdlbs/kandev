@@ -207,22 +207,13 @@ func (r *Repository) UpsertBackgroundWorkload(ctx context.Context, workload *mod
 }
 
 func (r *Repository) GetBackgroundWorkload(ctx context.Context, sessionID, id string) (*models.BackgroundWorkload, error) {
-	var query string
-	if dialect.IsPostgres(r.ro.DriverName()) {
-		query = `SELECT id, task_id, session_id, kind, title, state, parent_work_id,
+	query := `SELECT id, task_id, session_id, kind, title, state, parent_work_id,
 				origin_turn_id, source_message_id, source_call_id, capabilities, exit_code,
 				output, output_truncated, output_offset, started_at, finished_at,
 				revision, created_at, updated_at
-		   FROM task_session_background_work WHERE session_id = $1 AND id = $2`
-	} else {
-		query = `SELECT id, task_id, session_id, kind, title, state, parent_work_id,
-				origin_turn_id, source_message_id, source_call_id, capabilities, exit_code,
-				output, output_truncated, output_offset, started_at, finished_at,
-				revision, created_at, updated_at
-		   FROM task_session_background_work WHERE session_id = ? AND id = ?`
-	}
+	   FROM task_session_background_work WHERE session_id = ? AND id = ?`
 	var work models.BackgroundWorkload
-	err := r.ro.GetContext(ctx, &work, query, sessionID, id)
+	err := r.ro.GetContext(ctx, &work, r.ro.Rebind(query), sessionID, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -233,22 +224,13 @@ func (r *Repository) GetBackgroundWorkload(ctx context.Context, sessionID, id st
 }
 
 func (r *Repository) ListBackgroundWorkloadsBySession(ctx context.Context, sessionID string) ([]*models.BackgroundWorkload, error) {
-	var query string
-	if dialect.IsPostgres(r.ro.DriverName()) {
-		query = `SELECT id, task_id, session_id, kind, title, state, parent_work_id,
+	query := `SELECT id, task_id, session_id, kind, title, state, parent_work_id,
 				origin_turn_id, source_message_id, source_call_id, capabilities, exit_code,
 				output, output_truncated, output_offset, started_at, finished_at,
 				revision, created_at, updated_at
-		   FROM task_session_background_work WHERE session_id = $1 ORDER BY created_at ASC`
-	} else {
-		query = `SELECT id, task_id, session_id, kind, title, state, parent_work_id,
-				origin_turn_id, source_message_id, source_call_id, capabilities, exit_code,
-				output, output_truncated, output_offset, started_at, finished_at,
-				revision, created_at, updated_at
-		   FROM task_session_background_work WHERE session_id = ? ORDER BY created_at ASC`
-	}
+	   FROM task_session_background_work WHERE session_id = ? ORDER BY created_at ASC`
 	var workloads []*models.BackgroundWorkload
-	err := r.ro.SelectContext(ctx, &workloads, query, sessionID)
+	err := r.ro.SelectContext(ctx, &workloads, r.ro.Rebind(query), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -330,18 +312,11 @@ func (r *Repository) UpsertBackgroundRun(ctx context.Context, run *models.Backgr
 }
 
 func (r *Repository) GetBackgroundRun(ctx context.Context, sessionID, id string) (*models.BackgroundRun, error) {
-	var query string
-	if dialect.IsPostgres(r.ro.DriverName()) {
-		query = `SELECT id, workload_id, session_id, provider_run_key, state, exit_code,
+	query := `SELECT id, workload_id, session_id, provider_run_key, state, exit_code,
 				started_at, finished_at, created_at, updated_at
-		   FROM task_session_background_runs WHERE session_id = $1 AND id = $2`
-	} else {
-		query = `SELECT id, workload_id, session_id, provider_run_key, state, exit_code,
-				started_at, finished_at, created_at, updated_at
-		   FROM task_session_background_runs WHERE session_id = ? AND id = ?`
-	}
+	   FROM task_session_background_runs WHERE session_id = ? AND id = ?`
 	var run models.BackgroundRun
-	err := r.ro.GetContext(ctx, &run, query, sessionID, id)
+	err := r.ro.GetContext(ctx, &run, r.ro.Rebind(query), sessionID, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -352,18 +327,11 @@ func (r *Repository) GetBackgroundRun(ctx context.Context, sessionID, id string)
 }
 
 func (r *Repository) ListBackgroundRunsByWorkload(ctx context.Context, sessionID, workloadID string) ([]*models.BackgroundRun, error) {
-	var query string
-	if dialect.IsPostgres(r.ro.DriverName()) {
-		query = `SELECT id, workload_id, session_id, provider_run_key, state, exit_code,
+	query := `SELECT id, workload_id, session_id, provider_run_key, state, exit_code,
 				started_at, finished_at, created_at, updated_at
-		   FROM task_session_background_runs WHERE session_id = $1 AND workload_id = $2 ORDER BY created_at ASC`
-	} else {
-		query = `SELECT id, workload_id, session_id, provider_run_key, state, exit_code,
-				started_at, finished_at, created_at, updated_at
-		   FROM task_session_background_runs WHERE session_id = ? AND workload_id = ? ORDER BY created_at ASC`
-	}
+	   FROM task_session_background_runs WHERE session_id = ? AND workload_id = ? ORDER BY created_at ASC`
 	var runs []*models.BackgroundRun
-	err := r.ro.SelectContext(ctx, &runs, query, sessionID, workloadID)
+	err := r.ro.SelectContext(ctx, &runs, r.ro.Rebind(query), sessionID, workloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -412,16 +380,10 @@ func (r *Repository) RecordBackgroundActionReceipt(ctx context.Context, receipt 
 }
 
 func (r *Repository) GetBackgroundActionReceipt(ctx context.Context, sessionID, operationID string) (*models.BackgroundActionReceipt, error) {
-	var query string
-	if dialect.IsPostgres(r.ro.DriverName()) {
-		query = `SELECT id, session_id, workload_id, run_id, action, operation_id, status, error, uncertain, created_at, updated_at
-		   FROM task_session_background_action_receipts WHERE session_id = $1 AND operation_id = $2`
-	} else {
-		query = `SELECT id, session_id, workload_id, run_id, action, operation_id, status, error, uncertain, created_at, updated_at
-		   FROM task_session_background_action_receipts WHERE session_id = ? AND operation_id = ?`
-	}
+	query := `SELECT id, session_id, workload_id, run_id, action, operation_id, status, error, uncertain, created_at, updated_at
+	   FROM task_session_background_action_receipts WHERE session_id = ? AND operation_id = ?`
 	var receipt models.BackgroundActionReceipt
-	err := r.ro.GetContext(ctx, &receipt, query, sessionID, operationID)
+	err := r.ro.GetContext(ctx, &receipt, r.ro.Rebind(query), sessionID, operationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

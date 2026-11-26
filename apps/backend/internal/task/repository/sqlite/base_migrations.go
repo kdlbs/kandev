@@ -1278,6 +1278,9 @@ func (r *Repository) recreateTableNamed(name, tableName, triggerPhrase string, s
 // migrateTasksRemoveWorkflowFK removes the foreign key constraint on workflow_id
 // to allow ephemeral tasks (quick chat) to have empty workflow_id.
 func (r *Repository) migrateTasksRemoveWorkflowFK() error {
+	if err := r.migrate.Apply("tasks.flag_note", `ALTER TABLE tasks ADD COLUMN flag_note TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	if err := r.migrate.Apply("tasks.executor_actor_user_id", "ALTER TABLE tasks ADD COLUMN executor_actor_user_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -1299,6 +1302,7 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 			workflow_step_id TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL,
 			description TEXT DEFAULT '',
+			flag_note TEXT NOT NULL DEFAULT '',
 			state TEXT DEFAULT 'TODO',
 			priority INTEGER DEFAULT 0,
 			execution_grade TEXT NOT NULL DEFAULT '',
@@ -1315,7 +1319,7 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 			updated_at TIMESTAMP NOT NULL
 		)`,
 		fmt.Sprintf(`INSERT INTO tasks_new SELECT
-			id, executor_actor_user_id, workspace_id, '', workflow_id, workflow_step_id, title, description,
+			id, executor_actor_user_id, workspace_id, '', workflow_id, workflow_step_id, title, description, flag_note,
 			state, priority, %s, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, archived_at, created_at, updated_at
 		FROM tasks`, gradeExpression),
 		`DROP TABLE tasks`,

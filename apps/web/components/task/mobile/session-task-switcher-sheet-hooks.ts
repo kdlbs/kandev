@@ -471,6 +471,7 @@ function buildKanbanTaskUpsert(
     workflowStepId: task.workflow_step_id,
     title: task.title,
     description: task.description,
+    flagNote: task.flag_note ?? existing?.flagNote,
     position: task.position ?? 0,
     state: task.state,
     priority: task.priority,

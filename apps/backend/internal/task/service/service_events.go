@@ -499,6 +499,7 @@ func (s *Service) publishTaskEventNowWithOptions(
 		"workflow_step_id":   task.WorkflowStepID,
 		"title":              task.Title,
 		"description":        task.Description,
+		"flag_note":          task.FlagNote,
 		"state":              string(task.State),
 		"priority":           task.Priority,
 		"execution_grade":    task.ExecutionGrade,
@@ -1207,6 +1208,10 @@ func projectConversationReceipt(receipt *models.ConversationMutationReceipt) *mo
 		if operation.HadOutput != nil {
 			hadOutput := *operation.HadOutput
 			copyOperation.HadOutput = &hadOutput
+		}
+		if operation.ConfigurationCommandResult != nil {
+			result := *operation.ConfigurationCommandResult
+			copyOperation.ConfigurationCommandResult = &result
 		}
 		projected.Operations = append(projected.Operations, copyOperation)
 	}

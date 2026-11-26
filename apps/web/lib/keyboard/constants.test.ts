@@ -8,12 +8,6 @@ describe("MODIFIER_KEYS", () => {
     expect(MODIFIER_KEYS.ALT).toBe("Alt");
     expect(MODIFIER_KEYS.SHIFT).toBe("Shift");
   });
-
-  it("has correct type", () => {
-    // TypeScript ensures these are readonly at compile time
-    const keys: typeof MODIFIER_KEYS = MODIFIER_KEYS;
-    expect(keys).toBeDefined();
-  });
 });
 
 describe("KEYS", () => {
@@ -43,12 +37,6 @@ describe("KEYS", () => {
     expect(KEYS.ZERO).toBe("0");
     expect(KEYS.ONE).toBe("1");
     expect(KEYS.NINE).toBe("9");
-  });
-
-  it("has correct type", () => {
-    // TypeScript ensures these are readonly at compile time
-    const keys: typeof KEYS = KEYS;
-    expect(keys).toBeDefined();
   });
 });
 
@@ -114,12 +102,6 @@ describe("SHORTCUTS", () => {
     });
   });
 
-  it("has correct type", () => {
-    // TypeScript ensures these are readonly at compile time
-    const shortcuts: typeof SHORTCUTS = SHORTCUTS;
-    expect(shortcuts).toBeDefined();
-  });
-
   it("all shortcuts have valid key property", () => {
     Object.values(SHORTCUTS).forEach((shortcut) => {
       expect(shortcut).toHaveProperty("key");
@@ -137,27 +119,5 @@ describe("SHORTCUTS", () => {
         });
       }
     });
-  });
-});
-
-describe("Type definitions", () => {
-  it("KeyboardShortcut type accepts valid shortcuts", () => {
-    // These should compile without errors
-    const shortcut1: import("./constants").KeyboardShortcut = {
-      key: "Enter",
-    };
-    expect(shortcut1.key).toBe("Enter");
-
-    const shortcut2: import("./constants").KeyboardShortcut = {
-      key: "s",
-      modifiers: { ctrlOrCmd: true },
-    };
-    expect(shortcut2.modifiers?.ctrlOrCmd).toBe(true);
-
-    const shortcut3: import("./constants").KeyboardShortcut = {
-      key: "a",
-      modifiers: { ctrl: true, shift: true, alt: true },
-    };
-    expect(shortcut3.modifiers?.ctrl).toBe(true);
   });
 });

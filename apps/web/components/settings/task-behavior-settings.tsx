@@ -18,10 +18,8 @@ import { TodoListPanelSettings } from "@/components/settings/todo-list-panel-set
 import { TurnChangedFilesSettings } from "@/components/settings/turn-changed-files-settings";
 import { UnreadDividerSettings } from "@/components/settings/unread-divider-settings";
 import { UnreadTaskDotSettings } from "@/components/settings/unread-task-dot-settings";
-import {
-  MessageQueueSettingsContent,
-  useMessageQueueSettingsDraft,
-} from "@/components/settings/system/message-queue-settings";
+import { MessageQueueSettingsContent } from "@/components/settings/system/message-queue-settings";
+import { useMessageQueueSettingsDraft } from "@/components/settings/system/use-message-queue-settings-draft";
 import { SessionCapacitySettingsContent } from "@/components/settings/system/session-capacity-settings";
 import { useSessionCapacitySettings } from "@/components/settings/system/use-session-capacity-settings";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";

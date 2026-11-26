@@ -28,6 +28,7 @@ this design consumes that outcome and does not define recovery behavior.
 | AC-UI-EMPTY-TURN-NOTICE-001.4 through .8 | Frontend notice |
 | AC-UI-EMPTY-TURN-NOTICE-001.9, .10 | Recoverable-failure exception |
 | AC-UI-EMPTY-TURN-NOTICE-001.11 | Passthrough exclusion |
+| AC-UI-EMPTY-TURN-NOTICE-001.12, .13 | Configuration-command result |
 
 ## Backend output signal
 
@@ -71,6 +72,25 @@ The notice renders through the shared `StatusMessage` component
 no layout change. `filterVisibleMessages`
 (`apps/web/hooks/processed-message-filtering.ts`) hides the notice if later output
 arrives for the same turn.
+
+## Configuration-command result
+
+When a silent completion includes `configuration_result`, the same turn notice
+path creates a command-specific status message instead of the generic hint. The
+task service includes the result only when its read for that turn finds the
+initiating user slash command. The live completion and its Core conversation
+receipt carry the result; buffered or recovered Core playback strips it before
+the completion handler. Both live events use `empty-turn-${turn_id}`, so clients
+that receive both update one synthetic row. The row is not persisted and does
+not return after reload.
+
+The completed-turn identity is recorded independently from the notice state.
+Dismissal or expiry removes the row but does not make a duplicate completion
+eligible to recreate it.
+
+Confirmed outcomes expire after five visible seconds. Unconfirmed outcomes
+remain dismissible. The row is inserted without changing focus or forcing a
+scroll to the latest message. Provider text remains in ordinary agent rows.
 
 ## Recoverable-failure exception
 
@@ -117,11 +137,13 @@ change is required for this reusable notice exclusion.
 
 ## Compatibility and verification
 
-No protocol, persistence, or runtime flag changes: `had_output` is a transient
-event field. Backend coverage asserts the output allowlist and the
+No persistence or runtime flag changes: `had_output` and
+`configuration_result` are transient event fields. Backend coverage asserts the output allowlist and the
 error-terminated exception in the task service and orchestrator packages.
 Frontend coverage in `empty-turn-notice.test.ts` asserts the three notice
 variants, the once-per-turn keying, and the ephemeral-surface exclusion.
+Configuration-command tests assert result projection, notice precedence,
+visibility-based expiry, and dismissal.
 Passthrough cases cover the pure decision, real-store event handling, explicit
 false precedence, and late hydration. Filtering tests preserve errors and
 ordinary messages while hiding only synthetic empty-turn notices.

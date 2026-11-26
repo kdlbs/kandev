@@ -3,8 +3,10 @@
 import {
   IconAlertCircleOff,
   IconArchive,
+  IconFlag,
   IconHierarchy3,
   IconLoader,
+  IconPencil,
   IconSubtask,
   IconTrash,
   IconUnlink,
@@ -13,6 +15,7 @@ import { useOpenTaskGraph } from "@/hooks/domains/task/use-open-task-graph";
 import { ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
 import { useTranslation } from "react-i18next";
 import { useTaskTurnError } from "@/hooks/use-task-turn-error";
+import type { TaskSwitcherItem } from "./task-switcher-types";
 
 export function TaskArchiveItem({
   taskId,
@@ -170,5 +173,43 @@ export function TaskDeleteItem({
         {t("task:delete")}
       </ContextMenuItem>
     </>
+  );
+}
+
+export function TaskFlagItem({
+  task,
+  disabled,
+  onSelect,
+}: {
+  task: TaskSwitcherItem;
+  disabled?: boolean;
+  onSelect?: () => void;
+}) {
+  const { t } = useTranslation();
+  if (task.isArchived || !onSelect) return null;
+  return (
+    <ContextMenuItem disabled={disabled || task.isPendingRemoval} onSelect={onSelect}>
+      <IconFlag className="mr-2 h-4 w-4" aria-hidden="true" />
+      {t(task.flagNote ? "sidebar:flag" : "sidebar:addFlag")}
+    </ContextMenuItem>
+  );
+}
+
+export function TaskRenameItem({
+  task,
+  disabled,
+  onRenameTask,
+}: {
+  task: TaskSwitcherItem;
+  disabled?: boolean;
+  onRenameTask?: (taskId: string, currentTitle: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (!onRenameTask) return null;
+  return (
+    <ContextMenuItem disabled={disabled} onSelect={() => onRenameTask(task.id, task.title)}>
+      <IconPencil className="mr-2 h-4 w-4" />
+      {t("task:rename")}
+    </ContextMenuItem>
   );
 }

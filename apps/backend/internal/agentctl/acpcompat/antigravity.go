@@ -40,11 +40,19 @@ const (
 	// AntigravityPersonalAuthCapability is advertised by agentctl builds that
 	// understand AuthPolicy and transient auth status.
 	AntigravityPersonalAuthCapability = "antigravity_personal_auth_v1"
+	// AntigravityCLIRuntimeCapability is advertised by agentctl builds that
+	// preserve the CLI runtime's native home and reject session-scoped auth.
+	AntigravityCLIRuntimeCapability = "antigravity_cli_runtime_v1"
+
+	AntigravityRuntimeCLI        = "cli"
+	AntigravityRuntimeStandalone = "standalone"
 )
 
 // AuthPolicy is the internal child-process authentication contract. It is
 // never persisted as a profile option.
 type AuthPolicy struct {
+	RuntimeVariant   string `json:"runtime_variant,omitempty"`
+	AdapterVersion   string `json:"adapter_version,omitempty"`
 	MethodID         string `json:"method_id"`
 	AllowInteractive bool   `json:"allow_interactive,omitempty"`
 	AttemptID        string `json:"attempt_id,omitempty"`
@@ -52,6 +60,10 @@ type AuthPolicy struct {
 
 // ErrAuthRequired marks an operation that needs an interactive Google sign-in.
 var ErrAuthRequired = errors.New("antigravity authentication required")
+
+// ErrTaskAuthenticationDenied prevents task-scoped ACP authentication from
+// changing credentials in the host user's CLI store.
+var ErrTaskAuthenticationDenied = errors.New("antigravity CLI sign-in is available only from Settings")
 
 // ErrInvalidHarnessOverride marks a harness path that is not a usable regular
 // executable after environment merge.
@@ -81,10 +93,62 @@ func (e *AuthRequiredError) Unwrap() error { return ErrAuthRequired }
 // launch. Interactive permission is reserved for the dedicated operator setup
 // instance.
 func AntigravityAuthPolicy(allowInteractive bool) *AuthPolicy {
+	return AntigravityAuthPolicyForRuntime(AntigravityRuntimeStandalone, "", allowInteractive)
+}
+
+// AntigravityAuthPolicyForRuntime pins the wire policy and saved runtime
+// identity to the selected local executable.
+func AntigravityAuthPolicyForRuntime(variant, version string, allowInteractive bool) *AuthPolicy {
+	if variant == "" {
+		variant = AntigravityRuntimeStandalone
+	}
+	policy := &AuthPolicy{RuntimeVariant: variant}
+	if version != "" {
+		policy.AdapterVersion = fmt.Sprintf("antigravity-%s/%s", variant, version)
+	}
+	if variant == AntigravityRuntimeCLI {
+		return policy
+	}
 	return &AuthPolicy{
 		MethodID:         AntigravityPersonalAuthMethod,
 		AllowInteractive: allowInteractive,
+		RuntimeVariant:   policy.RuntimeVariant,
+		AdapterVersion:   policy.AdapterVersion,
 	}
+}
+
+// AntigravityRuntimeCapability identifies the agentctl contract required by
+// the selected Antigravity runtime.
+func AntigravityRuntimeCapability(policy *AuthPolicy) string {
+	if policy != nil && policy.RuntimeVariant == AntigravityRuntimeCLI {
+		return AntigravityCLIRuntimeCapability
+	}
+	return AntigravityPersonalAuthCapability
+}
+
+// AntigravityRuntimeForAdapterVersion recovers the selected executable from
+// the tagged value stored with a native conversation. Empty and unknown tags
+// preserve the historical standalone behavior.
+func AntigravityRuntimeForAdapterVersion(value string) string {
+	if strings.HasPrefix(value, "antigravity-cli/") {
+		return AntigravityRuntimeCLI
+	}
+	return AntigravityRuntimeStandalone
+}
+
+// AntigravityRuntimeForCommand recognizes the qualified vendor CLI argv. A
+// command that does not exactly begin with the CLI executable and ACP mode is
+// treated as standalone for legacy and remote launches.
+func AntigravityRuntimeForCommand(args []string) string {
+	if len(args) < 2 || args[1] != "acp" {
+		return AntigravityRuntimeStandalone
+	}
+	base := filepath.Base(strings.ReplaceAll(args[0], `\`, "/"))
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	if strings.EqualFold(name, "agy") {
+		return AntigravityRuntimeCLI
+	}
+	return AntigravityRuntimeStandalone
 }
 
 // IsAntigravity reports whether agentID names the Antigravity ACP agent.
@@ -99,6 +163,15 @@ func ClientInfoForAgent(agentID string) (name, version string) {
 		return AntigravityClientName, AntigravityClientVersion
 	}
 	return "", ""
+}
+
+// ClientInfoForLaunch keeps the vendor-specific standalone identity while
+// allowing the CLI to receive Kandev's regular ACP identity.
+func ClientInfoForLaunch(agentID string, policy *AuthPolicy) (name, version string) {
+	if IsAntigravity(agentID) && policy != nil && policy.RuntimeVariant == AntigravityRuntimeCLI {
+		return "", ""
+	}
+	return ClientInfoForAgent(agentID)
 }
 
 // IsHumanInputPermission reports whether an ACP permission request is an
@@ -128,6 +201,16 @@ func AntigravityCredentialEnvNames() []string {
 		"AGY_ACP_CCPA_PROJECT",
 		"AGY_ACP_ENABLE_OAUTH",
 	}
+}
+
+// StripAntigravityCredentialEnv removes environment values that select a
+// credential mode outside the host user's cached CLI sign-in.
+func StripAntigravityCredentialEnv(env []string) []string {
+	out := append([]string(nil), env...)
+	for _, key := range AntigravityCredentialEnvNames() {
+		out = removeEnvEntry(out, key)
+	}
+	return out
 }
 
 // ValidateLocalAntigravityEnvironment rejects profile inputs that would create
@@ -181,10 +264,7 @@ func PrepareLocalAntigravityEnv(env []string, harnessPath string) ([]string, err
 	if err := ValidateLocalAntigravityEnvSlice(env, home); err != nil {
 		return nil, err
 	}
-	out := append([]string(nil), env...)
-	for _, key := range AntigravityCredentialEnvNames() {
-		out = removeEnvEntry(out, key)
-	}
+	out := StripAntigravityCredentialEnv(env)
 	out = removeEnvEntry(out, AntigravityHarnessPathEnv)
 	if harnessPath != "" {
 		info, err := os.Stat(harnessPath)

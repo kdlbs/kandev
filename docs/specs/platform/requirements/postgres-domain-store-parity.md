@@ -108,6 +108,7 @@ Each required store must initialize before Kandev becomes ready. External provid
 - **AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.6:** Managed SQLite maintenance alone shall not change healthy persistence to unhealthy because it occupies the database writer.
 - **AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.7:** A deferred maintenance-time health check shall preserve each store's previous state and last check time. It shall not establish startup readiness or clear an existing failure.
 - **AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.8:** After maintenance releases the database, periodic health checks shall resume within the normal check interval. Actual database failures shall retain the existing readiness and caller error behavior.
+- **AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.9:** When SQLite writer contention alone causes a periodic check to exceed its deadline, healthy persistence shall remain healthy unless a confirmation check about three seconds later also fails. Other failure classes, already unhealthy stores, startup checks, and PostgreSQL checks shall retain immediate recording.
 
 ### REQ-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-008: Contributor workflow
 

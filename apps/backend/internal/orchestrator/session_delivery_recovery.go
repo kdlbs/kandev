@@ -27,6 +27,10 @@ type contextContinuationRecoveryVerifier interface {
 	HasResolvedContextContinuationRecovery(context.Context, models.AgentDeliveryRecovery) (bool, error)
 }
 
+type inactiveDeliveryRecoveryBlockResolver interface {
+	ResolveInactiveAgentDeliveryRecoveryBlock(context.Context, *models.SessionRecoveryBlock, time.Time) (bool, error)
+}
+
 func (s *Service) RetrySessionDelivery(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -248,8 +252,24 @@ func (s *Service) retryKnownSessionDelivery(ctx context.Context, session *models
 			"recovery_identity_mismatch", recovery.Revision, nil), nil
 	}
 	if !recoveryBlockMatches(block, recovery) {
-		return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
-			"independent_recovery_block", recovery.Revision, nil), nil
+		resolved, err := s.resolveInactiveDeliveryRecoveryBlock(ctx, session, block, recovery)
+		if err != nil {
+			return nil, err
+		}
+		if !resolved {
+			return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
+				"independent_recovery_block", recovery.Revision, nil), nil
+		}
+		block, err = s.repo.(sessionRecoveryBlockStore).GetOpenSessionRecoveryBlock(
+			ctx, session.ID, recovery.IncarnationID, currentGeneration,
+		)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if !recoveryBlockMatches(block, recovery) {
+			return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
+				"independent_recovery_block", recovery.Revision, nil), nil
+		}
 	}
 	if block == nil && recovery.Phase != models.AgentDeliveryRecoveryRecovered &&
 		recovery.Phase != models.AgentDeliveryRecoverySettled && !terminalDeliverySubmission(submission.State) {
@@ -257,6 +277,25 @@ func (s *Service) retryKnownSessionDelivery(ctx context.Context, session *models
 			"delivery_recovery_block_missing", recovery.Revision, nil), nil
 	}
 	return s.retryVerifiedSessionDelivery(ctx, session, recovery, submission)
+}
+
+func (s *Service) resolveInactiveDeliveryRecoveryBlock(
+	ctx context.Context,
+	session *models.TaskSession,
+	block *models.SessionRecoveryBlock,
+	recovery models.AgentDeliveryRecovery,
+) (bool, error) {
+	if block == nil || block.State != models.RecoveryBlockOpen ||
+		block.ConsumerReference != agentDeliveryConsumer || block.DeliverySubmissionID == "" ||
+		block.DeliverySubmissionID == recovery.SubmissionID || block.SessionID != session.ID ||
+		block.IncarnationID != recovery.IncarnationID || block.ExpectedGeneration != recovery.HarnessGeneration {
+		return false, nil
+	}
+	resolver, ok := s.repo.(inactiveDeliveryRecoveryBlockResolver)
+	if !ok {
+		return false, nil
+	}
+	return resolver.ResolveInactiveAgentDeliveryRecoveryBlock(ctx, block, time.Now().UTC())
 }
 
 func (s *Service) retryVerifiedSessionDelivery(ctx context.Context, session *models.TaskSession, recovery models.AgentDeliveryRecovery, submission *models.AgentDeliverySubmission) (*SessionDeliveryRecoveryResponse, error) {

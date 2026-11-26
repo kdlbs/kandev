@@ -15,6 +15,7 @@ import (
 )
 
 func TestAntigravityHostLaunchPolicy(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	dir := t.TempDir()
 	serverName, harnessName := "agy_acp_server.par", "localharness_external"

@@ -159,31 +159,24 @@ class LSPClientManager {
     sessionId: string,
     lspLanguage: string,
     userConfigs?: Record<string, Record<string, unknown>>,
-    continuityEnabled = false,
   ): () => void {
     const key = `${sessionId}:${lspLanguage}`;
     const configuration = configurationForLanguage(lspLanguage, userConfigs);
 
     const existing = this.connections.get(key);
-    if (
-      existing &&
-      existing.continuityEnabled === continuityEnabled &&
-      (existing.ws.readyState <= WebSocket.OPEN || existing.reconnecting)
-    ) {
+    if (existing && (existing.ws.readyState <= WebSocket.OPEN || existing.reconnecting)) {
       return this.acquireConnection(existing, configuration);
     }
     if (existing) this.cleanupConnection(existing);
 
-    if (!continuityEnabled) clearLspLeaseHint(sessionId, lspLanguage);
-    const leaseId = continuityEnabled ? getLspLeaseHint(sessionId, lspLanguage) : null;
-    const ws = this.transport.createSocket(sessionId, lspLanguage, continuityEnabled, leaseId);
+    const leaseId = getLspLeaseHint(sessionId, lspLanguage);
+    const ws = this.transport.createSocket(sessionId, lspLanguage, leaseId);
     const conn = createManagedLspConnection({
       key,
       sessionId,
       generation: ++this.connectionGeneration,
       ws,
       configuration,
-      continuityEnabled,
       leaseId,
       lspLanguage,
     });
@@ -372,7 +365,7 @@ class LSPClientManager {
     this.editorState.clearDocumentDiagnostics(conn, canonicalUri);
     conn.closedDocuments.add(canonicalUri);
 
-    if (conn.continuityEnabled && conn.reconnecting && !conn.documentsSynced) {
+    if (conn.reconnecting && !conn.documentsSynced) {
       document.pendingClose = true;
       return;
     }
@@ -398,40 +391,19 @@ class LSPClientManager {
     this.setStatus(key, { state: "stopping" });
     if (conn.idleTimer) clearTimeout(conn.idleTimer);
 
-    if (conn.continuityEnabled) {
-      conn.explicitlyStopped = true;
-      conn.releaseAfterConnect = "stop";
-      if (conn.reconnectTimer) {
-        clearTimeout(conn.reconnectTimer);
-        conn.reconnectTimer = null;
-      }
-      clearLspLeaseHint(sessionId, lspLanguage);
-      if (conn.ws.readyState === WebSocket.OPEN) {
-        void this.transport.release(conn, "stop");
-      } else if (conn.ws.readyState === WebSocket.CLOSED) {
-        conn.reconnecting = true;
-        this.transport.open(conn);
-      }
-      return;
+    conn.explicitlyStopped = true;
+    conn.releaseAfterConnect = "stop";
+    if (conn.reconnectTimer) {
+      clearTimeout(conn.reconnectTimer);
+      conn.reconnectTimer = null;
     }
-
-    // Send shutdown/exit before closing
-    if (conn.rpc && conn.initialized) {
-      try {
-        conn.rpc
-          .sendRequest("shutdown", null)
-          .then(() => {
-            conn.rpc?.sendNotification("exit", null);
-          })
-          .catch(() => {});
-      } catch {
-        // ignore
-      }
+    clearLspLeaseHint(sessionId, lspLanguage);
+    if (conn.ws.readyState === WebSocket.OPEN) {
+      void this.transport.release(conn, "stop");
+    } else if (conn.ws.readyState === WebSocket.CLOSED) {
+      conn.reconnecting = true;
+      this.transport.open(conn);
     }
-
-    this.cleanupConnection(conn);
-    this.statuses.delete(key);
-    this.notifyChange(key);
   }
 
   disconnectAll(): void {
@@ -474,23 +446,17 @@ class LSPClientManager {
       if (!this.isCurrentConnection(conn) || conn.refCount > 0 || hasActiveLspWork(conn.progress)) {
         return;
       }
-      if (conn.continuityEnabled) {
-        conn.releaseAfterConnect = "editor_idle";
-        if (conn.ws.readyState === WebSocket.OPEN) {
-          void this.transport.release(conn, "editor_idle");
-        } else if (conn.ws.readyState === WebSocket.CLOSED) {
-          if (conn.reconnectTimer) {
-            clearTimeout(conn.reconnectTimer);
-            conn.reconnectTimer = null;
-          }
-          conn.reconnecting = true;
-          this.transport.open(conn);
+      conn.releaseAfterConnect = "editor_idle";
+      if (conn.ws.readyState === WebSocket.OPEN) {
+        void this.transport.release(conn, "editor_idle");
+      } else if (conn.ws.readyState === WebSocket.CLOSED) {
+        if (conn.reconnectTimer) {
+          clearTimeout(conn.reconnectTimer);
+          conn.reconnectTimer = null;
         }
-        return;
+        conn.reconnecting = true;
+        this.transport.open(conn);
       }
-      this.cleanupConnection(conn);
-      this.statuses.delete(conn.key);
-      this.notifyChange(conn.key);
     }, LSP_IDLE_TIMEOUT);
   }
 
@@ -505,7 +471,11 @@ class LSPClientManager {
   }
 
   private isCurrentTransportConnection(conn: ManagedLspConnection, generation: number): boolean {
-    return this.isCurrentConnection(conn) && conn.transportGeneration === generation;
+    return (
+      this.isCurrentConnection(conn) &&
+      !conn.explicitlyStopped &&
+      conn.transportGeneration === generation
+    );
   }
 
   private cleanupConnection(conn: ManagedLspConnection) {

@@ -149,8 +149,8 @@ combines them has to be one sentence a person can hold in their head.
 
 ### REQ-WORKSPACES-ORG-UNITS-005: Workspace placement
 
-**Intent:** Moving a workspace between teams is a normal event, and it is the
-only way to narrow or widen who reaches it.
+**Intent:** A workspace can move between teams. A move can change who has
+access through a unit while preserving roles granted directly on the workspace.
 
 #### Acceptance criteria
 
@@ -167,6 +167,17 @@ only way to narrow or widen who reaches it.
   destination unit is in another organization.
 - **AC-WORKSPACES-ORG-UNITS-005.5:** When a workspace moves, the system shall
   retain its direct grants.
+- **AC-WORKSPACES-ORG-UNITS-005.6:** When authentication is off, the workspace
+  Overview shall omit the Authentication & users section on desktop and phone.
+- **AC-WORKSPACES-ORG-UNITS-005.7:** When a signed-in user opens the workspace
+  Overview, the system shall show an Authentication & users section on desktop
+  and phone. The section shall group Organization unit and Team access and
+  identify that they control access to this workspace. The user's workspace
+  permissions shall control the available actions.
+- **AC-WORKSPACES-ORG-UNITS-005.8:** The workspace Overview shall explain how
+  the selected unit and its parent units grant access. It shall explain that a
+  move retains direct roles and that the highest role applies when access comes
+  from both sources.
 
 ## Out of scope
 

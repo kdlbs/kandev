@@ -302,6 +302,7 @@ func buildStandaloneCreateInstanceRequest(
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKill,
+		OfflineBudgetMinutes:       offlineBudgetFromMetadata(req.Metadata),
 		StripEnv:                   stripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		AuthPolicy:                 req.AuthPolicy,
@@ -880,13 +881,15 @@ func (r *StandaloneExecutor) buildRecoveredInstancesWithLease(
 		if lease != nil {
 			client = lease.NewBoundInstanceClient(inst.Port, r.logger,
 				agentctl.WithExecutionID(inst.ID), agentctl.WithSessionID(sessionID),
-				agentctl.WithBuiltinMCPScopedRoutes(inst.ScopedMCPRoutes))
+				agentctl.WithBuiltinMCPScopedRoutes(inst.ScopedMCPRoutes),
+				agentctl.WithACPProtocolVersion(inst.ACPProtocolVersion))
 		} else {
 			client = agentctl.NewClient(r.host, inst.Port, r.logger,
 				agentctl.WithExecutionID(inst.ID),
 				agentctl.WithSessionID(sessionID),
 				agentctl.WithAuthToken(r.authToken),
-				agentctl.WithBuiltinMCPScopedRoutes(inst.ScopedMCPRoutes))
+				agentctl.WithBuiltinMCPScopedRoutes(inst.ScopedMCPRoutes),
+				agentctl.WithACPProtocolVersion(inst.ACPProtocolVersion))
 		}
 		deliveryStatus, legacyEvidence, deliveryErr := r.discoverDeliveryStatus(ctx, client)
 

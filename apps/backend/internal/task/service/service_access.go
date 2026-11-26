@@ -248,21 +248,28 @@ func (s *Service) authorizeTaskScope(ctx context.Context, taskID string, scope a
 }
 
 func (s *Service) authorizeTaskScopeAction(ctx context.Context, taskID string, scope authz.Scope, action models.WorkspaceCollaborationAction) error {
+	_, err := s.authorizeTaskScopeActionWorkspace(ctx, taskID, scope, action)
+	return err
+}
+
+// authorizeTaskScopeActionWorkspace applies task access rules and returns the
+// workspace ID from the task snapshot used for authorization.
+func (s *Service) authorizeTaskScopeActionWorkspace(ctx context.Context, taskID string, scope authz.Scope, action models.WorkspaceCollaborationAction) (string, error) {
 	if !s.needsWorkspaceAuthorization(ctx) {
-		return nil
+		return "", nil
 	}
 	task, err := s.tasks.GetTask(ctx, taskID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if task == nil {
-		return repoerrors.ErrTaskNotFound
+		return "", repoerrors.ErrTaskNotFound
 	}
 	if task.WorkspaceID == "" {
 		if s.collaborationApplies(ctx) {
-			return repoerrors.ErrTaskNotFound
+			return "", repoerrors.ErrTaskNotFound
 		}
-		return nil
+		return "", nil
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, task.WorkspaceID)
 	switch {
@@ -271,22 +278,42 @@ func (s *Service) authorizeTaskScopeAction(ctx context.Context, taskID string, s
 		// own row remains readable because there is no workspace owner left
 		// to authorize against.
 		if s.collaborationApplies(ctx) {
-			return repoerrors.ErrTaskNotFound
+			return "", repoerrors.ErrTaskNotFound
 		}
-		return nil
+		return task.WorkspaceID, nil
 	case err != nil:
-		return err
+		return "", err
 	case workspace == nil:
-		return repoerrors.ErrTaskNotFound
+		return "", repoerrors.ErrTaskNotFound
 	}
 	decision := s.workspaceDecision(ctx, workspace)
 	if !decision.CanRead() {
-		return repoerrors.ErrTaskNotFound
+		return "", repoerrors.ErrTaskNotFound
 	}
 	if !decision.Has(scope) {
-		return ErrForbidden
+		return "", ErrForbidden
 	}
-	return s.authorizeWorkspaceCollaboration(ctx, task.WorkspaceID, action)
+	if err := s.authorizeWorkspaceCollaboration(ctx, task.WorkspaceID, action); err != nil {
+		return "", err
+	}
+	return task.WorkspaceID, nil
+}
+
+// authorizeTaskIDWorkspace checks task reach and returns the workspace ID
+// from the same task snapshot. The caller uses this value for later reads that
+// must stay within the authorized workspace if the task is transferred.
+func (s *Service) authorizeTaskIDWorkspace(ctx context.Context, taskID string) (string, error) {
+	if s.needsWorkspaceAuthorization(ctx) {
+		return s.authorizeTaskScopeActionWorkspace(ctx, taskID, authz.ScopeWorkspaceRead, models.CollaborationRead)
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	if task == nil {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	return task.WorkspaceID, nil
 }
 
 // authorizeWorkflowID checks reach of a workflow via its workspace.

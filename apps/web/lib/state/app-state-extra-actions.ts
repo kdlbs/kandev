@@ -20,7 +20,13 @@ import type {
 
 // Split out of app-state-types.ts to stay under the file line limit. These
 // slices contribute actions only (no AppState fields declared here).
-export type AppStateExtraActions = Pick<UIA, "setThreadActiveView" | "createThreadView"> &
+export type AppStateExtraActions = Pick<
+  UIA,
+  | "setThreadActiveView"
+  | "createThreadView"
+  | "waitForSidebarViewSync"
+  | "reconcileSidebarGroupDisclosure"
+> &
   GitHubSliceActions &
   GitLabSliceActions &
   JiraSliceActions &

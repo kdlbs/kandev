@@ -58,7 +58,28 @@ Hermes launches with `hermes acp`. Install the required `hermes` executable from
 
 Goose launches with `goose acp`. Its **Settings > Agents** card runs only the official `download_cli.sh` installer. Homebrew (`block-goose-cli`) and pip (`pip install goose-ai`) are manual alternatives. Configure your model provider with `goose configure`. Goose currently supports task and workspace sessions.
 
-Antigravity has no automated install: Google distributes `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows) as a signed archive through the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp) rather than npm, so extract both files into one directory and add it to PATH yourself. Kandev fails discovery closed when the harness sibling is missing or not executable, so a partial extraction reports as not installed rather than as a broken session.
+For local and worktree executors, Kandev selects a compatible `agy` CLI when it is available. The CLI must support ACP through `agy acp` at version 1.5.0 or later. Its `agy acp --help` output must advertise `--process-per-session`. Kandev adds this flag to each local CLI launch so HTTP MCP support does not depend on profile edits. Google owns CLI installation and updates; use the [Antigravity CLI setup guide](https://antigravity.google/docs/cli). The CLI uses its own Google sign-in. In **Settings > Agents**, choose **Sign in** to run `agy acp --login` on the Kandev host. This sign-in is separate from the standalone server's credentials.
+
+When a compatible CLI is unavailable, Kandev uses the standalone ACP server. The **Settings > Agents > Browse** install action provisions the pinned `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows). Both files must be executable and stay in the same directory. The standalone server has its own Google sign-in and credential store. Its consent flow opens a browser on the Kandev host. Remote and container executors use their own standalone runtime and sign-in.
+
+## ACP v2 preview
+
+Enable **ACP v2 preview** in **Settings > System > Feature Toggles**, then
+restart Kandev. You can also set `KANDEV_FEATURES_ACP_V2=true` in the process
+environment. The preview starts off in all shipped profiles.
+
+The preview covers structured task chat on local and worktree executors.
+Use a managed Claude ACP 0.109.0 or 0.109.1 bridge, or a managed Codex ACP
+2.8.0 or 2.9.0 bridge. Sign in locally or configure the provider's API key.
+
+To return to ACP v1, disable **ACP v2 preview** in Feature Toggles and restart
+Kandev. If the environment locks the toggle, set `KANDEV_FEATURES_ACP_V2` to
+`false` and restart Kandev. If you remove the variable, restart Kandev to unlock
+the toggle. Disable any saved opt-in and restart again.
+
+If an ACP v2 process survives the restart, you can read its history, answer
+pending requests, and stop it. Reconnect the session to send new prompts over v1.
+Kandev reports a restore error if the agent cannot reopen the saved conversation.
 
 ## Codex app-server (experimental)
 
@@ -79,6 +100,7 @@ Agents that report background shell commands, subagents, or monitors feed the sh
 Provider support differs, and Kandev shows only what the connected runtime verifies:
 
 - **Claude ACP and native Codex** report job lifecycle and, for native Codex, supported job actions. Explicit controls appear only for an advertised capability.
+- **Codex ACP 2.8.0 and 2.9.0 with ACP v2 preview** report detached terminals and child sessions from live background snapshots when **Agent background work** is also enabled. Kandev retains available terminal output and exit status. This ACP adapter does not expose workload controls.
 - **OpenCode ACP** reports a detached shell launch with its native shell identity. With the optional integration plugin enabled on a supported OpenCode v2 2.2.0 runtime, Kandev can settle that job when the native shell exits. Without the plugin, or on any other runtime, the job stays inspectable and its later activity remains unknown. Neither path provides live output or process controls, and the original launch banner stays in the tool message.
 - **Other ACP agents** keep their existing behavior when they do not report background lifecycle.
 
@@ -265,30 +287,72 @@ ACP runtime selection does not replace the passthrough command.
 
 The status shown on this page is authoritative for the current host. A CLI that works in your interactive shell can still be absent from Kandev when the service has a different `PATH`, home directory, or operating-system user.
 
+### Pi thinking levels
+
+Pi's session mode controls its **thinking level**. It does not control tool permissions.
+The available levels depend on the selected model and the installed Pi provider extension.
+A model can advertise only **off**, even when its name contains “High”.
+
+In **Settings > Agents > Pi**, open the profile and choose **Thinking level**:
+
+- **Use provider default** removes the profile's thinking override. It keeps the model and exact-model setting.
+- A supported level, including **off**, saves an explicit override.
+- An unavailable saved value stays visible until you replace or clear it.
+
+If startup reports an unavailable or unapplied thinking level, no prompt was sent.
+If the level came from the profile, select **Edit profile**, choose a supported level or **Use provider default**, and save.
+If the level came from a session or workflow override, change that override or use the existing session configuration reset when applicable.
+If Kandev cannot identify the source, check both the profile and any overrides.
+Start a fresh session after you correct the setting. Saving a profile does not resend the failed prompt.
+
+Kandev uses the capabilities reported by Pi. Incorrect model metadata in a provider extension must be corrected in that extension.
+
 ### Update Oh My Pi on the Kandev host
 
 On an installed `omp` card, select the update icon under **Settings > Agents**.
-Review the installed version, the **Stable latest (reference)** version, and
-the `omp update` command, then choose **Update runtime** or **Repair runtime**.
+Review the installed version, the result of OMP's own update check, and the
+`omp update` command, then choose **Update runtime** or **Repair runtime**.
 Kandev runs OMP's own updater as the Kandev service user on the host, streams
 its output, and refreshes ACP capabilities only after a successful probe.
 Active sessions are not restarted.
 
+Kandev decides whether an OMP update is available by running
+`omp update --check` on the host, with the same environment as the updater.
+The check reads OMP's configured stable or canary channel, so Settings and the
+update dialog show the latest version for that channel (for example
+`18.22.0-canary.3`), **Channel: canary** when OMP reports a canary channel, or
+**Up to date.** An available update produces the usual runtime update
+notification. Kandev does not query npm for OMP, does not choose a channel, and
+does not pass `--canary`, `--stable`, `--force`, or a version.
+
+When the check cannot give a result, Settings explains why: the check failed
+(for example, the release feed is unreachable), another installer manages this
+OMP installation, the output was not recognized, the check timed out or
+produced too much output, the `omp` executable was not found, the check
+describes a different installation than the running agent, or the agent is
+disabled or unavailable. These states never show **Up to date.**, and the
+update action stays available.
+
+Kandev reuses a successful check result for six hours and a failed one for
+fifteen minutes. It checks again sooner when the `omp` executable, the
+version reported by the running agent, or OMP's update configuration changes:
+the profile and directory environment variables, OMP configuration and
+project settings files, the installation's `manager.json`, `.npmrc` and
+`.bunfig.toml`, and OMP's `.env` files. An edit that keeps a file's size and
+modification time takes effect when the cached result expires. Finishing an
+update job, successful or not, also discards the cached result.
+
 OMP detects whether its installation is managed by Homebrew, mise, Bun, npm,
 or a standalone binary and updates through that method. A Nix-managed
-installation cannot be updated by this action. OMP follows its already
-configured stable or canary channel; Kandev does not choose a channel or pass
-a version to `omp update`. The stable latest shown in Settings is a
-comparison reference, **not a promised install target**: the installed
-version reported by OMP after updating may differ. There is no version
-picker, Kandev pin, or rollback for OMP.
+installation cannot be updated by this action. The installed version reported
+by OMP after updating is the version for its configured channel. There is no
+version picker, Kandev pin, or rollback for OMP, and automatic updates are not
+available for it.
 
-The update affects only the host installation, not task containers or remote
-executors. If OMP's updater or the follow-up ACP probe fails, Settings reports
-the error and retains the previous capability catalogue; Kandev cannot
-restore an executable that OMP already changed. When metadata is unavailable,
-the update icon remains available, but a preview must resolve the stable
-reference before the update can start.
+The check and the update affect only the host installation, not task
+containers or remote executors. If OMP's updater or the follow-up ACP probe
+fails, Settings reports the error and retains the previous capability
+catalogue; Kandev cannot restore an executable that OMP already changed.
 
 ### Update a managed agent runtime
 
@@ -944,6 +1008,18 @@ or unsupported catalog, an unavailable model, or a failed apply stops the
 session before inference. Kandev never sends an unadvertised model and never
 rewrites the saved profile model.
 
+For Claude ACP profiles, you cannot save a new or changed strict selection when
+Start model is the bare `sonnet`, `opus`, `haiku`, or `fable` alias and the same
+profile sets a different nonblank `ANTHROPIC_MODEL` value. Select the full model
+ID you want to use, or remove that environment entry. Existing profiles with
+this pair can still be edited in other ways or repaired. Save validation checks
+only literal values in the profile. It does not resolve secret-backed or
+inherited values, and this alias/environment conflict check runs only when you
+save the profile. At launch, exact-model policy checks whether the selected
+executor advertises and accepts the requested model ID before the first prompt.
+A successful save does not guarantee that the selected executor advertises the
+model.
+
 For Auggie ACP task sessions, Kandev also requires the selected model and mode
 to take effect before it sends the first prompt. If a failed session offers the
 explicit recovery **Resume** action, it keeps the same conversation and skips
@@ -1032,6 +1108,10 @@ The field is not a shell script. Pipes, redirects, variable expansion, and comma
 
 Claude CLI passthrough uses standard output by default. Add an enabled `--verbose` entry to the profile CLI flags when you need diagnostic output.
 
+For Copilot, enable **Long context** in **CLI Flags** to pass `--context long_context` at launch. This option is off by default. To use long context for a new session, select a profile with the flag enabled and a model that supports it. Copilot controls the effective window and billing. Larger windows can use more AI credits. See [GitHub's supported Copilot models](https://docs.github.com/en/copilot/reference/ai-models/supported-models#models-with-extended-capabilities).
+
+For Antigravity, **Skip Antigravity CLI tool prompts** adds `--dangerously-skip-permissions` to a supported `agy acp` launch. It is off by default. When applied, Antigravity automatically approves all tool requests. Kandev applies it only when the selected CLI advertises the flag and the session policy allows blanket approval; standalone, coordinator, and managed-tool sessions keep their normal permission flow. This is separate from Kandev's **Auto-approve all permissions** setting.
+
 Some older profiles contain compatibility fields such as Auggie's `allow_indexing`; current launch behavior is represented by the active profile settings and flags.
 
 ### Command prefixes
@@ -1105,7 +1185,11 @@ In a structured ACP session, the agent can present a permission request and its 
 
 If an automatic decision fails before dispatch while the request is still answerable, Kandev exposes the request for a person. After a decision is dispatched, a failed or uncertain outcome shows non-actionable feedback instead of a second answer.
 
-Claude ACP also has a narrower built-in rule. When the agent uses the host-injected `kandev` MCP server, Kandev automatically selects an offered allow-once response, or allow-always when allow-once is not offered, even when **Auto-approve all permissions** is disabled. This covers every tool on that server, including task creation, task deletion, and plan changes. It is not a saved approval decision and is recreated for each task or Quick Chat session. Kandev still enforces MCP authentication, task and session authorization, user-question barriers, and workflow gates. Shell commands, file operations, third-party tools, and ambiguous requests keep the normal permission flow.
+Claude ACP and the Antigravity CLI have a narrower approval rule for the host-injected `kandev` MCP server. Kandev selects an offered allow-once response, or allow-always when allow-once is not offered, even when **Auto-approve all permissions** is disabled.
+
+For Antigravity, the typed `mcp_kandev_<tool>` name must match one tool in the live Kandev Core catalog. Kandev checks the CLI's global, workspace, and plugin MCP settings for another server that could produce the same name. A possible collision keeps the request in the normal permission flow. If the permission request omits its name, Kandev uses a tool notification only when its session and tool-call IDs match. This rule applies to Antigravity CLI sessions, not the standalone ACP server. See Google's [MCP configuration](https://antigravity.google/docs/mcp#global-and-workspace-server-configs) and [plugin naming](https://antigravity.google/docs/build-plugins) documentation.
+
+This rule is not a saved approval decision and is recreated for each task or Quick Chat session. Kandev still enforces MCP authentication, task and session authorization, user-question barriers, and workflow gates. Shell commands, file operations, third-party tools, ambiguous requests, and native Antigravity questions keep the normal permission flow.
 
 An external MCP client can also list live pending requests for an authorized task and submit one
 exact option originally offered by the agent. The request-generation ID prevents an old approval
@@ -1173,6 +1257,12 @@ repository and task workspace disables before approving imported connections.
 A profile selection cannot override those disables or executor policy. Host
 imports are limited to eligible local/worktree executions using the backend's
 home directory.
+
+The task setup panel labels the row **Discover Cursor MCP servers**. A
+**Details** disclosure shows the reason when discovery fails. The Marketplace
+lookup has a five-second time limit. A parent setup deadline can end the lookup
+before that limit. Kandev skips Marketplace plugin imports for that attempt. If
+setup completes, other configured MCP servers can still connect.
 
 When verification requires provider consent, choose **Authenticate** on the
 preparation step. Kandev opens Cursor's native login flow in the task terminal;
@@ -1460,6 +1550,14 @@ Deleting a profile is irreversible. Kandev checks references before deletion:
 - enabled automations bound to the profile are disabled **before** it is deleted, and a failure to disable them aborts the deletion. Unlike watchers, an automation has no preflight that would notice a profile had vanished, so it would otherwise keep firing at a profile that no longer exists;
 - feature-flagged Office routing-tier references are hard conflicts and cannot be forced;
 - Kandev attempts to clean every ephemeral task with a session using the profile, including matching Quick Chat and Configuration Chat. A cleanup failure is logged and does not prevent profile deletion, so audit leftover resources afterward.
+
+You can also disable a profile that live dynamic profiles or utility agents use.
+The confirmation lists both kinds of references. A dynamic profile skips a
+disabled candidate. If that profile has no other eligible candidate, routing
+stops and needs action. New utility calls stop until you re-enable the profile
+or repair the binding. Soft-deleted dynamic profiles do not block their former
+candidates. When you delete a candidate, Kandev tries to remove its routes from
+soft-deleted dynamic profiles; a cleanup failure can leave inert routes there.
 
 Only custom TUI agents can be deleted from the agent list. Built-in definitions remain registered even when their CLI is not installed.
 

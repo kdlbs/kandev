@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentLinks } from "@/components/shared/attachment-links";
 import { groupCommentsByFile } from "@/lib/state/slices/comments/group-review";
 import { useState } from "react";
 import { Button } from "@kandev/ui/button";
@@ -107,6 +108,7 @@ export function ReviewCommentsAttachment({ comments, className }: ReviewComments
 
                       {/* Comment text */}
                       <p className="whitespace-pre-wrap text-xs leading-relaxed">{comment.text}</p>
+                      <AttachmentLinks attachments={comment.attachments} />
                     </div>
                   ))}
                 </div>

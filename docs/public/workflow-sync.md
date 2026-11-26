@@ -7,6 +7,8 @@ description: "Reconcile workspace workflows from version-controlled definitions 
 
 Workflow Sync makes a GitHub or GitLab directory the source of truth for selected workflows in one Kandev workspace. Each run reads portable workflow files, creates or reconciles sync-owned workflows, and safely removes definitions that no longer exist. Workflows created manually in the same workspace are left alone.
 
+Saved prompts that step prompts reference by `@name` are synced separately with [Prompt Sync](prompt-sync.md); Workflow Sync warns when a synced step references a prompt that does not exist.
+
 Choose sync when workflow changes should be reviewed and versioned in Git. Choose [Workflow Import / Export](workflow-import-export.md) for a one-time copy that remains editable in Kandev.
 
 A workspace has at most one sync configuration, pointed at exactly one provider (GitHub or GitLab). Switching provider on an existing configuration replaces it on the next save; the following sync reconciles the workspace's workflows from scratch against the new provider's file set and applies the usual [deletion rules](#reconciliation-rules).
@@ -230,10 +232,10 @@ Deleting an individual repository definition has the different reconciliation be
 - **Directory or branch not found:** verify the resolved owner/repository (or project path), branch, and directory shown in the dialog. A branch name containing `/` (e.g. `features/TICKET-123`) is a common cause; set it directly in the Branch field rather than relying on a pasted link to split it correctly.
 - **GitLab project path looks right but sync still 404s:** confirm the path doesn't have a trailing `.git` and matches the project's exact namespace path (visible in the GitLab UI or via its clone URL).
 - **Nothing happens after Save:** save stores only the configuration. Use **Sync now** or wait until both the configured interval and the poller's next 60-second check have elapsed.
-- **Completed with warnings:** read every warning. Invalid files freeze their previous workflows; tasks in removed steps or workflows block deletion; duplicate step names block safe matching.
+- **Completed with warnings:** read every warning. Invalid files freeze their previous workflows; tasks in removed steps or workflows block deletion; duplicate step names block safe matching; an `@name` that is not a saved prompt is reported per workflow.
 - **Unexpected duplicate after rename:** restore the original `(file path, workflow name)`, or move/archive tasks from the old workflow before deleting it.
 - **Changes appear to revert:** a synced workflow is repository-owned. Commit the change to its source file; the next reconciliation repairs local drift.
 - **Rate limits or intermittent network failures:** inspect `last_error_class` and `next_attempt_at` before retrying. Lengthen `interval_seconds` when the normal cadence is too aggressive, or use **Sync now** for one interactive recovery attempt.
 - **GitHub shows full core quota but real calls still fail with 403:** a healthy `GET /rate_limit` result does not rule out a secondary throttle. Kandev keeps primary quota observations separate from a secondary refusal and waits until its locally enforced `retry_at`, unless an accepted GitHub response clears that estimate earlier.
 
-Related guides: [Workflow Tips](workflow-tips.md), [Workflow Import / Export](workflow-import-export.md), [Configuration](configuration.md), and [Operations](operations.md).
+Related guides: [Prompt Sync](prompt-sync.md), [Workflow Tips](workflow-tips.md), [Workflow Import / Export](workflow-import-export.md), [Configuration](configuration.md), and [Operations](operations.md).

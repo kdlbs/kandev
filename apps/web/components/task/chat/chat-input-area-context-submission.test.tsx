@@ -376,7 +376,7 @@ describe("pending submission selection edits and admission compatibility", () =>
   );
 });
 
-// @covers AC-UI-WALKTHROUGH-STEP-FEEDBACK-001.3
+// @covers AC-UI-WALKTHROUGH-STEP-FEEDBACK-001.3, AC-TASKS-COMMENT-FILES-001.3
 it("retains submitted walkthrough feedback and leaves later feedback pending", async () => {
   const note: WalkthroughComment = {
     id: "submitted-note",
@@ -391,6 +391,15 @@ it("retains submitted walkthrough feedback and leaves later feedback pending", a
     endLine: 1,
     stepText: "Explain",
     text: "First note",
+    attachments: [
+      {
+        type: "resource",
+        attachment_id: "walkthrough-file",
+        mime_type: "text/plain",
+        name: "notes.txt",
+        delivery_mode: "path",
+      },
+    ],
     createdAt: STARTED_AT,
     status: "pending",
   };
@@ -399,6 +408,12 @@ it("retains submitted walkthrough feedback and leaves later feedback pending", a
   mount();
   const completion = startSubmission();
   await waitForAdmission();
+  expect(requestPayload()).toMatchObject({
+    content: expect.stringContaining(
+      "> First note\n\n<!-- kandev-comment-files:walkthrough-file -->",
+    ),
+    attachments: [{ ...note.attachments?.[0], comment_id: "walkthrough-file" }],
+  });
   act(() =>
     useCommentsStore.getState().addComment({ ...note, id: "next-note", text: "Next note" }),
   );

@@ -57,7 +57,8 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	}
 }
 
-func TestCanvasFeatureFlagIsDisabledInEveryProfile(t *testing.T) {
+// @covers AC-CANVASES-DEFAULT-AVAILABILITY-001.1
+func TestCanvasFeatureFlagIsEnabledInEveryProfile(t *testing.T) {
 	for _, profile := range []struct {
 		name     string
 		selector map[string]string
@@ -85,8 +86,8 @@ func TestCanvasFeatureFlagIsDisabledInEveryProfile(t *testing.T) {
 			if err != nil {
 				t.Fatalf("EnvironmentDefaults: %v", err)
 			}
-			if got := defaults["KANDEV_FEATURES_CANVASES"]; got != "false" {
-				t.Fatalf("KANDEV_FEATURES_CANVASES = %q in %s, want false", got, profile.name)
+			if got := defaults["KANDEV_FEATURES_CANVASES"]; got != "true" {
+				t.Fatalf("KANDEV_FEATURES_CANVASES = %q in %s, want true", got, profile.name)
 			}
 		})
 	}
@@ -127,7 +128,7 @@ func TestOfficeSessionIdentityIsAbsentFromEveryProfile(t *testing.T) {
 	}
 }
 
-func TestLSPBrowserContinuityIsEnabledInEveryProfile(t *testing.T) {
+func TestLSPBrowserContinuityIsAbsentFromEveryProfile(t *testing.T) {
 	for _, profile := range []struct {
 		name     string
 		selector map[string]string
@@ -155,8 +156,8 @@ func TestLSPBrowserContinuityIsEnabledInEveryProfile(t *testing.T) {
 			if err != nil {
 				t.Fatalf("EnvironmentDefaults: %v", err)
 			}
-			if got := defaults["KANDEV_FEATURES_LSP_BROWSER_CONTINUITY"]; got != "true" {
-				t.Fatalf("KANDEV_FEATURES_LSP_BROWSER_CONTINUITY = %q in %s, want true", got, profile.name)
+			if _, exists := defaults["KANDEV_FEATURES_LSP_BROWSER_CONTINUITY"]; exists {
+				t.Fatalf("retired KANDEV_FEATURES_LSP_BROWSER_CONTINUITY remains in %s profile", profile.name)
 			}
 		})
 	}

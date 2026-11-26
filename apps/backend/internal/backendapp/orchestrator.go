@@ -145,7 +145,7 @@ func provideOrchestrator(
 	autoMergeEnabled := queueSettings.AutoMergeEnabled
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
 	msgQueue.SetMergeEnabled(mergeEnabled)
-	msgQueue.SetAutoMergePolicy(autoMergeEnabled, queueResolution.Settings.AutoMergeRevision)
+	msgQueue.SetGlobalAutoMergePolicy(queueResolution.Settings.GlobalAutoMergePolicy())
 	log.Info("Message queue initialized",
 		zap.Int("max_per_session", maxPerSession),
 		zap.Bool("merge_enabled", mergeEnabled),

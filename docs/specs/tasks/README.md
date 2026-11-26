@@ -38,6 +38,7 @@ ordered executor access.
 
 ### Requirements
 
+- [HTTP repository IDs](requirements/http-task-repository-selection.md)
 - [Initial task brief](requirements/initial-task-brief.md)
 
 - [Bounded Session History Storage](requirements/bounded-session-history.md)
@@ -133,6 +134,7 @@ ordered executor access.
 - [User Question Turn Boundary](requirements/user-question-turn-boundary.md)
 - [WIP Limits and Visible Overflow Queues](requirements/wip-limit-pull-system.md)
 - [Tasks Without Repositories](requirements/without-repositories.md)
+- [Workspace root files](requirements/workspace-root-files.md)
 - [Workflow completion-signal payload delivery](requirements/workflow-completion-signal-payload-delivery.md)
 - [Cancelled Turn Completion](requirements/workflow-cancelled-turn-completion.md)
 - [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
@@ -158,6 +160,7 @@ ordered executor access.
 
 ### System design
 
+- [HTTP repository IDs](system-design/http-task-repository-selection.md)
 - [Bounded Session History Storage](system-design/bounded-session-history.md)
 - [Initial task brief](system-design/initial-task-brief.md)
 
@@ -165,6 +168,7 @@ ordered executor access.
 
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
+- [Workspace root files](system-design/workspace-root-files.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
 - [Command-panel archived task results](system-design/command-panel-archived-task-results.md)
 - [Detached Workspace Continuity](system-design/detached-workspace-continuity.md)

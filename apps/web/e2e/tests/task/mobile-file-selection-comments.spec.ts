@@ -1,3 +1,4 @@
+import { attachCommentFile } from "../../helpers/comment-attachment";
 import fs from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
 import {
@@ -132,18 +133,21 @@ test.describe("File selection comments on mobile", () => {
         await expectDockWithinEditor(dock, owner);
 
         await action.tap();
+        let attachmentId: string;
         if (provider === "codemirror") {
           const textarea = testPage.getByPlaceholder("Add your comment or instruction...");
-          const popover = testPage.locator("div.fixed.z-50").filter({ has: textarea }).first();
-          await expect(popover).toBeVisible();
-          await expect(popover.locator("pre")).toContainText(CODE_SELECTION_QUOTE);
-          await expect(popover).toContainText(`${CODE_SELECTION_LINE}`);
+          const commentDialog = testPage.getByRole("dialog").filter({ has: textarea }).first();
+          await expect(commentDialog).toBeVisible();
+          await expect(commentDialog).toContainText(CODE_SELECTION_QUOTE);
+          await expect(commentDialog).toContainText(`${CODE_SELECTION_LINE}`);
+          attachmentId = await attachCommentFile(testPage, commentDialog, "line-note.txt");
           await textarea.fill(COMMENT_TEXT);
-          await popover.getByRole("button", { name: "Add", exact: true }).tap();
+          await commentDialog.getByRole("button", { name: "Add", exact: true }).tap();
         } else {
           const form = owner.locator("[data-comment-zone]").last();
           const textarea = form.locator("textarea");
           await expect(form).toBeVisible();
+          attachmentId = await attachCommentFile(testPage, form, "line-note.txt");
           await textarea.fill(COMMENT_TEXT);
           const addButton = form.locator("[data-comment-actions] button").nth(1);
           await expect(addButton).toBeVisible();
@@ -157,12 +161,19 @@ test.describe("File selection comments on mobile", () => {
           fileName,
           repositoryName,
           commentText: COMMENT_TEXT,
+          attachmentId,
         });
         expect(fs.readFileSync(diskPath, "utf8")).toContain(CODE_SELECTION_QUOTE);
         await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
-        await expect(
-          session.activeChat().getByText(`${fileName} (1)`, { exact: true }),
-        ).toBeVisible();
+        const commentPreview = session.activeChat().getByRole("button", {
+          name: `${fileName} (1)`,
+          exact: true,
+        });
+        await commentPreview.tap();
+        const link = testPage.getByRole("link", { name: "line-note.txt" });
+        await expect(link).toBeVisible();
+        await expect(link).toHaveAttribute("href", new RegExp(attachmentId));
+        expect((await link.boundingBox())?.height).toBeGreaterThanOrEqual(44);
       } finally {
         await restoreSelectionCommentVisualViewport(testPage);
         fs.rmSync(diskPath, { force: true });

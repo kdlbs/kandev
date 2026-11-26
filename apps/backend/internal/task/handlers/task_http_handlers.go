@@ -179,7 +179,7 @@ func (h *TaskHandlers) writeWorkspaceSourceError(c *gin.Context, err error) {
 	status := workspaceSourceHTTPStatus(err)
 	if status == http.StatusInternalServerError {
 		h.logger.Error("attach workspace sources failed", zap.Error(err))
-		c.JSON(status, gin.H{"error": "request failed"})
+		c.JSON(status, gin.H{"error": requestFailedMessage})
 		return
 	}
 	c.JSON(status, gin.H{"error": err.Error()})
@@ -1074,6 +1074,7 @@ type httpCreateTaskRequest struct {
 	ExecutionGrade         string                                `json:"execution_grade,omitempty"`
 	State                  *v1.TaskState                         `json:"state,omitempty"`
 	Repositories           []httpTaskRepositoryInput             `json:"repositories,omitempty"`
+	RepositoryIDs          []string                              `json:"repository_ids,omitempty"`
 	Position               int                                   `json:"position,omitempty"`
 	Metadata               map[string]interface{}                `json:"metadata,omitempty"`
 	MCPServerIDs           []string                              `json:"mcp_server_ids,omitempty"`
@@ -1214,6 +1215,33 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, rejectedCreateMessage("invalid payload"))
 		return
+	}
+	// Resolve an existing identity before validating request-specific fields so
+	// retries keep returning their original task when the payload has drifted.
+	if body.ExternalID != "" {
+		existing, found, err := h.service.FindTaskByExternalIDForCreate(c.Request.Context(), body.WorkspaceID, body.ExternalID)
+		if err != nil {
+			handleTaskCreateFailure(c, h.logger, err)
+			return
+		}
+		if found {
+			outcome := service.CreateTaskOutcomeFoundUnsettled
+			if existing.ExternalIDSettledAt != nil {
+				outcome = service.CreateTaskOutcomeFoundSettled
+			}
+			c.JSON(http.StatusOK, foundCreateTaskResponse(service.CreateTaskResult{Task: existing, Outcome: outcome}))
+			return
+		}
+	}
+	if body.Repositories != nil && body.RepositoryIDs != nil {
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage("repositories and repository_ids cannot both be provided"))
+		return
+	}
+	if body.RepositoryIDs != nil {
+		body.Repositories = make([]httpTaskRepositoryInput, len(body.RepositoryIDs))
+		for index, repositoryID := range body.RepositoryIDs {
+			body.Repositories[index].RepositoryID = repositoryID
+		}
 	}
 	labels, err := encodeTaskLabels(body.Labels)
 	if err != nil {
@@ -1968,6 +1996,7 @@ func (h *TaskHandlers) recordSuccessfulTaskCreateProfile(ctx context.Context, pr
 type httpUpdateTaskRequest struct {
 	Title          *string                   `json:"title,omitempty"`
 	Description    *string                   `json:"description,omitempty"`
+	FlagNote       *string                   `json:"flag_note,omitempty"`
 	Priority       *string                   `json:"priority,omitempty"`
 	ExecutionGrade *string                   `json:"execution_grade,omitempty"`
 	State          *v1.TaskState             `json:"state,omitempty"`
@@ -2055,6 +2084,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	task, err := h.service.UpdateTaskAsHuman(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
 		Title:          title,
 		Description:    description,
+		FlagNote:       body.FlagNote,
 		Priority:       body.Priority,
 		ExecutionGrade: body.ExecutionGrade,
 		State:          body.State,

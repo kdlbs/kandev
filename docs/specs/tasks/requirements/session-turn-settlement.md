@@ -66,6 +66,11 @@ finished background job, must not hold the session busy after the agent stops.
 - **AC-TASKS-SESSION-TURN-SETTLEMENT-002.6:** A tool update that carries no
   status shall not mark a ready session busy. Only turn content or a tool update
   with a reported active status shall start an agent-started turn.
+- **AC-TASKS-SESSION-TURN-SETTLEMENT-002.7:** When a Codex ACP session resumes
+  successfully and reports an MCP startup failure, the conversation shall show
+  a warning on desktop and phone. The report shall leave session readiness and
+  prompt ownership with the existing resume and dispatch operations. Eligible
+  prompts shall follow the [resume queue policy](resume-prompt-queue.md).
 
 ## Exclusions
 
@@ -79,3 +84,4 @@ finished background job, must not hold the session busy after the agent stops.
 - [Completion callback lease repair](../../../plans/completion-callback-lease/plan.md).
 - [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md).
 - [Send Now claim loss repair](../../../plans/send-now-claim-loss/plan.md).
+- [Codex ACP MCP startup warning repair](../../../plans/codex-acp-mcp-startup-warning/plan.md).

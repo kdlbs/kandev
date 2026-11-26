@@ -68,6 +68,8 @@ curl -H "Authorization: Bearer kandev_pat_..." https://kandev.example.com/api/v1
 
 External MCP clients (Claude Code, Cursor connecting to `/mcp`) must be configured with a PAT once authentication is enabled. WebSocket clients that cannot send headers can pass `?token=<PAT>` on the connection URL.
 
+With authentication enabled, user-facing Office API routes accept the same PAT bearer header. Office applies the authenticated user's workspace permissions; if both a PAT and a valid session cookie are sent, the session cookie takes precedence. With authentication disabled, Office treats a PAT-shaped bearer as if no bearer was sent. Office runtime routes require an agent JWT.
+
 ## When credential storage is unavailable
 
 Kandev distinguishes a rejected credential from a verification dependency it cannot read. A missing, malformed, expired, or revoked session or token still returns `401` on a protected route, with `WWW-Authenticate: Bearer`. A database read failure for the credential, account, or organization returns instead:

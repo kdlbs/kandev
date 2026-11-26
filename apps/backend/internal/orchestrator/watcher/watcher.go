@@ -54,6 +54,10 @@ type AgentEventData struct {
 	DeliverySequence          uint64                                `json:"delivery_sequence,omitempty"`
 	DeliverySubmissionID      string                                `json:"delivery_submission_id,omitempty"`
 	DeliveryOutcome           string                                `json:"delivery_outcome,omitempty"`
+	DetachedAtCommit          bool                                  `json:"detached_at_commit,omitempty"`
+	CommittedAt               *time.Time                            `json:"committed_at,omitempty"`
+	CancelCause               string                                `json:"cancel_cause,omitempty"`
+	CancelDecidedAt           *time.Time                            `json:"cancel_decided_at,omitempty"`
 	Status                    string                                `json:"status,omitempty"`
 	ExitCode                  *int                                  `json:"exit_code,omitempty"`
 	ErrorMessage              string                                `json:"error_message,omitempty"`
@@ -96,6 +100,8 @@ type AgentEventData struct {
 	// under someone who just asked the retries to stop would defeat the
 	// purpose of the cancel button.
 	UserInitiated bool `json:"user_initiated,omitempty"`
+
+	ConfigurationCommandResult *streams.ConfigurationCommandResult `json:"configuration_result,omitempty"`
 }
 
 // ACPSessionEventData contains data from ACP session events
@@ -108,6 +114,7 @@ type ACPSessionEventData struct {
 	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+	AdapterVersion            string `json:"adapter_version,omitempty"`
 	// DeliveryReplacesNativeConversation marks a fresh-start conversation that
 	// succeeds the committed harness generation.
 	DeliveryReplacesNativeConversation bool `json:"delivery_replaces_native_conversation,omitempty"`

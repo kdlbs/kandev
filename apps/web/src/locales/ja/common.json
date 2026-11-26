@@ -309,6 +309,7 @@
   "onboardingExecutorSpritesDescription": "リモートのプロバイダーサンドボックスで実行します。先に Sprites と Executor profile を設定してください。",
   "onboardingExecutorSshDescription": "信頼できる SSH ホストで実行します。先に接続と Executor profile を設定し、接続を確認してください。",
   "onboardingExecutorWorktreeDescription": "タスクの変更用に別の Git checkout を作成します。ホストアカウントとそのアクセス権限を共有します。",
+  "onboardingNoInstalledAgents": "インストール済みのエージェントは見つかりませんでした。",
   "onboardingStepAgentsDescription": "検出済み agent 管理、新規 install。",
   "onboardingStepAgentsTitle": "AIエージェント",
   "onboardingStepCommandPanelDescription": "キーボードショートカットで、どこからでも action にすぐアクセス。",

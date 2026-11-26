@@ -27,6 +27,22 @@ func TestAntigravityClientInfo(t *testing.T) {
 	}
 }
 
+func TestAntigravityRuntimePolicyAndCommand(t *testing.T) {
+	cli := AntigravityAuthPolicyForRuntime(AntigravityRuntimeCLI, "1.5.15", false)
+	if cli.MethodID != "" || cli.AdapterVersion != "antigravity-cli/1.5.15" {
+		t.Fatalf("CLI policy = %+v", cli)
+	}
+	if name, _ := ClientInfoForLaunch(AntigravityAgentID, cli); name != "" {
+		t.Fatalf("CLI identity = %q, want default identity", name)
+	}
+	if got := AntigravityRuntimeForCommand([]string{`C:\Program Files\agy.exe`, "acp"}); got != AntigravityRuntimeCLI {
+		t.Fatalf("Windows CLI variant = %q", got)
+	}
+	if got := AntigravityRuntimeForAdapterVersion(""); got != AntigravityRuntimeStandalone {
+		t.Fatalf("legacy variant = %q, want standalone", got)
+	}
+}
+
 func TestAntigravityConsentURL(t *testing.T) {
 	raw, ok := ParseConsentURL("Open this URL: " + validConsentURL)
 	if !ok || raw != validConsentURL {

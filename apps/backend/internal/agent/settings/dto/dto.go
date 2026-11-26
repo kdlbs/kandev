@@ -263,6 +263,7 @@ type ModelEntryDTO struct {
 
 type ModelConfigDTO struct {
 	DefaultModel          string            `json:"default_model"`
+	RuntimeVariant        string            `json:"runtime_variant,omitempty"`
 	AvailableModels       []ModelEntryDTO   `json:"available_models"`
 	CurrentModelID        string            `json:"current_model_id,omitempty"`
 	AvailableModes        []ModeEntryDTO    `json:"available_modes,omitempty"`
@@ -388,9 +389,10 @@ type RuntimeUpdateDTO struct {
 	EffectiveVersion string          `json:"effective_version"`
 }
 
-// AgentUpdateCheckState describes the result of the cached npm latest-version
-// lookup. Unknown is intentionally distinct from up_to_date so the UI can
-// avoid suggesting that an unavailable registry check is current.
+// AgentUpdateCheckState describes the result of the cached latest-version
+// lookup or native update check. Unknown is intentionally distinct from
+// up_to_date so the UI can avoid suggesting that an unavailable check is
+// current.
 type AgentUpdateCheckState string
 
 const (
@@ -398,6 +400,15 @@ const (
 	AgentUpdateCheckStateUpToDate        AgentUpdateCheckState = "up_to_date"
 	AgentUpdateCheckStateUnknown         AgentUpdateCheckState = "unknown"
 )
+
+// AgentUpdateCheckSource names a non-default status source. Empty means the
+// registry or release lookup; native means the agent's own update check.
+type AgentUpdateCheckSource string
+
+const AgentUpdateCheckSourceNative AgentUpdateCheckSource = "native"
+
+// AgentUpdateCheckReason is a stable code explaining an unknown native check.
+type AgentUpdateCheckReason string
 
 // AgentUpdateStatusDTO is the read-only update hint for one available managed
 // runtime. ActiveVersion is the optional persisted operator selection; the
@@ -426,6 +437,9 @@ type AgentUpdateStatusDTO struct {
 	LatestVersion       string                        `json:"latest_version,omitempty"`
 	CheckedAt           *time.Time                    `json:"checked_at,omitempty"`
 	CheckState          AgentUpdateCheckState         `json:"check_state"`
+	CheckSource         AgentUpdateCheckSource        `json:"check_source,omitempty"`
+	UpdateChannel       string                        `json:"update_channel,omitempty"`
+	CheckReason         AgentUpdateCheckReason        `json:"check_reason,omitempty"`
 	Family              string                        `json:"family,omitempty"`
 	RuntimeSource       string                        `json:"runtime_source,omitempty"`
 	RuntimeRevision     uint64                        `json:"runtime_revision,omitempty"`
@@ -544,6 +558,11 @@ type AgentUpdatePreviewDTO struct {
 	EffectiveVersion           string                         `json:"effective_version"`
 	TargetVersion              string                         `json:"target_version"`
 	StableLatestVersion        string                         `json:"stable_latest_version,omitempty"`
+	CheckSource                AgentUpdateCheckSource         `json:"check_source,omitempty"`
+	CheckState                 AgentUpdateCheckState          `json:"check_state,omitempty"`
+	LatestVersion              string                         `json:"latest_version,omitempty"`
+	UpdateChannel              string                         `json:"update_channel,omitempty"`
+	CheckReason                AgentUpdateCheckReason         `json:"check_reason,omitempty"`
 	Operation                  string                         `json:"operation"`
 	AvailableVersions          []AgentUpdateVersionDTO        `json:"available_versions"`
 	Command                    []string                       `json:"command"`
@@ -639,6 +658,7 @@ type CommandPreviewResponse struct {
 // Data now comes from the host utility capability cache populated by ACP probes.
 type DynamicModelsResponse struct {
 	AgentName       string              `json:"agent_name"`
+	RuntimeVariant  string              `json:"runtime_variant,omitempty"`
 	Status          string              `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
 	ReasonCode      string              `json:"reason_code,omitempty"`
 	Models          []ModelEntryDTO     `json:"models"`

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -38,6 +39,7 @@ func TestMigrateTasksRemoveWorkflowFK_AssignmentGenerationSurvivesRebuild(t *tes
 			workflow_step_id TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL,
 			description TEXT DEFAULT '',
+			flag_note TEXT NOT NULL DEFAULT '',
 			state TEXT DEFAULT 'TODO',
 			priority INTEGER DEFAULT 0,
 			position INTEGER DEFAULT 0,
@@ -53,8 +55,8 @@ func TestMigrateTasksRemoveWorkflowFK_AssignmentGenerationSurvivesRebuild(t *tes
 			updated_at TIMESTAMP NOT NULL,
 			FOREIGN KEY (workflow_id) REFERENCES workflows(id)
 		);
-		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
-			VALUES ('task-legacy-fk', 'ws-legacy', 'Legacy FK task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+		INSERT INTO tasks (id, workspace_id, title, flag_note, created_at, updated_at)
+			VALUES ('task-legacy-fk', 'ws-legacy', 'Legacy FK task', 'Keep this note', '2024-01-02 03:04:05', '2024-01-02 03:04:06');
 	`); err != nil {
 		t.Fatalf("seed legacy schema: %v", err)
 	}
@@ -101,15 +103,19 @@ func TestMigrateTasksRemoveWorkflowFK_AssignmentGenerationSurvivesRebuild(t *tes
 
 	// The pre-existing row must survive the rebuild, with the new column
 	// defaulted to 0.
-	var gotTitle string
+	var gotTitle, gotFlagNote string
+	var createdAt, updatedAt time.Time
 	var gotGeneration int64
 	if err := db.QueryRow(
-		`SELECT title, assignment_generation FROM tasks WHERE id = ?`, "task-legacy-fk",
-	).Scan(&gotTitle, &gotGeneration); err != nil {
+		`SELECT title, assignment_generation, flag_note, created_at, updated_at FROM tasks WHERE id = ?`, "task-legacy-fk",
+	).Scan(&gotTitle, &gotGeneration, &gotFlagNote, &createdAt, &updatedAt); err != nil {
 		t.Fatalf("query migrated row: %v", err)
 	}
 	if gotTitle != "Legacy FK task" {
 		t.Fatalf("title = %q, want %q (row lost during rebuild)", gotTitle, "Legacy FK task")
+	}
+	if gotFlagNote != "Keep this note" || !createdAt.Equal(time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)) || !updatedAt.Equal(time.Date(2024, 1, 2, 3, 4, 6, 0, time.UTC)) {
+		t.Fatalf("rebuild lost task flag or timestamps: %q %v %v", gotFlagNote, createdAt, updatedAt)
 	}
 	if gotGeneration != 0 {
 		t.Fatalf("assignment_generation = %d, want 0 for a pre-existing row", gotGeneration)

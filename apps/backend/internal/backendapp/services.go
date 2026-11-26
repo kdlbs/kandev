@@ -51,6 +51,7 @@ import (
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/promptsync"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
@@ -132,6 +133,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	if pluginsSvc != nil {
 		boundary := &workspaceCollaborationBoundary{enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task}
 		pluginsSvc.SetHostCallContextPolicy(boundary.enabled, boundary.validatePluginCall)
+		taskSvc.SetSidebarGroupingResolver(pluginsSvc)
 	}
 
 	services := assembleServices(managedRuntimeSelections, core, providers, integrations)
@@ -182,6 +184,7 @@ func assembleServices(
 		Linear:                   providers.linear,
 		Sentry:                   providers.sentry,
 		WorkflowSync:             providers.workflowSync,
+		PromptSync:               providers.promptSync,
 		Share:                    integrations.shareHTTP,
 		Automation:               integrations.automationComponents,
 		Plugins:                  integrations.pluginsSvc,
@@ -597,6 +600,7 @@ type thirdPartyProviders struct {
 	linear        *linear.Service
 	sentry        *sentry.Service
 	workflowSync  *workflowsync.Service
+	promptSync    *promptsync.Service
 }
 
 func initThirdPartyProviders(
@@ -650,10 +654,17 @@ func initThirdPartyProviders(
 	if recordErr := recordRequiredStore(ctx, storeTracker, "workflow-sync", workflowSyncErr); recordErr != nil {
 		return nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
 	}
+	if workflowSyncSvc != nil && promptSvc != nil {
+		workflowSyncSvc.SetPromptReferenceChecker(promptSvc)
+	}
+	promptSyncSvc, _, promptSyncErr := initPromptSyncServiceRequired(dbPool, githubSvc, gitlabSvc, promptSvc, repos, taskSvc, log)
+	if recordErr := recordRequiredStore(ctx, storeTracker, "prompt-sync", promptSyncErr); recordErr != nil {
+		return nil, fmt.Errorf("initialize prompt sync: %w", recordErr)
+	}
 	return &thirdPartyProviders{
 		github: githubSvc, gitlab: gitlabSvc, gitlabCleanup: gitlabCleanup,
 		jira: jiraSvc, linear: linearSvc,
-		sentry: sentrySvc, workflowSync: workflowSyncSvc,
+		sentry: sentrySvc, workflowSync: workflowSyncSvc, promptSync: promptSyncSvc,
 	}, nil
 }
 
@@ -1782,6 +1793,7 @@ func recordPluginStores(ctx context.Context, tracker *requiredstores.Tracker, in
 		"plugin-state",
 		"plugin-instance-state",
 		"plugin-user-state",
+		"plugin-command-receipts",
 	} {
 		if err := recordRequiredStore(ctx, tracker, id, initErrors[id]); err != nil {
 			failures = append(failures, err)
@@ -1929,23 +1941,38 @@ func (a pluginsTaskWriterAdapter) createTask(ctx context.Context, in plugins.Tas
 		return nil, false, err
 	}
 	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
-		WorkspaceID:    in.WorkspaceID,
-		WorkflowID:     in.WorkflowID,
-		WorkflowStepID: in.WorkflowStepID,
-		Title:          in.Title,
-		Description:    in.Description,
-		ParentID:       in.ParentID,
-		Metadata:       metadata,
-		Repositories:   repositories,
-		PlanMode:       in.PlanMode,
-		Priority:       in.Priority,
-		StartAgent:     in.StartAgent,
-		ExternalID:     externalID,
+		WorkspaceID:                       in.WorkspaceID,
+		WorkflowID:                        in.WorkflowID,
+		WorkflowStepID:                    in.WorkflowStepID,
+		Title:                             in.Title,
+		Description:                       in.Description,
+		ProjectID:                         in.ProjectID,
+		RequireProjectWorkspaceValidation: in.ProjectID != "",
+		ParentID:                          in.ParentID,
+		Metadata:                          metadata,
+		Repositories:                      repositories,
+		PlanMode:                          in.PlanMode,
+		Priority:                          in.Priority,
+		StartAgent:                        in.StartAgent,
+		ExternalID:                        externalID,
 	})
 	if err != nil {
-		return nil, false, err
+		return nil, false, pluginTaskCreateError(err)
 	}
 	return result.Task, result.Outcome != taskservice.CreateTaskOutcomeCreated, nil
+}
+
+func pluginTaskCreateError(err error) error {
+	switch {
+	case errors.Is(err, taskservice.ErrProjectNotFound), errors.Is(err, taskservice.ErrProjectWorkspaceMismatch):
+		return status.Error(codes.InvalidArgument, "project_id must identify a project in the task workspace")
+	case errors.Is(err, taskservice.ErrProjectWorkspaceReaderUnavailable), errors.Is(err, taskservice.ErrProjectWorkspaceLookupUnavailable):
+		return status.Error(codes.Unavailable, "project workspace lookup is unavailable")
+	case errors.Is(err, repoerrors.ErrProjectMembershipChanged):
+		return status.Error(codes.Aborted, "project workspace membership changed during task creation")
+	default:
+		return err
+	}
 }
 
 func (a pluginsTaskWriterAdapter) DeleteTask(ctx context.Context, id string) error {

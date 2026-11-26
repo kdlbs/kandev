@@ -50,7 +50,8 @@ Native `repo_url` remains the canonical `https://github.com/<owner/name>`
 from that same pointer. The current native manifest parser already excludes
 `repo_url`. Preserve that protection instead of expanding manifest authority.
 Manifest display name, description, icon, categories, and compatibility remain
-presentation data. Package verification remains mandatory.
+presentation data. Registry categories add catalog labels after manifest
+categories. The index removes duplicates. Package verification remains mandatory.
 
 `schema_version: 1` and the frontend `MarketplaceEntry` contract stay compatible.
 `MarketplaceEntryRow` continues to show the catalog's `author` through

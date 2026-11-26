@@ -62,7 +62,7 @@ test("keeps the phone advisory compact with 44px controls", async ({
   await expect(testPage.getByTestId("session-delivery-storage-settings")).toHaveCount(0);
   const details = testPage.getByTestId("session-delivery-storage-details");
   expect((await details.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  await details.click();
+  await details.tap();
   await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
     "Free space on sprites",
   );
@@ -104,18 +104,94 @@ test("keeps the phone advisory compact with 44px controls", async ({
 
   await notify!({
     ...base,
+    state: "normal",
+    available_bytes: 500_000_000,
+    pressure_observed_at: new Date().toISOString(),
+    pressure_age_seconds: 0,
+    write_pressure: true,
+    delivery_state: "delivery_failed",
+    revision: 3,
+  });
+  await expect(notice).toContainText("Delivery is blocked");
+  await expect(notice).not.toContainText("Disk 50% used");
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "Kandev could not determine the cause",
+  );
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "session recovery",
+  );
+
+  await notify!({
+    ...base,
+    state: "warning",
+    available_bytes: 50_000_000,
+    pressure_observed_at: new Date().toISOString(),
+    pressure_age_seconds: 0,
+    write_pressure: true,
+    delivery_state: "delivery_failed",
+    failure_storage: {
+      reason: "stream_limit_reached",
+      location: "executor_runtime",
+      executor_label: "sprites",
+    },
+    revision: 4,
+  });
+  await expect(notice).toContainText("Delivery is blocked: stream limit reached");
+  await expect(notice.locator(".flex.min-w-0.items-baseline")).not.toContainText("95% used");
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "High disk usage: 95% used",
+  );
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "Inspect retained output and delivery progress before resuming.",
+  );
+  await prCapture.screenshot(`delivery-storage-stream-limit-${testInfo.project.name}`, {
+    caption: "Phone keeps stream-limit guidance and high disk usage in Details.",
+  });
+
+  await notify!({
+    ...base,
     state: "warning",
     available_bytes: 100_000_000,
     pressure_observed_at: new Date().toISOString(),
     pressure_age_seconds: 0,
-    revision: 3,
+    write_pressure: true,
+    delivery_state: "delivery_failed",
+    failure_storage: {
+      reason: "stream_limit_reached",
+      location: "executor_runtime",
+      executor_label: "sprites",
+    },
+    revision: 5,
   });
   await expect(notice).toHaveCount(1);
-  await expect(notice).toContainText("sprites: Disk 90% used");
-  await expect(notice).not.toContainText("Delivery is blocked");
+  await expect(notice).toContainText("Delivery is blocked: stream limit reached");
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "High disk usage: 90% used",
+  );
   await expect(editor).toHaveText("Phone draft survives guidance updates");
 
-  await notify!({ ...base, state: "normal", available_bytes: 500_000_000, revision: 4 });
+  await notify!({
+    ...base,
+    state: "warning",
+    available_bytes: 120_000_000,
+    pressure_observed_at: new Date().toISOString(),
+    pressure_age_seconds: 0,
+    write_pressure: true,
+    delivery_state: "delivery_failed",
+    failure_storage: {
+      reason: "stream_limit_reached",
+      location: "executor_runtime",
+      executor_label: "sprites",
+    },
+    revision: 6,
+  });
+  await expect(notice).toHaveCount(1);
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "High disk usage: 88% used",
+  );
+  await expect(editor).toHaveText("Phone draft survives guidance updates");
+
+  await notify!({ ...base, state: "normal", available_bytes: 200_000_000, revision: 7 });
   await expect(notice).toHaveCount(0);
   await testPage.reload();
   await expect(testPage.getByTestId("chat-input-area")).toBeVisible();

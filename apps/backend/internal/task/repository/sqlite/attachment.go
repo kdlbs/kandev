@@ -831,6 +831,22 @@ func (r *Repository) PrepareMessageAttachmentsForTaskDelete(
 	return attachments, nil
 }
 
+// ExpireStagedMessageAttachment fences attachment retention before deleting private bytes.
+func (r *Repository) ExpireStagedMessageAttachment(ctx context.Context, id, ownerID string) error {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_message_attachments SET state = ?, expires_at = ?, updated_at = ?
+		WHERE id = ? AND owner_id = ? AND state = ?
+	`), models.AttachmentStateExpired, now, now, id, ownerID, models.AttachmentStateStaged)
+	if err != nil {
+		return fmt.Errorf("expire staged attachment for deletion: %w", err)
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		return models.ErrAttachmentClaimConflict
+	}
+	return nil
+}
+
 func (r *Repository) DeleteMessageAttachment(ctx context.Context, id, ownerID string) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM task_message_attachments WHERE id = ? AND owner_id = ?

@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activateLocale } from "@/lib/i18n";
-import { createLspManagerHarness, FakeWebSocket } from "./lsp-client-manager.test-harness";
+import {
+  acknowledgeRelease,
+  createLspManagerHarness,
+  FakeWebSocket,
+} from "./lsp-client-manager.test-harness";
 import { LSP_IDLE_TIMEOUT } from "./lsp-client-config";
 import type { LspProgressToken } from "./lsp-progress";
 
@@ -30,7 +34,6 @@ import { lspClientManager } from "./lsp-client-manager";
 const { createMonacoHarness } = createLspManagerHarness(lspClientManager, mocks);
 const SESSION_ID = "progress-session";
 const REPLACEMENT_SESSION_ID = "progress-replacement-session";
-const ERROR_SESSION_ID = "progress-error-session";
 const INSTALL_SESSION_ID = "progress-install-session";
 const LANGUAGE = "typescript";
 const WORKSPACE_PATH = "/workspace";
@@ -109,15 +112,15 @@ describe("LSP connection failure reporting", () => {
     });
   });
 
-  it("reports a bridge close while initialization is pending", async () => {
+  it("reports a confirmed server exit while initialization is pending", async () => {
     const { socket } = beginInitialization();
 
-    socket.failClosed(1006, "language server crashed during initialize");
+    socket.failClosed(4006, "language server crashed during initialize");
 
     await vi.waitFor(() => {
       expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({
         state: "error",
-        reason: "language server crashed during initialize",
+        reason: "language server exited",
       });
     });
   });
@@ -144,14 +147,14 @@ describe("LSP connection failure reporting", () => {
     consoleError.mockRestore();
   });
 
-  it("describes an unexpected bridge close when the proxy omits its reason", async () => {
+  it("describes a confirmed server exit without a close reason", async () => {
     const { initialize, socket } = beginInitialization();
     completeInitialization(socket, initialize.id);
     await vi.waitFor(() => {
       expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({ state: "ready" });
     });
 
-    socket.failClosed(1000, "");
+    socket.failClosed(4006, "");
 
     expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({
       state: "error",
@@ -178,21 +181,11 @@ describe("LSP connection failure localization", () => {
       const startingSocket = FakeWebSocket.instances.at(-1);
       if (!startingSocket) throw new Error(EXPECTED_SOCKET_ERROR);
       startingSocket.open();
-      startingSocket.failClosed(1001, "");
+      startingSocket.failClosed(1000, "");
 
       expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({
         state: "error",
         reason: "Ćōńńēćţĩōń ćĺōśēď",
-      });
-
-      lspClientManager.connect(ERROR_SESSION_ID, LANGUAGE);
-      const errorSocket = FakeWebSocket.instances.at(-1);
-      if (!errorSocket) throw new Error(EXPECTED_SOCKET_ERROR);
-      errorSocket.onerror?.(new Event("error"));
-
-      expect(lspClientManager.getStatus(ERROR_SESSION_ID, LANGUAGE)).toEqual({
-        state: "error",
-        reason: "ŴēƀŚōćķēţ ēŕŕōŕ",
       });
 
       const { initialize, socket } = beginInitialization(REPLACEMENT_SESSION_ID);
@@ -202,7 +195,7 @@ describe("LSP connection failure localization", () => {
           state: "ready",
         });
       });
-      socket.failClosed(1000, "");
+      socket.failClosed(4006, "");
 
       expect(lspClientManager.getStatus(REPLACEMENT_SESSION_ID, LANGUAGE)).toEqual({
         state: "error",
@@ -321,7 +314,7 @@ describe("LSP progress token and generation ownership", () => {
     expect(currentProgress.active.map((item) => item.title)).toEqual(["Current generation"]);
   });
 
-  it("clears connection-owned progress when the server stops", () => {
+  it("clears connection-owned progress when the server stops", async () => {
     const { socket, initialize } = beginInitialization();
     emitProgress(socket, initialize.params.workDoneToken, {
       kind: "begin",
@@ -329,6 +322,10 @@ describe("LSP progress token and generation ownership", () => {
     });
 
     lspClientManager.stop(SESSION_ID, LANGUAGE);
+    acknowledgeRelease(socket, "stop");
+    await vi.waitFor(() =>
+      expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({ state: "disabled" }),
+    );
 
     const progress = lspClientManager.getProgress(SESSION_ID, LANGUAGE);
     expect(progress).toEqual({
@@ -358,6 +355,8 @@ describe("LSP progress-aware idle cleanup", () => {
       expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({ state: "ready" });
 
       await vi.advanceTimersByTimeAsync(LSP_IDLE_TIMEOUT + 1);
+      acknowledgeRelease(socket, "editor_idle");
+      await vi.advanceTimersByTimeAsync(0);
       expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
     } finally {
       vi.useRealTimers();
@@ -383,6 +382,8 @@ describe("LSP progress-aware idle cleanup", () => {
 
       emitProgress(socket, initialize.params.workDoneToken, { kind: "end" });
       await vi.advanceTimersByTimeAsync(LSP_IDLE_TIMEOUT + 1);
+      acknowledgeRelease(socket, "editor_idle");
+      await vi.advanceTimersByTimeAsync(0);
       expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
     } finally {
       vi.useRealTimers();

@@ -74,8 +74,10 @@ restart the backend after you change it.
 ## Use CLI passthrough on a phone
 
 Open a task running in CLI passthrough mode. Its connected terminal shows the
-same navigation keys as a task terminal: **Ctrl**, **Shift**, **^C**, **^D**,
-**Esc**, **Tab**, arrows, and other terminal keys. Swipe the row to reach more keys.
+same navigation keys as a task terminal: **Esc**, arrows, **Enter**, and
+**Tab**, followed by **Ctrl**, **Shift**, **^C**, **^D**, and other terminal
+keys. A horizontal swipe icon shows that the row scrolls. Swipe the row to reach
+more keys.
 
 Tap **Ctrl** once to modify the next input, twice to keep it enabled, and again
 to turn it off. **Shift** followed by **Tab** sends reverse Tab. Keys go directly
@@ -93,6 +95,8 @@ Quick Chat is an agent conversation outside the board. Use it for repository ori
 ### Comment on an agent reply
 
 In Task Chat or Quick Chat, select text from a settled agent prose reply, then select the comment button that appears beside the selection. On a phone or tablet, the comment button joins the row of icons above the composer instead, so your device's own selection menu cannot cover it. The same applies in Office threads, Markdown previews, and code files, where the button appears in the bottom-right corner. The editor works like plan comments: enter feedback and choose **Add** to keep it as pending context, or **Run** to send it immediately. Pending selections use the same inline highlight and comment badge as plans; select either one to update or delete the feedback. Pending message comments are kept for the current browser tab, appear as composer context chips, and are included in the next prompt as Markdown. If the agent is busy, **Run** queues the feedback for its next turn.
+
+To include a file with feedback on an agent reply, walkthrough step, or file line, open the paperclip and choose **Add files**. Wait for each file to finish uploading before you add or run the comment. The agent receives a readable file path with that comment. If an upload fails, retry it or remove the file to continue.
 
 Inline comments are available only on ordinary settled prose. Streaming replies, tool/thinking/status output, plans, rich-block content, raw views, and user messages do not accept inline comments.
 
@@ -113,12 +117,13 @@ is running and a green dot when a reply is ready to read. Terminal tabs do not
 contribute to this activity indicator.
 
 On a phone, Quick Terminal includes the same shortcut row as a task terminal:
-**Ctrl**, **Shift**, **^C**, **^D**, **Esc**, **Tab**, navigation keys, and symbols.
-Swipe the row to reach more keys. Tap **^C** to interrupt a command. Tap a modifier
-once for the next input, twice to keep it enabled, and again to turn it off.
-Shortcuts target the selected terminal and keep the keyboard focused. The row
-stays above the on-screen keyboard. Modifiers reset when you switch terminal
-tabs or close the view.
+**Esc**, navigation keys, **Enter**, and **Tab**, followed by **Ctrl**, **Shift**,
+**^C**, **^D**, and symbols. A horizontal swipe icon shows that the row scrolls.
+Swipe the row to reach more keys. Tap **Enter** to run a command or **^C** to
+interrupt it. Tap a modifier once for the next input, twice to keep it enabled,
+and again to turn it off. Shortcuts target the selected terminal and keep the
+keyboard focused. The row stays above the on-screen keyboard. Modifiers reset
+when you switch terminal tabs or close the view.
 
 ### Recover a Quick Terminal
 
@@ -389,11 +394,42 @@ Closing the preview, file tab, focused viewer, or optional Browser panel removes
 
 ### Comment on a rendered preview
 
-Select **Annotate** in a Browser panel or rendered HTML-file preview. Choose **Select text**, **Select element**, or **Select screenshot region**, make the selection in the page, enter a comment, and select **Save feedback**. Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
+Select text in a Browser panel or rendered HTML-file preview to comment on it directly: a **Comment** button appears beside the selection, or in the bottom selection bar on touch devices. The same comment form used for plan, chat, and file comments opens next to the selection (a bottom sheet on touch devices). Enter a comment and select **Add**, or press Ctrl+Enter (⌘+Enter on macOS).
 
-Screenshot mode rasterizes the selected part of the rendered document and shows the PNG before saving. A screenshot is limited to 16 megapixels and 10 MiB, and one pending collection can contain up to 10 screenshots. Browser rendering features that cannot be read or reproduced by the rasterizer, including some canvas, video, font, and cross-origin resources, can look different or cause capture to fail. A failed capture or upload keeps a retryable draft; discarding it removes its staged image.
+For more than one comment, select **Annotate** to enter annotation mode. The preview gets an outline and a toolbar. On desktop the toolbar floats at the top; drag its handle to move it off the content you want to capture, and double-click the handle to put it back. Kandev remembers its position on each device. On touch devices the toolbar is docked at the bottom:
 
-Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from **Annotate**. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
+- **Interact** uses the page normally, including commenting on a text selection.
+- **Text** captures each text selection.
+- **Element** outlines the candidate under the pointer and captures the element you click.
+- **Region** captures each rectangle you drag. Drag an outline to move it, or drag a corner to resize it; the image is recaptured and the comment kept.
+
+The selected tool stays active after each capture, so you can mark several places in a row. While you write a comment on a text or element capture, the tool pauses and keeps the captured target highlighted. Choosing another tool closes an open comment, as **Close** does, so the new tool works at once. Leave the mode with **Exit**, or press Escape: it first closes an open comment form, then switches to **Interact**, then exits. Escape works whether focus is in Kandev or inside the page. After you leave the mode, numbered markers stay on text and elements you commented on, as comments stay highlighted in chat and plans. Click a marker to edit or delete its comment without entering the mode. Hover a marker to highlight the text or element its comment is about; the highlight stays while that comment is open. Region outlines appear only in annotation mode.
+
+Comments are always written in a comment box next to the capture. On desktop, a comments panel also opens beside the preview the first time you enter the mode. It lists saved comments and unsaved drafts, numbered like their markers on the page. The highlighted count on the toolbar shows and hides the panel; hiding it gives the page the full width. Kandev remembers on each device whether the panel was open. On touch devices the list is a bottom sheet that starts hidden.
+
+Select a number on the page, or **Edit** in the list, to edit or delete that comment in its comment box; picking an entry in the list scrolls the page to it. Closing a new capture's comment with **Close**, Escape, or a click elsewhere removes the capture if you typed nothing, and keeps it as an unsaved draft (shown dashed) if you did. **Annotate** shows a dot while drafts exist; use **Resume** or **Discard** under **Unsaved**. Drafts last until you add or discard them, or close the preview.
+
+Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
+
+The Region tool rasterizes the selected part of the rendered document and shows the PNG before saving. While it captures, the region keeps an animated outline, and the image shows what was under the rectangle when you released it, even if you scroll meanwhile. A capture that does not finish within 15 seconds is removed with an error. A screenshot is limited to 16 megapixels and 10 MiB. Saved and unsaved screenshots together are limited to 10 per task; at the limit the Region tool is disabled with a message until you send or delete some. A failed capture or upload keeps a retryable draft; discarding it removes its staged image. If a moved or resized region cannot be recaptured, the previous outline and image stay.
+
+Region outlines follow the page and any inner panel they were drawn in as you scroll. They also follow the content they were drawn over when the page's layout moves it, such as when the comments panel opens or the window resizes. When that content is removed, hidden, or changes size, the outline turns into a dashed amber warning: the saved screenshot still shows the original area, and moving or resizing the region captures it again from its new position. Kandev never captures again on its own; a capture always takes what is visible inside the outline. Hover a region (or tap its eye button on touch devices) and select **Show capture** to compare the saved screenshot with the live page. Content that scrolls inside a canvas, such as a Flutter app, does not move the outline; the captured image is unaffected.
+
+Previewed pages keep their WebGL drawing buffers, so screenshots of WebGL content drawn on the page's main thread contain the rendered pixels. This includes Flutter web builds made with `flutter build web` and with `--wasm`. Content the rasterizer cannot read still comes out blank or different:
+
+- Canvases rendered inside a worker, which browsers allow only on cross-origin-isolated pages. Kandev previews are not cross-origin isolated, so Flutter renders on the page's main thread there.
+- Some video, font, and cross-origin resources.
+
+When a capture over a canvas comes out as a single solid color, the comment form shows a warning under the thumbnail. Check the image before adding it: a genuinely solid area is fine to keep.
+
+<details>
+<summary>Flutter element feedback</summary>
+
+Flutter draws its UI on a canvas, so the **Element** tool only finds the whole `flutter-view` by default. Call `SemanticsBinding.instance.ensureSemantics()` in your app's `main()` to expose Flutter's semantics tree; element feedback then anchors to the individual `flt-semantics` nodes.
+
+</details>
+
+Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from the toolbar's count, or select a saved region's outline to edit its comment; editing opens the same comment form. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
 
 Send addresses the selected task session. An idle session receives the feedback directly; a busy session receives the same text, element metadata, and PNG attachments through its durable queue. Kandev removes only the exact saved versions accepted with that message. A validation, capacity, attachment, or version conflict leaves the feedback and composer draft available for correction and retry. The preview server and navigated page state remain ephemeral even though the saved feedback is durable.
 
@@ -456,9 +492,13 @@ The status surface separates process startup, the LSP `initialize` request, and 
 
 Kandev does not impose an automatic initialization timeout or invent a percentage or ETA. Some valid project imports take several minutes, and LSP has no universal indexing-progress contract. When a server reports standard work-done progress, Kandev shows its title, message, percentage, and concurrent work-item count when available. Those values describe only the work item the server reported; its completion does not guarantee that every cross-file definition or reference is ready. If cross-file navigation is still incomplete, leave the server running while its project model warms up, or stop it explicitly if the wait is unexpected.
 
-Task-owned browser continuity is on by default in shipped profiles. The restart-required `features.lspBrowserContinuity` runtime flag remains as an operator kill switch; an explicit false override restores browser-owned cleanup. With continuity enabled, each browser window owns an independent lease for the task-host language-server process. Closing a browser window or losing its network connection detaches the window while the lease continues to drain server messages. Reopening the task can reattach to that lease without a second `initialize`; duplicated tabs and other windows receive independent leases. Current diagnostics are cleared on detach and restored only after the editor resends its open files.
+Each browser window owns an independent lease for the task-host language-server process. Closing a browser window or losing its network connection detaches the window while the lease continues to drain server messages. Reopening the task can reattach to that lease without a second `initialize`; duplicated tabs and other windows receive independent leases. Current diagnostics are cleared on detach and restored only after the editor resends its open files.
 
-**Stop** releases that window's lease, and closing the last editor releases it after two minutes. Closing the browser retains a detached lease for up to one hour; reopening it resets that deadline, and an attached editor has no expiry deadline. Expiry releases the language server and lets normal task-host cleanup resume. Archiving or deleting the task starts background runtime cleanup that releases its leases. Stopping the task runtime or Kandev also releases its leases. Kandev allows eight active or detached leases by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. If the limit is reached, a new request is rejected while every lease is attached. When a detached lease is available, Kandev evicts the one detached longest. After expiry, eviction, or a backend restart, the next eligible connection starts a fresh server and project analysis must run again. With continuity disabled by the kill switch, closing the browser connection reaps its process as before. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-lease limit before retrying.
+**Stop** releases that window's lease, and closing the last editor releases it after two minutes. Closing the browser retains a detached lease for up to one hour; reopening it resets that deadline, and an attached editor has no expiry deadline. Expiry releases the language server and lets normal task-host cleanup resume. Archiving or deleting the task starts background runtime cleanup that releases its leases. Stopping the task runtime or Kandev also releases its leases. Kandev allows eight active or detached leases by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. If the limit is reached, a new request is rejected while every lease is attached. When a detached lease is available, Kandev evicts the one detached longest. After expiry, eviction, or a backend restart, the next eligible connection starts a fresh server and project analysis must run again. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-lease limit before retrying.
+
+Kandev ignores the retired `features.lspBrowserContinuity` override and the old
+`KANDEV_FEATURES_LSP_BROWSER_CONTINUITY` environment variable. Installations
+that used either value to disable continuity now use task-host leases.
 
 During a temporary browser-to-backend transport failure, the status changes to **Reconnecting** while Kandev attempts to reattach; browser closes `1005` and `1006`, backend restart close `1001`, and backend transport close `4009` do not prove that the language server exited. A confirmed server process exit uses `4006` and shows the server-exited state with **Retry**. Close `4010` means the task runtime stopped, so Kandev ends that lease without reconnecting it.
 

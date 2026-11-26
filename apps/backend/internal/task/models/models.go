@@ -260,11 +260,15 @@ const (
 	// review tasks. Their worktree setup scripts can read executor-profile secrets;
 	// a user can still explicitly start the task after reviewing it.
 	MetaKeyForkPRRequiresManualStart = "fork_pr_requires_manual_start"
-	// MetaKeyInterruptedAt is set by reconciliation when a task's session lost
-	// an active turn. Its presence makes the task DTO report `interrupted: true`
-	// so task-list surfaces show the warning indicator. The orchestrator removes
-	// the key only after the provider confirms recovery.
+	// MetaKeyInterruptedAt projects whether any session on a task still needs
+	// continuation. Keep it for existing readers of the task DTO.
 	MetaKeyInterruptedAt = "interrupted_at"
+	// MetaKeyInterruptedSessions stores private interruption ownership by
+	// session so one accepted prompt cannot clear another session's warning.
+	MetaKeyInterruptedSessions = "interrupted_sessions"
+	// MetaKeyLegacyInterruptedAt preserves a timestamp-only warning while a
+	// scoped interruption is added to the same task.
+	MetaKeyLegacyInterruptedAt = "interrupted_legacy_at"
 	// MetaKeyAutoStartFailed is set when a workflow step's auto_start_agent
 	// on_enter action fails to launch a run (kanban StartTask error, or an
 	// Office task queue-run error/unresolvable agent). Its presence makes the
@@ -411,6 +415,37 @@ func ManagedToolPolicyFromTask(task *Task) (*mcpprofile.ManagedToolPolicy, bool,
 		return nil, true, err
 	}
 	return policy, true, nil
+}
+
+// InterruptedSessionMarker is the private ownership record for one
+// interrupted task session.
+type InterruptedSessionMarker struct {
+	IncarnationID string `json:"incarnation_id"`
+	InterruptedAt string `json:"interrupted_at"`
+	Token         string `json:"token"`
+}
+
+// LoadInterruptedSessionMarkers decodes the private scoped markers in task
+// metadata. The boolean reports whether the key was present.
+func LoadInterruptedSessionMarkers(
+	metadata map[string]interface{},
+) (map[string]InterruptedSessionMarker, bool, error) {
+	value, present := metadata[MetaKeyInterruptedSessions]
+	if !present || value == nil {
+		return nil, present, nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, true, err
+	}
+	markers := map[string]InterruptedSessionMarker{}
+	if err := json.Unmarshal(encoded, &markers); err != nil {
+		return nil, true, err
+	}
+	if markers == nil {
+		markers = map[string]InterruptedSessionMarker{}
+	}
+	return markers, true, nil
 }
 
 // officeCarrierMetadataKeys is every MetaKeyOfficeCarrier* key above, kept
@@ -826,6 +861,39 @@ const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
 // selector state so task-detail boot hydration does not wait for WebSocket
 // reconnection. It is display metadata and is not replayed to the provider.
 const SessionMetaKeyACPModelState = "acp_model_state"
+
+// SessionMetaKeyACPAdapterIdentity keeps runtime provenance attached to the
+// current native ACP session when a legacy session has no generation row.
+const SessionMetaKeyACPAdapterIdentity = "acp_adapter_identity"
+
+// ACPAdapterIdentity binds a tagged adapter version to the native session ID
+// it describes. The ID check prevents stale provenance from selecting a
+// runtime after the provider conversation changes.
+type ACPAdapterIdentity struct {
+	NativeSessionID string `json:"native_session_id"`
+	AdapterVersion  string `json:"adapter_version"`
+}
+
+// ACPAdapterVersionForNativeSession reads provenance only when it belongs to
+// the requested native conversation.
+func ACPAdapterVersionForNativeSession(metadata map[string]interface{}, nativeSessionID string) string {
+	if nativeSessionID == "" || metadata == nil {
+		return ""
+	}
+	raw, ok := metadata[SessionMetaKeyACPAdapterIdentity]
+	if !ok || raw == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return ""
+	}
+	var identity ACPAdapterIdentity
+	if err := json.Unmarshal(encoded, &identity); err != nil || identity.NativeSessionID != nativeSessionID {
+		return ""
+	}
+	return identity.AdapterVersion
+}
 
 // SessionMetaKeyMCPAttachmentState records bounded, safe evidence about MCP
 // attachment for this task session and its immediate prior attempts.
@@ -1317,6 +1385,10 @@ func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
 		decodeOptionalErrorCauseString(fields, "attempted_model", &cause.AttemptedModel)
 		decodeOptionalErrorCauseString(fields, "requested_mode", &cause.RequestedMode)
 		decodeOptionalErrorCauseString(fields, "effective_mode", &cause.EffectiveMode)
+		decodeOptionalErrorCauseString(fields, "requested_setting", &cause.RequestedSetting)
+		decodeOptionalErrorCauseString(fields, "effective_setting", &cause.EffectiveSetting)
+		decodeOptionalErrorCauseString(fields, "setting_config_id", &cause.SettingConfigID)
+		decodeOptionalErrorCauseString(fields, "setting_source", &cause.SettingSource)
 		decodeOptionalErrorCauseString(fields, "runtime_version", &cause.RuntimeVersion)
 		if value, ok := fields["prompt_not_sent"]; ok {
 			var promptNotSent bool
@@ -1601,6 +1673,7 @@ type Task struct {
 	WorkflowAgentOverrides *WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
 	Title                  string                  `json:"title"`
 	Description            string                  `json:"description"`
+	FlagNote               string                  `json:"flag_note"`
 	State                  v1.TaskState            `json:"state"`
 	Priority               string                  `json:"priority"`
 	Position               int                     `json:"position"` // Order within workflow step
@@ -2011,6 +2084,11 @@ type TaskRepository struct {
 	UpdatedAt                     time.Time              `json:"updated_at"`
 }
 
+// TaskRepositoryInheritedCheckoutReuseOnlyMetadataKey marks a copied
+// inherited checkout selector that identifies a shared workspace slot but
+// must not pin a fresh checkout after an executor transition.
+const TaskRepositoryInheritedCheckoutReuseOnlyMetadataKey = "inherited_checkout_reuse_only"
+
 // TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
 // It stays separate from TaskRepository because folders are not Git sources.
 type TaskWorkspaceFolder struct {
@@ -2204,6 +2282,9 @@ const (
 	// PermissionActorCoordinatorUnattended marks a denial made by the backend
 	// for a coordinator's unattended turn, where no person is present.
 	PermissionActorCoordinatorUnattended PermissionResolutionActorKind = "coordinator_unattended"
+	// PermissionActorLinkedIdentity marks a Kandev user who decided on an
+	// external surface linked to their account, relayed by a plugin.
+	PermissionActorLinkedIdentity PermissionResolutionActorKind = "linked_identity"
 )
 
 type PermissionResolutionSource string
@@ -2220,6 +2301,9 @@ const (
 	// PermissionSourceCoordinatorWake identifies a denial made during a
 	// coordinator wake's unattended turn.
 	PermissionSourceCoordinatorWake PermissionResolutionSource = "coordinator_wake"
+	// PermissionSourcePlugin identifies a response a plugin relayed with a
+	// receipt minted for a linked Kandev user.
+	PermissionSourcePlugin PermissionResolutionSource = "plugin"
 )
 
 type PermissionResolutionResult string
@@ -2673,6 +2757,9 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		"updated_at":                     s.UpdatedAt,
 		"admitted_execution_grade":       s.AdmittedExecutionGrade,
 		"admitted_execution_grade_known": s.AdmittedExecutionGradeKnown,
+	}
+	if adapterVersion := ACPAdapterVersionForNativeSession(s.Metadata, s.DownstreamACPSessionID); adapterVersion != "" {
+		result["runtime_adapter_version"] = adapterVersion
 	}
 	if s.RouteGeneration > 0 {
 		result["route_generation"] = s.RouteGeneration
@@ -3468,16 +3555,18 @@ type TaskPlan struct {
 
 // TaskPlanComment is pending user feedback attached to the current task plan.
 type TaskPlanComment struct {
-	ID           string    `json:"id"`
-	TaskID       string    `json:"task_id"`
-	PlanID       string    `json:"plan_id"`
-	Body         string    `json:"body"`
-	SelectedText string    `json:"selected_text"`
-	AnchorFrom   int       `json:"anchor_from"`
-	AnchorTo     int       `json:"anchor_to"`
-	Version      int64     `json:"version"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	AttachmentIDs []string               `json:"-"`
+	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
+	ID            string                 `json:"id"`
+	TaskID        string                 `json:"task_id"`
+	PlanID        string                 `json:"plan_id"`
+	Body          string                 `json:"body"`
+	SelectedText  string                 `json:"selected_text"`
+	AnchorFrom    int                    `json:"anchor_from"`
+	AnchorTo      int                    `json:"anchor_to"`
+	Version       int64                  `json:"version"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
 // TaskPlanCommentSnapshot is the authoritative pending-comment collection for a plan.
@@ -3537,6 +3626,17 @@ type TaskPreviewFeedbackSnapshot struct {
 	TaskID   string                 `json:"task_id" db:"task_id"`
 	Revision int64                  `json:"revision" db:"revision"`
 	Items    []*TaskPreviewFeedback `json:"items"`
+}
+
+// TaskPreviewFeedbackScreenshotReplacement replaces a saved screenshot item's
+// rectangle and image at an exact version. An empty Comment keeps the stored one.
+type TaskPreviewFeedbackScreenshotReplacement struct {
+	TaskID                 string
+	ItemID                 string
+	ExpectedVersion        int64
+	Comment                string
+	CaptureRect            json.RawMessage
+	ScreenshotAttachmentID string
 }
 
 // TaskPreviewFeedbackRef identifies the exact pending item version included in delivery.
@@ -3812,10 +3912,11 @@ type TaskMessageAttachment struct {
 }
 
 const (
-	AttachmentStateStaged  = "staged"
-	AttachmentStateClaimed = "claimed"
-	AttachmentStateExpired = "expired"
-	AttachmentStateDeleted = "deleted"
+	AttachmentStateStaged      = "staged"
+	AttachmentStateClaimed     = "claimed"
+	AttachmentStatePlanComment = "plan_comment"
+	AttachmentStateExpired     = "expired"
+	AttachmentStateDeleted     = "deleted"
 )
 
 // SessionFileReview tracks per-file review state within a session
@@ -3857,6 +3958,7 @@ func (t *Task) ToAPI() *v1.Task {
 		WorkflowID:             t.WorkflowID,
 		Title:                  t.Title,
 		Description:            t.Description,
+		FlagNote:               t.FlagNote,
 		State:                  t.State,
 		Priority:               t.Priority,
 		Repositories:           repositories,

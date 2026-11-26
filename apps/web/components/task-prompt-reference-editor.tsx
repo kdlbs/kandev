@@ -15,6 +15,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -36,6 +37,8 @@ import {
 } from "@/lib/prompts/task-prompt-document";
 import { TaskPromptReference } from "./task-prompt-reference-node";
 
+type PromptSuggestions = { label: string; testId: string; inline?: boolean };
+
 type TaskPromptReferenceEditorProps = {
   value: string;
   onChange: (value: string) => void;
@@ -43,6 +46,7 @@ type TaskPromptReferenceEditorProps = {
   disabled?: boolean;
   autoFocus?: boolean;
   className?: string;
+  promptSuggestions?: PromptSuggestions;
   onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void;
   onPaste?: (event: ClipboardEvent<HTMLElement>) => void;
   onFocus?: () => void;
@@ -60,6 +64,7 @@ export const TaskPromptReferenceEditor = forwardRef<
     disabled = false,
     autoFocus = false,
     className,
+    promptSuggestions,
     onKeyDown,
     onPaste,
     onFocus,
@@ -98,6 +103,7 @@ export const TaskPromptReferenceEditor = forwardRef<
     placeholder,
     disabled,
     className,
+    promptSuggestions,
     initialContent,
     promptNames,
     valueRef,
@@ -116,25 +122,27 @@ export const TaskPromptReferenceEditor = forwardRef<
     value,
     onChange,
     promptInsertMode: "reference",
+    anchorToCaret: !promptSuggestions,
   });
   useLayoutEffect(() => {
     mentionRef.current = mention;
   }, [mention]);
 
-  const handleMentionKeyDownCapture = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "Escape" && mention.isOpen) {
-        event.preventDefault();
-        event.stopPropagation();
-        mention.closeMenu();
-        requestAnimationFrame(() => editorInputRef.current?.focus());
-        return;
-      }
-      if (event.defaultPrevented) return;
+  const handleMentionKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape" && mention.isOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (promptSuggestions && editor) reconcilePromptReferences(editor, promptNames);
+      mention.closeMenu();
+      requestAnimationFrame(() => editorInputRef.current?.focus());
+      return;
+    }
+    const reservedKey =
+      event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing;
+    if (!event.defaultPrevented && !(promptSuggestions && reservedKey)) {
       mention.handleKeyDown(event as unknown as KeyboardEvent<HTMLElement>);
-    },
-    [mention.closeMenu, mention.handleKeyDown, mention.isOpen],
-  );
+    }
+  };
 
   const createInputHandle = useCallback(
     () => createEditorInputHandle(editor, promptNames, valueRef, onChangeRef, syncingRef),
@@ -151,6 +159,7 @@ export const TaskPromptReferenceEditor = forwardRef<
     <TaskPromptReferenceEditorView
       editor={editor}
       mention={mention}
+      promptSuggestions={promptSuggestions}
       onKeyDownCapture={handleMentionKeyDownCapture}
     />
   );
@@ -161,6 +170,7 @@ type TaskPromptTiptapOptions = {
   placeholder: string;
   disabled: boolean;
   className?: string;
+  promptSuggestions?: PromptSuggestions;
   initialContent: TaskPromptDocument;
   promptNames: readonly string[];
   valueRef: MutableRefObject<string>;
@@ -178,6 +188,7 @@ function useTaskPromptTiptap({
   placeholder,
   disabled,
   className,
+  promptSuggestions,
   initialContent,
   promptNames,
   valueRef,
@@ -204,12 +215,13 @@ function useTaskPromptTiptap({
     editable: !disabled,
     editorProps: {
       attributes: {
-        "data-testid": "task-description-input",
+        "data-testid": promptSuggestions?.testId ?? "task-description-input",
         "data-prompt-reference-editor": "true",
         "data-task-description-value": value,
         role: "textbox",
         "aria-multiline": "true",
-        "aria-label": placeholder,
+        "aria-label": promptSuggestions?.label ?? placeholder,
+        ...(promptSuggestions && { "aria-autocomplete": "list" }),
         class: cn(
           "min-w-0 max-w-full whitespace-pre-wrap break-words px-2 py-2 text-[13px] leading-relaxed outline-none",
           "min-h-[96px] max-h-[240px] overflow-y-auto",
@@ -219,7 +231,9 @@ function useTaskPromptTiptap({
       },
       handleKeyDown: (_view, event) => {
         const wasDefaultPrevented = event.defaultPrevented;
-        mentionRef.current?.handleKeyDown(event as unknown as KeyboardEvent<HTMLElement>);
+        if (!promptSuggestions) {
+          mentionRef.current?.handleKeyDown(event as unknown as KeyboardEvent<HTMLElement>);
+        }
         if (!event.defaultPrevented) {
           onKeyDownRef.current?.(event as unknown as KeyboardEvent<HTMLElement>);
         }
@@ -239,6 +253,7 @@ function useTaskPromptTiptap({
           if (currentEditor && !currentEditor.isDestroyed) {
             reconcilePromptReferences(currentEditor, promptNames);
           }
+          if (promptSuggestions) mentionRef.current?.closeMenu();
           onBlurRef.current?.();
           return false;
         },
@@ -272,20 +287,48 @@ function useTaskPromptTiptap({
 type TaskPromptReferenceEditorViewProps = {
   editor: Editor | null;
   mention: ReturnType<typeof useTaskCreatePromptMentionForInput>;
+  promptSuggestions?: PromptSuggestions;
   onKeyDownCapture: (event: KeyboardEvent<HTMLDivElement>) => void;
 };
 
 function TaskPromptReferenceEditorView({
   editor,
   mention,
+  promptSuggestions,
   onKeyDownCapture,
 }: TaskPromptReferenceEditorViewProps) {
+  const listId = useId();
+  const listOpen = promptSuggestions && mention.isOpen;
+  useLayoutEffect(() => {
+    if (!promptSuggestions || !editor || editor.isDestroyed) return;
+    const input = editor.view.dom;
+    if (listOpen) input.setAttribute("aria-controls", listId);
+    else input.removeAttribute("aria-controls");
+    if (listOpen && mention.items[mention.selectedIndex]) {
+      input.setAttribute("aria-activedescendant", `${listId}-${mention.selectedIndex}`);
+    } else {
+      input.removeAttribute("aria-activedescendant");
+    }
+  }, [editor, promptSuggestions, listId, listOpen, mention.items, mention.selectedIndex]);
+
   return (
     <>
-      <div className="min-w-0 max-w-full" onKeyDownCapture={onKeyDownCapture}>
+      <div
+        className="min-w-0 max-w-full"
+        data-prompt-suggestions-open={listOpen || undefined}
+        onKeyDownCapture={onKeyDownCapture}
+      >
         <EditorContent editor={editor} />
       </div>
       <MentionMenu
+        promptList={
+          promptSuggestions ? { id: listId, inline: promptSuggestions.inline } : undefined
+        }
+        clientRect={
+          promptSuggestions && !promptSuggestions.inline
+            ? () => editor?.view.dom.getBoundingClientRect() ?? null
+            : undefined
+        }
         isOpen={mention.isOpen}
         isLoading={mention.isLoading}
         position={mention.position}

@@ -60,8 +60,8 @@ Resolve it for the runtime the execution resolved, not the requested executor ty
 Pass this value through the current `CommandOptions` and runtime-selection seams as needed.
 Other agents retain their existing fixed-package resolution.
 
-All OpenCode consumers must use this resolution: registry probes, host utilities, lifecycle profile resolution,
-standalone sessions, executor preflight/install, container and SSH commands, retry/cache repair,
+All OpenCode consumers must use this resolution: registry probes, host utilities, session-bound utility prompts,
+lifecycle profile resolution, standalone sessions, executor preflight/install, container and SSH commands, retry/cache repair,
 Settings preview and activation, and Kandev-created interactive CLI commands.
 For OpenCode the interactive CLI and ACP runtime come from the same distribution.
 Construct interactive commands without `acp` and retain their existing resume/model/prompt arguments.
@@ -72,10 +72,15 @@ Managed selection overrides native preference, including executor `native_binary
 Stage managed candidates through `CacheUpdateCommand`, never `NativeUpdateCommand`.
 Use an explicit managed ACP candidate command, never `RefreshCommand` if it can rediscover PATH.
 Installation helpers for managed OpenCode must use the resolved exact package.
-Discovery and availability checks must recognize the selected managed runtime even when `opencode` is absent from PATH.
-`OpenCodeACP.IsInstalled` currently checks native presence; reconcile that check with managed readiness so a successful
-managed installation remains selectable. An unprepared fresh runtime may show an install action; discovery alone must not
-perform an unrequested global install. Installation uses the normal Kandev install/launch flow and the resolved managed command.
+Discovery and availability checks must recognize the selected managed runtime even when `opencode` is absent from PATH,
+and must survive reviewed default pin advances within the adopted family.
+`OpenCodeACP.IsInstalled` checks managed readiness against the npm execution cache (`<npm_cache>/_npx`) without running
+network operations or installs:
+1. Fast path: if the exact non-symlink execution directory for `NpxExecutionCacheKey(spec.PackageSpec(version))` exists, report available.
+2. Same-family fallback: when the exact-version directory is absent (for example after `reconcileOpenCodeDefault` advances `applied_default_version` to a newly shipped pin), scan `<npm_cache>/_npx` (rejecting a symlinked `_npx` directory and skipping symlinked or non-directory entries) and report available if at least one execution directory contains a regular `node_modules/<spec.Package>/package.json` file for the selected family's trusted package (`@opencode/cli` for v2 or `opencode-ai` for v1).
+Unrelated packages, cross-family packages, incomplete entries, and symlinks are skipped individually; they neither satisfy availability nor mask a valid sibling tree. Caller cancellation returns `ctx.Err()`; missing `npm`, missing cache directories, or zero matching entries return unavailable without error.
+Once reported available, `hostutility` bootstrap and normal launches execute the resolved exact managed command for the new pin, which materializes the new `_npx` execution tree on demand and restores the exact-key fast path.
+An unprepared fresh runtime still reports unavailable and shows an install action; discovery alone must not perform an unrequested install. Installation uses the normal Kandev install/launch flow and the resolved managed command.
 Before a managed Settings install command reaches the shell, prepare its internal npm project-prefix marker as a private
 temporary directory on the backend host. The displayed command may retain the readable marker; execution must not rely
 on creating or resolving that path beneath the user's home directory.

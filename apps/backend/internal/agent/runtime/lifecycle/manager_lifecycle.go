@@ -324,6 +324,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				WorkspacePath:         ri.WorkspacePath,
 				OriginalWorkspacePath: originalWorkspacePath,
 				RuntimeName:           ri.RuntimeName,
+				McpProfile:            restoreMcpProfileContext(ri.Metadata),
 				Status:                v1.AgentStatusRunning,
 				StartedAt:             time.Now(),
 				metadata:              ri.Metadata,
@@ -602,7 +603,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
 	}
 	for _, record := range records {
-		if record == nil || detailedOutcomes[record.SessionID] != RecoveryOutcomeNoMatchingInstance ||
+		if record == nil || !remoteRecoveryOutcomeProvesAbsence(record.Runtime, detailedOutcomes[record.SessionID]) ||
 			!remoteRecoveryNoMatchProvesStopped(record.Runtime) {
 			continue
 		}
@@ -715,6 +716,8 @@ func (m *Manager) Start(ctx context.Context) error {
 			m.remoteStatusLoop(remoteStatusCtx)
 		}()
 		m.logger.Info("remote status loop started")
+		m.wg.Add(1)
+		go m.dispatchedPromptStallLoop(m.stopContext)
 	})
 	// Set up callbacks for passthrough mode (using standalone runtime)
 	if standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone); err == nil {
@@ -791,6 +794,7 @@ func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution 
 	execution.ContinueCommand = commands.continue_
 	execution.AgentArgs = commands.args
 	execution.ContinueArgs = commands.continueArgs
+	execution.OpenCodeRuntime = commands.openCodeRuntime
 	execution.LaunchWrapper, err = recoveredLaunchWrapper(ctx, execution, commands.wrapper)
 	if err != nil {
 		return err

@@ -1,12 +1,15 @@
 "use client";
 
+import { AttachmentLinks } from "@/components/shared/attachment-links";
 import { memo } from "react";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { ContextChip } from "./context-chip";
 
 type SelectionComment = {
   id: string;
   selectedText: string;
   text: string;
+  attachments?: MessageAttachment[];
 };
 
 export const SelectionCommentItem = memo(function SelectionCommentItem({
@@ -32,6 +35,7 @@ export const SelectionCommentItem = memo(function SelectionCommentItem({
             </div>
           ) : null}
           <div className="break-words">{comment.text}</div>
+          <AttachmentLinks attachments={comment.attachments} />
         </div>
       ))}
     </div>
