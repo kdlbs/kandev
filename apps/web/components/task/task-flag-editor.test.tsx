@@ -58,3 +58,16 @@ it("keeps the draft after a failed write and allows retrying it", async () => {
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(save.mock.calls).toEqual([[trimmed], [trimmed]]);
 });
+
+it("keeps oversized drafts from reaching the save handler", () => {
+  const save = vi.fn();
+  renderEditor(save);
+  expect(noteField().getAttribute("maxlength")).toBe("1024");
+  fireEvent.change(noteField(), { target: { value: "🙂".repeat(512) } });
+  const saveButton = screen.getByRole<HTMLButtonElement>("button", { name: "Save" });
+  expect(saveButton.disabled).toBe(false);
+  fireEvent.change(noteField(), { target: { value: "🙂".repeat(512) + "x" } });
+  expect(saveButton.disabled).toBe(true);
+  fireEvent.submit(noteField().closest("form")!);
+  expect(save).not.toHaveBeenCalled();
+});

@@ -94,6 +94,23 @@ it("publishes flag changes and restores the note in the demo sidebar after reloa
   });
 });
 
+it("rejects an oversized flag update before mutating the demo task", async () => {
+  const path = `/api/v1/tasks/${CHECKOUT_TASK}`;
+  const note = "🙂".repeat(512);
+  expect(await http(path, { flag_note: `  ${note}  ` }, "PATCH")).toMatchObject({
+    status: 200,
+    body: { flag_note: note },
+  });
+  expect(
+    await http(path, { flag_note: note + "x", title: "Must not change" }, "PATCH"),
+  ).toMatchObject({
+    status: 400,
+  });
+  const { body } = await http(path, {}, "GET");
+  expect(body).toMatchObject({ flag_note: note });
+  expect(body).not.toMatchObject({ title: "Must not change" });
+});
+
 it("preserves file and plan edits in the tab snapshot", () => {
   socket("workspace.file.update", {
     session_id: CHECKOUT_SESSION,

@@ -1,5 +1,9 @@
 ---
 status: done
+id: "01-sidebar-flags"
+title: "Add sidebar task flags"
+wave: 1
+depends_on: []
 requirements:
   - REQ-TASKS-SIDEBAR-FLAGS-001
 system_design:

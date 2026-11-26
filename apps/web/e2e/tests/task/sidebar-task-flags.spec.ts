@@ -19,6 +19,7 @@ test("adds, reads, edits, and removes a flag on another sidebar task", async ({
   const editor = testPage.getByRole("dialog").filter({ has: testPage.getByRole("textbox") });
   const save = editor.getByRole("button", { name: "Save", exact: true });
   await expect(save).toBeDisabled();
+  await expect(editor.getByRole("textbox")).toHaveAttribute("maxlength", "1024");
   await editor.getByRole("textbox").fill("Check links before release");
   await save.click();
   const flag = sidebar.row(target.task_id).getByRole("button", { name: /flag/i });

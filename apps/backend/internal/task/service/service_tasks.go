@@ -2252,6 +2252,9 @@ func (s *Service) validateTaskUpdateInput(ctx context.Context, id string, req *U
 			return err
 		}
 	}
+	if err := validateTaskFlagNote(req.FlagNote); err != nil {
+		return err
+	}
 	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return err
 	}

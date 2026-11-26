@@ -16,7 +16,7 @@ owners:
 
 #### Acceptance criteria
 
-- **AC-TASKS-SIDEBAR-FLAGS-001.1:** Right-clicking a single unflagged task offers **Add flag**. Saving a nonblank note places a small red flag beside that task's title. The current task stays open.
+- **AC-TASKS-SIDEBAR-FLAGS-001.1:** Right-clicking a single unflagged task offers **Add flag**. Saving a nonblank note places a small red flag beside that task's title. The current task stays open. A flag note can contain up to 1,024 UTF-16 code units.
 - **AC-TASKS-SIDEBAR-FLAGS-001.2:** Hovering or focusing the flag reveals the full note as plain text. The flag stays visible when the pointer leaves the row.
 - **AC-TASKS-SIDEBAR-FLAGS-001.3:** A flagged task offers **Flag**. This action opens its saved note for editing and offers **Remove flag**. Removal clears the icon and restores **Add flag**.
 - **AC-TASKS-SIDEBAR-FLAGS-001.4:** Every sidebar occurrence shows the same saved flag after refresh. Cancel preserves the saved state. A failed write preserves the draft and offers a retry.

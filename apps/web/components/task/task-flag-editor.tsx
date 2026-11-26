@@ -4,6 +4,7 @@ import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Drawer, DrawerContent, DrawerTitle } from "@kandev/ui/drawer";
 import { Textarea } from "@kandev/ui/textarea";
+import { TASK_FLAG_NOTE_MAX_LENGTH } from "@/lib/task-flag-note";
 
 export function TaskFlagEditor({
   savedNote,
@@ -74,6 +75,8 @@ function useTaskFlagDraft(
   const [failed, setFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const submitting = useRef(false);
+  const trimmedNote = note.trim();
+  const canSave = Boolean(trimmedNote) && note.length <= TASK_FLAG_NOTE_MAX_LENGTH;
 
   const close = () => {
     if (!submitting.current) onClose();
@@ -95,10 +98,10 @@ function useTaskFlagDraft(
   };
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (note.trim()) void submit(note.trim());
+    if (canSave) void submit(trimmedNote);
   };
 
-  return { note, setNote, failed, saving, close, submit, handleSubmit };
+  return { note, setNote, failed, saving, canSave, close, submit, handleSubmit };
 }
 
 function preventSubmit(event: FormEvent) {
@@ -106,7 +109,7 @@ function preventSubmit(event: FormEvent) {
 }
 
 function TaskFlagForm({
-  draft: { note, setNote, failed, saving, close, submit, handleSubmit },
+  draft: { note, setNote, failed, saving, canSave, close, submit, handleSubmit },
   hasSavedNote,
   readOnly,
   touch,
@@ -129,6 +132,7 @@ function TaskFlagForm({
           id={noteId}
           value={note}
           rows={3}
+          maxLength={TASK_FLAG_NOTE_MAX_LENGTH}
           className={touch ? "resize-none md:text-base" : "resize-none"}
           readOnly={readOnly || saving}
           onChange={(event) => setNote(event.target.value)}
@@ -165,7 +169,7 @@ function TaskFlagForm({
             {t(readOnly ? "common:close" : "common:cancel")}
           </Button>
           {!readOnly && (
-            <Button type="submit" className={buttonSize} disabled={saving || !note.trim()}>
+            <Button type="submit" className={buttonSize} disabled={saving || !canSave}>
               {t("common:save")}
             </Button>
           )}

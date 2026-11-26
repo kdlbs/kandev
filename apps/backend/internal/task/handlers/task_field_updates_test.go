@@ -238,3 +238,36 @@ func TestTaskFieldUpdatesRegisteredProtocols(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskFlagNoteLengthInRegisteredProtocols(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	pair := fieldProtocolPair(t)
+	fixture := pair[0]
+	const taskID = "protocol-fields"
+	maximum := strings.Repeat("🙂", 512)
+	for _, transport := range []string{"REST", "WS"} {
+		t.Run(transport, func(t *testing.T) {
+			ctx := t.Context()
+			body, ok, err := fixture.request(ctx, transport, map[string]interface{}{"flag_note": " " + maximum + " "})
+			require.NoError(t, err)
+			require.True(t, ok, body)
+			require.Equal(t, maximum, body["flag_note"])
+			<-fixture.published
+
+			body, ok, err = fixture.request(ctx, transport, map[string]interface{}{
+				"flag_note": maximum + "x", "title": "Must not change",
+			})
+			require.NoError(t, err)
+			require.False(t, ok, body)
+			if transport == "WS" {
+				require.Equal(t, ws.ErrorCodeValidation, body["code"])
+			}
+			require.Empty(t, fixture.published)
+
+			persisted, err := fixture.gate.Repository.GetTask(ctx, taskID)
+			require.NoError(t, err)
+			require.Equal(t, maximum, persisted.FlagNote)
+			require.Equal(t, "Original", persisted.Title)
+		})
+	}
+}

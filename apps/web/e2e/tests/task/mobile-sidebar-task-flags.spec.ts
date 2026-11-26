@@ -22,6 +22,7 @@ test("adds a flag from phone task actions and opens its note by touch", async ({
   const editor = testPage.getByRole("dialog").filter({ has: testPage.getByRole("textbox") });
   await expect(editor).toHaveAttribute("data-slot", "drawer-content");
   const note = editor.getByRole("textbox");
+  await expect(note).toHaveAttribute("maxlength", "1024");
   await note.fill("Review the final link");
   await assertNoDocumentHorizontalOverflow(testPage, "phone flag editor");
   await editor.getByRole("button", { name: "Save", exact: true }).tap();
