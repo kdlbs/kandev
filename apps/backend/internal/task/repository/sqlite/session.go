@@ -5106,9 +5106,10 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	if err := r.confirmTaskSessionDeletionIdentityTx(ctx, tx, session); err != nil {
 		return nil, err
 	}
+	// Malformed private warning data must not block session deletion.
 	if _, err := r.removeTaskInterruptedSessionTx(
 		ctx, tx, session.TaskID, session.ID, session.QueueIncarnationID,
-	); err != nil {
+	); err != nil && !errors.Is(err, errMalformedTaskInterruptionEntries) {
 		return nil, fmt.Errorf("remove deleted session interruption marker: %w", err)
 	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), session.ID); err != nil {

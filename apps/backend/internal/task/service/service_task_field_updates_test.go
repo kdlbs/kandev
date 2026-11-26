@@ -150,6 +150,11 @@ func TestTaskFieldUpdatePublicMetadataRoundTripPreservesTwoInterruptedSessions(t
 	for sessionID, marker := range map[string]models.InterruptedSessionMarker{
 		"session-first": first, "session-second": second,
 	} {
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: sessionID, TaskID: "field-task", QueueIncarnationID: marker.IncarnationID,
+		}); err != nil {
+			t.Fatalf("create session %s: %v", sessionID, err)
+		}
 		changed, err := repo.SetTaskInterruptedSessionIfNotArchived(ctx, "field-task", sessionID, marker)
 		if err != nil || !changed {
 			t.Fatalf("set interruption for %s: changed=%t err=%v", sessionID, changed, err)

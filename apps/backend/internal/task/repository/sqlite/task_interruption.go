@@ -75,6 +75,8 @@ type taskInterruptionRecoveryGuard struct {
 	token     string
 }
 
+var errMalformedTaskInterruptionEntries = errors.New("malformed task interruption entries")
+
 func (r *Repository) lockTaskInterruptionMetadata(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -264,13 +266,13 @@ func (r *Repository) removeTaskInterruptedSessionTx(
 	if taskID == "" || sessionID == "" || incarnationID == "" {
 		return false, nil
 	}
-	metadata, _, err := readTaskInterruptionMetadata(ctx, tx, taskID)
-	if err != nil {
+	metadata, found, _, err := r.lockTaskInterruptionMetadata(ctx, tx, taskID)
+	if err != nil || !found {
 		return false, err
 	}
 	entries, err := interruptedSessionEntries(metadata)
 	if err != nil {
-		return false, nil
+		return false, err
 	}
 	entry, exists := entries[sessionID]
 	if !exists || entry.IncarnationID != incarnationID {
@@ -327,7 +329,7 @@ func interruptedSessionEntries(metadata map[string]json.RawMessage) (map[string]
 		return entries, nil
 	}
 	if err := json.Unmarshal(value, &entries); err != nil {
-		return nil, fmt.Errorf("decode task interruption entries: %w", err)
+		return nil, fmt.Errorf("%w: decode task interruption entries: %v", errMalformedTaskInterruptionEntries, err)
 	}
 	if entries == nil {
 		entries = map[string]models.InterruptedSessionMarker{}

@@ -83,3 +83,19 @@ func TestDeleteTaskSessionWithMalformedInterruptedMetadata(t *testing.T) {
 	require.NoError(t, repo.DB().QueryRowContext(ctx, repo.db.Rebind(`SELECT metadata FROM tasks WHERE id=?`), casTaskID).Scan(&stored))
 	require.JSONEq(t, malformed, stored)
 }
+
+func TestRemoveTaskInterruptedSessionReportsMalformedEntries(t *testing.T) {
+	repo := newRepoForMetadataCASTests(t)
+	ctx := context.Background()
+	seedMetadataCASTask(t, repo, nil)
+	malformed := `{"interrupted_sessions":"legacy-malformed-value","interrupted_at":"2026-11-25T10:00:00Z","keep":true}`
+	_, err := repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE tasks SET metadata=? WHERE id=?`), malformed, casTaskID)
+	require.NoError(t, err)
+
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	_, err = repo.removeTaskInterruptedSessionTx(ctx, tx, casTaskID, "session", "incarnation")
+	require.ErrorIs(t, err, errMalformedTaskInterruptionEntries)
+	require.ErrorContains(t, err, "decode task interruption entries")
+}
