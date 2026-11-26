@@ -5,7 +5,7 @@ export type PreviewDiff = { lines: string[]; kinds: Kind[]; split: Row[] };
 function classify(line: string, oldCount: number, newCount: number): Kind {
   if (oldCount && line.startsWith("-")) return "remove";
   if (newCount && line.startsWith("+")) return "add";
-  if (oldCount && newCount && line.startsWith(" ")) return "context";
+  if (oldCount && newCount && (line === "" || line.startsWith(" "))) return "context";
   return "header";
 }
 
@@ -18,30 +18,14 @@ export function parsePreviewDiff(content: string): PreviewDiff | null {
   let oldCount = 0;
   let newCount = 0;
   let hasHunk = false;
-  let removed: number[] = [];
-  let added: number[] = [];
-  function flushChanges() {
-    if (!removed.length && !added.length) return;
-    for (let i = 0; i < Math.max(removed.length, added.length); i++) {
-      split.push([removed[i] ?? null, added[i] ?? null]);
-    }
-    removed = [];
-    added = [];
-  }
+  const changes = collectChanges(split);
   for (const [index, line] of lines.entries()) {
     const kind = classify(line, oldCount, newCount);
     kinds.push(kind);
-    if (kind === "remove") {
-      oldCount--;
-      removed.push(index);
-      continue;
-    }
-    if (kind === "add") {
-      newCount--;
-      added.push(index);
-      continue;
-    }
-    flushChanges();
+    if (kind === "remove") oldCount--;
+    if (kind === "add") newCount--;
+    if (changes.record(index, kind, line)) continue;
+    changes.flush();
     if (kind === "context") {
       oldCount--;
       newCount--;
@@ -57,6 +41,31 @@ export function parsePreviewDiff(content: string): PreviewDiff | null {
     }
     split.push([index]);
   }
-  flushChanges();
+  changes.flush();
   return hasHunk && oldCount + newCount === 0 ? { lines, split, kinds } : null;
+}
+
+function collectChanges(split: Row[]) {
+  let removed: number[] = [];
+  let added: number[] = [];
+  let markers: [number | null, number | null] = [null, null];
+  function flush() {
+    if (!removed.length && !added.length) return;
+    for (let i = 0; i < Math.max(removed.length, added.length); i++) {
+      split.push([removed[i] ?? null, added[i] ?? null]);
+    }
+    if (markers.some((index) => index !== null)) split.push(markers);
+    markers = [null, null];
+    removed = [];
+    added = [];
+  }
+  function record(index: number, kind: Kind, line: string) {
+    if (kind === "add") added.push(index);
+    else if (kind === "remove") removed.push(index);
+    else if (line.startsWith("\\") && (removed.length || added.length)) {
+      markers[added.length ? 1 : 0] = index;
+    } else return false;
+    return true;
+  }
+  return { record, flush };
 }

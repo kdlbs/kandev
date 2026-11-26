@@ -22,3 +22,9 @@ it("aligns unequal changes and preserves source headers, metadata and CRLF", () 
 it("leaves unsupported text in the ordinary preview", () => {
   expect(parsePreviewDiff("--- plain text")).toBeNull();
 });
+
+it("pairs replacements across missing-newline markers and retains blank context", () => {
+  const marker = "\\ No newline at end of file";
+  const patch = ["@@ -1,2 +1,2 @@", "", "-old", marker, "+new", marker];
+  expect(parsePreviewDiff(patch.join("\n"))?.split).toEqual([[0], [1, 1], [2, 4], [3, 5]]);
+});

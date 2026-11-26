@@ -1,6 +1,9 @@
 ---
 status: complete
-spec: docs/specs/agents/requirements/rich-diff-preview.md
+requirements:
+  - REQ-AGENTS-RICH-DIFF-PREVIEW-001
+system_design:
+  - ../../specs/agents/system-design/rich-diff-preview.md
 created: 2026-11-25
 ---
 

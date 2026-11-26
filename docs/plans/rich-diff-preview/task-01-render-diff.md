@@ -1,5 +1,6 @@
 ---
 id: "01-render-diff"
+title: Render unified diffs in FilePreview
 status: done
 wave: 1
 depends_on: []
