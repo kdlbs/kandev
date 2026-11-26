@@ -235,11 +235,8 @@ Update `apps/web/e2e/tests/task/claude-monitor-lifecycle.spec.ts` (`chromium`),
 - The requested targeted ACP, orchestrator, and mock-agent race test commands
   passed after the review fixes.
 - Specification catalog validation, specification lint, and `git diff --check` passed.
-- Changed-Go lint could not be reverified after the review follow-up: the
-  5-minute wrapper timed out during package loading while other workspace Go
-  jobs were active, and an extended run encountered concurrently removed Go
-  cache artifacts. A task-local-cache retry remained queued behind other serial
-  lint runs and was stopped before it began analysis.
+- Changed-Go lint passed on the final staged tree in the normal commit hook
+  after the review follow-up.
 
 ## Risks
 

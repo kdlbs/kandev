@@ -164,8 +164,5 @@ git diff --check
 - Chromium and mobile-chrome lifecycle E2E runs passed with kind/title summary
   checks and draft preservation asserted after second-Monitor completion.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
-- Post-review changed-Go lint did not complete: the 5-minute wrapper timed out
-  in package loading under concurrent workspace Go jobs, and an extended run
-  found shared Go-cache artifacts removed by overlapping builds. A retry with
-  a task-local cache remained queued behind other serial lint runs and was
-  stopped before analysis. No post-review lint verdict is available.
+- Changed-Go lint passed on the final staged tree in the normal commit hook
+  after the review follow-up.
