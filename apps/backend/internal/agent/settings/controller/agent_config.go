@@ -221,7 +221,8 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 	// launch path does the same via cliflags.Resolve; mirroring it here
 	// keeps the preview faithful to what the agent subprocess will see.
 	// Tolerate malformed entries silently — the preview is informational.
-	cliFlagTokens, _ := cliflags.Resolve(cliFlagsFromDTO(req.CLIFlags))
+	profileFlags := normalizeAntigravityCLIFlags(agentName, cliFlagsFromDTO(req.CLIFlags))
+	cliFlagTokens, _ := cliflags.Resolve(profileFlags)
 
 	copilotPlugins, err := previewCopilotPlugins(agentName, req.CopilotSelectedPlugins)
 	if err != nil {
@@ -245,6 +246,7 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 	// after the agent's BuildCommand.
 	var cmd agents.Command
 	requiresAntigravityWorkerMode := false
+	antigravitySkipPermissionsSupported := false
 	if ptAgent, ok := agentConfig.(agents.PassthroughAgent); ok && req.CLIPassthrough {
 		cmd = ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 			Model:            req.Model,
@@ -283,12 +285,19 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 			}
 			requiresAntigravityWorkerMode = agentName == agents.AntigravityACPAgentID &&
 				selection.Variant == acpcompat.AntigravityRuntimeCLI
+			antigravitySkipPermissionsSupported = agentName == agents.AntigravityACPAgentID &&
+				selection.Variant == acpcompat.AntigravityRuntimeCLI && selection.SupportsDangerouslySkipPermissions
 		}
 		if len(cliFlagTokens) > 0 {
 			cmd = cmd.With().Flag(cliFlagTokens...).Build()
 		}
 		if requiresAntigravityWorkerMode {
 			cmd = agents.NewCommand(antigravityruntime.RequireWorkerMode(cmd.Args())...)
+		}
+		if agentName == agents.AntigravityACPAgentID {
+			cmd = agents.NewCommand(antigravityruntime.FilterDangerouslySkipPermissions(
+				cmd.Args(), antigravitySkipPermissionsSupported,
+			)...)
 		}
 		// Prepend the launcher prefix last, mirroring
 		// lifecycle.CommandBuilder.BuildCommand. Prefixes were validated above;

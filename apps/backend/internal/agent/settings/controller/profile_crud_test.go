@@ -72,6 +72,16 @@ func TestSeedCLIFlags_EmptyForCodexACP(t *testing.T) {
 	}
 }
 
+func TestSeedCLIFlags_AntigravitySkipPermissionsOffByDefault(t *testing.T) {
+	flags := seedCLIFlags(agents.NewAntigravityACP())
+	if len(flags) != 1 || flags[0].Flag != "--dangerously-skip-permissions" || flags[0].Enabled {
+		t.Fatalf("Antigravity CLI flags = %+v, want one disabled --dangerously-skip-permissions entry", flags)
+	}
+	if flags[0].Description == "" {
+		t.Fatal("Antigravity skip-permissions flag has no description")
+	}
+}
+
 func TestSeedCLIFlags_FromCursorACP(t *testing.T) {
 	flags := seedCLIFlags(agents.NewCursorACP())
 	want := map[string]bool{"--force": false}
