@@ -2,6 +2,7 @@ import { expect, test } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarTasksPage } from "../../pages/sidebar-tasks-page";
+import { writeSidebarFlag } from "./sidebar-task-flags-helpers";
 
 test("adds, reads, edits, and removes a flag on another sidebar task", async ({
   testPage,
@@ -21,11 +22,13 @@ test("adds, reads, edits, and removes a flag on another sidebar task", async ({
 
   const editor = testPage.getByRole("dialog").filter({ has: testPage.getByRole("textbox") });
   const save = editor.getByRole("button", { name: "Save", exact: true });
+  const initialNote = "Check links before release";
+  const updatedNote = "Check the final link";
   await expect(save).toBeDisabled();
   const note = editor.getByRole("textbox");
   await expect(note).toHaveAttribute("maxlength", "1024");
   await waitForFiniteAnimations(editor);
-  await note.fill("Check links before release");
+  await note.fill(initialNote);
   expect((await editor.boundingBox())!.height).toBeLessThan(viewport.height / 2);
 
   await note.fill(Array.from({ length: 96 }, (_, index) => `Check ${index}`).join("\n"));
@@ -39,24 +42,31 @@ test("adds, reads, edits, and removes a flag on another sidebar task", async ({
   expect(editorBounds.y + editorBounds.height).toBeLessThanOrEqual(viewport.height);
   await expect(save).toBeInViewport({ ratio: 1 });
 
-  await note.fill("Check links before release");
-  await save.click();
-  const flag = sidebar.row(target.task_id).getByRole("button", { name: /flag/i });
+  await note.fill(initialNote);
+  await writeSidebarFlag(testPage, target.task_id, initialNote, () => save.click());
+  const row = sidebar.row(target.task_id);
+  const flag = row.getByRole("button", { name: /flag/i });
   await flag.hover();
-  await expect(testPage.getByRole("tooltip")).toHaveText("Check links before release");
+  await expect(testPage.getByRole("tooltip")).toHaveText(initialNote);
 
   await sidebar.rightClick(target.task_id);
   await sidebar.menuItem("Flag").click();
-  await expect(editor.getByRole("textbox")).toHaveValue("Check links before release");
-  await editor.getByRole("textbox").fill("Check the final link");
-  await save.click();
+  await expect(editor.getByRole("textbox")).toHaveValue(initialNote);
+  await note.fill(updatedNote);
+  await writeSidebarFlag(testPage, target.task_id, updatedNote, () => save.click());
   await expect(editor).toBeHidden();
+  await expect(row).toBeFocused();
+  await testPage.keyboard.press("Tab");
+  await expect(flag).toBeFocused();
+  await expect(testPage.getByRole("tooltip")).toHaveText(updatedNote);
+
   await testPage.reload();
-  await flag.focus();
-  await expect(testPage.getByRole("tooltip")).toHaveText("Check the final link");
   await sidebar.rightClick(target.task_id);
   await sidebar.menuItem("Flag").click();
-  await editor.getByRole("button", { name: "Remove flag" }).click();
+  await expect(note).toHaveValue(updatedNote);
+  await writeSidebarFlag(testPage, target.task_id, "", () =>
+    editor.getByRole("button", { name: "Remove flag" }).click(),
+  );
   await expect(flag).toHaveCount(0);
   await sidebar.rightClick(target.task_id);
   await expect(sidebar.menuItem("Add flag")).toBeVisible();
