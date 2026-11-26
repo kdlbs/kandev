@@ -6,6 +6,7 @@ import { SwimlaneTaskGraphContent } from "@/components/kanban/swimlane-task-grap
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
+import { getEffectiveViewId, KANBAN_VIEW_MODES, type KanbanViewId } from "./view-modes";
 
 export type ViewContentProps = {
   compactHeight?: boolean;
@@ -47,32 +48,31 @@ export type ViewRegistryEntry = {
   enabled: boolean;
 };
 
-export const VIEW_REGISTRY: ViewRegistryEntry[] = [
-  {
-    id: "kanban",
-    storedValue: "",
+const viewsById: Record<KanbanViewId, ViewRegistryEntry> = {
+  kanban: {
+    ...KANBAN_VIEW_MODES.kanban,
     labelKey: "kanban:kanban",
     icon: IconLayoutColumns,
     component: SwimlaneKanbanContent as ComponentType<ViewContentProps>,
     enabled: true,
   },
-  {
-    id: "graph2",
-    storedValue: "graph2",
+  graph2: {
+    ...KANBAN_VIEW_MODES.graph2,
     labelKey: "kanban:pipeline",
     icon: IconTimeline,
     component: SwimlaneGraph2Content,
     enabled: true,
   },
-  {
-    id: "graph",
-    storedValue: "graph",
+  graph: {
+    ...KANBAN_VIEW_MODES.graph,
     labelKey: "kanban:graph",
     icon: IconHierarchy3,
     component: SwimlaneTaskGraphContent,
     enabled: true,
   },
-];
+};
+
+export const VIEW_REGISTRY = Object.values(viewsById);
 
 export function getEnabledViews(): ViewRegistryEntry[] {
   return VIEW_REGISTRY.filter((v) => v.enabled);
@@ -83,10 +83,9 @@ export function getViewByStoredValue(value: string): ViewRegistryEntry | undefin
 }
 
 export function getDefaultView(): ViewRegistryEntry {
-  return VIEW_REGISTRY[0];
+  return viewsById.kanban;
 }
 
 export function getEffectiveView(value: string, isMobile: boolean): ViewRegistryEntry {
-  if (isMobile) return getDefaultView();
-  return getViewByStoredValue(value) ?? getDefaultView();
+  return viewsById[getEffectiveViewId(value, isMobile)];
 }
