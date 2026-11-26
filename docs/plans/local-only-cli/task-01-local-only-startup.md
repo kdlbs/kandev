@@ -94,3 +94,8 @@ None.
   The test mounted the build host's Nix libraries read-only.
 - The public docs validators and specification checks passed. The builds,
   checks, and Docker descendants used an 8 GB systemd memory limit.
+- Backend CI exposed a date-dependent fixture in the existing interruption
+  prompt test. The test now uses a fixed scoped timestamp between the legacy
+  timestamps. The focused orchestrator test passed under the 8 GB limit.
+- The Docker-in-Docker E2E fixture now sets its backend bind explicitly. The
+  outer Docker container still publishes only a host loopback port.

@@ -254,7 +254,7 @@ func addInterruptedSessionMarker(
 	t.Helper()
 	marker := models.InterruptedSessionMarker{
 		IncarnationID: session.QueueIncarnationID,
-		InterruptedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		InterruptedAt: "2026-11-25T10:00:00Z",
 		Token:         "interruption-" + session.ID,
 	}
 	changed, err := repo.SetTaskInterruptedSessionIfNotArchived(context.Background(), taskID, session.ID, marker)
