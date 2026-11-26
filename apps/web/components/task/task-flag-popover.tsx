@@ -6,13 +6,16 @@ import type { useTaskFlagEditorContext } from "./task-flag-editor-provider";
 import { TaskFlagForm, useTaskFlagDraft } from "./task-flag-editor";
 import { stopTaskFlagEvent, TaskFlagTrigger } from "./task-flag-trigger";
 
+export type PendingFlagDraft = { taskId: string; savedNote: string; text: string };
+
 type FlagPopoverProps = {
   taskId: string;
   note: string;
+  pendingDraft: React.RefObject<PendingFlagDraft | null>;
   editor: NonNullable<ReturnType<typeof useTaskFlagEditorContext>>;
 };
 
-function useFlagPopover({ taskId, note, editor }: FlagPopoverProps) {
+function useFlagPopover({ taskId, note, editor, pendingDraft }: FlagPopoverProps) {
   const anchor = useRef<HTMLButtonElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const invoker = useRef<HTMLElement | null>(null);
@@ -23,6 +26,7 @@ function useFlagPopover({ taskId, note, editor }: FlagPopoverProps) {
   const openRef = useRef(false);
 
   const close = () => {
+    pendingDraft.current = null;
     restoreFocus.current =
       Boolean(invoker.current) || Boolean(content.current?.contains(document.activeElement));
     openRef.current = false;
@@ -37,12 +41,14 @@ function useFlagPopover({ taskId, note, editor }: FlagPopoverProps) {
     (next: boolean) => {
       if (!next && (submitting.current || retryPending.current)) return;
       if (next && !openRef.current) {
-        reset(note);
+        const pending = pendingDraft.current;
+        reset(pending?.taskId === taskId && pending.savedNote === note ? pending.text : note);
       }
+      if (!next) pendingDraft.current = null;
       openRef.current = next;
       setOpen(next);
     },
-    [note, reset, submitting],
+    [note, reset, submitting, pendingDraft, taskId],
   );
   const hover = useHoverPopover({
     open,
@@ -96,7 +102,13 @@ function useFlagPopover({ taskId, note, editor }: FlagPopoverProps) {
     content,
     open,
     hover,
-    draft,
+    draft: {
+      ...draft,
+      setNote: (text: string) => {
+        pendingDraft.current = { taskId, savedNote: note, text };
+        draft.setNote(text);
+      },
+    },
     focusEditor,
     onOpenAutoFocus,
     onCloseAutoFocus,

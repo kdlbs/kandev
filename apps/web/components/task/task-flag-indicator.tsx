@@ -1,7 +1,8 @@
+import { useRef } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskFlagEditorContext } from "./task-flag-editor-provider";
-import { TaskFlagPopover } from "./task-flag-popover";
+import { TaskFlagPopover, type PendingFlagDraft } from "./task-flag-popover";
 import { TaskFlagTrigger } from "./task-flag-trigger";
 
 export function TaskFlagIndicator({
@@ -16,6 +17,7 @@ export function TaskFlagIndicator({
   onOpen?: (invoker: HTMLButtonElement) => void;
 }) {
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const pendingDraft = useRef<PendingFlagDraft | null>(null);
   const editor = useTaskFlagEditorContext();
   const touch = isMobile || !isFinePointer;
   if (touch && onOpen) {
@@ -28,7 +30,9 @@ export function TaskFlagIndicator({
     );
   }
   if (!touch && !readOnly && editor) {
-    return <TaskFlagPopover taskId={taskId} note={note} editor={editor} />;
+    return (
+      <TaskFlagPopover taskId={taskId} note={note} editor={editor} pendingDraft={pendingDraft} />
+    );
   }
   return (
     <Tooltip>

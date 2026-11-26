@@ -29,3 +29,7 @@ Task [flag] [...] -> Change flag > Edit flag   -> note drawer
 ```
 
 An unflagged row offers Add flag. The priority icon is a numbered list.
+
+## Verification results
+
+Desktop and phone Playwright checks passed for task flags, menu grouping, and priority. Component tests, TypeScript, localization, specification validation, and the diff check passed. The [work order](task-01-sidebar-flag-actions.md#verification) lists commands and results.

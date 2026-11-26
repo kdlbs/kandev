@@ -46,6 +46,14 @@ An unflagged row offers Add flag. The priority icon is a numbered list.
 
 ## Verification
 
-From `apps/web`, run `pnpm run typecheck`, `pnpm run i18n:check`, and, after rebuilding E2E assets, `pnpm e2e:raw --project=chromium --project=mobile-chrome sidebar-task-flags.spec.ts task-menu-grouping.spec.ts mobile-sidebar-task-actions.spec.ts`.
+From the repository root, build the E2E fixtures with `make build-backend build-e2e-plugin-package build-e2e-delivery-fixture build-e2e-send-now-fixture` and build the frontend with `make build-web-e2e`. Both builds passed.
 
-The desktop and phone flag flows and desktop menu grouping passed in Playwright. The scenarios cover hover editing, keyboard focus, draft recovery, direct removal, and phone submenu actions. Focused component tests, TypeScript, and localization checks also passed.
+From `apps/web`, set `KANDEV_SERVER_HOST=127.0.0.1` for Playwright and supply browser libraries on the host library path.
+
+- `pnpm e2e:raw --project=chromium --project=mobile-chrome e2e/tests/task/sidebar-task-flags.spec.ts e2e/tests/task/mobile-sidebar-task-flags.spec.ts e2e/tests/task/task-menu-grouping.spec.ts` passed all three tests.
+- `pnpm e2e:raw --project=chromium e2e/tests/task/sidebar-layout.spec.ts --grep 'shows priority after the title'` passed the desktop priority test.
+- `pnpm e2e:raw --project=mobile-chrome e2e/tests/task/mobile-sidebar-task-actions.spec.ts` passed all 17 phone sidebar tests.
+- `pnpm exec vitest run components/task/task-flag-indicator.test.tsx components/task/task-switcher-{context-menu,rename-handoff}.test.tsx` passed all 29 cases across the three suites, including keyboard dismissal and draft retention after a breakpoint change.
+- `pnpm run typecheck` and `pnpm run i18n:check` passed.
+
+From the repository root, `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.

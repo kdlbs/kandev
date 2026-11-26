@@ -117,7 +117,7 @@ export function TaskFlagForm({
   draft: { note, setNote, failed, saving, canSave, close, handleSubmit },
   touch = false,
 }: {
-  draft: ReturnType<typeof useTaskFlagDraft>;
+  draft: Omit<ReturnType<typeof useTaskFlagDraft>, "setNote"> & { setNote: (text: string) => void };
   touch?: boolean;
 }) {
   const { t } = useTranslation();
