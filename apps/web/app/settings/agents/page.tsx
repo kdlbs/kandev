@@ -9,14 +9,7 @@ import { IconAlertTriangle, IconDownload } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import {
-  createCustomTUIAgent,
-  listAgentDiscovery,
-  listAgents,
-  listAvailableAgents,
-} from "@/lib/api";
-import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
+import { useAppStore } from "@/components/state-provider";
 import type {
   AgentUpdateJob,
   AgentUpdateMode,
@@ -24,10 +17,6 @@ import type {
   AgentUpdateStatus,
   InstallJob,
 } from "@/lib/api";
-import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
-import { useAgentRuntimeUpdates } from "@/hooks/domains/settings/use-agent-runtime-updates";
-import { useAgentRuntimeUpdateStatuses } from "@/hooks/domains/settings/use-agent-runtime-update-statuses";
-import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
 import { AgentProfilesSubList } from "@/components/settings/agents/agent-profiles-section";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
@@ -37,7 +26,6 @@ import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
 import { DynamicAgentsCard } from "@/components/settings/dynamic-agents-card";
 import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import {
-  detectedAgents,
   DYNAMIC_AGENT_NAME,
   orderAgentsForDisplay,
   orphanedAgents,
@@ -53,11 +41,10 @@ import type {
   AgentDiscovery,
   Agent,
   AntigravityRuntimeVariant,
-  AvailableAgent,
   RuntimeUpdate,
 } from "@/lib/types/http";
 import { useProfileOrder } from "@/hooks/domains/settings/use-profile-order";
-import { getAgentListResourceScope } from "@/hooks/domains/settings/agent-list-resource";
+import { useAgentPageState } from "@/hooks/domains/settings/use-agent-page-state";
 
 const installedAgentsActionClassName = settingsActionClassName("cursor-pointer");
 
@@ -93,26 +80,11 @@ type InstalledAgentsSectionProps = {
   setTuiDialogOpen: (open: boolean) => void;
   handleRescan: () => Promise<void>;
   canManage: boolean;
+  reinstallOpenCodeHref?: string;
   onOpenRuntime: (agentName: string, opener: HTMLElement) => void;
 };
 
 type AgentCard = { key: string; agent: AgentDiscovery; detected: boolean };
-
-function createAgentSettingsResolvers<TStatus>(
-  availableAgents: AvailableAgent[],
-  statusByAgent: Record<string, TStatus | undefined>,
-) {
-  const agentsByName = new Map(availableAgents.map((agent) => [agent.name, agent]));
-  const findAgent = (name: string) => agentsByName.get(name);
-  return {
-    resolveDisplayName: (name: string) => findAgent(name)?.display_name ?? name,
-    resolveCapabilityStatus: (name: string) => findAgent(name)?.model_config?.status,
-    resolveLoginCommand: (name: string) => findAgent(name)?.login_command,
-    resolveRuntimeVariant: (name: string) => findAgent(name)?.model_config?.runtime_variant,
-    resolveRuntimeUpdate: (name: string) => findAgent(name)?.runtime_update,
-    resolveRuntimeUpdateStatus: (name: string) => statusByAgent[name],
-  };
-}
 
 /**
  * Every agent worth a card, in the backend's rank order: the ones the scan
@@ -165,6 +137,7 @@ function renderInstalledAgentCards({
   installJobs,
   updateJobs,
   canManage,
+  reinstallOpenCodeHref,
   previewUpdate,
   startUpdate,
   handleRescan,
@@ -182,6 +155,7 @@ function renderInstalledAgentCards({
   | "installJobs"
   | "updateJobs"
   | "canManage"
+  | "reinstallOpenCodeHref"
   | "previewUpdate"
   | "startUpdate"
   | "handleRescan"
@@ -202,6 +176,7 @@ function renderInstalledAgentCards({
           profileCreationDisabled={agent.name === "codex-app-server" && !nativeCodexAvailable}
           runtimeVariant={resolveRuntimeVariant(agent.name)}
           loginCommand={resolveLoginCommand(agent.name)}
+          reinstallHref={agent.name === "opencode-acp" ? reinstallOpenCodeHref : undefined}
           {...(detected
             ? {
                 capabilityStatus: resolveCapabilityStatus(agent.name),
@@ -249,6 +224,7 @@ function InstalledAgentsSection({
   setTuiDialogOpen,
   handleRescan,
   canManage,
+  reinstallOpenCodeHref,
   onOpenRuntime,
 }: InstalledAgentsSectionProps) {
   const { t } = useTranslation();
@@ -321,6 +297,7 @@ function InstalledAgentsSection({
         installJobs,
         updateJobs,
         canManage,
+        reinstallOpenCodeHref,
         previewUpdate,
         startUpdate,
         handleRescan,
@@ -341,6 +318,7 @@ function InstalledAgentsSettingsSection({
   return (
     <InstalledAgentsSection
       canManage={state.canManage}
+      reinstallOpenCodeHref={state.reinstallOpenCodeHref}
       installedAgents={state.installedAgents}
       discoveryOrder={state.discoveryAgents}
       savedAgents={state.savedAgents}
@@ -362,105 +340,6 @@ function InstalledAgentsSettingsSection({
       onOpenRuntime={manager.openRuntime}
     />
   );
-}
-
-function useAgentPageState() {
-  const { items: discoveryAgents, loading: discoveryLoading } = useAgentDiscovery();
-  const savedAgents = useAppStore((state) => state.settingsAgents.items);
-  const setAgentDiscovery = useAppStore((state) => state.setAgentDiscovery);
-  const setAvailableAgents = useAppStore((state) => state.setAvailableAgents);
-  const storeApi = useAppStoreApi();
-  const installJobs = useAppStore((state) => state.installJobs.byAgent);
-  const { items: availableAgents } = useAvailableAgents();
-  const [rescanning, setRescanning] = useState(false);
-  const [tuiDialogOpen, setTuiDialogOpen] = useState(false);
-  // Agents and agent profiles are org configuration: every write behind this
-  // page requires org.config.manage, which only an administrator holds.
-  const canManage = useIsAdmin();
-  const { updateJobs, previewUpdate, startUpdate } = useAgentRuntimeUpdates();
-  const {
-    refresh: refreshRuntimeUpdateStatuses,
-    statusByAgent,
-    loading: runtimeStatusLoading,
-    refreshFailed: runtimeStatusFailed,
-  } = useAgentRuntimeUpdateStatuses(updateJobs);
-
-  const handleStartUpdate: InstalledAgentsSectionProps["startUpdate"] = async (...args) => {
-    const result = await startUpdate(...args);
-    if (!result.job_id && result.operation === "up_to_date") {
-      void refreshRuntimeUpdateStatuses().catch(() => {});
-    }
-    return result;
-  };
-
-  const installedAgents = useMemo(() => detectedAgents(discoveryAgents), [discoveryAgents]);
-  const savedAgentsByName = useMemo(
-    () => new Map(savedAgents.map((agent: Agent) => [agent.name, agent])),
-    [savedAgents],
-  );
-  const agentResolvers = createAgentSettingsResolvers(availableAgents, statusByAgent);
-
-  const handleRescan = async () => {
-    if (rescanning) {
-      return;
-    }
-    setRescanning(true);
-    try {
-      const [discoveryResp, availableResp] = await Promise.all([
-        listAgentDiscovery({ cache: "no-store" }),
-        listAvailableAgents({ cache: "no-store" }),
-      ]);
-      setAgentDiscovery(discoveryResp.agents);
-      setAvailableAgents(availableResp.agents, availableResp.tools ?? []);
-      await refreshRuntimeUpdateStatuses();
-    } finally {
-      setRescanning(false);
-    }
-  };
-
-  const handleCreateCustomTUI = async (data: {
-    display_name: string;
-    model?: string;
-    command: string;
-    mcp_strategy?: string;
-    protocol?: string;
-  }) => {
-    await createCustomTUIAgent(data);
-    const profileVersion = storeApi.getState().agentProfiles.version;
-    const [discoveryResp, agentsResp, availableResp] = await Promise.all([
-      listAgentDiscovery({ cache: "no-store" }),
-      listAgents({ cache: "no-store" }),
-      listAvailableAgents({ cache: "no-store" }),
-    ]);
-    setAgentDiscovery(discoveryResp.agents);
-    if (!storeApi.getState().applyAgentListSnapshot(agentsResp.agents, profileVersion)) {
-      await getAgentListResourceScope(storeApi).ensure();
-    }
-    setAvailableAgents(availableResp.agents, availableResp.tools ?? []);
-  };
-
-  return {
-    canManage,
-    savedAgents,
-    installedAgents,
-    discoveryAgents,
-    savedAgentsByName,
-    discoveryLoading,
-    rescanning,
-    tuiDialogOpen,
-    setTuiDialogOpen,
-    ...agentResolvers,
-    statusByAgent,
-    runtimeStatusLoading,
-    runtimeStatusFailed,
-    refreshRuntimeUpdateStatuses,
-    handleRescan,
-    handleCreateCustomTUI,
-    installJobs,
-    updateJobs,
-    previewUpdate,
-    startUpdate: handleStartUpdate,
-  };
 }
 
 function AgentsPageHeader({
