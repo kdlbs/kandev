@@ -96,10 +96,15 @@ above the same queue control. The explanation requires no tap or hover.
 - Review fixup covers paused managed conversations and restores the automatic
   delivery hint when the conversation resumes. The focused chat suite passed.
 
-The Go command above passed in all three packages. The chat Vitest command
-passed 2,464 tests during implementation. Each focused Playwright command
-passed both scenarios on the final warning layout. Catalog validation,
-specification lint and the diff check passed after the review fixes.
+| Command listed above | Result |
+| --- | --- |
+| `go test -trimpath` for the three affected packages | Passed all three packages. |
+| `vitest run components/task/chat` | Passed 2,464 tests before review. |
+| `run-e2e.sh --project chromium` for message-turn capacity | Passed both cases. |
+| `run-e2e.sh --project mobile-chrome` for message-turn capacity | Passed both cases. |
+| `python3 scripts/list-docs.py validate` | Passed. |
+| `python3 scripts/lint-spec-files.py --all` | Passed. |
+| `git diff --check` | Passed. |
 
 The notice joins only non-empty, fully translated sentences. Queue handler
 tests verify that client-supplied admission reasons are ignored. The shared

@@ -295,13 +295,17 @@ describe("QueueAffordance capacity notice", () => {
     expect(screen.queryByTestId(noticeId)).toBeNull();
   });
 
-  it("omits the automatic delivery promise while cancellation is pending", () => {
-    useQueueMock.mockReturnValue(queueState([deferred], { cancellationPending: true }));
-    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
-    const notice = screen.getByTestId(noticeId);
-    expect(notice.textContent).toBe(reason);
-    expect(notice.textContent).not.toContain(autoSend);
-    expect(notice.textContent).not.toContain(enableAutoRun);
+  it.each([
+    { reason: "cancellation is pending", cancellationPending: true, autoDeliveryBlocked: false },
+    { reason: "the conversation is paused", cancellationPending: false, autoDeliveryBlocked: true },
+  ])("omits delivery instructions when $reason", ({ cancellationPending, autoDeliveryBlocked }) => {
+    useQueueMock.mockReturnValue(queueState([deferred], { cancellationPending }));
+    render(
+      <QueueAffordance sessionId={SESSION_ID} autoDeliveryBlocked={autoDeliveryBlocked}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    expect(screen.getByTestId(noticeId).textContent).toBe(reason);
   });
 });
 
