@@ -446,7 +446,17 @@ func runTaskInterruptionRepositoryContract(t *testing.T, repo *Repository) {
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID: "session-2", TaskID: casTaskID, QueueIncarnationID: second.IncarnationID,
 	}))
-	changed, err := repo.SetTaskInterruptedSessionIfNotArchived(ctx, casTaskID, "session-1", first)
+	staleIncarnation := first
+	staleIncarnation.IncarnationID = "stale-incarnation"
+	changed, err := repo.SetTaskInterruptedSessionIfNotArchived(ctx, casTaskID, "session-1", staleIncarnation)
+	require.NoError(t, err)
+	require.False(t, changed, "an interruption must match the current session incarnation")
+	changed, err = repo.SetTaskInterruptedSessionIfNotArchived(ctx, casTaskID, "deleted-session", first)
+	require.NoError(t, err)
+	require.False(t, changed, "an interruption must not be written after its session is deleted")
+	assertTaskInterruption(t, repo, nil, "")
+
+	changed, err = repo.SetTaskInterruptedSessionIfNotArchived(ctx, casTaskID, "session-1", first)
 	require.NoError(t, err)
 	require.True(t, changed)
 	changed, err = repo.SetTaskInterruptedSessionIfNotArchived(ctx, casTaskID, "session-2", second)
@@ -487,7 +497,7 @@ func runTaskInterruptionRepositoryContract(t *testing.T, repo *Repository) {
 	changed, err = repo.ResolveTaskInterruptedSession(ctx, casTaskID, "session-1", first.IncarnationID, "stale-token", "")
 	require.NoError(t, err)
 	require.False(t, changed)
-	changed, err = repo.ResolveTaskInterruptedSession(ctx, casTaskID, "session-1", "old-incarnation", first.Token, "")
+	changed, err = repo.ResolveTaskInterruptedSession(ctx, casTaskID, "session-1", "old-incarnation", replacement.Token, "")
 	require.NoError(t, err)
 	require.False(t, changed)
 	changed, err = repo.ResolveTaskInterruptedSession(ctx, casTaskID, "session-1", replacement.IncarnationID, replacement.Token, "")
@@ -550,6 +560,9 @@ func runTaskInterruptionRepositoryContract(t *testing.T, repo *Repository) {
 	require.NoError(t, repo.CreateTask(ctx, legacyTask))
 	legacyTimestamp := "2026-11-24T10:00:00Z"
 	require.NoError(t, repo.SetTaskMetadataKey(ctx, legacyTaskID, models.MetaKeyInterruptedAt, legacyTimestamp))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "legacy-session", TaskID: legacyTaskID, QueueIncarnationID: "legacy-incarnation",
+	}))
 	changed, err = repo.SetTaskInterruptedSessionIfNotArchived(ctx, legacyTaskID, "legacy-session", models.InterruptedSessionMarker{
 		IncarnationID: "legacy-incarnation",
 		InterruptedAt: "2026-11-25T10:00:00Z",

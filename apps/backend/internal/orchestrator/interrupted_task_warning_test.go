@@ -25,7 +25,13 @@ func TestTaskInterruptionPromptAcceptance(t *testing.T) {
 		publisher := &recordingTaskUpdatedPublisher{}
 		svc.SetTaskEventPublisher(publisher)
 
-		_, err := svc.promptTask(ctx, "task-direct", session.ID, "continue", "", false, nil, false, launchOriginManual, promptTaskOptions{})
+		_, err := svc.promptTask(ctx, "task-direct", session.ID, "continue", "", false, nil, false, launchOriginManual, promptTaskOptions{
+			onAccepted: func(string) {
+				requireTaskInterruptionEntries(t, repo, "task-direct", map[string]models.InterruptedSessionMarker{
+					session.ID: marker,
+				})
+			},
+		})
 		require.NoError(t, err)
 		requireTaskInterruptionEntries(t, repo, "task-direct", nil)
 		require.Contains(t, publisher.updatedTaskIDs, "task-direct")

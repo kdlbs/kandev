@@ -124,7 +124,9 @@ func (r *Repository) setTaskInterruptedSessionTx(
 		return false, err
 	}
 	setTaskInterruptionProjection(metadata, entries)
-	return r.writeTaskInterruptionMetadataGuarded(ctx, tx, taskID, metadata, r.nowUTC(), sessionID, recovery)
+	return r.writeTaskInterruptionMetadataGuarded(
+		ctx, tx, taskID, metadata, r.nowUTC(), sessionID, marker.IncarnationID, recovery,
+	)
 }
 
 func validateInterruptedSessionMarker(marker models.InterruptedSessionMarker) error {
@@ -241,7 +243,7 @@ func (r *Repository) persistResolvedInterruption(
 		return false, err
 	}
 	setTaskInterruptionProjection(metadata, entries)
-	written, err := r.writeTaskInterruptionMetadataGuarded(ctx, tx, taskID, metadata, updatedAt, "", nil)
+	written, err := r.writeTaskInterruptionMetadataGuarded(ctx, tx, taskID, metadata, updatedAt, "", "", nil)
 	if err != nil {
 		return false, err
 	}
@@ -283,7 +285,7 @@ func (r *Repository) removeTaskInterruptedSessionTx(
 		}
 	}
 	setTaskInterruptionProjection(metadata, entries)
-	written, err := r.writeTaskInterruptionMetadataGuarded(ctx, tx, taskID, metadata, r.nowUTC(), "", nil)
+	written, err := r.writeTaskInterruptionMetadataGuarded(ctx, tx, taskID, metadata, r.nowUTC(), "", "", nil)
 	if err != nil {
 		return false, err
 	}
@@ -389,6 +391,7 @@ func (r *Repository) writeTaskInterruptionMetadataGuarded(
 	metadata map[string]json.RawMessage,
 	updatedAt time.Time,
 	sessionID string,
+	sessionIncarnationID string,
 	recovery *taskInterruptionRecoveryGuard,
 ) (bool, error) {
 	encoded, err := json.Marshal(metadata)
@@ -397,6 +400,10 @@ func (r *Repository) writeTaskInterruptionMetadataGuarded(
 	}
 	query := `UPDATE tasks SET metadata = ?, updated_at = ? WHERE id = ?`
 	args := []interface{}{string(encoded), updatedAt, taskID}
+	if sessionID != "" {
+		query += ` AND EXISTS (SELECT 1 FROM task_sessions s WHERE s.id = ? AND s.task_id = tasks.id AND s.queue_incarnation_id = ?)`
+		args = append(args, sessionID, sessionIncarnationID)
+	}
 	if recovery != nil {
 		var tokenPath string
 		if dialect.IsPostgres(r.db.DriverName()) {

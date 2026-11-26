@@ -1158,8 +1158,12 @@ func (s *Service) startCreatedSession(
 		s.configureInitialDeliveryAdmission(session, options, &launchOptions)
 	}
 	if options.initialCreatePrompt && session.IsPassthrough {
+		originalExecutionAdmitted := launchOptions.OnExecutionAdmitted
 		launchOptions.OnExecutionAdmitted = func(executionID string) {
 			s.bindInitialCreatePromptPassthroughExecution(ctx, sessionID, initialTurnID, executionID)
+			if originalExecutionAdmitted != nil {
+				originalExecutionAdmitted(executionID)
+			}
 		}
 	}
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
@@ -8069,58 +8073,10 @@ func (s *Service) preparePromptDispatchCallback(
 		session.AgentExecutionID,
 		s.isDynamicPromptSession(session),
 	)
-	dispatchOutcome = &promptDispatchOutcome{}
-	dispatchOutcome.turnID = rollback.turnID
-	if options.onAccepted != nil {
-		dispatchOutcome.onAccepted = func(_, turnID string) { options.onAccepted(turnID) }
-	}
-	acceptedExecutionID := session.AgentExecutionID
-	if resumeAttempt != nil && resumeAttempt.execution() != "" {
-		acceptedExecutionID = resumeAttempt.execution()
-	}
-	acceptedAttemptID := rollback.turnID
-	if resumeAttempt != nil {
-		acceptedAttemptID = resumeAttempt.identity()
-	}
-	interruptionSnapshot := s.captureInterruptedTaskWarning(
-		promptCtx, taskID, session, acceptedExecutionID, acceptedAttemptID, rollback.turnID,
+	var acceptedExecutionID string
+	dispatchOutcome, acceptedExecutionID = s.preparePromptDispatchAcceptance(
+		promptCtx, taskID, sessionID, session, rollback, options, resumeAttempt,
 	)
-	if interruptionSnapshot.captured {
-		originalOnAccepted := dispatchOutcome.onAccepted
-		dispatchOutcome.onAccepted = func(executionID, turnID string) {
-			if originalOnAccepted != nil {
-				originalOnAccepted(executionID, turnID)
-			}
-			s.resolveInterruptedTaskWarningAfterPromptAcceptance(
-				promptCtx, interruptionSnapshot, executionID, acceptedAttemptID, turnID,
-			)
-		}
-	}
-	if options.retireInitialSubmissionReplay {
-		originalOnAccepted := dispatchOutcome.onAccepted
-		dispatchOutcome.onAccepted = func(executionID, turnID string) {
-			retireCtx, cancel := context.WithTimeout(context.WithoutCancel(promptCtx), 5*time.Second)
-			defer cancel()
-			if err := s.blockInitialSubmissionReplayForOtherPrompt(
-				retireCtx, sessionID, executionID, turnID,
-			); err != nil {
-				s.logger.Warn("failed to retire original task submission after later prompt acceptance",
-					zap.String("session_id", sessionID), zap.Error(err))
-			}
-			if originalOnAccepted != nil {
-				originalOnAccepted(executionID, turnID)
-			}
-		}
-	}
-	if options.promptAccepted != nil {
-		originalOnAccepted := dispatchOutcome.onAccepted
-		dispatchOutcome.onAccepted = func(executionID, turnID string) {
-			options.promptAccepted.Store(true)
-			if originalOnAccepted != nil {
-				originalOnAccepted(executionID, turnID)
-			}
-		}
-	}
 	onDispatched = s.promptDispatchCallbackForIdentity(
 		promptCtx, taskID, sessionID, rollback.sessionIdentity,
 		acceptedExecutionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
@@ -8155,6 +8111,56 @@ func (s *Service) preparePromptDispatchCallback(
 		}
 	}
 	return onDispatched, dispatchOutcome
+}
+
+func (s *Service) preparePromptDispatchAcceptance(
+	ctx context.Context,
+	taskID, sessionID string,
+	session *models.TaskSession,
+	rollback promptClaimRollback,
+	options promptTaskOptions,
+	resumeAttempt *resumeAttempt,
+) (*promptDispatchOutcome, string) {
+	outcome := &promptDispatchOutcome{turnID: rollback.turnID}
+	acceptedExecutionID := session.AgentExecutionID
+	if resumeAttempt != nil && resumeAttempt.execution() != "" {
+		acceptedExecutionID = resumeAttempt.execution()
+	}
+	acceptedAttemptID := rollback.turnID
+	if resumeAttempt != nil {
+		acceptedAttemptID = resumeAttempt.identity()
+	}
+	interruptionSnapshot := s.captureInterruptedTaskWarning(
+		ctx, taskID, session, acceptedExecutionID, acceptedAttemptID, rollback.turnID,
+	)
+	if options.onAccepted == nil && !interruptionSnapshot.captured &&
+		!options.retireInitialSubmissionReplay && options.promptAccepted == nil {
+		return outcome, acceptedExecutionID
+	}
+	outcome.onAccepted = func(executionID, turnID string) {
+		if options.onAccepted != nil {
+			options.onAccepted(turnID)
+		}
+		if interruptionSnapshot.captured {
+			s.resolveInterruptedTaskWarningAfterPromptAcceptance(
+				ctx, interruptionSnapshot, executionID, acceptedAttemptID, turnID,
+			)
+		}
+		if options.retireInitialSubmissionReplay {
+			retireCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := s.blockInitialSubmissionReplayForOtherPrompt(
+				retireCtx, sessionID, executionID, turnID,
+			); err != nil {
+				s.logger.Warn("failed to retire original task submission after later prompt acceptance",
+					zap.String("session_id", sessionID), zap.Error(err))
+			}
+		}
+		if options.promptAccepted != nil {
+			options.promptAccepted.Store(true)
+		}
+	}
+	return outcome, acceptedExecutionID
 }
 
 func (s *Service) acceptResumeAttemptAtPromptAcceptance(
