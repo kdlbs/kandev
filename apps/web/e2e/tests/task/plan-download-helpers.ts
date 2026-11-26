@@ -43,6 +43,12 @@ export async function openDownloadPlan(
   await page.keyboard.press("Enter");
   await page.keyboard.insertText("Next line 雪");
   await expect(editor).toContainText("Next line 雪");
+  await expect
+    .poll(() => api.getTaskPlan(task.id), { timeout: 30_000 })
+    .toMatchObject({
+      content: EXPECTED,
+    });
+  await expect(panel.getByTestId("plan-toolbar-implement-button")).toBeEnabled();
   return panel;
 }
 

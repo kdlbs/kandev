@@ -144,7 +144,7 @@ func newStatsRouter(t *testing.T, identity *authn.Identity) (*gin.Engine, *recor
 		})
 	}
 	repo := &recordingRepo{}
-	RegisterStatsRoutes(router, repo, newOwnerAuthorizer(), authzTestLogger(t))
+	RegisterStatsRoutes(router, repo, newOwnerAuthorizer(), authzTestLogger(t), true)
 	return router, repo
 }
 
@@ -234,6 +234,15 @@ func TestStatsOwnerStillReadsOwnWorkspace(t *testing.T) {
 		t.Run(routePath, func(t *testing.T) {
 			router, repo := newStatsRouter(t, memberIdentity("user-a"))
 			rec := doGet(t, router, requestPath(routePath, wsA))
+			if strings.Contains(routePath, "stats/token-usage") {
+				if rec.Code != http.StatusInternalServerError {
+					t.Fatalf("status = %d, want 500 without a retained usage repository (body %s)", rec.Code, rec.Body.String())
+				}
+				if len(repo.calls) != 0 {
+					t.Fatalf("repository calls = %v, want none when the usage capability is absent", repo.calls)
+				}
+				return
+			}
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
 			}
@@ -257,14 +266,25 @@ func TestStatsUnscopedCallersUnchanged(t *testing.T) {
 			t.Run(name+" "+routePath, func(t *testing.T) {
 				router, repo := newStatsRouter(t, identity)
 				// wsB is owned by another user; wsMissing has no row at all.
+				usageRoute := strings.Contains(routePath, "stats/token-usage")
 				for _, workspaceID := range []string{wsA, wsB, wsLegacy, wsMissing} {
 					rec := doGet(t, router, requestPath(routePath, workspaceID))
+					if usageRoute {
+						if rec.Code != http.StatusInternalServerError {
+							t.Fatalf("%s: status = %d, want 500 without a retained usage repository (body %s)", workspaceID, rec.Code, rec.Body.String())
+						}
+						continue
+					}
 					if rec.Code != http.StatusOK {
 						t.Fatalf("%s: status = %d, want 200 (body %s)", workspaceID, rec.Code, rec.Body.String())
 					}
 				}
-				if len(repo.calls) != 4 {
-					t.Fatalf("repository calls = %v, want one per request", repo.calls)
+				wantCalls := 4
+				if usageRoute {
+					wantCalls = 0
+				}
+				if len(repo.calls) != wantCalls {
+					t.Fatalf("repository calls = %v, want %d", repo.calls, wantCalls)
 				}
 			})
 		}
@@ -314,7 +334,7 @@ func newDenyingRouter(t *testing.T, authorizer WorkspaceAuthorizer, log *commonl
 		c.Next()
 	})
 	repo := &recordingRepo{}
-	RegisterStatsRoutes(router, repo, authorizer, log)
+	RegisterStatsRoutes(router, repo, authorizer, log, true)
 	return router, repo
 }
 
@@ -368,7 +388,7 @@ func TestStatsDenialIsAuditable(t *testing.T) {
 		authn.SetOnGin(c, *memberIdentity("user-a"))
 		c.Next()
 	})
-	RegisterStatsRoutes(router, &recordingRepo{}, newOwnerAuthorizer(), log)
+	RegisterStatsRoutes(router, &recordingRepo{}, newOwnerAuthorizer(), log, true)
 
 	if rec := doGet(t, router, "/api/v1/workspaces/"+wsB+"/stats/tasks"); rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)

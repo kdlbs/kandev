@@ -123,6 +123,35 @@ export async function retentionStatus(page: Page): Promise<ToolPayloadRetentionS
   return response.json();
 }
 
+export async function withRetentionPolicyRestore<T>(page: Page, operation: () => Promise<T>) {
+  const previousPolicy = (await retentionStatus(page)).policy;
+  let operationFailed = false;
+  let operationError: unknown;
+  try {
+    return await operation();
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+    throw error;
+  } finally {
+    try {
+      const current = await retentionStatus(page);
+      const restored = await page.request.put(RETENTION_API, {
+        data: { ...previousPolicy, revision: current.policy.revision },
+      });
+      expect(restored.status(), await restored.text()).toBe(200);
+    } catch (restorationError) {
+      if (operationFailed) {
+        throw new AggregateError(
+          [operationError, restorationError],
+          "Retention operation and policy restoration failed",
+        );
+      }
+      throw restorationError;
+    }
+  }
+}
+
 export async function resetRetention(page: Page) {
   const { policy } = await retentionStatus(page);
   const response = await page.request.put(RETENTION_API, {
@@ -260,7 +289,9 @@ export async function analyzeRetention(page: Page, touch = false) {
       { timeout: 30_000 },
     )
     .toBe("succeeded");
-  await expect(page.getByTestId("tool-payload-estimate")).toContainText("Completed");
+  await expect(page.getByTestId("tool-payload-estimate")).toContainText("Completed", {
+    timeout: 15_000,
+  });
 }
 
 export async function activateRetention(page: Page, choice: "backup" | "skip", touch = false) {

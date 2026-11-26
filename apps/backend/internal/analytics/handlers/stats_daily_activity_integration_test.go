@@ -50,7 +50,7 @@ func newDailyActivityFixture(t *testing.T) *dailyActivityFixture {
 	}
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	RegisterStatsRoutes(router, analytics, newOwnerAuthorizer(), authzTestLogger(t))
+	RegisterStatsRoutes(router, analytics, newOwnerAuthorizer(), authzTestLogger(t), true)
 	return &dailyActivityFixture{t: t, repo: tasks, router: router, today: time.Now().UTC().Truncate(24 * time.Hour)}
 }
 

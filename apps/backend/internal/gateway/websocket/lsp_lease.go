@@ -79,6 +79,7 @@ type lspLease struct {
 	closed                        bool
 	expectedUpstreamClose         bool
 	readDone                      chan struct{}
+	readOnce                      sync.Once
 	ready                         bool
 	readyStatus                   map[string]any
 	workspacePath                 string
@@ -247,7 +248,6 @@ func (m *lspLeaseManager) createLease(
 		lease.terminate(lspCloseTransport, "browser attachment failed", lspLeaseReleaseRuntimeStop)
 		return nil, 0, false, err
 	}
-	go lease.readUpstream()
 	m.logger.Debug("created language server lease", zap.String("language", language))
 	return lease, generation, false, nil
 }
@@ -636,6 +636,12 @@ func (l *lspLease) readUpstream() {
 			return
 		}
 	}
+}
+
+func (l *lspLease) startUpstreamReader() {
+	l.readOnce.Do(func() {
+		go l.readUpstream()
+	})
 }
 
 func classifyLSPUpstreamClose(err error) (int, string, string) {

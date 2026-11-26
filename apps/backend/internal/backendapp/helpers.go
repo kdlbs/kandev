@@ -1144,6 +1144,7 @@ type routeParams struct {
 	taskRepo                      *sqliterepo.Repository
 	officeRepo                    *officesqlite.Repository
 	analyticsRepo                 analyticsrepository.Repository
+	usageHistoryControl           *usageHistoryProjectionControl
 	orchestratorSvc               *orchestrator.Service
 	lifecycleMgr                  *lifecycle.Manager
 	loginMgr                      *loginpty.Manager
@@ -1848,7 +1849,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		processHandlers.SetTerminalService(p.services.Terminal)
 	}
 	taskhandlers.RegisterWorkspaceFileRoutes(p.router, processHandlers)
-	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.taskSvc, p.log)
+	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.taskSvc, p.log, p.features.UsageHistory)
 	agenthandlers.RegisterShellRoutes(p.router, p.lifecycleMgr, p.log)
 	if p.services.Share != nil {
 		p.services.Share.RegisterRoutes(p.router)
@@ -2190,6 +2191,7 @@ func registerSecondaryRoutes(
 		p.router, p.agentSettingsController, p.runtimeUpdateNotifier, p.e2eRuntimeUpdateHooks, p.log,
 	)
 	registerE2EStartupPageFixtureRoute(p.router, p.log)
+	registerE2EUsageHistoryRoutes(p.router, p.taskSvc, p.analyticsRepo, p.dbPool, p.usageHistoryControl)
 	registerE2ECapacityRetryClockRoutes(p.router, p.services.capacityRetryClock)
 
 	if officetestharness.Enabled() {

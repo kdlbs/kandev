@@ -168,6 +168,14 @@ describe("resolveSpaRoute — automations", () => {
       kind: "stats",
       range: undefined,
     });
+    expect(resolveSpaRoute("/stats/token-usage", new URLSearchParams("range=week"))).toEqual({
+      kind: "tokenUsage",
+      range: "week",
+    });
+    expect(resolveSpaRoute("/stats/token-usage", new URLSearchParams("range=bad"))).toEqual({
+      kind: "tokenUsage",
+      range: undefined,
+    });
   });
 
   it("routes settings and office paths through their SPA shells", () => {

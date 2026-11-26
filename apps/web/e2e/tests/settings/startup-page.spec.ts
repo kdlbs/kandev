@@ -62,7 +62,9 @@ test.describe("Threads Home default", () => {
     await testPage.reload();
     await expectEmptyList(testPage);
     expect((await apiClient.getUserSettings()).settings.startup_page).toBe("threads");
-    await testPage.getByRole("link", { name: "Home", exact: true }).click();
+    // Startup preferences apply at the root entry point; reloading /tasks must
+    // preserve the current listing before Home is opened again.
+    await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
     await expectThreadsHome(testPage, seedData.workspaceId);
     await testPage.evaluate((key) => localStorage.removeItem(key), VIEW_STORAGE_KEY);
     await testPage.goto("/");

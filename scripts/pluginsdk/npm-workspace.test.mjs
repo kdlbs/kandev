@@ -105,9 +105,8 @@ test("checker follows an npm workspace's installed resolution and binds its exac
   await assert.rejects(check(), (error) =>
     /no registry SDK resolution/.test(error.stderr),
   );
-  await assert.rejects(
-    check("../../node_modules/@kdlbs/plugin-sdk"),
-    (error) => /resolved installed/.test(error.stderr),
+  await assert.rejects(check("../../node_modules/@kdlbs/plugin-sdk"), (error) =>
+    /resolved installed/.test(error.stderr),
   );
   await rm(shadow, { recursive: true });
   await symlink(installed, shadow);
@@ -117,7 +116,8 @@ test("checker follows an npm workspace's installed resolution and binds its exac
   await rm(shadow);
 
   const lock = JSON.parse(before);
-  lock.packages["node_modules/@kdlbs/plugin-sdk"].version = "9.9.9";
+  lock.packages["node_modules/@kdlbs/plugin-sdk"].version =
+    `${record.sdk_version}-mismatch`;
   await writeFile(lockPath, JSON.stringify(lock));
   await assert.rejects(check(), (error) => /lock version/.test(error.stderr));
   // A nearer lockfile cannot authorize a package installed outside its tree.

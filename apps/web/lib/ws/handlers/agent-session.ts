@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- session WebSocket handlers share one event registry. */
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { AppState } from "@/lib/state/store";
 import {
   mergeQueuePolicyMeta,
@@ -45,6 +46,18 @@ import {
 import { applyForegroundActivity, applyCancellationPending } from "./session-activity";
 
 const debug = createDebugLogger("session:state");
+
+function isStaleAgentctlObservation(
+  store: StoreApi<AppState>,
+  sessionId: string,
+  timestamp: string | undefined,
+): boolean {
+  const previous = parseStrictRfc3339Timestamp(
+    store.getState().sessionAgentctl?.itemsBySessionId[sessionId]?.updatedAt,
+  );
+  const incoming = parseStrictRfc3339Timestamp(timestamp);
+  return previous !== null && incoming !== null && incoming < previous;
+}
 
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "COMPLETED",
@@ -144,6 +157,7 @@ function maybePromoteAgentctlReady(
   newState: TaskSessionState | undefined,
   timestamp: string | undefined,
 ): void {
+  if (isStaleAgentctlObservation(store, sessionId, timestamp)) return;
   const state = store.getState();
   const current = state.sessionAgentctl?.itemsBySessionId?.[sessionId];
   const session = state.taskSessions?.items?.[sessionId];
@@ -160,6 +174,7 @@ function maybePromoteAgentctlReady(
   store.getState().setSessionAgentctlStatus(sessionId, {
     status: "ready",
     agentExecutionId: current?.agentExecutionId,
+    startingExecutionId: undefined,
     updatedAt: timestamp,
   });
 }
@@ -973,7 +988,10 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
           );
         if (agentctl?.startingExecutionId) {
           const { startingExecutionId: _startingExecutionId, ...status } = agentctl;
-          store.getState().setSessionAgentctlStatus(sessionId, status);
+          store.getState().setSessionAgentctlStatus(sessionId, {
+            ...status,
+            startingExecutionId: undefined,
+          });
         }
       }
 
@@ -1011,6 +1029,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     "session.agentctl_starting": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) return;
+      if (isStaleAgentctlObservation(store, payload.session_id, message.timestamp)) return;
       store
         .getState()
         .invalidateConfirmedConfigOptions(payload.session_id, payload.agent_execution_id);
@@ -1024,6 +1043,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     "session.agentctl_ready": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) return;
+      if (isStaleAgentctlObservation(store, payload.session_id, message.timestamp)) return;
       const sessionBeforeSync = store.getState().taskSessions.items[payload.session_id];
       store.getState().setSessionAgentctlStatus(payload.session_id, {
         status: "ready",
@@ -1037,6 +1057,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     "session.agentctl_error": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) return;
+      if (isStaleAgentctlObservation(store, payload.session_id, message.timestamp)) return;
       store.getState().setSessionAgentctlStatus(payload.session_id, {
         status: "error",
         agentExecutionId: payload.agent_execution_id,

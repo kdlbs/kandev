@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api-client";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
+import { resetSeedRepositoryCheckout } from "./seed-repository-checkout";
 import { seedNavigationTasks } from "../tests/task/task-navigation-helpers";
 
 vi.mock("@playwright/test", async () => ({
   expect: (await import("vitest")).expect,
 }));
 
-vi.mock("../fixtures/test-base", () => ({
+vi.mock("./seed-repository-checkout", () => ({
   resetSeedRepositoryCheckout: vi.fn(),
 }));
 
@@ -47,20 +48,20 @@ describe("seedNavigationTasks", () => {
       }),
     };
 
-    const tasks = await seedNavigationTasks(
-      api as unknown as ApiClient,
-      {
-        workspaceId: "workspace",
-        workflowId: "workflow",
-        startStepId: "start",
-        repositoryId: "repository",
-        worktreeExecutorProfileId: "worktree-profile",
-      } as SeedData,
-      { tmpDir: "/navigation-fixture" } as BackendContext,
-      { executorProfileId: requested },
-    );
+    const seed = {
+      workspaceId: "workspace",
+      workflowId: "workflow",
+      startStepId: "start",
+      repositoryId: "repository",
+      worktreeExecutorProfileId: "worktree-profile",
+    } as SeedData;
+    const backend = { tmpDir: "/navigation-fixture" } as BackendContext;
+    const tasks = await seedNavigationTasks(api as unknown as ApiClient, seed, backend, {
+      executorProfileId: requested,
+    });
 
     expect(tasks.map((task) => task.id)).toEqual(["task-1", "task-2"]);
+    expect(resetSeedRepositoryCheckout).toHaveBeenCalledWith(seed, backend.tmpDir);
     expect(api.listTaskSessions).toHaveBeenCalledTimes(2);
     for (const call of api.createTaskWithAgent.mock.calls) {
       expect(call[3]).toEqual(expect.objectContaining({ executor_profile_id: expected }));

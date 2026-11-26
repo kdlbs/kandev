@@ -126,6 +126,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useDockviewStore.setState({ api: null });
+  vi.restoreAllMocks();
 });
 
 it("uses the active session workspace to distinguish an external editor during rename", async () => {

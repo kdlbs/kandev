@@ -30,6 +30,59 @@ async function waitForReviewTasksInBackend(
     .toBe(titles.length);
 }
 
+async function prepareReviewTaskSessions(
+  apiClient: ApiClient,
+  workspaceId: string,
+  reviewStepId: string,
+  titles: string[],
+): Promise<void> {
+  const { tasks } = await apiClient.listTasks(workspaceId);
+  const reviewTasks = titles.map((title) => {
+    const task = tasks.find(
+      (candidate) => candidate.title === title && candidate.workflow_step_id === reviewStepId,
+    );
+    if (!task) throw new Error(`PR watcher did not create review task ${title}`);
+    return task;
+  });
+
+  for (const task of reviewTasks) {
+    const prepared = await apiClient.ensureTaskSession(task.id);
+    expect(prepared.session_id, `${task.title} should have a primary session`).toBeTruthy();
+    expect(prepared.state, `${task.title} should be prepared without starting an agent`).toBe(
+      "CREATED",
+    );
+
+    await expect
+      .poll(
+        async () => {
+          const [currentTask, environment, { sessions }] = await Promise.all([
+            apiClient.getTask(task.id),
+            apiClient.getTaskEnvironment(task.id),
+            apiClient.listTaskSessions(task.id),
+          ]);
+          const session = sessions.find((candidate) => candidate.id === prepared.session_id);
+          return {
+            primarySession: currentTask.primary_session_id === prepared.session_id,
+            sessionState: session?.state ?? "missing",
+            environmentStatus: environment?.status ?? "missing",
+            workspaceReady: Boolean(environment?.workspace_path),
+          };
+        },
+        {
+          timeout: 60_000,
+          intervals: [500, 1_000, 2_000],
+          message: `${task.title} primary session and workspace should be prepared`,
+        },
+      )
+      .toEqual({
+        primarySession: true,
+        sessionState: "CREATED",
+        environmentStatus: "ready",
+        workspaceReady: true,
+      });
+  }
+}
+
 async function waitForReviewTaskCards(
   testPage: Page,
   kanban: KanbanPage,
@@ -123,14 +176,15 @@ test.describe("PR watcher dockview layout stability", () => {
    *
    * Flow:
    *   1. PR watcher detects 3 PRs and auto-creates tasks in the background
-   *   2. Open PR task 1 from the kanban homepage
+   *   2. Prepare the PR task sessions one at a time, then open PR task 1
    *   3. Toggle plan mode (adds plan panel)
    *   4. Switch to PR task 2 via sidebar → should have default layout
    *   5. Switch to PR task 3 via sidebar → should have default layout
    *
    * Setup:
-   *   Review step with auto_start_agent on_enter — all 3 tasks get primary
-   *   sessions immediately, so sidebar navigation takes the fast (synchronous) path.
+   *   The watcher creates all 3 PR tasks in Review. Their primary sessions and
+   *   workspaces are prepared sequentially, so sidebar navigation uses the
+   *   existing-session fast path without launching three agents at once.
    */
   test("layout remains correct when switching between PR watcher tasks with plan mode", async ({
     testPage,
@@ -194,15 +248,6 @@ test.describe("PR watcher dockview layout stability", () => {
       workflowId = workflow.id;
 
       const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 0);
-
-      // Configure auto-start so the review watcher immediately launches mock agents
-      // for all 3 PR tasks. By the time the test reaches the sidebar navigation
-      // steps, tasks 2 and 3 already have a primarySessionId in kanbanMulti.snapshots
-      // → handleSelectTask takes the fast (synchronous) path instead of the slow
-      // HTTP + WS round-trip that times out in CI.
-      await apiClient.updateWorkflowStep(reviewStep.id, {
-        events: { on_enter: [{ type: "auto_start_agent" }] },
-      });
 
       await apiClient.saveUserSettings({
         workspace_id: seedData.workspaceId,
@@ -294,6 +339,13 @@ test.describe("PR watcher dockview layout stability", () => {
       );
       await waitForReviewTaskCards(testPage, kanban, reviewStep.id, prTaskTitles);
 
+      // The layout scenario needs real primary sessions and ready workspaces,
+      // but it does not need three concurrent agent/worktree launches. Prepare
+      // each task through the backend and let the first user-visible action
+      // below start the agent whose plan mode is toggled.
+      await prepareReviewTaskSessions(apiClient, seedData.workspaceId, reviewStep.id, prTaskTitles);
+      await kanban.goto();
+
       // --- Click PR task 1 to enter session view ---
       await kanban.taskCardInColumn(prTask1Title, reviewStep.id).click();
       await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
@@ -305,10 +357,12 @@ test.describe("PR watcher dockview layout stability", () => {
       await expect(session.chat).toBeVisible({ timeout: 10_000 });
       await expect(session.sidebar).toBeVisible();
 
-      // Wait until the session has either become promptable or reported its
-      // recoverable startup state. Both states have a settled dockview layout;
-      // requiring promptability would make this layout test fail when an agent
-      // startup is the part that is under contention.
+      // Start the prepared primary session through the same visible control a
+      // user gets after workspace preparation, then wait for its real idle or
+      // recovery state before toggling plan mode.
+      const startAgentButton = session.activeChat().getByTestId("task-description-start-button");
+      await expect(startAgentButton).toBeVisible({ timeout: 60_000 });
+      await startAgentButton.click();
       await waitForLayoutReady(session);
       await ensurePlanModeAvailable(session);
 
@@ -320,9 +374,8 @@ test.describe("PR watcher dockview layout stability", () => {
 
       // --- Switch to PR task 2 via sidebar ---
       await session.clickTaskInSidebar(prTask2Title);
-      // With auto_start_agent configured, task 2 already has a primarySessionId in
-      // kanbanMulti.snapshots → handleSelectTask takes the synchronous fast path
-      // and setActiveSession is called immediately.
+      // Task 2 already has a primary session in kanbanMulti.snapshots, so
+      // handleSelectTask uses the existing-session fast path.
       await expect(
         testPage
           .getByRole("navigation", { name: "breadcrumb" })
