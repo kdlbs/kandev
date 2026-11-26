@@ -3072,7 +3072,7 @@ func completedAtForTaskSessionState(status models.TaskSessionState, now time.Tim
 // closing the read-after-write gap where a session could commit CANCELLED
 // but its event never gets published because that follow-up read failed or
 // timed out. Returned sessions therefore carry only the fields the
-// RETURNING clause selects (ID, TaskID, AgentProfileID,
+// RETURNING clause selects (ID, QueueIncarnationID, TaskID, AgentProfileID,
 // AgentProfileSnapshot, IsPassthrough, Name, ReviewStatus, Metadata,
 // TaskEnvironmentID, State, UpdatedAt, IsPrimary) — every other models.TaskSession
 // field is left at its zero value, and callers must not rely on fields
@@ -3092,7 +3092,7 @@ func (r *Repository) CancelActiveTaskSessionsByTaskID(ctx context.Context, taskI
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE task_id = ?
 			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
-		RETURNING id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
+		RETURNING id, queue_incarnation_id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
 			review_status, metadata, task_environment_id, state, updated_at, is_primary
 	`), string(models.TaskSessionStateCancelled), reason, now, now, taskID)
 	if err != nil {
@@ -3181,7 +3181,7 @@ func (r *Repository) CancelRunningTaskSessionByID(ctx context.Context, sessionID
 		WHERE id = ?
 			AND state IN ('STARTING', 'RUNNING')
 			AND updated_at < ?
-		RETURNING id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
+		RETURNING id, queue_incarnation_id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
 			review_status, metadata, task_environment_id, state, updated_at, is_primary
 	`), string(models.TaskSessionStateCancelled), reason, now, now, sessionID, staleBefore)
 	if err != nil {
@@ -3334,7 +3334,7 @@ func (r *Repository) RecoverTaskSessionByCandidate(
 		args = append(args, candidate.ExpectedTurnID)
 	}
 	query += `
-		RETURNING id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
+		RETURNING id, queue_incarnation_id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
 			review_status, metadata, task_environment_id, state, updated_at, is_primary
 	`
 	rows, err := r.db.QueryContext(writeCtx, r.db.Rebind(query), args...)
@@ -3384,7 +3384,7 @@ func (r *Repository) CancelActiveTaskSessionsByIDs(ctx context.Context, taskID s
 			WHERE task_id = ?
 				AND id IN (`+placeholders+`)
 				AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
-			RETURNING id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
+			RETURNING id, queue_incarnation_id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
 				review_status, metadata, task_environment_id, state, updated_at, is_primary
 		`), args...)
 		if err != nil {
@@ -3453,7 +3453,7 @@ func (r *Repository) CancelActiveTaskSessionsByCandidates(
 			WHERE task_id = ?
 			  AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 			AND (`+strings.Join(predicates, " OR ")+`)
-			RETURNING id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
+			RETURNING id, queue_incarnation_id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
 				review_status, metadata, task_environment_id, state, updated_at, is_primary
 		`), args...)
 		if err != nil {
@@ -3514,7 +3514,7 @@ func activeSessionCancellationCandidatePredicate(
 // CancelActiveTaskSessionsByTaskID's UPDATE ... RETURNING into a
 // *models.TaskSession, mirroring scanTaskSessionRow's JSON-unmarshal and
 // int-to-bool/nullable-string conventions but for the narrower RETURNING
-// column set (id, agent_profile_id, agent_profile_snapshot, is_passthrough,
+// column set (id, queue_incarnation_id, agent_profile_id, agent_profile_snapshot, is_passthrough,
 // name, review_status, metadata, task_environment_id, state, updated_at,
 // is_primary). taskID backfills TaskID, which RETURNING cannot supply since
 // it's a query parameter, not a returned column.
@@ -3530,7 +3530,7 @@ func scanCancelledTaskSessionRow(rows *sql.Rows, taskID string) (*models.TaskSes
 	var name sql.NullString
 
 	if err := rows.Scan(
-		&session.ID, &agentProfileID, &agentProfileSnapshotJSON, &isPassthrough, &name,
+		&session.ID, &session.QueueIncarnationID, &agentProfileID, &agentProfileSnapshotJSON, &isPassthrough, &name,
 		&reviewStatus, &metadataJSON, &session.TaskEnvironmentID, &state, &session.UpdatedAt,
 		&isPrimary,
 	); err != nil {
@@ -5105,6 +5105,12 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	defer func() { _ = tx.Rollback() }()
 	if err := r.confirmTaskSessionDeletionIdentityTx(ctx, tx, session); err != nil {
 		return nil, err
+	}
+	// Malformed private warning data must not block session deletion.
+	if _, err := r.removeTaskInterruptedSessionTx(
+		ctx, tx, session.TaskID, session.ID, session.QueueIncarnationID,
+	); err != nil && !errors.Is(err, errMalformedTaskInterruptionEntries) {
+		return nil, fmt.Errorf("remove deleted session interruption marker: %w", err)
 	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), session.ID); err != nil {
 		return nil, err

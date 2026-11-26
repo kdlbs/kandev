@@ -260,11 +260,15 @@ const (
 	// review tasks. Their worktree setup scripts can read executor-profile secrets;
 	// a user can still explicitly start the task after reviewing it.
 	MetaKeyForkPRRequiresManualStart = "fork_pr_requires_manual_start"
-	// MetaKeyInterruptedAt is set by reconciliation when a task's session lost
-	// an active turn. Its presence makes the task DTO report `interrupted: true`
-	// so task-list surfaces show the warning indicator. The orchestrator removes
-	// the key only after the provider confirms recovery.
+	// MetaKeyInterruptedAt projects whether any session on a task still needs
+	// continuation. Keep it for existing readers of the task DTO.
 	MetaKeyInterruptedAt = "interrupted_at"
+	// MetaKeyInterruptedSessions stores private interruption ownership by
+	// session so one accepted prompt cannot clear another session's warning.
+	MetaKeyInterruptedSessions = "interrupted_sessions"
+	// MetaKeyLegacyInterruptedAt preserves a timestamp-only warning while a
+	// scoped interruption is added to the same task.
+	MetaKeyLegacyInterruptedAt = "interrupted_legacy_at"
 	// MetaKeyAutoStartFailed is set when a workflow step's auto_start_agent
 	// on_enter action fails to launch a run (kanban StartTask error, or an
 	// Office task queue-run error/unresolvable agent). Its presence makes the
@@ -411,6 +415,37 @@ func ManagedToolPolicyFromTask(task *Task) (*mcpprofile.ManagedToolPolicy, bool,
 		return nil, true, err
 	}
 	return policy, true, nil
+}
+
+// InterruptedSessionMarker is the private ownership record for one
+// interrupted task session.
+type InterruptedSessionMarker struct {
+	IncarnationID string `json:"incarnation_id"`
+	InterruptedAt string `json:"interrupted_at"`
+	Token         string `json:"token"`
+}
+
+// LoadInterruptedSessionMarkers decodes the private scoped markers in task
+// metadata. The boolean reports whether the key was present.
+func LoadInterruptedSessionMarkers(
+	metadata map[string]interface{},
+) (map[string]InterruptedSessionMarker, bool, error) {
+	value, present := metadata[MetaKeyInterruptedSessions]
+	if !present || value == nil {
+		return nil, present, nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, true, err
+	}
+	markers := map[string]InterruptedSessionMarker{}
+	if err := json.Unmarshal(encoded, &markers); err != nil {
+		return nil, true, err
+	}
+	if markers == nil {
+		markers = map[string]InterruptedSessionMarker{}
+	}
+	return markers, true, nil
 }
 
 // officeCarrierMetadataKeys is every MetaKeyOfficeCarrier* key above, kept

@@ -2445,10 +2445,18 @@ func TestRecoverTaskSessionByCandidatePreservesConversationAndGuardsTurn(t *test
 	seedRepoLink(t, repo, "ws-recover", "repo-recover", "task-recover", "session-recover", "RUNNING")
 	seedRepoLink(t, repo, "ws-recover", "repo-recover-2", "task-recover-2", "session-recover-2", "RUNNING")
 	seedRepoLink(t, repo, "ws-recover", "repo-recover-created", "task-recover-created", "session-recover-created", "CREATED")
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?
+	`), "incarnation-recover-created", "session-recover-created"); err != nil {
+		t.Fatalf("set created session incarnation: %v", err)
+	}
 
 	created, err := repo.GetTaskSession(ctx, "session-recover-created")
 	if err != nil {
 		t.Fatalf("GetTaskSession created candidate: %v", err)
+	}
+	if created.QueueIncarnationID == "" {
+		t.Fatal("created session has no incarnation")
 	}
 	recovered, err := repo.RecoverTaskSessionByCandidate(ctx, models.ActiveSessionRecoveryCandidate{
 		TaskID:              created.TaskID,
@@ -2462,6 +2470,9 @@ func TestRecoverTaskSessionByCandidatePreservesConversationAndGuardsTurn(t *test
 	}
 	if recovered == nil {
 		t.Fatal("RecoverTaskSessionByCandidate created session returned nil")
+	}
+	if recovered.QueueIncarnationID != created.QueueIncarnationID {
+		t.Fatalf("recovered incarnation = %q, want %q", recovered.QueueIncarnationID, created.QueueIncarnationID)
 	}
 	if !models.HasInterruptedRecoveryPending(recovered.Metadata) {
 		t.Fatalf("created recovered metadata = %#v, want durable recovery marker", recovered.Metadata)
