@@ -256,6 +256,7 @@ func (a *Adapter) trackToolCallPayload(
 		a.trackCodexSubagentControlLocked(sessionID, toolCallID, payload)
 		a.trackCopilotSubagentCallLocked(sessionID, toolCallID, payload)
 		a.applyPendingCursorTaskMetaLocked(sessionID, toolCallID, payload)
+		a.trackAntigravityPermissionToolNameLocked(sessionID, call)
 		a.activeToolCalls[toolCallID] = payload
 		return payload, eventType, signal, toolCallID, "", false
 	}
@@ -992,6 +993,9 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	}
 
 	if isTerminal {
+		delete(a.antigravityPermissionToolNames, permissionToolNameKey{
+			sessionID: sessionID, toolCallID: toolCallID,
+		})
 		if payload == nil || !payload.IsActiveBackgroundWork() {
 			delete(a.activeToolCalls, emittedToolCallID)
 			a.forgetPromptHandoffToolLocked(emittedToolCallID)

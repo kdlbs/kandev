@@ -63,6 +63,17 @@ func Provide(log *logger.Logger, codexAppServerEnabled ...bool) (*Registry, func
 			configureMockAgent(reg, agents.CopilotACPAgentID, log)
 		}
 		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
+			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_ANTIGRAVITY"), "true") {
+			// Browser coverage needs Antigravity's curated profile settings
+			// without requiring the native CLI or standalone server.
+			antigravity := agents.NewMockAgentWithID(agents.AntigravityACPAgentID, "Antigravity ACP Agent", "Antigravity")
+			antigravity.SetDisplayOrder(1003)
+			if err := reg.Register(antigravity); err != nil {
+				return nil, nil, err
+			}
+			configureMockAgent(reg, agents.AntigravityACPAgentID, log)
+		}
+		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
 			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_DEVIN"), "true") {
 			// Browser coverage needs a disposable Devin settings identity. The
 			// mock ACP peer supplies deterministic modes and capability

@@ -135,6 +135,8 @@ type Manager struct {
 	questionImageOnce        sync.Once
 	questionImageSlots       chan struct{}
 	cfg                      *config.InstanceConfig
+	antigravityMCPNames      []string
+	antigravityMCPNamesKnown bool
 	builtinCatalogMu         sync.RWMutex
 	builtinCatalog           func() map[mcpprofile.PackageID][]string
 	logger                   *logger.Logger
@@ -557,6 +559,13 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		workspaceSourceRoots:       canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
 		workspaceExcludedRoots:     canonicalWorkspaceSourceRoots(cfg.WorkspaceExcludedRoots),
 		trackerGitEnv:              append([]string(nil), cfg.AgentEnv...),
+	}
+	if cfg.AgentType == acpcompat.AntigravityAgentID && cfg.AuthPolicy != nil &&
+		cfg.AuthPolicy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI {
+		m.antigravityMCPNames, m.antigravityMCPNamesKnown = scanAntigravityNativeMCPNames(cfg)
+		if !m.antigravityMCPNamesKnown {
+			m.logger.Warn("Antigravity native MCP registrations are unavailable; implicit tool approval is disabled")
+		}
 	}
 	if cfg.HomeDir != "" {
 		exclusions := append([]string{cfg.WorkDir}, cfg.WorkspaceSourceRoots...)

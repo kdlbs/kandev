@@ -19,6 +19,7 @@ import (
 
 const minimumACPCLIVersion = "1.5.0"
 const workerModeFlag = "--process-per-session"
+const dangerouslySkipPermissionsFlag = "--dangerously-skip-permissions"
 
 const acpHelpTimeout = 5 * time.Second
 
@@ -42,10 +43,11 @@ func (e *SavedRuntimeError) Unwrap() error { return e.Cause }
 // LocalRuntime identifies the complete command selected for a host-local
 // Antigravity operation. CLI qualification happens once per selection.
 type LocalRuntime struct {
-	Variant string
-	Args    []string
-	Version string
-	Bundle  *Bundle
+	Variant                            string
+	Args                               []string
+	Version                            string
+	Bundle                             *Bundle
+	SupportsDangerouslySkipPermissions bool
 }
 
 // FindCLIPath returns an installed CLI candidate without starting a process.
@@ -247,9 +249,10 @@ func resolveQualifiedCLI(
 		return nil, errCLIWorkerModeUnsupported
 	}
 	return &LocalRuntime{
-		Variant: acpcompat.AntigravityRuntimeCLI,
-		Args:    []string{cliPath, "acp", workerModeFlag},
-		Version: version,
+		Variant:                            acpcompat.AntigravityRuntimeCLI,
+		Args:                               []string{cliPath, "acp", workerModeFlag},
+		Version:                            version,
+		SupportsDangerouslySkipPermissions: hasDeclaredACPFlag(help, dangerouslySkipPermissionsFlag),
 	}, nil
 }
 
@@ -282,6 +285,10 @@ func probeCLIACPHelp(
 }
 
 func hasWorkerModeFlag(output string) bool {
+	return hasDeclaredACPFlag(output, workerModeFlag)
+}
+
+func hasDeclaredACPFlag(output, flag string) bool {
 	inDeclarations := false
 	for _, line := range strings.Split(output, "\n") {
 		declaration := strings.TrimSpace(line)
@@ -297,11 +304,40 @@ func hasWorkerModeFlag(output string) bool {
 			continue
 		}
 		option := strings.Trim(fields[0], "[]{}()<>,;:'\"`")
-		if option == workerModeFlag || strings.HasPrefix(option, workerModeFlag+"=") {
+		if option == flag || strings.HasPrefix(option, flag+"=") {
 			return true
 		}
 	}
 	return false
+}
+
+// FilterDangerouslySkipPermissions removes the provider-wide approval bypass
+// unless the selected CLI supports it and the caller's session policy allows it.
+func FilterDangerouslySkipPermissions(args []string, permitted bool) []string {
+	if permitted || len(args) == 0 {
+		return args
+	}
+	result := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" {
+			result = append(result, args[index:]...)
+			return result
+		}
+		option, _, hasValue := strings.Cut(arg, "=")
+		if isAntigravityValueOption(option) {
+			result = append(result, arg)
+			if !hasValue && index+1 < len(args) {
+				index++
+				result = append(result, args[index])
+			}
+			continue
+		}
+		if arg != dangerouslySkipPermissionsFlag && !strings.HasPrefix(arg, dangerouslySkipPermissionsFlag+"=") {
+			result = append(result, arg)
+		}
+	}
+	return result
 }
 
 func resolveStandalone(ctx context.Context, opts ResolveOptions, cliErr error) (*LocalRuntime, error) {

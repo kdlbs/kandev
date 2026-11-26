@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -345,6 +346,36 @@ func TestDeleteAgentEndpoint(t *testing.T) {
 // caching header, and separates "no such agent" from "agent has no logo" —
 // both 404s, but only one of them means the agent is unknown.
 func TestGetAgentLogoEndpoint(t *testing.T) {
+	t.Run("serves Antigravity light and dark logo assets", func(t *testing.T) {
+		router, _, reg := newSettingsHarness(t, newFakeSettingsRepo(), nil)
+		antigravity := agents.NewAntigravityACP()
+		if err := reg.Register(antigravity); err != nil {
+			t.Fatalf("register Antigravity: %v", err)
+		}
+
+		for _, tc := range []struct {
+			name    string
+			variant string
+			logo    agents.LogoVariant
+		}{
+			{name: "default light", logo: agents.LogoLight},
+			{name: "light", variant: "light", logo: agents.LogoLight},
+			{name: "dark", variant: "dark", logo: agents.LogoDark},
+		} {
+			path := "/api/v1/agents/antigravity-acp/logo"
+			if tc.variant != "" {
+				path += "?variant=" + tc.variant
+			}
+			response := doSettingsRequest(router, http.MethodGet, path, "")
+			if response.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, body = %s", tc.name, response.Code, response.Body.String())
+			}
+			if !bytes.Equal(response.Body.Bytes(), antigravity.Logo(tc.logo)) {
+				t.Errorf("%s logo does not match the registered Antigravity asset", tc.name)
+			}
+		}
+	})
+
 	t.Run("serves the light logo by default and the dark variant on request", func(t *testing.T) {
 		router, _, reg := newSettingsHarness(t, newFakeSettingsRepo(), nil)
 		registerTestTUIAgent(t, reg, "logo-agent", 1)

@@ -15,6 +15,8 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
+const AntigravitySkipPermissionsFlag = "--dangerously-skip-permissions"
+
 // Tokenise returns the argv tokens for a single CLIFlag entry. An empty or
 // whitespace-only input yields no tokens. Unterminated quotes and trailing
 // backslashes are errors so the user sees the mistake at save time rather
@@ -151,4 +153,32 @@ func Resolve(flags []models.CLIFlag) ([]string, error) {
 		out = append(out, tokens...)
 	}
 	return out, nil
+}
+
+// NormalizeExactFlag collapses duplicate rows for one curated flag. An
+// enabled duplicate keeps the effective choice enabled so an old profile
+// cannot silently lose a saved opt-in until the user changes it.
+func NormalizeExactFlag(flags []models.CLIFlag, exactFlag string) []models.CLIFlag {
+	if len(flags) == 0 || exactFlag == "" {
+		return flags
+	}
+	result := make([]models.CLIFlag, 0, len(flags))
+	found := false
+	enabled := false
+	description := ""
+	for _, entry := range flags {
+		if strings.TrimSpace(entry.Flag) != exactFlag {
+			result = append(result, entry)
+			continue
+		}
+		found = true
+		enabled = enabled || entry.Enabled
+		if entry.Description != "" {
+			description = entry.Description
+		}
+	}
+	if !found {
+		return flags
+	}
+	return append(result, models.CLIFlag{Flag: exactFlag, Description: description, Enabled: enabled})
 }

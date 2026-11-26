@@ -293,7 +293,8 @@ func (c *Controller) resolveProfileProbeLaunchSettings(
 	if err := c.validateProfileDiscoverySecrets(ctx, envVars); err != nil {
 		return profileProbeLaunchSettings{}, ErrInvalidProfileDiscovery
 	}
-	cliTokens, err := cliflags.Resolve(cliFlagsFromDTO(cliFlags))
+	profileFlags := normalizeAntigravityCLIFlags(registered.ID(), cliFlagsFromDTO(cliFlags))
+	cliTokens, err := cliflags.Resolve(profileFlags)
 	if err != nil {
 		return profileProbeLaunchSettings{}, ErrInvalidProfileDiscovery
 	}
