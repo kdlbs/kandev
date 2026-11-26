@@ -10,7 +10,7 @@ import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { linkToTask } from "@/lib/links";
+import { BOARD_GRAPH_FOCUS_PARAM, linkToTask } from "@/lib/links";
 import { getRecentTasks } from "@/lib/recent-tasks";
 import {
   isExplicitHomeDestination,
@@ -29,6 +29,7 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
   const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const hasBoardGraphFocus = Boolean(searchParams.get(BOARD_GRAPH_FOCUS_PARAM));
   const { isMobile } = useResponsiveBreakpoint();
   const { preferredView } = useTaskListingView();
   const startupPage = useAppStore((state) => state.userSettings.startupPage);
@@ -90,7 +91,10 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
   return (
     <>
       {showOnboarding && (
-        <OnboardingDialog open={!isMobile} onComplete={handleOnboardingComplete} />
+        <OnboardingDialog
+          open={!isMobile && !hasBoardGraphFocus}
+          onComplete={handleOnboardingComplete}
+        />
       )}
       <KanbanWithPreview
         key={boardKey}
