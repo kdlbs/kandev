@@ -2,11 +2,13 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 // fullProject builds a Project with every persisted column set to a
@@ -114,6 +116,9 @@ func TestGetProject_NotFound(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("GetProject(missing) returned %+v, want nil", got)
+	}
+	if !errors.Is(err, sqlite.ErrProjectNotFound) {
+		t.Errorf("GetProject(missing) error = %v, want ErrProjectNotFound", err)
 	}
 	if !strings.Contains(err.Error(), "project not found: missing") {
 		t.Errorf("error = %q, want it to name the missing project", err)

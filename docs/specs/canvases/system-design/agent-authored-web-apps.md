@@ -81,9 +81,9 @@ standard web protocol that the Plugins system owns.
 PR #3061's declarative implementation is superseded, not a prerequisite.
 
 The runtime flag identity is `features.canvases`. Its environment variable is
-`KANDEV_FEATURES_CANVASES`. The first implementation sets `prod`, `dev`, and
-`e2e` profile defaults to `false`. Focused development and end-to-end tests set
-the environment variable explicitly.
+`KANDEV_FEATURES_CANVASES`. The `prod`, `dev`, and `e2e` profiles enable
+the feature by default. An installation override or explicit environment
+value can still disable it.
 
 The flag requires a restart because it changes MCP tool registration and
 backend composition. When the flag is off, Kandev does not register backend

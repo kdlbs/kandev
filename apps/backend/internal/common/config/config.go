@@ -521,10 +521,6 @@ type FeaturesConfig struct {
 	// IntegratedControl gates the cross-workspace navigation and existing-conversation surface.
 	IntegratedControl bool `mapstructure:"integrated_control" json:"integratedControl"`
 
-	// LSPBrowserContinuity gates runtime-owned language-server leases that stay
-	// connected across browser attachment loss. Off in every embedded profile.
-	LSPBrowserContinuity bool `mapstructure:"lsp_browser_continuity" json:"lspBrowserContinuity"`
-
 	// Office gates the autonomous-agent feature: backend service construction,
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`
@@ -542,8 +538,7 @@ type FeaturesConfig struct {
 	Auth bool `mapstructure:"auth" json:"auth"`
 
 	// Canvases gates agent-authored plugin web applications and their task and
-	// workspace surfaces. It remains off in every shipped profile until the
-	// isolated runtime and lifecycle are ready for opt-in use.
+	// workspace surfaces. The installation can disable the feature during rollout.
 	Canvases bool `mapstructure:"canvases" json:"canvases"`
 
 	// MultiTenancy gates organizations: a tenant boundary above users, where

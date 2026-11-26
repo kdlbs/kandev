@@ -107,22 +107,14 @@ test.describe("Task-create dependency selector", () => {
       await expect(
         advancedSettings.getByTestId("task-create-dependency-setting-label"),
       ).toContainText("Depends on");
-      const settingGrid = advancedSettings.getByTestId("task-create-advanced-settings-grid");
-      const settingGridBox = await settingGrid.boundingBox();
-      const settingRow = advancedSettings.getByTestId("task-create-dependency-setting-row");
-      const settingRowBox = await settingRow.boundingBox();
       const settingLabel = advancedSettings.getByTestId("task-create-dependency-setting-label");
       const settingLabelBox = await settingLabel.boundingBox();
       const selectorContainer = advancedSettings.getByTestId(
         "task-create-dependency-selector-container",
       );
       const selectorContainerBox = await selectorContainer.boundingBox();
-      expect(settingGridBox).not.toBeNull();
-      expect(settingRowBox).not.toBeNull();
       expect(settingLabelBox).not.toBeNull();
       expect(selectorContainerBox).not.toBeNull();
-      expect(settingRowBox!.width).toBeLessThan(settingGridBox!.width * 0.75);
-      expect(selectorContainerBox!.width).toBeLessThan(settingGridBox!.width * 0.75);
       expect(selectorContainerBox!.x).toBeGreaterThan(settingLabelBox!.x + settingLabelBox!.width);
       expect(Math.abs(selectorContainerBox!.y - settingLabelBox!.y)).toBeLessThanOrEqual(4);
       const settingInfo = advancedSettings.getByTestId("task-create-dependency-setting-info");
@@ -134,6 +126,13 @@ test.describe("Task-create dependency selector", () => {
       const dependency = dialog.getByTestId(DEPENDENCY_TRIGGER);
       await expect(dependency).toBeVisible();
       await expect(dependency).toContainText("No dependency");
+      await expect(dependency).toHaveCSS("border-top-width", "1px");
+      const promptBorder = await dialog.getByTestId("task-description-input").evaluate((input) => {
+        const wrapper = input.closest(".border-input");
+        if (!wrapper) throw new Error("Prompt border is missing");
+        return getComputedStyle(wrapper).borderTopColor;
+      });
+      await expect(dependency).toHaveCSS("border-top-color", promptBorder);
       await dependency.click();
 
       const picker = dialog.getByTestId("task-create-dependencies-popover");

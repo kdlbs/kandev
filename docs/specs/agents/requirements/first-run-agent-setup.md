@@ -42,9 +42,10 @@ by [profile capability discovery](profile-capability-discovery.md) and
   shall have an associated accessible label and a 44px coarse-pointer activation
   target, which may be its clickable row rather than the visual switch.
 - **AC-AGENTS-FIRST-RUN-SETUP-001.4:** Help shall direct users to Settings > Agents
-  for further configuration. The existing read-only warning about default
-  Auto Approve behavior shall remain; hiding its setting shall not change
-  permission defaults.
+  for further configuration. When no agent is detected and the catalog offers
+  an installable agent, administrators shall have a direct link to the catalog.
+  The existing read-only warning about default Auto Approve behavior shall remain.
+  Hiding its setting shall preserve permission defaults.
 - **AC-AGENTS-FIRST-RUN-SETUP-001.5:** The agent list shall scroll within a
   tour capped at 720px tall and bounded by the dynamic viewport minus 32px.
   Navigation actions shall remain outside its single scrolling body and reachable
