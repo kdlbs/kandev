@@ -27,6 +27,8 @@ vi.mock("@/lib/api/domains/session-api", async (original) => ({
   listTaskSessions: vi.fn(),
 }));
 
+const OTHER_TASK = "other-task";
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchTaskSession).mockReset();
@@ -83,7 +85,7 @@ describe("primary follow ownership", () => {
         store.getState().setActiveSession("t1", "latest");
         store.getState().setActiveSession("t1", "old");
       } else if (change === "task-departure") {
-        store.getState().setActiveTask("other-task");
+        store.getState().setActiveTask(OTHER_TASK);
         store.getState().setActiveSessionAuto("t1", "old");
       } else if (change === "auto-selection") {
         store.getState().setActiveSessionAuto("t1", "latest");
@@ -253,7 +255,7 @@ describe("primary follow coordination", () => {
         ...kanban,
         tasks: [
           ...kanban.tasks,
-          { ...kanban.tasks[0], id: "other-task", primarySessionId: "other-session" },
+          { ...kanban.tasks[0], id: OTHER_TASK, primarySessionId: "other-session" },
         ],
       },
     }));
@@ -265,7 +267,7 @@ describe("primary follow coordination", () => {
       type: "notification",
       action: "task.deleted",
       payload: {
-        task_id: "other-task",
+        task_id: OTHER_TASK,
         workflow_id: "wf1",
         workflow_step_id: "step1",
         title: "Task",
@@ -274,6 +276,28 @@ describe("primary follow coordination", () => {
     });
     expect(store.getState().tasks.activeTaskId).toBe("t1");
     read.resolve(response("WAITING_FOR_INPUT"));
+    await read.promise;
+    expect(store.getState().tasks.activeSessionId).toBe("next");
+  });
+
+  it("follows the promoted primary across workflow-focus changes on an unrelated task", async () => {
+    const store = selectedStore();
+    const read = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    promote(store);
+    store.setState({
+      workflowSessionFocus: {
+        nextRequestId: 2,
+        intent: null,
+        request: {
+          requestId: 1,
+          presentationToken: 1,
+          taskId: OTHER_TASK,
+          sessionId: "other-session",
+        },
+      },
+    });
+    read.resolve(response("COMPLETED"));
     await read.promise;
     expect(store.getState().tasks.activeSessionId).toBe("next");
   });

@@ -17,12 +17,19 @@ export function isConfirmedSessionRemoved(state: TaskSessionsState, sessionId: s
   return removedIds(state)?.[sessionId] === true;
 }
 
+const MAX_CONFIRMED_REMOVALS = 100;
+
 export function recordConfirmedSessionRemoval(state: TaskSessionsState, sessionId: string): void {
   const backend = getBackendConfig().apiBaseUrl;
   let removed = state.confirmedRemovals;
   if (!removed || removed.backend !== backend) {
     removed = { backend, ids: {} };
     state.confirmedRemovals = removed;
+  }
+  const keys = Object.keys(removed.ids);
+  if (!removed.ids[sessionId] && keys.length >= MAX_CONFIRMED_REMOVALS) {
+    const oldest = keys[0];
+    if (oldest) delete removed.ids[oldest];
   }
   removed.ids[sessionId] = true;
 }

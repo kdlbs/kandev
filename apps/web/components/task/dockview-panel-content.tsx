@@ -37,7 +37,7 @@ import { TerminalPanel } from "./terminal-panel";
 import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
 import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
-import { isRemovalChatBlocked } from "./dockview-session-removal-focus";
+import { useRemovalChatBlocked } from "./dockview-session-removal-focus";
 import { useTranslation } from "react-i18next";
 
 /** Resolve the chat panel's tab title: the session's agent label when present,
@@ -87,7 +87,7 @@ function ChatContent({
 }) {
   const appStore = useAppStoreApi();
   const api = useDockviewStore((state) => state.api);
-  const blocked = useAppStore((state) => isRemovalChatBlocked(api, appStore, panelId, state));
+  const blocked = useRemovalChatBlocked(api, appStore, panelId);
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = paramSessionId ?? storeSessionId;

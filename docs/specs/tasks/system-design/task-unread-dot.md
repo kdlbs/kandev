@@ -249,24 +249,20 @@ selection/pin and workflow requests targeting it. Preserve independent intent,
 surviving pins/cursors and newer user/workflow selection. Owned empty slots can
 re-prove after changed primaries. Proof fills missing recipient identity/lifecycle.
 
-Explicit hits use HTTP-safe scoped identity, even at the same URL.
-Routes/workflow reopen hidden targets; restore keeps flat/tree/legacy choices.
-Phone/tablet consume route/workflow Chat focus; 404 vetoes admission/sync.
-`workflow_focus_disposition: none`: admitted, no source/effective launch;
-omit while deferred launch is possible. Removal leases protect live/parked groups.
-Layouts validate first and roll back once; only success retires maximize.
-Scoped frames own visibility/read/dots.
-File intents own reads/creates; deletes retire reads/tabs/saved aliases.
-Installed keys; empty Git: ready repos (lone unnamed=1), commits, no pending.
+Explicit session queries use scoped identities to disambiguate requests targeting
+the same URL. Routes and workflow transitions reopen hidden session targets, while
+layout restoration preserves flat, tree, and legacy presentation preferences.
+Phone and tablet viewports consume route- and workflow-driven Chat focus; a 404
+vetoes further admission. When a step transition specifies
+`workflow_focus_disposition: "none"`, it is admitted without triggering an
+automatic session launch. Removal leases protect active and parked session groups
+during layout updates, validating changes before committing.
 
-`invalidateTaskSessionMembership` fences pending/admitted/queued foreground and
-removal-dialog reads, not new reads/unrelated keys. Confirmed UUID deletion
-fences canonical/list/event/route/selection admission per store/backend; eviction
-or restart is not deletion. Queue incarnation/hydration cannot recreate deleted
-UUIDs. Survivors retain membership/freshness/cursors and comment-conflict scope.
-
-Fresh lists settle uncertain reads/owned confirmed slots; no retry.
-Unread/promotion/schema stay; optional move-focus metadata is backward-compatible.
+Session membership cache invalidation (`invalidateTaskSessionMembership`) fences
+foreground reads alongside removal queries without affecting unrelated read keys.
+Confirmed session deletion permanently fences admission for that session ID.
+Fresh membership listings settle uncertain reads and confirmed empty slots without
+unbounded retries, while surviving sessions retain cursors and unread dot state.
 
 An unread failed sibling that was never displayed is not evidence of a failed
 cursor write. It remains unread under AC .2, .9, .12, and .17. Preserve this

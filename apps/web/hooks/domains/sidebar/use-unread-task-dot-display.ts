@@ -4,6 +4,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useCallback, useSyncExternalStore } from "react";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { getActiveTabForSession } from "@/lib/local-storage";
 import {
   hiddenSessionIdsFor,
   onDidHideSessionPanel,
@@ -62,7 +63,10 @@ export function useUnreadTaskDotDisplay() {
       (isMobile
         ? (state.mobileSession.activePanelBySessionId[displayedSessionId] ?? "chat") === "chat"
         : !isTablet ||
-          (state.tabletSession.activeTabBySessionId[displayedSessionId] ?? "chat") === "chat"),
+          (state.tabletSession.activeTabBySessionId[displayedSessionId] ??
+            (typeof window !== "undefined"
+              ? getActiveTabForSession(displayedSessionId, "chat")
+              : "chat")) === "chat"),
   );
   const hidden = useSessionHiddenInDesktopLayout(displayedSessionId);
   return {

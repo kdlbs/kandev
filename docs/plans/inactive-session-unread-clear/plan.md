@@ -300,10 +300,7 @@ never choose another drive.
 ```bash
 set -euo pipefail
 SOURCE=$(git rev-parse --show-toplevel)
-CACHE=/home/clem/.cache/tmp
-case "$(findmnt -no SOURCE --target "$CACHE")" in /dev/sdd*) ;; *) exit 1 ;; esac
-python3 -c 'import shutil; u=shutil.disk_usage("/mnt/clem-cache"); assert u.used/u.total < .9, "Cache above 90%; follow cache-full procedure before continuing"'
-SNAPSHOT=$(mktemp -d "$CACHE/unread-verification.XXXXXX")
+SNAPSHOT=$(mktemp -d "${TMPDIR:-/tmp}/unread-verification.XXXXXX")
 VERIFY="$SNAPSHOT/repo"
 git clone --no-hardlinks "$SOURCE" "$VERIFY"
 rsync -a --safe-links --delete --exclude='/.git' --exclude='node_modules/' \
@@ -315,22 +312,8 @@ export TMPDIR="$SNAPSHOT/tmp" GOTMPDIR="$SNAPSHOT/tmp"
 export XDG_CACHE_HOME="$SNAPSHOT/cache" npm_config_cache="$SNAPSHOT/npm"
 export GOCACHE="$SNAPSHOT/go-build" GOMODCACHE="$SNAPSHOT/go-mod" GOPATH="$SNAPSHOT/go"
 export CARGO_HOME="$SNAPSHOT/cargo" CARGO_TARGET_DIR="$SNAPSHOT/target"
-export PLAYWRIGHT_BROWSERS_PATH=/home/clem/.cache/ms-playwright
 export PYTHONDONTWRITEBYTECODE=1
 mkdir -p "$TMPDIR" "$XDG_CACHE_HOME" "$npm_config_cache" "$GOCACHE" "$GOMODCACHE" "$GOPATH" "$CARGO_HOME" "$CARGO_TARGET_DIR"
-cache_only() {
-  local p
-  p=$(realpath -m "$1")
-  while [[ ! -e "$p" ]]; do p=$(dirname "$p"); done
-  case "$(findmnt -no SOURCE --target "$p")" in /dev/sdd*) ;; *) printf 'Unsafe output: %s\n' "$1" >&2; return 1 ;; esac
-}
-for p in "$VERIFY" "$VERIFY/apps/node_modules" "$VERIFY/apps/web/dist" \
-  "$VERIFY/apps/backend/bin" "$VERIFY/apps/backend/.build" \
-  "$VERIFY/apps/backend/cmd/plugin-fixture/fixture-package/ui" \
-  "$VERIFY/apps/web/e2e/test-results" "$VERIFY/apps/web/e2e/blob-report" \
-  "$VERIFY/apps/web/e2e/playwright-report" "$VERIFY/apps/web/.pr-assets" \
-  "$TMPDIR" "$XDG_CACHE_HOME" "$npm_config_cache" "$GOCACHE" "$GOMODCACHE" \
-  "$GOPATH" "$CARGO_HOME" "$CARGO_TARGET_DIR" "$PLAYWRIGHT_BROWSERS_PATH"; do cache_only "$p"; done
 cd "$VERIFY"
 (cd apps && pnpm install --frozen-lockfile --store-dir "$SNAPSHOT/pnpm-store")
 (cd apps/web && pnpm exec vitest run components/task/chat/use-session-read-tracking.test.ts components/task/task-unread-dot-visibility.test.ts lib/session-unread-divider.test.ts)

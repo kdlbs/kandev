@@ -191,3 +191,35 @@ export function inheritFallbackReadiness(
     updatedAt: previous.updatedAt,
   });
 }
+
+export function resolveLifecycleTarget(
+  state: AppState,
+  pending: {
+    taskId: string;
+    previousSessionId: string;
+    projectedPrimaryId?: string | null;
+    targetSessionId?: string | null;
+    source: FollowSource;
+  },
+  excluded?: ReadonlySet<string>,
+): string | null {
+  const primary = pending.projectedPrimaryId;
+  const projected = primary ? state.taskSessions.items[primary] : undefined;
+  const unavailable = isUnavailableSession(state, primary, excluded);
+  if (primary && primary !== pending.previousSessionId && !projected && !unavailable) return null;
+  const hinted = pending.targetSessionId
+    ? state.taskSessions.items[pending.targetSessionId]
+    : undefined;
+  if (
+    pending.source === NEW_SESSION_SOURCE &&
+    isEligibleReplacementSession(hinted, pending.taskId, excluded)
+  ) {
+    if (!isConfirmedSessionRemoved(state.taskSessions, hinted.id)) return hinted.id;
+  }
+  const ranked = pickReplacementSessionId(state, pending.taskId, excluded);
+  if (ranked === undefined) return null;
+  if (ranked) return ranked;
+  return isEligibleReplacementSession(projected, pending.taskId, excluded)
+    ? (primary ?? null)
+    : null;
+}

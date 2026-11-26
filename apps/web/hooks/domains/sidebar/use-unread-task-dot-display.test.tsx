@@ -149,6 +149,10 @@ it.each(["chat", "changes", FILE_TAB, "pr"])(
       <StateProvider
         initialState={{
           tasks: { ...base.tasks, activeTaskId: "t1", activeSessionId: SESSION_ID },
+          taskPRs: {
+            ...base.taskPRs,
+            byTaskId: { t1: [{ id: 1, number: 1, title: "PR", state: "open" } as never] },
+          },
           tabletSession: { activeTabBySessionId: { [SESSION_ID]: tab } },
           mobileSession: {
             ...base.mobileSession,
@@ -189,6 +193,35 @@ it.each(["chat", "changes", FILE_TAB, "pr"])(
     }
   },
 );
+
+it("falls back to chat when saved pr tab has no linked reviews", () => {
+  viewport.isTablet = true;
+  const base = createAppStore().getState();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <StateProvider
+      initialState={{
+        tasks: { ...base.tasks, activeTaskId: "t1", activeSessionId: SESSION_ID },
+        taskPRs: { ...base.taskPRs, byTaskId: { t1: [] } },
+        tabletSession: { activeTabBySessionId: { [SESSION_ID]: "pr" } },
+      }}
+    >
+      {children}
+    </StateProvider>
+  );
+  const hook = renderHook(
+    () => ({
+      tab: useTabletSessionTab(SESSION_ID),
+      store: useAppStoreApi(),
+    }),
+    { wrapper },
+  );
+  try {
+    expect(hook.result.current.tab[0]).toBe("chat");
+  } finally {
+    hook.unmount();
+    viewport.isTablet = false;
+  }
+});
 
 it("delivers and acknowledges committed tablet workflow focus without replaying it", () => {
   viewport.isTablet = true;

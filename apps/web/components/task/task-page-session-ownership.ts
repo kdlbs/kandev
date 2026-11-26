@@ -2,6 +2,7 @@
 
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
+import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 import type { AppState } from "@/lib/state/store";
 import type { StoreApi } from "zustand";
 
@@ -50,13 +51,22 @@ export function useRenderedTaskSession(
   agentSessionId: string | null,
 ): RenderedTaskSession {
   const appStore = useAppStoreApi();
-  const ownsEmptyRemoval = useAppStore(
-    (state) =>
-      !!renderedTaskId &&
-      state.tasks.activeTaskId === renderedTaskId &&
-      state.tasks.activeSessionId === null &&
-      getProvenRemovalPredecessor(appStore, renderedTaskId, null) !== null,
-  );
+  const ownsEmptyRemoval = useAppStore((state) => {
+    if (
+      !renderedTaskId ||
+      state.tasks.activeTaskId !== renderedTaskId ||
+      state.tasks.activeSessionId !== null
+    )
+      return false;
+    const proof = state.taskRemoval?.removalHandoff;
+    if (proof && proof.taskId === renderedTaskId && proof.targetSessionId === null) {
+      return (
+        state.taskRemoval.navigationRevision === proof.navigationRevision &&
+        stateReadScopeIdentity(state) === proof.scopeIdentity
+      );
+    }
+    return getProvenRemovalPredecessor(appStore, renderedTaskId, null) !== null;
+  });
   const validatedActiveSessionId = useAppStore((state) => {
     const sid = state.tasks.activeSessionId;
     if (!sid || !renderedTaskId) return null;

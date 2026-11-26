@@ -1,7 +1,14 @@
+import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 import type { TaskSession } from "@/lib/types/http";
-import { NEW_SESSION_SOURCE, type FollowSource } from "./session-selection";
+import { isSessionRestartPending } from "@/lib/session/session-restart-state";
+import {
+  NEW_SESSION_SOURCE,
+  hasExplicitWorkflowFocus,
+  shouldPreservePinnedSessionForTask,
+  type FollowSource,
+} from "./session-selection";
 import { findTaskInState } from "./task-lookup";
 
 /** Non-removal follow intent observed while a removal is still being verified. */
@@ -62,4 +69,42 @@ export function inheritFollowIntent(owner: FollowOwner, existing: FollowOwner | 
   owner.deferred = source === "removed" ? existing.deferred : { source, targetSessionId };
   owner.resumedAfterDisproof = existing.resumedAfterDisproof;
   owner.lifecycleRecipient ||= existing.lifecycleRecipient;
+}
+
+function hasOtherTaskFocus(focus: AppState["workflowSessionFocus"], taskId: string): boolean {
+  const reqTaskId = focus?.request?.taskId;
+  const intentTaskId = focus?.intent?.taskId;
+  return (
+    (reqTaskId !== undefined && reqTaskId !== taskId) ||
+    (intentTaskId !== undefined && intentTaskId !== taskId)
+  );
+}
+
+export function isCrossTaskWorkflowFocus(
+  current: AppState["workflowSessionFocus"],
+  pending: AppState["workflowSessionFocus"],
+  taskId: string,
+): boolean {
+  return hasOtherTaskFocus(current, taskId) || hasOtherTaskFocus(pending, taskId);
+}
+
+export function ownsSelection(store: StoreApi<AppState>, pending: FollowOwner): boolean {
+  const state = store.getState();
+  const workflowFocusMatches =
+    state.workflowSessionFocus === pending.workflowFocus ||
+    isCrossTaskWorkflowFocus(state.workflowSessionFocus, pending.workflowFocus, pending.taskId);
+  return (
+    stateReadScopeIdentity(state) === pending.scopeIdentity &&
+    state.tasks.activeTaskId === pending.taskId &&
+    state.tasks.activeSessionId === pending.selectedSessionId &&
+    state.tasks.pinnedSessionId === pending.pinnedSessionId &&
+    state.taskRemoval?.navigationRevision === pending.navigationRevision &&
+    workflowFocusMatches &&
+    !hasExplicitWorkflowFocus(state, pending.taskId) &&
+    !isSessionRestartPending(store, pending.previousSessionId) &&
+    (!shouldPreservePinnedSessionForTask(state, pending.taskId) ||
+      (pending.source === "removed" &&
+        state.tasks.pinnedSessionId === pending.previousSessionId)) &&
+    (pending.source !== "primary" || Boolean(findTaskInState(state, pending.taskId)))
+  );
 }

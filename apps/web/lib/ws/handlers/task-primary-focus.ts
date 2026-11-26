@@ -35,8 +35,7 @@ import {
   isEligibleReplacementSession,
   hasExplicitWorkflowFocus,
   isUnavailableSession,
-  pickReplacementSessionId,
-  shouldPreservePinnedSessionForTask,
+  resolveLifecycleTarget,
   allowsFollowState,
   NEW_SESSION_SOURCE,
   inheritFallbackReadiness,
@@ -45,6 +44,7 @@ import { findTaskInState } from "./task-lookup";
 import {
   captureOwner,
   inheritFollowIntent,
+  ownsSelection,
   type FollowOwner,
   type PendingFollow,
   type RemovalOwner,
@@ -72,50 +72,8 @@ function retainRemovalMembershipProof(store: StoreApi<AppState>, owner: RemovalO
   });
 }
 
-function ownsSelection(store: StoreApi<AppState>, pending: FollowOwner): boolean {
-  const state = store.getState();
-  return (
-    stateReadScopeIdentity(state) === pending.scopeIdentity &&
-    state.tasks.activeTaskId === pending.taskId &&
-    state.tasks.activeSessionId === pending.selectedSessionId &&
-    state.tasks.pinnedSessionId === pending.pinnedSessionId &&
-    state.taskRemoval?.navigationRevision === pending.navigationRevision &&
-    state.workflowSessionFocus === pending.workflowFocus &&
-    !hasExplicitWorkflowFocus(state, pending.taskId) &&
-    !isSessionRestartPending(store, pending.previousSessionId) &&
-    (!shouldPreservePinnedSessionForTask(state, pending.taskId) ||
-      (pending.source === "removed" &&
-        state.tasks.pinnedSessionId === pending.previousSessionId)) &&
-    (pending.source !== "primary" || !!findTaskInState(state, pending.taskId))
-  );
-}
-
 function ownsPendingFollow(store: StoreApi<AppState>, pending: PendingFollow): boolean {
   return pendingByStore.get(store) === pending && ownsSelection(store, pending);
-}
-
-function lifecycleTarget(store: StoreApi<AppState>, pending: FollowOwner): string | null {
-  const state = store.getState();
-  const excluded = observedRemovals(store);
-  const primary = pending.projectedPrimaryId;
-  const projected = primary ? state.taskSessions.items[primary] : undefined;
-  const unavailable = isUnavailableSession(state, primary, excluded);
-  if (primary && primary !== pending.previousSessionId && !projected && !unavailable) return null;
-  const hinted = pending.targetSessionId
-    ? state.taskSessions.items[pending.targetSessionId]
-    : undefined;
-  if (
-    pending.source === NEW_SESSION_SOURCE &&
-    isEligibleReplacementSession(hinted, pending.taskId, excluded)
-  ) {
-    if (!isConfirmedSessionRemoved(state.taskSessions, hinted.id)) return hinted.id;
-  }
-  const ranked = pickReplacementSessionId(state, pending.taskId, excluded);
-  if (ranked === undefined) return null;
-  if (ranked) return ranked;
-  return isEligibleReplacementSession(projected, pending.taskId, excluded)
-    ? (primary ?? null)
-    : null;
 }
 
 function prepareFollowTarget(
@@ -128,7 +86,7 @@ function prepareFollowTarget(
   const target =
     removedTarget?.id ??
     (pending.source === "terminal" || pending.source === NEW_SESSION_SOURCE
-      ? lifecycleTarget(store, pending)
+      ? resolveLifecycleTarget(state, pending, excluded)
       : pending.targetSessionId);
   if (
     !target ||
@@ -278,12 +236,16 @@ function commitRemovalMembership(
   retireRemovalMembership(store, pending);
 }
 
+const MAX_REMOVAL_VERIFY_ATTEMPTS = 5;
+
 async function verifyRemoval(store: StoreApi<AppState>, pending: RemovalOwner) {
   if (stateReadScopeIdentity(store.getState()) !== pending.scopeIdentity) return;
   const reads = getTaskSessionReads(store);
   const release = reads.retain(pending.taskId);
+  let attempts = 0;
   try {
     while (
+      attempts++ < MAX_REMOVAL_VERIFY_ATTEMPTS &&
       reads.isCurrent(pending.taskId) &&
       (!isConfirmedSessionRemoved(store.getState().taskSessions, pending.previousSessionId) ||
         ownsEmptySelection(store, pending))
