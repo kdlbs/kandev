@@ -1,7 +1,7 @@
 ---
 status: current
 system: platform
-updated: 2026-11-05
+updated: 2026-11-25
 requirements:
   - REQ-PLATFORM-INTERACTIVE-READS-001
   - REQ-PLATFORM-INTERACTIVE-READS-002
@@ -353,8 +353,17 @@ Multiple desktop and phone mounts join the same cycle.
 Final release aborts pending attempts, disposes the clock, and removes the recovery record.
 Retain existing StrictMode restart behavior and bounded page/entity ownership.
 
-The runner uses the task-navigation schedule: five attempts, with delays of 2, 5, 10, and 10 seconds.
-Reuse `TaskNavigationRecoveryClock` for the thirty-second visible-time budget and hidden-tab accounting.
+The runner selects a schedule when a cycle starts and keeps it for that cycle.
+Without eligible retained rows, it uses the task-navigation schedule: five attempts,
+with delays of 2, 5, 10, and 10 seconds, inside thirty seconds of visible time.
+With eligible retained rows, it uses the sustained schedule: nine attempts, with delays of
+2, 5, 10, 10, 20, 30, 30, and 30 seconds, inside one hundred fifty seconds of visible time.
+`SidebarTaskPageCache.request` receives a `hasRetainedRows` option from the hook.
+A matching displayed response or first page loaded from cache sets this option when a cycle starts.
+A shared record uses the sustained schedule when any consumer that starts the cycle has retained rows.
+Consumers that join an active cycle do not change its schedule or budget.
+Reuse `TaskNavigationRecoveryClock` for each budget and for hidden-tab accounting.
+Pass its existing `budgetMs` option; task navigation keeps the thirty-second default.
 Each HTTP attempt has a ten-second wall-time deadline and its own abort signal.
 Cycle expiry and cancellation abort that attempt even when a mocked transport ignores cancellation.
 Cleanup closes its deadline timer and child signal listeners.
@@ -375,8 +384,14 @@ Repeated foreground triggers join pending work and reuse an already handled epis
 Live invalidations mark membership dirty without resetting the active budget or backoff.
 Preserve provisional response reconciliation and the single trailing refresh after accepted success.
 `useProvisionalSidebarRefresh` must not restart a failed cycle when pending returns to null.
-An exhausted cycle rejects ordinary background refresh admission until explicit Retry or a later foreground episode.
-Queued invalidations cannot bypass that latch. They remain available for the next admitted read.
+An exhausted record stores the wall-clock time at which its cycle ended.
+Explicit Retry and a later foreground episode start a new cycle immediately.
+An ordinary background admission starts a new cycle only sixty seconds or more after that time.
+Earlier background admissions reject with the stored error and send no request.
+Disclosure-sync exhaustion keeps its existing latch; only explicit Retry restarts it.
+Queued invalidations cannot bypass the cooldown. They remain available for the next admitted read.
+The cooldown uses the shared record, not a consumer timer. A background event still has to arrive;
+the record schedules no request by itself.
 No retry record makes a provisional page reusable or establishes complete local coverage.
 
 ### Warning visibility
@@ -477,6 +492,7 @@ all causes of persistence overload.
 - [Task read resilience](../../../plans/task-read-resilience/plan.md) revises recovery timing and preserves current task content for REQ-PLATFORM-INTERACTIVE-READS-005.
 - [Quiet task refresh recovery](../../../plans/quiet-task-refresh-recovery/plan.md) adds bounded sidebar recovery and defers warnings until exhaustion.
 - [Delivery environment lookup index](../../../plans/delivery-sweep-environment-index/plan.md) covers REQ-PLATFORM-INTERACTIVE-READS-008.
+- [Sustained sidebar recovery](../../../plans/sustained-sidebar-recovery/plan.md) adds the sustained retained-row schedule and the background cooldown.
 
 ## Journey loading extension
 

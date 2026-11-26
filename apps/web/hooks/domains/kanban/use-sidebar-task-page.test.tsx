@@ -581,10 +581,14 @@ it("offers Retry for a transient failure after correcting an invalid filter", as
   expect(hook.result.current.requestedPage).toBe(1);
   expect(hook.result.current.response).not.toBeNull();
 
-  await act(async () => vi.advanceTimersByTimeAsync(30_000));
+  await act(async () => vi.advanceTimersByTimeAsync(90_000));
+  expect(hook.result.current.error).toBeNull();
+  expect(querySidebarTasks).toHaveBeenCalledTimes(9);
+
+  await act(async () => vi.advanceTimersByTimeAsync(47_000));
   expect(hook.result.current.error).toBe(QUERY_REFRESH_FAILED);
   expect(hook.result.current.canRetry).toBe(true);
   expect(hook.result.current.response).not.toBeNull();
-  expect(querySidebarTasks).toHaveBeenCalledTimes(7);
+  expect(querySidebarTasks).toHaveBeenCalledTimes(11);
   vi.useRealTimers();
 });

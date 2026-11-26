@@ -220,6 +220,10 @@ export function beginSidebarLoad(args: {
     {
       manualRetry: options.manualRetry,
       foregroundRecoveryEpisode: options.foregroundRecoveryEpisode,
+      hasRetainedRows:
+        cached != null ||
+        (state.response != null &&
+          sidebarContentKey(state.responseViewKeyRef.current) === sidebarContentKey(key)),
     },
   );
   state.activeRequestRef.current = request;

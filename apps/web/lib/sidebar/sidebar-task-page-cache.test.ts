@@ -31,6 +31,9 @@ const query: SidebarTaskQuery = {
   page_size: 100,
   locale: "en",
 };
+const savedViewId = "saved-view";
+const recoveredQueryKey = "recovered";
+const busy = () => new ApiError("busy", 503, { code: "persistence_unavailable" });
 const page = (key = "a"): SidebarTaskPageResponse => ({
   query_key: key,
   page: 1,
@@ -398,8 +401,6 @@ it("journals admitted sidebar stages without granting authority to cache reuse o
 });
 
 describe("sidebar page recovery", () => {
-  const busy = () => new ApiError("busy", 503, { code: "persistence_unavailable" });
-
   it("shares one bounded cycle and latches exhaustion for background triggers", async () => {
     const { cache } = setup();
     vi.mocked(querySidebarTasks).mockRejectedValue(busy());
@@ -462,29 +463,113 @@ describe("sidebar page recovery", () => {
     foreground.release();
     repeated.release();
   });
+});
 
-  it("keeps the terminal record until the final consumer releases", async () => {
+describe("sidebar page recovery cooldown", () => {
+  it("re-admits retained-row background recovery after the exhaustion cooldown", async () => {
     const { cache } = setup();
+    const retainedRows = { hasRetainedRows: true };
     vi.mocked(querySidebarTasks).mockRejectedValue(busy());
-    const first = cache.request("ws", query, "view");
-    const firstError = first.promise.catch((error: unknown) => error);
-    await vi.advanceTimersByTimeAsync(30_000);
-    await expect(firstError).resolves.toMatchObject({ status: 503 });
+    const initial = cache.request("ws", query, "view", retainedRows);
+    const initialError = initial.promise.catch((error: unknown) => error);
+    const joining = cache.request("ws", query, "view");
+    const joiningError = joining.promise.catch((error: unknown) => error);
 
-    const latched = cache.request("ws", query, "view");
-    const latchedError = latched.promise.catch((error: unknown) => error);
-    await expect(latchedError).resolves.toMatchObject({ status: 503 });
-    expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+    await vi.advanceTimersByTimeAsync(137_000);
+    await expect(initialError).resolves.toMatchObject({ status: 503 });
+    await expect(joiningError).resolves.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(9);
+    const exhaustedAt = Date.now();
 
-    first.release();
-    latched.release();
-    vi.mocked(querySidebarTasks).mockResolvedValueOnce(page());
-    const fresh = cache.request("ws", query, "view");
+    const tooSoon = cache.request("ws", query, "view", retainedRows);
+    await expect(tooSoon.promise).rejects.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(9);
+
+    vi.setSystemTime(exhaustedAt + 59_999);
+    const stillCooling = cache.request("ws", query, "view", retainedRows);
+    await expect(stillCooling.promise).rejects.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(9);
+
+    vi.setSystemTime(exhaustedAt + 60_000);
+    vi.mocked(querySidebarTasks).mockResolvedValueOnce(page(recoveredQueryKey));
+    const resumed = cache.request("ws", query, "view", retainedRows);
     await vi.advanceTimersByTimeAsync(0);
-    await expect(fresh.promise).resolves.toMatchObject({ page: 1 });
-    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
-    fresh.release();
+    await expect(resumed.promise).resolves.toMatchObject({ query_key: recoveredQueryKey });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(10);
+
+    initial.release();
+    joining.release();
+    tooSoon.release();
+    stillCooling.release();
+    resumed.release();
   });
+
+  it("keeps disclosure-sync exhaustion behind explicit Retry", async () => {
+    const { store, cache } = setup();
+    const reconcile = vi
+      .spyOn(store.getState(), "reconcileSidebarGroupDisclosure")
+      .mockResolvedValue(false);
+    const disclosureQuery: SidebarTaskQuery = {
+      ...query,
+      disclosure_view_id: savedViewId,
+      collapsed_group_keys: Array.from({ length: 1_002 }, (_, index) => `group-${index}`),
+    };
+    const retainedRows = { hasRetainedRows: true };
+    vi.mocked(querySidebarTasks).mockResolvedValue({
+      ...page("disclosure"),
+      grouping_keys: ["group"],
+    });
+
+    const initial = cache.request("ws", disclosureQuery, savedViewId, retainedRows);
+    const initialError = await initial.promise.catch((error: unknown) => error);
+    expect(initialError).toBeInstanceOf(Error);
+    const exhaustedAt = Date.now();
+
+    vi.setSystemTime(exhaustedAt + 60_000);
+    const background = cache.request("ws", disclosureQuery, savedViewId, retainedRows);
+    await expect(background.promise).rejects.toBe(initialError);
+    const foreground = cache.request("ws", disclosureQuery, savedViewId, {
+      ...retainedRows,
+      foregroundRecoveryEpisode: {},
+    });
+    await expect(foreground.promise).rejects.toBe(initialError);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(1);
+
+    const manual = cache.request("ws", disclosureQuery, savedViewId, {
+      ...retainedRows,
+      manualRetry: true,
+    });
+    await expect(manual.promise).rejects.toBeInstanceOf(Error);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(2);
+    initial.release();
+    background.release();
+    foreground.release();
+    manual.release();
+    reconcile.mockRestore();
+  });
+});
+
+it("keeps the terminal record until the final consumer releases", async () => {
+  const { cache } = setup();
+  vi.mocked(querySidebarTasks).mockRejectedValue(busy());
+  const first = cache.request("ws", query, "view");
+  const firstError = first.promise.catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(30_000);
+  await expect(firstError).resolves.toMatchObject({ status: 503 });
+
+  const latched = cache.request("ws", query, "view");
+  const latchedError = latched.promise.catch((error: unknown) => error);
+  await expect(latchedError).resolves.toMatchObject({ status: 503 });
+  expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+  first.release();
+  latched.release();
+  vi.mocked(querySidebarTasks).mockResolvedValueOnce(page());
+  const fresh = cache.request("ws", query, "view");
+  await vi.advanceTimersByTimeAsync(0);
+  await expect(fresh.promise).resolves.toMatchObject({ page: 1 });
+  expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+  fresh.release();
 });
 
 // @covers AC-PLATFORM-INTERACTIVE-READS-007.3, AC-PLATFORM-INTERACTIVE-READS-007.4
