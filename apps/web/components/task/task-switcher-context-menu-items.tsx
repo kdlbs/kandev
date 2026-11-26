@@ -17,6 +17,7 @@ import {
 import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
+import { TaskFlagItem } from "./task-flag-menu-item";
 import { TaskColorMenu } from "./task-switcher-color-menu";
 import { TaskPluginLinkMenu, selectTaskLinkActions } from "./task-switcher-link-menu";
 import {
@@ -24,7 +25,6 @@ import {
   TaskCreateSubtaskItem,
   TaskDeleteItem,
   TaskDetachItem,
-  TaskFlagItem,
   TaskRenameItem,
   TaskShowInGraphItem,
   TaskTurnErrorDismissItem,
@@ -59,7 +59,7 @@ type SingleGroupProps = Pick<
   | "onTogglePin"
   | "onEditTask"
   | "onRenameTask"
-  | "onFlagTask"
+  | "flagActions"
   | "onCreateSubtask"
   | "onDetachTask"
   | "onArchiveTask"
@@ -275,11 +275,11 @@ function SingleEditGroup({
   isDeleting,
   onEditTask,
   onRenameTask,
-  onFlagTask,
+  flagActions,
   nativeUnlinkEntries,
 }: Pick<
   SingleGroupProps,
-  "task" | "isDeleting" | "onEditTask" | "onRenameTask" | "onFlagTask" | "nativeUnlinkEntries"
+  "task" | "isDeleting" | "onEditTask" | "onRenameTask" | "flagActions" | "nativeUnlinkEntries"
 >) {
   const { t } = useTranslation();
   return (
@@ -304,7 +304,7 @@ function SingleEditGroup({
         <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
       )}
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
-      <TaskFlagItem task={task} disabled={isDeleting} onSelect={onFlagTask} />
+      <TaskFlagItem task={task} disabled={isDeleting} actions={flagActions} />
       {taskRowActionAvailability(task).mark && (
         <ContextMenuItem disabled>
           <IconCopy className="mr-2 h-4 w-4" />
