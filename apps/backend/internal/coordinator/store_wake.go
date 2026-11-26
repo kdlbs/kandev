@@ -74,14 +74,21 @@ func deleteCoordinatorPhase3Rows(ctx context.Context, tx *sqlx.Tx, scope string,
 		`DELETE FROM coordinator_dream_ratings WHERE item_id IN (SELECT id FROM coordinator_dream_items WHERE dream_id IN (` + dreams + `))`,
 		`DELETE FROM coordinator_dream_items WHERE dream_id IN (` + dreams + `)`,
 		`DELETE FROM coordinator_dreams WHERE coordinator_id ` + scope,
+		`DELETE FROM coordinator_proposal_notes WHERE note_id IN (SELECT id FROM coordinator_notes WHERE coordinator_id ` + scope + `)`,
+		`DELETE FROM coordinator_note_receipts WHERE note_id IN (SELECT id FROM coordinator_notes WHERE coordinator_id ` + scope + `)`,
+		`DELETE FROM coordinator_note_versions WHERE note_id IN (SELECT id FROM coordinator_notes WHERE coordinator_id ` + scope + `)`,
+		`DELETE FROM coordinator_notes WHERE coordinator_id ` + scope,
+		`DELETE FROM coordinator_note_snapshots WHERE coordinator_id ` + scope,
+		`DELETE FROM coordinator_merge_dispatches WHERE proposal_id IN (SELECT proposal_id FROM coordinator_merge_proposals WHERE coordinator_id ` + scope + `)`,
 		`DELETE FROM coordinator_turn_calls WHERE turn_id IN (SELECT id FROM coordinator_turns WHERE coordinator_id ` + scope + `)`,
 		`DELETE FROM coordinator_unattended_denials WHERE turn_id IN (SELECT id FROM coordinator_unattended_turns WHERE coordinator_id ` + scope + `)`,
 	}
 	for _, table := range []string{
-		"coordinator_unattended_turns", "coordinator_wakes", "coordinator_class_changes",
+		"coordinator_unattended_turns", "coordinator_wakes", "coordinator_class_changes", "coordinator_eligibility_changes",
 		"coordinator_class_reviews", "coordinator_pending_changes", "coordinator_turns",
 		"coordinator_outcomes", "coordinator_feedback", "coordinator_moveback_seen",
 		"coordinator_replay_results",
+		"coordinator_merge_proposals", "coordinator_merge_repos", "coordinator_merge_deps", "coordinator_merge_audit",
 	} {
 		stmts = append(stmts, `DELETE FROM `+table+` WHERE coordinator_id `+scope)
 	}

@@ -6,8 +6,9 @@ import { ApiError } from "@/lib/api/client";
 import {
   getCoordinatorSettings,
   putCoordinatorSettings,
-  type ControlAction,
+  type SettingsAction,
   type ControlSetting,
+  type EligibilitySettings,
 } from "@/lib/api/domains/coordinator-api";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { toast } from "@/lib/toast/sonner";
@@ -16,6 +17,7 @@ import { useWorkspaceProjects } from "@/hooks/domains/coordinator/use-workspace-
 import {
   buildPutRequest,
   draftFromSettings,
+  isEligibilityInvalid,
   isPolicyDirty,
   isProjectsDirty,
   isProjectsInvalid,
@@ -176,14 +178,38 @@ function draftFlags(draft: ControlDraft | null, stored: ControlDraft | null) {
   const both = !!draft && !!stored;
   const watchesInvalid = both && isWatchesInvalid(draft, stored);
   const projectsInvalid = both && isProjectsInvalid(draft, stored);
+  const eligibilityInvalid = both && isEligibilityInvalid(draft, stored);
   return {
     policyDirty: both && isPolicyDirty(draft, stored),
     watchesDirty: both && isWatchesDirty(draft, stored),
     projectsDirty: both && isProjectsDirty(draft, stored),
     watchesInvalid,
     projectsInvalid,
-    invalid: watchesInvalid || projectsInvalid,
+    invalid: watchesInvalid || projectsInvalid || eligibilityInvalid,
   };
+}
+
+type DraftUpdate = (change: (current: ControlDraft) => ControlDraft) => void;
+
+function useDraftSetters(update: DraftUpdate) {
+  const setAction = useCallback(
+    (action: SettingsAction, value: ControlSetting) =>
+      update((d) => ({ ...d, actions: { ...d.actions, [action]: value } })),
+    [update],
+  );
+  const setWatches = useCallback(
+    (watches: WatchesDraft) => update((d) => ({ ...d, watches })),
+    [update],
+  );
+  const setProjects = useCallback(
+    (projects: ProjectsDraft) => update((d) => ({ ...d, projects })),
+    [update],
+  );
+  const setEligibility = useCallback(
+    (eligibility: EligibilitySettings) => update((d) => ({ ...d, eligibility })),
+    [update],
+  );
+  return { setAction, setWatches, setProjects, setEligibility };
 }
 
 type Params = { workspaceId: string; coordinatorId: string; canManage: boolean };
@@ -219,19 +245,7 @@ export function useControlDraft({ workspaceId, coordinatorId, canManage }: Param
     setFieldError(null);
   }, []);
 
-  const setAction = useCallback(
-    (action: ControlAction, value: ControlSetting) =>
-      update((d) => ({ ...d, actions: { ...d.actions, [action]: value } })),
-    [update],
-  );
-  const setWatches = useCallback(
-    (watches: WatchesDraft) => update((d) => ({ ...d, watches })),
-    [update],
-  );
-  const setProjects = useCallback(
-    (projects: ProjectsDraft) => update((d) => ({ ...d, projects })),
-    [update],
-  );
+  const { setAction, setWatches, setProjects, setEligibility } = useDraftSetters(update);
   const { projectsRead, pruneAfterRefresh } = useProjectsListing(
     workspaceId,
     draft,
@@ -294,6 +308,7 @@ export function useControlDraft({ workspaceId, coordinatorId, canManage }: Param
     setAction,
     setWatches,
     setProjects,
+    setEligibility,
     policyDirty,
     watchesDirty,
     projectsDirty,

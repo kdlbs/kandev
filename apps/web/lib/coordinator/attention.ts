@@ -41,7 +41,8 @@ export type AttentionStall = {
 };
 
 export type AttentionProposalSpec = {
-  rationale: string;
+  /** Absent on a merge proposal, whose reasons are read from the provider. */
+  rationale?: string;
   title?: string;
   description?: string;
   workflow_id?: string;
@@ -169,7 +170,7 @@ const RUNNING_SESSION_STATES = new Set(["RUNNING", "STARTING"]);
  * kept all three actions after a create failure. `approved`/`rejected` are
  * settled and never classify.
  */
-const OPEN_PROPOSAL_STATUSES = new Set(["pending", "approving", "failed"]);
+const OPEN_PROPOSAL_STATUSES = new Set(["pending", "approving", "failed", "uncertain"]);
 
 /** Whether a primary session state counts as "an agent is running" (AC-COORDINATOR-NEEDS-YOU-002.6). */
 export function isRunningSessionState(state: string | undefined): boolean {

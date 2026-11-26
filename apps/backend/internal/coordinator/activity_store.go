@@ -23,6 +23,8 @@ type ActivityCount struct {
 	Edited  bool            `db:"edited"`
 	Rows    int64           `db:"rows"`
 	Refusal int64           `db:"refusals"`
+	// ProposalRows counts the rows that carry a proposal id.
+	ProposalRows int64 `db:"proposal_rows"`
 }
 
 // ListActivityRows returns up to limit rows of one coordinator, newest first,
@@ -30,7 +32,12 @@ type ActivityCount struct {
 func (s *Store) ListActivityRows(ctx context.Context, coordinatorID string, class Action, before *ActivityCursor, limit int) ([]ActivityRow, error) {
 	query := `SELECT ` + activityReadColumns + ` FROM coordinator_activity WHERE coordinator_id = ?`
 	args := []any{coordinatorID}
-	if class != "" {
+	switch class {
+	case "":
+	case ActionStartAgent:
+		query += ` AND proposal_id IN (SELECT id FROM coordinator_proposals WHERE coordinator_id = ? AND starts_agent = TRUE)`
+		args = append(args, coordinatorID)
+	default:
 		query += ` AND action_class = ?`
 		args = append(args, string(class))
 	}
@@ -68,7 +75,8 @@ func (s *Store) GetActivityRow(ctx context.Context, exec coordinatorExec, coordi
 // ActivityCounts groups the coordinator's rows created at or after since.
 func (s *Store) ActivityCounts(ctx context.Context, coordinatorID string, since time.Time) ([]ActivityCount, error) {
 	var out []ActivityCount
-	err := s.ro.SelectContext(ctx, &out, s.ro.Rebind(`SELECT action_class, outcome, edited, COUNT(*) AS rows, COALESCE(SUM(refusal_count), 0) AS refusals
+	err := s.ro.SelectContext(ctx, &out, s.ro.Rebind(`SELECT action_class, outcome, edited, COUNT(*) AS rows, COALESCE(SUM(CASE WHEN proposal_id IS NULL THEN refusal_count ELSE 0 END), 0) AS refusals,
+		COALESCE(SUM(CASE WHEN proposal_id IS NULL THEN 0 ELSE 1 END), 0) AS proposal_rows
 		FROM coordinator_activity WHERE coordinator_id = ? AND created_at >= ?
 		GROUP BY action_class, outcome, edited`), coordinatorID, since.UTC())
 	if err != nil {
@@ -81,7 +89,8 @@ func (s *Store) ActivityCounts(ctx context.Context, coordinatorID string, since 
 // through exec, so a caller holding the coordinator lock reads on its own
 // handle.
 func (s *Store) ActivityCountsIn(ctx context.Context, exec coordinatorExec, coordinatorID string, since, until time.Time) ([]ActivityCount, error) {
-	rows, err := exec.QueryContext(ctx, s.db.Rebind(`SELECT action_class, outcome, edited, COUNT(*) AS rows, COALESCE(SUM(refusal_count), 0) AS refusals
+	rows, err := exec.QueryContext(ctx, s.db.Rebind(`SELECT action_class, outcome, edited, COUNT(*) AS rows, COALESCE(SUM(CASE WHEN proposal_id IS NULL THEN refusal_count ELSE 0 END), 0) AS refusals,
+		COALESCE(SUM(CASE WHEN proposal_id IS NULL THEN 0 ELSE 1 END), 0) AS proposal_rows
 		FROM coordinator_activity WHERE coordinator_id = ? AND created_at >= ? AND created_at < ?
 		GROUP BY action_class, outcome, edited`), coordinatorID, since.UTC(), until.UTC())
 	if err != nil {
@@ -91,7 +100,7 @@ func (s *Store) ActivityCountsIn(ctx context.Context, exec coordinatorExec, coor
 	var out []ActivityCount
 	for rows.Next() {
 		var c ActivityCount
-		if err := rows.Scan(&c.Class, &c.Outcome, &c.Edited, &c.Rows, &c.Refusal); err != nil {
+		if err := rows.Scan(&c.Class, &c.Outcome, &c.Edited, &c.Rows, &c.Refusal, &c.ProposalRows); err != nil {
 			return nil, fmt.Errorf("scan coordinator activity count: %w", err)
 		}
 		out = append(out, c)

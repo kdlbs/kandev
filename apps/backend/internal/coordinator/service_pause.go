@@ -212,3 +212,22 @@ func (s *Service) pauseView(ctx context.Context, c *Coordinator) PauseView {
 	}
 	return view
 }
+
+// WithAnswer turns answer proposals on or off. Callers pass the effective
+// condition, never the raw flag.
+func WithAnswer(on bool) ServiceOption {
+	return func(s *Service) { s.answer = on }
+}
+
+// WithMerge turns merge stewardship on or off. Callers pass the effective
+// condition (the coordinator, phase 2 and phase 3 flags and the merge flag),
+// never the raw flag.
+func WithMerge(on bool) ServiceOption {
+	return func(s *Service) { s.merge = on }
+}
+
+// MergeEnabled reports whether merge stewardship is effective.
+func (s *Service) MergeEnabled() bool { return s.merge }
+
+// AnswerEnabled reports whether answer proposals are effective.
+func (s *Service) AnswerEnabled() bool { return s.answer }

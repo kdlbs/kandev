@@ -25,6 +25,7 @@ type eligibilityConditionDTO struct {
 type eligibilityResponse struct {
 	Eligible   bool                      `json:"eligible"`
 	Conditions []eligibilityConditionDTO `json:"conditions"`
+	Settings   EligibilitySettings       `json:"settings"`
 	Setting    Setting                   `json:"setting"`
 	ChangedBy  string                    `json:"changed_by"`
 	ChangedAt  *time.Time                `json:"changed_at"`
@@ -58,7 +59,7 @@ func (h *Handlers) httpGetEligibility(c *gin.Context) {
 		conds[i] = eligibilityConditionDTO(cond)
 	}
 	c.JSON(http.StatusOK, eligibilityResponse{
-		Eligible: view.Result.Eligible, Conditions: conds, Setting: view.Setting,
+		Eligible: view.Result.Eligible, Conditions: conds, Settings: view.Settings, Setting: view.Setting,
 		ChangedBy: view.ChangedBy, ChangedAt: view.ChangedAt,
 	})
 }

@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import type { ActivityItem } from "@/lib/api/domains/coordinator-activity-api";
 import type { UndoMessageKey } from "@/hooks/domains/coordinator/activity-controller";
 import type { PersonName } from "@/hooks/domains/coordinator/use-activity-members";
+import { mergeReasonText } from "@/lib/coordinator/merge-text";
 
 export const CLASS_LABEL_KEY: Record<string, string> = {
   create_task: "coordinator:activityClassCreateTask",
@@ -11,6 +12,7 @@ export const CLASS_LABEL_KEY: Record<string, string> = {
   resume: "coordinator:activityClassResume",
   stop: "coordinator:activityClassStop",
   improvement: "coordinator:activityClassImprovement",
+  merge: "coordinator:activityClassMerge",
   unknown: "coordinator:activityClassUnknown",
 };
 
@@ -36,16 +38,24 @@ const REFUSED_REASON_KEY: Record<string, string> = {
   policy_denied: "coordinator:activityRefusedPolicyDenied",
 };
 
-function refusedText(code: string | null, t: TFunction): string {
+function refusedText(code: string | null, t: TFunction, actionClass?: string): string {
   if (!code) return t("coordinator:activityRefused");
+  if (actionClass === "merge") {
+    return t("coordinator:activityRefusedCode", { code: mergeReasonText(code, t) });
+  }
   const key = REFUSED_REASON_KEY[code];
   return key ? t(key) : t("coordinator:activityRefusedCode", { code });
 }
 
 /** The Action cell text: refused reason, prefixed rejected or failed detail, else the detail or the class label. */
 export function actionText(item: ActivityItem, t: TFunction): string {
-  if (item.outcome === "refused") return refusedText(item.reason_code, t);
+  if (item.outcome === "refused") return refusedText(item.reason_code, t, item.action_class);
   const detail = item.detail.trim() === "" ? "" : item.detail;
+  if (item.outcome === "uncertain") {
+    return detail
+      ? t("coordinator:activityUncertainDetail", { detail })
+      : t("coordinator:activityUncertain");
+  }
   if (item.outcome === "rejected") {
     return detail
       ? t("coordinator:activityRejectedDetail", { detail })
@@ -107,6 +117,8 @@ export function outcomeLine(item: ActivityItem, person: PersonName, t: TFunction
         : t("coordinator:activityReturned");
     case "failed":
       return t("coordinator:activityFailed");
+    case "uncertain":
+      return t("coordinator:activityUncertain");
     case "undone":
       return name ? t("coordinator:activityUndoneBy", { name }) : t("coordinator:activityUndone");
     default:

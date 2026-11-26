@@ -95,11 +95,13 @@ func latestPipelineStatusAndFailingJobs(ctx context.Context, client Client, proj
 // doc for why this matters.
 //
 // The empty method leaves the MR squash choice and project policy to GitLab,
-// as in the interactive merge path.
-func (s *Service) MergeMRForAutomation(ctx context.Context, workspaceID, host, projectPath string, mrIID int) (*MR, error) {
+// as in the interactive merge path. A non-empty expectedSHA is sent as the
+// accept-merge `sha`, so GitLab refuses with ErrMergeHeadMoved when the head
+// moved.
+func (s *Service) MergeMRForAutomation(ctx context.Context, workspaceID, host, projectPath string, mrIID int, method, expectedSHA string) (*MR, error) {
 	var merged *MR
 	err := s.RunWithWorkspaceClient(ctx, workspaceID, host, func(client Client) error {
-		result, err := s.mergeMRWithClient(ctx, client, projectPath, mrIID, "", "")
+		result, err := s.mergeMRWithClient(ctx, client, projectPath, mrIID, method, "", expectedSHA)
 		if err != nil {
 			return err
 		}

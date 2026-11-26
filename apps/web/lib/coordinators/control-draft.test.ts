@@ -13,6 +13,7 @@ import {
 } from "./control-draft";
 
 const base = (): ControlDraft => ({
+  eligibility: null,
   actions: {
     create_task: "requires_approval",
     start_agent: "denied",

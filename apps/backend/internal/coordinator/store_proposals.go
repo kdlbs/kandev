@@ -23,7 +23,7 @@ var ErrCoordinatorProposalCapReached = errors.New("coordinator: open proposal ca
 
 // openProposalStatuses are the statuses counted against maxOpenProposals and
 // reported as a coordinator's open_proposals count (decision 9).
-var openProposalStatuses = []ProposalStatus{ProposalStatusPending, ProposalStatusApproving, ProposalStatusFailed}
+var openProposalStatuses = []ProposalStatus{ProposalStatusPending, ProposalStatusApproving, ProposalStatusFailed, ProposalStatusUncertain}
 
 const proposalColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json, reply_text, reply_delivered_at, reply_delivery_claimed_at, in_reply_to, decided_automatically, claimed_automatically, automatic_at, ` + changeStatusColumn
 
@@ -191,6 +191,10 @@ func (s *Store) insertProposalBody(ctx context.Context, exec coordinatorExec, p 
 	if _, err := lockedCoordinatorRow(ctx, exec, s.db.Rebind, p.WorkspaceID, p.CoordinatorID, false); err != nil {
 		return err
 	}
+	links, err := s.checkProposalNotes(ctx, exec, p.CoordinatorID)
+	if err != nil {
+		return err
+	}
 	if pre != nil {
 		done, err := pre(ctx, exec)
 		if err != nil {
@@ -244,6 +248,9 @@ func (s *Store) insertProposalBody(ctx context.Context, exec coordinatorExec, p 
 		nullableString(p.InReplyTo), s.ledgerTurnID(ctx))
 	if err != nil {
 		return fmt.Errorf("insert proposal: %w", err)
+	}
+	if err := s.insertNoteLinks(ctx, exec, p.ID, links); err != nil {
+		return err
 	}
 	if inTx != nil {
 		return inTx(ctx, exec, p)
@@ -479,12 +486,16 @@ func (s *Store) ClaimProposalRawTx(ctx context.Context, exec coordinatorExec, id
 		SET status = ?, claimed_at = ?, claim_token = ?, final_spec_json = ?, decided_by = ?, error = NULL, updated_at = ?, claimed_automatically = ?`
 	args := []any{string(ProposalStatusApproving), now, token, finalJSON, decidedBy, now, autonomyColumn(automaticAt != nil)}
 	if automaticAt != nil {
-		query += `, decided_automatically = 1, automatic_at = ?`
-		args = append(args, automaticAt.UTC())
-	}
-	query += `
+		// An automatic claim takes only a pending proposal no automatic attempt
+		// has touched; a manager's claim also retries a failed one.
+		query += `, decided_automatically = 1, automatic_at = ?
+		WHERE id = ? AND status = ? AND decided_automatically = 0`
+		args = append(args, automaticAt.UTC(), id, string(ProposalStatusPending))
+	} else {
+		query += `
 		WHERE id = ? AND status IN (?, ?)`
-	args = append(args, id, string(ProposalStatusPending), string(ProposalStatusFailed))
+		args = append(args, id, string(ProposalStatusPending), string(ProposalStatusFailed))
+	}
 	res, err := exec.ExecContext(ctx, s.db.Rebind(query), args...)
 	if err != nil {
 		return false, fmt.Errorf("claim proposal: %w", err)

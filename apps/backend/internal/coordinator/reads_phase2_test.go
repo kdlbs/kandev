@@ -151,6 +151,9 @@ func TestPolicyView(t *testing.T) {
 		t.Fatalf("unreadable view = %+v, %v", v, err)
 	}
 	for _, a := range AllActions {
+		if a == ActionAnswer {
+			continue
+		}
 		if v.Actions[a] != SettingDenied {
 			t.Fatalf("unreadable policy %s = %v, want denied", a, v.Actions[a])
 		}

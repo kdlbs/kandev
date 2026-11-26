@@ -7,31 +7,39 @@ import { CardDescription } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import {
   isCreateTaskProposal,
+  isAnswerProposal,
   isImprovementProposal,
   type ApproveProposalEdits,
   type CreateTaskProposal,
   type ImprovementProposal,
+  isMergeProposal,
   type KindProposal,
+  type MergeProposal,
   type MessageSpec,
   type ProposalSpec,
   type StoredProposal,
 } from "@/lib/api/domains/coordinator-api";
+import { AnswerProposalCard } from "./answer-card";
+import { MergeProposalCard } from "./merge-card";
 import { RunsWithLine } from "./runs-with-line";
 import type { AttentionTask } from "@/lib/coordinator/attention";
 import type { StandingOrder } from "@/lib/api/domains/coordinator-api";
-import {
-  useProposalDecision,
-  type ProposalDecisionOutcome,
-} from "@/hooks/domains/coordinator/use-proposal-decision";
+import { useProposalDecision } from "@/hooks/domains/coordinator/use-proposal-decision";
 import {
   approvedStatusLine,
   effectiveProposalSpec,
   isApprovalClaimStale,
   proposalStatusLine,
-  resolveStepName,
   workflowStepLabel,
 } from "@/lib/coordinator/proposal-text";
 import { useToast } from "@/components/toast-provider";
+import {
+  applyDecisionOutcome,
+  type OutcomeContext,
+  type TFn,
+  type ProposalCardForm,
+  type ProposalCardVariant,
+} from "./decision-outcome";
 import { useNowTick } from "../use-now-tick";
 import { EditForm, type EditFormServerError } from "./edit-form";
 import {
@@ -42,7 +50,7 @@ import {
 } from "./improvement-card";
 import { KindBody } from "./kind-body";
 import { MessageEditForm } from "./message-edit-form";
-import { kindApprovedToast, kindFailureText, policyLineText } from "./outcome-copy";
+import { kindFailureText, policyLineText } from "./outcome-copy";
 import { usePhase2CardContext } from "./phase2-context";
 import { RejectForm } from "./reject-form";
 import { ReplySection } from "./reply-section";
@@ -51,8 +59,7 @@ import { ShapedBy } from "./shaped-by";
 import { useApprovedCardLabel } from "./use-approved-card-label";
 import { useTargetTask } from "./use-target-task";
 
-export type ProposalCardVariant = "full" | "compact";
-export type ProposalCardForm = "edit" | "reject";
+export type { ProposalCardForm, ProposalCardVariant } from "./decision-outcome";
 
 export type ProposalCardProps = {
   proposal: StoredProposal;
@@ -80,56 +87,13 @@ export type ProposalCardProps = {
   onReplyStarted?: () => void;
 };
 
-type TFn = ReturnType<typeof useTranslation>["t"];
-type ToastFn = ReturnType<typeof useToast>["toast"];
-
-function nextLine(t: TFn, computeNeedsYouCount?: () => number) {
-  if (!computeNeedsYouCount) return undefined;
-  const count = computeNeedsYouCount();
-  return count === 0 ? t("coordinator:toastNextNone") : t("coordinator:toastNextCount", { count });
-}
-
-type OutcomeContext = {
-  t: TFn;
-  toast: ToastFn;
-  variant: ProposalCardVariant;
-  stepNameByWorkflowStep: Map<string, string>;
-  computeNeedsYouCount?: () => number;
-  setServerError: (error: EditFormServerError | null) => void;
-  setOpenForm: (form: ProposalCardForm | null) => void;
-  resolveCardLabel: (proposal: StoredProposal) => Promise<string>;
-  /** The target task label of a resume, message or move card. */
-  targetLabel: string;
-  setPolicyDenied: (denied: boolean) => void;
-  offerReject?: (offer: { proposalId: string; reason: string }) => void;
+type GenericCardProps = Omit<ProposalCardProps, "proposal"> & {
+  proposal: Exclude<StoredProposal, MergeProposal>;
 };
-
-async function toastApproved(proposal: StoredProposal, ctx: OutcomeContext) {
-  let title: string;
-  if (isImprovementProposal(proposal)) {
-    title = ctx.t("coordinator:improvementApprovedPending");
-  } else if (isCreateTaskProposal(proposal)) {
-    const step = resolveStepName(effectiveProposalSpec(proposal), ctx.stepNameByWorkflowStep);
-    const card = await ctx.resolveCardLabel(proposal);
-    title = ctx.t("coordinator:toastApproved", { card, step });
-  } else {
-    title = kindApprovedToast(
-      proposal,
-      ctx.targetLabel,
-      kindStepName(proposal, ctx.stepNameByWorkflowStep),
-      ctx.t,
-    );
-  }
-  ctx.toast({
-    title,
-    description: nextLine(ctx.t, ctx.computeNeedsYouCount),
-    variant: "success",
-  });
-}
 
 const ACTIONABLE: ReadonlySet<StoredProposal["status"]> = new Set(["pending", "failed"]);
 
-function splitProposal(proposal: StoredProposal) {
+function splitProposal(proposal: Exclude<StoredProposal, MergeProposal>) {
   const improvementProposal: ImprovementProposal | null = isImprovementProposal(proposal)
     ? proposal
     : null;
@@ -169,83 +133,6 @@ function editableForm(
 ): "create" | "message" | null {
   if (createProposal) return "create";
   return kindProposal?.kind === "message" ? "message" : null;
-}
-
-function kindStepName(proposal: KindProposal, names: Map<string, string>): string {
-  if (proposal.kind !== "move") return "";
-  const spec = proposal.final_spec ?? proposal.spec;
-  return names.get(`${spec.workflow_id}:${spec.to_step_id}`) ?? spec.to_step_id;
-}
-
-function toastRejected(proposalId: string, rejectReason: string | undefined, ctx: OutcomeContext) {
-  const { t, toast, computeNeedsYouCount } = ctx;
-  const reason = rejectReason?.trim();
-  const offer = ctx.offerReject && reason ? { proposalId, reason } : null;
-  toast({
-    title: offer ? t("coordinator:toastRejectedOffer") : t("coordinator:toastRejected"),
-    description: nextLine(t, computeNeedsYouCount),
-    variant: "success",
-    ...(offer && {
-      duration: 10_000,
-      action: {
-        label: t("coordinator:toastRejectedOfferAction"),
-        onClick: () => ctx.offerReject?.(offer),
-      },
-    }),
-  });
-}
-
-/**
- * Applies one decision outcome per the decision-outcomes table
- * (docs/specs/coordinator/system-design/proposal-cards.md#cards "Decision
- * outcomes"): toast copy, form close/keep-open, and server-error display.
- * Extracted from ProposalCard to keep the component's own branching low.
- */
-function applyDecisionOutcome(
-  outcome: ProposalDecisionOutcome,
-  plainApprove: boolean,
-  ctx: OutcomeContext,
-  rejectReason?: string,
-) {
-  const { t, toast, variant, setServerError, setOpenForm } = ctx;
-  switch (outcome.kind) {
-    case "decided": {
-      setServerError(null);
-      setOpenForm(null);
-      if (outcome.proposal.status === "failed") return;
-      if (outcome.proposal.status === "approved") {
-        void toastApproved(outcome.proposal, ctx);
-      } else if (outcome.proposal.status === "rejected") {
-        toastRejected(outcome.proposal.id, rejectReason, ctx);
-      }
-      return;
-    }
-    case "validation":
-      setServerError({ message: outcome.message, field: outcome.field });
-      // Only the full (Needs-you) card can show the edit form inline; the
-      // compact chat card keeps its buttons visible and surfaces the error
-      // via serverError-driven copy, since it has no inline form surface.
-      if (plainApprove && variant === "full") setOpenForm("edit");
-      return;
-    case "policy_denied":
-      setOpenForm(null);
-      setServerError(null);
-      ctx.setPolicyDenied(true);
-      return;
-    case "conflict":
-      setOpenForm(null);
-      setServerError(null);
-      toast({ title: t("coordinator:toastConflict"), variant: "error" });
-      return;
-    case "forbidden":
-      toast({ title: t("coordinator:toastForbidden"), variant: "error" });
-      return;
-    case "not_found":
-      toast({ title: t("coordinator:toastNotFound"), variant: "error" });
-      return;
-    case "network":
-      toast({ title: t("coordinator:toastNetworkError"), variant: "error" });
-  }
 }
 
 /** True only for a remote decision arriving while this card's own form is open and it isn't the one deciding it. */
@@ -447,7 +334,10 @@ function CardBody(props: CardBodyProps) {
           {!improvementProposal && (
             <CardDescription>
               {kindProposal
-                ? policyLineText(proposal as Exclude<StoredProposal, ImprovementProposal>, t)
+                ? policyLineText(
+                    proposal as Exclude<StoredProposal, ImprovementProposal | MergeProposal>,
+                    t,
+                  )
                 : t("coordinator:policyProposeOnly")}
             </CardDescription>
           )}
@@ -469,7 +359,7 @@ function CardBody(props: CardBodyProps) {
 }
 
 // eslint-disable-next-line max-lines-per-function -- one component owns state, effects and rendering wiring; branching itself lives in applyDecisionOutcome/shouldForceCloseForm/ProposalCardActions
-export function ProposalCard({
+function GenericProposalCard({
   proposal,
   variant,
   canManage,
@@ -485,7 +375,7 @@ export function ProposalCard({
   onFormForceClosed,
   computeNeedsYouCount,
   onReplyStarted,
-}: ProposalCardProps) {
+}: GenericCardProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const now = useNowTick();
@@ -661,4 +551,15 @@ export function ProposalCard({
       )}
     </div>
   );
+}
+
+/** Answer proposals render their own card; every other kind shares the generic card. */
+export function ProposalCard(props: ProposalCardProps) {
+  if (isAnswerProposal(props.proposal)) {
+    return <AnswerProposalCard {...props} proposal={props.proposal} />;
+  }
+  if (isMergeProposal(props.proposal)) {
+    return <MergeProposalCard {...props} proposal={props.proposal} />;
+  }
+  return <GenericProposalCard {...props} proposal={props.proposal} />;
 }

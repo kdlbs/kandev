@@ -194,3 +194,13 @@ because it only adds tools to the next session.
 plan. When G2 is met, this section records the maintainer reply on
 [#3752](https://github.com/kdlbs/kandev/issues/3752), or "proceeding without
 maintainer reply" with the date.
+
+## Amendment 2026-11-08: merging can be granted per repository
+
+The "Merging" decision above (merging stays human in every phase) holds while
+`features.coordinatorMerge` is off. When it is on, a manager may grant merge
+authority per repository (`denied` by default); see
+[Coordinator merge authority](2026-11-08-coordinator-merge-authority.md).
+Moving a task to Done stays human. With the flag on, the May do Merge row
+shows "Set per repository" and links to the repository table instead of
+"Always human".

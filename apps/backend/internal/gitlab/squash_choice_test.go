@@ -92,7 +92,7 @@ func runSquashChoice(t *testing.T, tc squashChoiceCase) {
 	svc := squashChoiceService(t, server.URL)
 	var failed bool
 	if tc.automation {
-		_, err := svc.MergeMRForAutomation(t.Context(), "selected", server.URL, "group/sub/target", 17)
+		_, err := svc.MergeMRForAutomation(t.Context(), "selected", server.URL, "group/sub/target", 17, "", "")
 		failed = err != nil
 	} else {
 		router := gin.New()

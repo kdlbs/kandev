@@ -86,6 +86,9 @@ type MR struct {
 	// marked as blocking; it is not the primary unresolved-discussion
 	// signal (see MRStatus.UnresolvedDiscussions).
 	BlockingDiscussionsResolved bool `json:"blocking_discussions_resolved"`
+	// MergeCommitSHA is the commit a merged MR produced (the squash commit
+	// when GitLab fast-forwarded a squashed MR); empty until merged.
+	MergeCommitSHA string `json:"merge_commit_sha,omitempty"`
 }
 
 // MRReviewer represents a reviewer or assignee on an MR.

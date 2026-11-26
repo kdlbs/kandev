@@ -72,6 +72,7 @@ var replyTexts = map[string]replyTextFunc{
 	ProposalKindMessage: taskKindReplyText,
 	ProposalKindMove:    taskKindReplyText,
 	ProposalKindResume:  taskKindReplyText,
+	ProposalKindAnswer:  taskKindReplyText,
 	ProposalKindImprovement: func(p *Proposal, title, reply string) string {
 		return fmt.Sprintf("Reply to your improvement proposal %q (proposal %s): %s. "+
 			"If you still think the change is needed, send a new improvement that meets the condition.",
@@ -89,6 +90,7 @@ var replyTitleVerbs = map[string]string{
 	ProposalKindMessage: "Message",
 	ProposalKindMove:    "Move",
 	ProposalKindResume:  "Resume",
+	ProposalKindAnswer:  "Answer",
 }
 
 // replyTitle is the one-line name of a proposal in its reply text.
@@ -133,6 +135,11 @@ func (s *Service) ReplyToProposal(ctx context.Context, workspaceID, coordinatorI
 		return nil, &ProposalConflictError{Proposal: proposal}
 	}
 	kind := replyKind(proposal)
+	if kind == ProposalKindAnswer {
+		if err := s.recheckAnswerFlag(); err != nil {
+			return nil, err
+		}
+	}
 	if _, ok := replyTexts[kind]; !ok {
 		return nil, &FieldError{Field: "kind", Message: fmt.Sprintf("a %s proposal cannot be replied to", kind)}
 	}
@@ -173,11 +180,14 @@ func (s *Service) ReplyToProposal(ctx context.Context, workspaceID, coordinatorI
 			s.logger.Warn("reply not delivered", zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID))
 		}
 	}
+	lowered := s.lowerOnOverride(ctx, proposal)
 	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 	if err != nil {
 		s.logger.Warn("re-read proposal after reply failed", zap.String("proposal_id", proposalID), zap.Error(err))
+		returned.LoweredClass = lowered
 		return &returned, nil
 	}
+	current.LoweredClass = lowered
 	return current, nil
 }
 

@@ -178,7 +178,7 @@ a pull request or moves a task to Done.
 ### REQ-COORDINATOR-PROPOSAL-KINDS-005: Stall Resume and PR-ready actions
 
 **Intent:** A manager acts on a stall or a ready pull request in one click,
-and merging stays human.
+and merging stays human while the merge flag is off; [merge stewardship](merge.md) amends this when enabled.
 
 #### Acceptance criteria
 
@@ -196,7 +196,7 @@ and merging stays human.
   message.
 - **AC-COORDINATOR-PROPOSAL-KINDS-005.4:** The Ready to merge group shall say
   "Merging a pull request is always human." and no card, row or approval
-  shall merge a pull request.
+  shall merge a pull request while `features.coordinatorMerge` is off. When it is on, [merge stewardship](merge.md) governs.
 - **AC-COORDINATOR-PROPOSAL-KINDS-005.5:** While a **Resume** request is in
   flight its button shall be disabled with a spinner and a second click shall
   send nothing. On a successful answer the button shall stay disabled with the

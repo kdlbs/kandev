@@ -380,7 +380,7 @@ while the phase-2 flag is on.
   a raw code. If the row leaves Ready to merge or its session stops accepting
   messages while the form is open, the form closes with the row.
 - The Ready to merge group header shows "Merging a pull request is always
-  human." (`005.4`). No merge control exists anywhere in the coordinator UI.
+  human." (`005.4`); [merge](merge.md) amends this when enabled.
 
 ## Cards
 
