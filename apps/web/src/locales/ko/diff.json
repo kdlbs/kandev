@@ -1,4 +1,6 @@
 {
+  "before": "변경 전",
+  "after": "변경 후",
   "add": "추가",
   "addAComment": "댓글 추가...",
   "addComment": "댓글 추가",

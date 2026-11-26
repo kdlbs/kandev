@@ -670,7 +670,7 @@ before you correct the call.
 | `StatusList` | Up to 20 ordered, static verification findings with visible status labels and icons. |
 | `Callout` | A static info, success, warning or error note with optional title and plain text. |
 | `Metrics` | One to six label/value pairs with optional details. |
-| `FilePreview` | A workspace-relative file path with optional `repo`, title, and caption. |
+| `FilePreview` | A workspace-relative file path with optional `repo`, title, and caption. Use a path such as `reports/snapshots.diff` for a unified patch. Native previews for `.diff` and `.patch` expand automatically in side-by-side view and support switching to Unified. |
 
 Agents choose hierarchy and ordering from this catalog. Kandev owns styling,
 axes, legends, tooltips, and responsive behavior. HTML, Markdown, JavaScript,
