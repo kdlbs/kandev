@@ -5,9 +5,31 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
+// ErrProjectRepositorySourceReaderUnavailable reports that project repository
+// defaults cannot be loaded.
 var ErrProjectRepositorySourceReaderUnavailable = errors.New("project repository source reader is unavailable")
+
+// ErrProjectWorkspaceReaderUnavailable reports missing project membership validation.
+var ErrProjectWorkspaceReaderUnavailable = errors.New("project workspace reader is unavailable")
+
+// ErrProjectWorkspaceLookupUnavailable reports a failed Office membership read.
+var ErrProjectWorkspaceLookupUnavailable = errors.New("project workspace lookup is unavailable")
+
+// ErrProjectNotFound reports that an explicitly selected project does not exist.
+var ErrProjectNotFound = errors.New("project not found")
+
+// ErrProjectWorkspaceMismatch reports that a project belongs to another workspace.
+var ErrProjectWorkspaceMismatch = errors.New("project does not belong to task workspace")
+
+// ProjectWorkspaceReader validates a project independently of its configured
+// repository sources.
+type ProjectWorkspaceReader interface {
+	GetProjectWorkspaceID(context.Context, string) (string, error)
+}
 
 // ProjectRepositorySources is the task service's Office-neutral project read
 // result. Sources retain the project's configured order.
@@ -33,6 +55,9 @@ func (s *Service) prepareProjectRepositorySources(ctx context.Context, req *Crea
 	}
 	project, err := s.projectRepositorySourceReader.ReadProjectRepositorySources(ctx, req.ProjectID)
 	if err != nil {
+		if req.RequireProjectWorkspaceValidation && errors.Is(err, ErrProjectNotFound) {
+			return repoerrors.ErrProjectMembershipChanged
+		}
 		return fmt.Errorf("read repository sources for project %q: %w", req.ProjectID, err)
 	}
 	if project.WorkspaceID != req.WorkspaceID {
@@ -44,6 +69,26 @@ func (s *Service) prepareProjectRepositorySources(ctx context.Context, req *Crea
 	}
 	req.Repositories = repositories
 	req.projectRepositoryDefaults = true
+	return nil
+}
+
+func (s *Service) validateProjectWorkspace(ctx context.Context, workspaceID, projectID string) error {
+	if projectID == "" {
+		return ErrProjectNotFound
+	}
+	if s.projectWorkspaceReader == nil {
+		return ErrProjectWorkspaceReaderUnavailable
+	}
+	projectWorkspaceID, err := s.projectWorkspaceReader.GetProjectWorkspaceID(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrProjectWorkspaceLookupUnavailable, err)
+	}
+	if projectWorkspaceID == "" {
+		return fmt.Errorf("%w: %s", ErrProjectNotFound, projectID)
+	}
+	if projectWorkspaceID != workspaceID {
+		return fmt.Errorf("%w: %s", ErrProjectWorkspaceMismatch, projectID)
+	}
 	return nil
 }
 

@@ -304,6 +304,7 @@
   "onboardingExecutorSpritesDescription": "在远程服务商沙箱中运行。请先配置 Sprites 服务和执行器配置。",
   "onboardingExecutorSshDescription": "在可信任的 SSH 主机上运行。请先配置并验证 SSH 连接和执行器配置。",
   "onboardingExecutorWorktreeDescription": "为任务更改创建单独的 Git 工作树。它与主机帐户及其权限共享。",
+  "onboardingNoInstalledAgents": "未检测到已安装的智能体。",
   "onboardingStepAgentsDescription": "管理已发现的智能体并安装新智能体。",
   "onboardingStepAgentsTitle": "AI 智能体",
   "onboardingStepCommandPanelDescription": "通过键盘快捷键随时快速访问操作。",

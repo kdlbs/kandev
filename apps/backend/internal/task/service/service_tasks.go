@@ -31,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
@@ -274,6 +275,11 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if found, result, err := s.findTaskByExternalIDIfPresent(ctx, req.WorkspaceID, externalID); found {
 		return result, err
 	}
+	if req.RequireProjectWorkspaceValidation {
+		if err := s.validateProjectWorkspace(ctx, req.WorkspaceID, req.ProjectID); err != nil {
+			return CreateTaskResult{}, newPreAllocationTaskCreateError(err)
+		}
+	}
 	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return CreateTaskResult{}, err
 	}
@@ -297,6 +303,11 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 		return CreateTaskResult{}, newPreAllocationTaskCreateError(err)
 	}
 
+	if req.RequireProjectWorkspaceValidation {
+		ctx = admission.WithProjectWorkspaceValidation(ctx, admission.ProjectWorkspaceExpectation{
+			ProjectID: req.ProjectID, WorkspaceID: req.WorkspaceID,
+		})
+	}
 	ctx = taskrepo.WithTaskCreationParentValidator(ctx, hierarchy.ValidateCreationParent)
 	insertTask := func() error { return s.createTaskWithCapacity(ctx, prepared.task) }
 	var createErr error

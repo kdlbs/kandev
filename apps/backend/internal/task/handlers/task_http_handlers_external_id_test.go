@@ -341,16 +341,10 @@ func TestHTTPCreateTask_FoundSettledSkipsPostCreateWork(t *testing.T) {
 	assert.Equal(t, 1, count, "no duplicate task should exist")
 }
 
-// TestHTTPCreateTask_FoundOutcomeIgnoresNonexistentRepositoryInRetry pins
-// the spec's documented answer to "what happens when a Found-outcome retry
-// names a repository that no longer exists": convertCreateTaskRepositories
-// (the handler-level pre-service conversion) only checks that an
-// identifying field is present, never that the repository actually exists —
-// existence validation lives in Service.createTaskRepositories, which a
-// Found outcome's early return never reaches. So the retry payload's
-// repositories are never even looked at; the existing task is returned as
-// normal, not a validation failure.
-func TestHTTPCreateTask_FoundOutcomeIgnoresNonexistentRepositoryInRetry(t *testing.T) {
+// TestHTTPCreateTask_FoundOutcomeSkipsRepositoryValidationInRetry pins the
+// create-idempotency contract: an existing external_id returns its task
+// before handler-level repository conversion or service validation runs.
+func TestHTTPCreateTask_FoundOutcomeSkipsRepositoryValidationInRetry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newIdempotentCreateTaskRepo()
 	h := newIdempotencyTestHandlers(t, repo)
@@ -372,6 +366,14 @@ func TestHTTPCreateTask_FoundOutcomeIgnoresNonexistentRepositoryInRetry(t *testi
 	assert.Equal(t, firstID, retryResp["id"])
 	assert.Equal(t, true, retryResp["deduplicated"])
 	assert.Equal(t, true, retryResp["creation_complete"])
+
+	invalidIDRetry := doCreateTask(h, `{"workspace_id":"ws-1","workflow_id":"wf-1","workflow_step_id":"step-1","title":"Retry with invalid repository ID","external_id":"ext-1","repository_ids":[""]}`)
+	require.Equal(t, http.StatusOK, invalidIDRetry.Code, "body: %s", invalidIDRetry.Body.String())
+	var invalidIDResp map[string]interface{}
+	require.NoError(t, json.Unmarshal(invalidIDRetry.Body.Bytes(), &invalidIDResp))
+	assert.Equal(t, firstID, invalidIDResp["id"])
+	assert.Equal(t, true, invalidIDResp["deduplicated"])
+	assert.Equal(t, true, invalidIDResp["creation_complete"])
 }
 
 // TestHTTPCreateTask_FoundUnsettledReportsIncomplete covers the diagnostic

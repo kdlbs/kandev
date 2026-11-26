@@ -17,6 +17,7 @@ import (
 )
 
 const (
+	defaultLSPMaxConnections             = 8
 	lspLeaseSnapshotLimit                = 4 << 20
 	lspLeaseDialTimeout                  = 15 * time.Second
 	lspLeaseCloseTimeout                 = 5 * time.Second

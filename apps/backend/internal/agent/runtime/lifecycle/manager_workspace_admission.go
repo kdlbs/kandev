@@ -147,6 +147,8 @@ func validateBoundWorkspaceEnvironment(
 	switch env.Status {
 	case "", models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
 		return nil
+	case models.TaskEnvironmentStatusCreating:
+		return fmt.Errorf("%w: %w", ErrSessionWorkspaceNotReady, errWorkspaceEnvironmentCreating)
 	default:
 		return fmt.Errorf("%w: task environment is not attachable", ErrSessionWorkspaceNotReady)
 	}

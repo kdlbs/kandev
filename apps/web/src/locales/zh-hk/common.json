@@ -304,6 +304,7 @@
   "onboardingExecutorSpritesDescription": "在遠端服務商沙箱中執行。請先設定 Sprites 服務和執行器設定檔。",
   "onboardingExecutorSshDescription": "在可信任的 SSH 主機上執行。請先設定並驗證 SSH 連接和執行器設定檔。",
   "onboardingExecutorWorktreeDescription": "為任務更改建立單獨的 Git 工作樹。它與主機帳戶及其權限共享。",
+  "onboardingNoInstalledAgents": "未檢測到已安裝的代理程式。",
   "onboardingStepAgentsDescription": "管理已發現的代理程式並安裝新代理程式。",
   "onboardingStepAgentsTitle": "AI 代理程式",
   "onboardingStepCommandPanelDescription": "通過鍵盤快捷鍵隨時快速存取操作。",

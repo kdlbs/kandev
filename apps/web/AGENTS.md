@@ -8,7 +8,7 @@ For plugin UI work, begin with the [canonical plugin authoring guide](../../docs
 
 ## UI Components
 
-For UI components, responsive behavior, and touch interactions, read [UI component guidance](UI-COMPONENTS.md) and use `/mobile-parity`.
+Before UI work, read [Layout in DESIGN.md](../../DESIGN.md#layout) for workbench and settings composition. For UI components, responsive behavior, and touch interactions, also read [UI component guidance](UI-COMPONENTS.md) and use `/mobile-parity`.
 
 ## Data Flow Pattern (Critical)
 

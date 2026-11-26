@@ -30,6 +30,8 @@ import (
 // have a resolved workspace path (typically while worktree preparation is in progress).
 var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 
+var errWorkspaceEnvironmentCreating = errors.New("task environment is not attachable")
+
 // ErrSessionTerminal indicates that an agent-start operation reached a terminal
 // session state. Workspace-only admission deliberately does not return this
 // error because retained workspace infrastructure can remain usable after the
