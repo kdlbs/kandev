@@ -847,6 +847,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		}
 	}
 	var earlyMonitorSettlement *claudeMonitorSettlement
+	var taskStopMonitorSettlement *claudeMonitorSettlement
 
 	// A terminal tool_call_update for an already-tracked Monitor (the agent
 	// proactively ended the watch). NormalizeToolResult would otherwise stomp
@@ -933,6 +934,11 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		statusMissing = false
 	}
 	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
+	if (a.agentID == claudeAgentID || a.agentID == mockAgentID) && status == toolStatusComplete && isTaskStopMeta(tcu.Meta) {
+		if taskID, confirmed := recognizeTaskStopCompletedTaskID(tcu.Meta, tcu.RawOutput, tcu.RawInput, payload); confirmed {
+			taskStopMonitorSettlement = a.settleTrackedMonitorFromTaskStopLocked(sessionID, taskID)
+		}
+	}
 
 	// Subagent (Task) result metadata is split across meta (Claude) and
 	// rawOutput (OpenCode/Cursor); enrich the stored payload from both.
@@ -1013,6 +1019,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		a.claudeShellOutput.finish(sessionID, claudeOutputFinishID)
 	}
 	earlyMonitorSettlement.sendBackgroundWork(a)
+	taskStopMonitorSettlement.send(a)
 	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
 
 	// ScheduleWakeup tracking: tool_call_update is where rawInput.prompt and

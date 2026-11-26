@@ -17,7 +17,7 @@ test.describe("Claude Monitor lifecycle (desktop)", () => {
     fs.rmSync(signalFile, { force: true });
     await backend.restart({
       KANDEV_MOCK_PROVIDERS: "claude-acp",
-      E2E_MOCK_AGENT_CLAUDE_BRIDGE_VERSION: "0.107.0",
+      E2E_MOCK_AGENT_CLAUDE_BRIDGE_VERSION: "0.109.0",
     });
   });
 

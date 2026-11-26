@@ -16,13 +16,14 @@ import (
 
 const (
 	claudeNativeVersion              = "2.1.323"
+	claudeNativeCurrentVersion       = "2.1.328"
 	claudeMonitorPollInterval        = 100 * time.Millisecond
 	claudeMonitorMaxRecordBytes      = 256 * 1024
 	claudeMonitorMaxReadBytes        = 1024 * 1024
 	claudeMonitorMaxPendingRecords   = 64
 	claudeMonitorMaxCompletionMarks  = 1024
 	claudeMonitorEvidenceBridgeName  = verifiedClaudeTerminalBridgeName
-	claudeMonitorEvidenceBridgeBuild = verifiedClaudeTerminalBridgeManagedVersion
+	claudeMonitorEvidenceBridgeBuild = verifiedClaudeTerminalBridgeCurrentVersion
 )
 
 var (
@@ -134,9 +135,14 @@ func isQualifiedClaudeMonitorRecord(
 	origin claudeNativeTaskOrigin,
 	sessionID, nativeVersion string,
 ) bool {
-	return record.SessionID == sessionID && record.Version == nativeVersion && nativeVersion == claudeNativeVersion &&
+	nativeVersionMatches := nativeVersion == "" || record.Version == nativeVersion
+	return record.SessionID == sessionID && nativeVersionMatches && isQualifiedClaudeNativeVersion(record.Version) &&
 		origin.Kind == "task-notification" && origin.Producer == "session-task" &&
 		record.Timestamp != ""
+}
+
+func isQualifiedClaudeNativeVersion(version string) bool {
+	return version == claudeNativeVersion || version == claudeNativeCurrentVersion
 }
 
 func claudeMonitorRunState(status string) (streams.RunState, bool) {
@@ -200,7 +206,7 @@ func newClaudeMonitorCompletionReader(
 		workDirName: projectName,
 		sessionFile: sessionID + ".jsonl",
 		sessionID:   sessionID,
-		version:     claudeNativeVersion,
+		version:     "",
 		admittedAt:  admittedAt,
 	}
 	project, err := reader.openProject()
