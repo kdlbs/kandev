@@ -111,6 +111,9 @@ test.describe("Mobile GitLab parity", () => {
     // @covers AC-UI-MOBILE-CONFIRMATION-001.8
     await expect(gitlab.mobileSidebar).toHaveAttribute("data-vaul-drawer-direction", "bottom");
     await waitForFiniteAnimations(gitlab.mobileSidebar);
+    await expect(
+      testPage.getByTestId("toast-message").getByText("Kandev update available", { exact: true }),
+    ).toBeHidden();
     const originalHeight = (await gitlab.mobileSidebar.boundingBox())!.height;
     const sheetId = await gitlab.mobileSidebar.getAttribute("id");
     const trigger = gitlab.mobileSidebar.getByTestId("gitlab-saved-delete-mobile-gitlab-saved");
@@ -127,7 +130,6 @@ test.describe("Mobile GitLab parity", () => {
       confirmation,
     );
     expect(compactBounds.height).toBeLessThan(originalHeight);
-    await expect(testPage.getByText("Kandev update available", { exact: true })).toBeHidden();
     await testPage.screenshot({
       path: testInfo.outputPath("compact-saved-query-confirmation.png"),
     });

@@ -69,7 +69,9 @@ test.describe("executor profile routing", () => {
       );
       await floatingSave.getByRole("button", { name: "Save changes" }).click();
       await saveResponse;
-      await expect(testPage.getByText("Profile saved")).toBeVisible();
+      await expect(
+        testPage.getByTestId("toast-message").getByText("Profile saved", { exact: true }),
+      ).toBeVisible();
       await expect
         .poll(
           async () =>
