@@ -185,7 +185,7 @@ Task MCP is scoped to an active Kandev agent session, but it can still create or
 ## Isolated web applications
 
 > [!EXPERIMENTAL]
-> Agent-authored canvases are in progress. Enable `features.canvases` only for a trusted test instance and review every permission request.
+> Canvases are experimental and enabled by default. Review the canvas source and each permission request before approval.
 
 An isolated web app is a packaged static app that runs inside a sandboxed
 iframe. It is different from a native plugin bundle. Native bundles run as

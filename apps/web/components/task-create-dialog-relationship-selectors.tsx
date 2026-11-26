@@ -257,7 +257,12 @@ export function TaskCreateParentSelector({
   disabled,
   contextStepId,
   excludeTaskId,
-}: SelectorProps & { value?: string; onChange: (value: string | undefined) => void }) {
+  triggerClassName,
+}: SelectorProps & {
+  value?: string;
+  onChange: (value: string | undefined) => void;
+  triggerClassName?: string;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -280,6 +285,7 @@ export function TaskCreateParentSelector({
           className={cn(
             "h-7 min-h-7 w-full min-w-0 justify-between max-md:h-11 max-md:min-h-11 pointer-coarse:h-11 pointer-coarse:min-h-11",
             !disabled && "cursor-pointer",
+            triggerClassName,
           )}
           disabled={disabled}
           data-testid="task-create-parent-trigger"
@@ -349,11 +355,13 @@ export function TaskCreateRelatedSelector({
   disabled,
   contextStepId,
   excludeTaskId,
+  triggerClassName,
 }: SelectorProps & {
   value: string[];
   onChange: (value: string[]) => void;
   blockedBy: string[];
   parentTaskId?: string;
+  triggerClassName?: string;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -379,6 +387,7 @@ export function TaskCreateRelatedSelector({
           className={cn(
             "h-7 min-h-7 w-full min-w-0 justify-between max-md:h-11 max-md:min-h-11 pointer-coarse:h-11 pointer-coarse:min-h-11",
             !disabled && "cursor-pointer",
+            triggerClassName,
           )}
           disabled={disabled}
           data-testid="task-create-related-trigger"

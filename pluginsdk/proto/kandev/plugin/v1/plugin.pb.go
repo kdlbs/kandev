@@ -20230,7 +20230,8 @@ type CreateTaskRequest struct {
 	Launch       *PluginTaskLaunchOptions `protobuf:"bytes,9,opt,name=launch,proto3,oneof" json:"launch,omitempty"`
 	Metadata     *structpb.Struct         `protobuf:"bytes,10,opt,name=metadata,proto3" json:"metadata,omitempty"` // plugin namespace only; host reserves source.
 	// One of critical, high, medium, or low; empty defaults to medium.
-	Priority      string `protobuf:"bytes,11,opt,name=priority,proto3" json:"priority,omitempty"`
+	Priority      string  `protobuf:"bytes,11,opt,name=priority,proto3" json:"priority,omitempty"`
+	ProjectId     *string `protobuf:"bytes,12,opt,name=project_id,json=projectId,proto3,oneof" json:"project_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -20338,6 +20339,13 @@ func (x *CreateTaskRequest) GetMetadata() *structpb.Struct {
 func (x *CreateTaskRequest) GetPriority() string {
 	if x != nil {
 		return x.Priority
+	}
+	return ""
+}
+
+func (x *CreateTaskRequest) GetProjectId() string {
+	if x != nil && x.ProjectId != nil {
+		return *x.ProjectId
 	}
 	return ""
 }
@@ -28334,7 +28342,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\n" +
 	"profile_id\x18\x02 \x01(\tR\tprofileId\"0\n" +
 	"\x1aInvokeUtilityAgentResponse\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\x94\x04\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xc7\x04\n" +
 	"\x11CreateTaskRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1f\n" +
 	"\vworkflow_id\x18\x02 \x01(\tR\n" +
@@ -28349,11 +28357,14 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x06launch\x18\t \x01(\v2).kandev.plugin.v1.PluginTaskLaunchOptionsH\x02R\x06launch\x88\x01\x01\x123\n" +
 	"\bmetadata\x18\n" +
 	" \x01(\v2\x17.google.protobuf.StructR\bmetadata\x12\x1a\n" +
-	"\bpriority\x18\v \x01(\tR\bpriorityB\x13\n" +
+	"\bpriority\x18\v \x01(\tR\bpriority\x12\"\n" +
+	"\n" +
+	"project_id\x18\f \x01(\tH\x03R\tprojectId\x88\x01\x01B\x13\n" +
 	"\x11_workflow_step_idB\f\n" +
 	"\n" +
 	"_parent_idB\t\n" +
-	"\a_launch\"\xd6\x02\n" +
+	"\a_launchB\r\n" +
+	"\v_project_id\"\xd6\x02\n" +
 	"\x14PluginTaskRepository\x12#\n" +
 	"\rrepository_id\x18\x01 \x01(\tR\frepositoryId\x12I\n" +
 	"\x06remote\x18\x02 \x01(\v2,.kandev.plugin.v1.RemoteRepositoryDescriptorH\x00R\x06remote\x88\x01\x01\x12$\n" +

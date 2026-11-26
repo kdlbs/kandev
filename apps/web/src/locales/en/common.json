@@ -309,6 +309,7 @@
   "onboardingExecutorSpritesDescription": "Runs in a remote provider sandbox. Set up your Sprites provider and executor profile first.",
   "onboardingExecutorSshDescription": "Runs on a trusted SSH host. Set up and verify the connection and executor profile first.",
   "onboardingExecutorWorktreeDescription": "Creates a separate Git checkout for task changes. It shares the host account and its access.",
+  "onboardingNoInstalledAgents": "No installed agents detected.",
   "onboardingStepAgentsDescription": "Manage discovered agents and install new ones.",
   "onboardingStepAgentsTitle": "AI Agents",
   "onboardingStepCommandPanelDescription": "Quick access to actions from anywhere with a keyboard shortcut.",
