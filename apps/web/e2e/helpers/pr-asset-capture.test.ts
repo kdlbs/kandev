@@ -7,6 +7,7 @@ import { PrAssetCapture, type AssetManifest } from "./pr-asset-capture";
 
 function fakePage(content = "screenshot"): Page {
   return {
+    evaluate: vi.fn(async () => undefined),
     screenshot: vi.fn(async ({ path: screenshotPath }: { path: string }) => {
       fs.writeFileSync(screenshotPath, content);
     }),

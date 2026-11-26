@@ -17,6 +17,10 @@ import (
 
 const ManagedToolPolicyMetadataKey = "kandev.managed_tool_policy"
 
+// SurfaceMetadataKey records the typed MCP surface that controls launch policy
+// across backend recovery.
+const SurfaceMetadataKey = "kandev.mcp_profile_surface"
+
 type Surface string
 
 const (

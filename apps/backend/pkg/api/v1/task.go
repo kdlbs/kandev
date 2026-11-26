@@ -167,6 +167,7 @@ type Task struct {
 	WorkflowID             string                 `json:"workflow_id"`
 	Title                  string                 `json:"title"`
 	Description            string                 `json:"description"`
+	FlagNote               string                 `json:"flag_note"`
 	State                  TaskState              `json:"state"`
 	Priority               string                 `json:"priority"`
 	Repositories           []TaskRepository       `json:"repositories,omitempty"`

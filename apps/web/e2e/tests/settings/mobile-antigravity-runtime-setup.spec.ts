@@ -4,6 +4,74 @@ import type { Locator } from "@playwright/test";
 import { installAntigravityRuntimeFixture } from "./antigravity-runtime-setup-helpers";
 
 test.describe("Antigravity runtime setup on phone", () => {
+  test("Antigravity CLI permission flag saves by touch", async ({
+    backend,
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
+    const restoreBackend = await backend.useEnv({ KANDEV_E2E_MOCK_ANTIGRAVITY: "true" });
+    let profileId: string | undefined;
+
+    try {
+      const { agents } = await apiClient.listAgents();
+      const agent = agents.find((candidate) => candidate.name === "antigravity-acp");
+      if (!agent) throw new Error("Antigravity agent is not available in the E2E registry");
+      const profile = await apiClient.createAgentProfile(agent.id, "Mobile Antigravity CLI flag", {
+        model: "",
+        cli_flags: [],
+      });
+      profileId = profile.id;
+      await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+      const flagSwitch = testPage.getByTestId(
+        "cli-flag-curated-enabled-antigravity_skip_permissions",
+      );
+      await expect(flagSwitch).toBeVisible({ timeout: 15_000 });
+      await expect(flagSwitch).toHaveAttribute("data-state", "unchecked");
+      const box = await flagSwitch.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      await flagSwitch.tap();
+      await expect(flagSwitch).toHaveAttribute("data-state", "checked");
+
+      const saveButton = testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: /^Save( changes)?$/i });
+      await expect(saveButton).toHaveCount(1);
+      await saveButton.tap();
+      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
+      await expect
+        .poll(() => apiClient.getAgentProfile(profile.id))
+        .toMatchObject({
+          cliFlags: [
+            expect.objectContaining({ flag: "--dangerously-skip-permissions", enabled: true }),
+          ],
+        });
+
+      await testPage.reload();
+      await expect(flagSwitch).toHaveAttribute("data-state", "checked", { timeout: 15_000 });
+      await flagSwitch.scrollIntoViewIfNeeded();
+      await prCapture.screenshot("antigravity-cli-flag-phone", {
+        caption: "Antigravity CLI permission switch on the phone profile page",
+      });
+      await flagSwitch.tap();
+      await expect(saveButton).toHaveCount(1);
+      await saveButton.tap();
+      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
+      await testPage.reload();
+      await expect(flagSwitch).toHaveAttribute("data-state", "unchecked", { timeout: 15_000 });
+      expect(
+        await testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+    } finally {
+      if (profileId) await apiClient.deleteAgentProfile(profileId).catch(() => {});
+      await restoreBackend();
+    }
+  });
+
   test("opens standalone consent, restores focus, and refreshes readiness", async ({
     testPage,
   }) => {

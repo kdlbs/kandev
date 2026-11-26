@@ -20,8 +20,10 @@ import (
 )
 
 const (
-	defaultProbeInterval = 15 * time.Second
-	probeTimeout         = 2 * time.Second
+	defaultProbeInterval     = 15 * time.Second
+	defaultConfirmationDelay = 3 * time.Second
+	probeTimeout             = 2 * time.Second
+	probeErrorClassDeadline  = "deadline_exceeded"
 )
 
 // Health probes the shared database and every table declared by the catalog.
@@ -31,11 +33,12 @@ type Health struct {
 	pool    *db.Pool
 	log     *logger.Logger
 
-	mu       sync.Mutex
-	logMu    sync.Mutex
-	interval time.Duration
-	cancel   context.CancelFunc
-	done     chan struct{}
+	mu                sync.Mutex
+	logMu             sync.Mutex
+	interval          time.Duration
+	confirmationDelay time.Duration
+	cancel            context.CancelFunc
+	done              chan struct{}
 
 	lastLoggedState    State
 	lastLoggedStoreIDs []string
@@ -51,9 +54,17 @@ type probeFailureDiagnostic struct {
 	readerStats sql.DBStats
 }
 
+type probeResult struct {
+	storeErrors []error
+	diagnostic  *probeFailureDiagnostic
+}
+
 // NewHealth creates a runtime health probe for a completed store tracker.
 func NewHealth(tracker *Tracker, pool *db.Pool, log *logger.Logger) *Health {
-	return &Health{tracker: tracker, pool: pool, log: log, interval: defaultProbeInterval}
+	return &Health{
+		tracker: tracker, pool: pool, log: log,
+		interval: defaultProbeInterval, confirmationDelay: defaultConfirmationDelay,
+	}
 }
 
 // SetInterval changes the periodic interval. It is intended for tests and
@@ -66,6 +77,17 @@ func (h *Health) SetInterval(interval time.Duration) {
 	}
 }
 
+// SetConfirmationDelay changes the pause before a periodic SQLite deadline is
+// confirmed. It is intended for tests and controlled embedders; callers must
+// set it before Start.
+func (h *Health) SetConfirmationDelay(delay time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if delay > 0 {
+		h.confirmationDelay = delay
+	}
+}
+
 // Check runs one synchronous probe. It returns an aggregate error when one or
 // more stores are unavailable, while recording an independent result for each
 // catalog entry.
@@ -75,13 +97,20 @@ func (h *Health) Check(ctx context.Context) error {
 }
 
 func (h *Health) check(ctx context.Context) (*probeFailureDiagnostic, error) {
+	result, err := h.probe(ctx)
+	if err != nil {
+		return result.diagnostic, err
+	}
+	return result.diagnostic, h.record(result)
+}
+
+func (h *Health) probe(ctx context.Context) (probeResult, error) {
 	if h == nil || h.tracker == nil {
-		return nil, errors.New("required-store health tracker is unavailable")
+		return probeResult{}, errors.New("required-store health tracker is unavailable")
 	}
 	if h.pool == nil || h.pool.Writer() == nil || h.pool.Reader() == nil {
 		err := errors.New("database pool is unavailable")
-		diagnostic := h.failureDiagnostic("pool", 0, err, "")
-		return diagnostic, h.recordUnavailable(err)
+		return probeResult{storeErrors: repeatedError(len(h.tracker.catalog), err), diagnostic: h.failureDiagnostic("pool", 0, err, "")}, nil
 	}
 	diagnostic, probeErr := h.pingObserved(ctx)
 	results := make([]error, len(h.tracker.catalog))
@@ -99,22 +128,36 @@ func (h *Health) check(ctx context.Context) (*probeFailureDiagnostic, error) {
 			}
 		}
 	}
+	return probeResult{storeErrors: results, diagnostic: diagnostic}, nil
+}
+
+func repeatedError(count int, err error) []error {
+	results := make([]error, count)
+	for index := range results {
+		results[index] = err
+	}
+	return results
+}
+
+func (h *Health) record(result probeResult) error {
+	if h == nil || h.tracker == nil {
+		return errors.New("required-store health tracker is unavailable")
+	}
+	if len(result.storeErrors) != len(h.tracker.catalog) {
+		return errors.New("required-store probe returned an incomplete result")
+	}
 	var failures []error
-	for index, result := range results {
-		if err := h.tracker.RecordProbe(h.tracker.catalog[index].ID, result); err != nil {
+	for index, probeErr := range result.storeErrors {
+		if err := h.tracker.RecordProbe(h.tracker.catalog[index].ID, probeErr); err != nil {
 			failures = append(failures, err)
 			continue
 		}
-		if result != nil {
-			failures = append(failures, fmt.Errorf("%s: %w", h.tracker.catalog[index].ID, result))
+		if probeErr != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", h.tracker.catalog[index].ID, probeErr))
 		}
 	}
-	if len(failures) == 0 {
-		h.logTransition()
-		return nil, nil
-	}
 	h.logTransition()
-	return diagnostic, errors.Join(failures...)
+	return errors.Join(failures...)
 }
 
 // MarkUnavailable records a destructive database transition before the
@@ -139,18 +182,65 @@ func (h *Health) checkRuntime(ctx context.Context) (deferred bool, err error) {
 func (h *Health) checkRuntimeDetailed(
 	ctx context.Context,
 ) (deferred bool, diagnostic *probeFailureDiagnostic, err error) {
+	deferred, result, release, err := h.probeRuntime(ctx)
+	if release != nil {
+		defer release()
+	}
+	if deferred || err != nil {
+		return deferred, result.diagnostic, err
+	}
+	return false, result.diagnostic, h.record(result)
+}
+
+func (h *Health) probeRuntime(
+	ctx context.Context,
+) (deferred bool, result probeResult, release func(), err error) {
 	if h.isSQLite() {
-		release, ok := maintenance.ForPool(h.pool).TryAcquire()
+		var ok bool
+		release, ok = maintenance.ForPool(h.pool).TryAcquire()
 		if !ok {
 			if h.log != nil {
 				h.log.Debug("required persistence probe deferred during database maintenance")
 			}
-			return true, nil, nil
+			return true, probeResult{}, nil, nil
 		}
-		defer release()
 	}
-	diagnostic, err = h.check(ctx)
-	return false, diagnostic, err
+	result, err = h.probe(ctx)
+	return false, result, release, err
+}
+
+func (h *Health) shouldConfirm(result probeResult) bool {
+	if !h.isSQLite() || !h.Healthy() || len(result.storeErrors) == 0 {
+		return false
+	}
+	hasFailure := false
+	for _, err := range result.storeErrors {
+		if err == nil {
+			continue
+		}
+		hasFailure = true
+		if classifyProbeError(err) != probeErrorClassDeadline {
+			return false
+		}
+	}
+	return hasFailure
+}
+
+func (h *Health) confirmationDelayDuration() time.Duration {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.confirmationDelay
+}
+
+func waitForConfirmation(ctx context.Context, wait time.Duration) bool {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return ctx.Err() == nil
+	}
 }
 
 func (h *Health) isSQLite() bool {
@@ -268,7 +358,7 @@ func classifyProbeError(err error) string {
 	}
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
-		return "deadline_exceeded"
+		return probeErrorClassDeadline
 	case errors.Is(err, context.Canceled):
 		return "canceled"
 	case strings.Contains(message, "required table") && strings.Contains(message, "missing"):
@@ -306,6 +396,13 @@ func (h *Health) logProbeFailure(diagnostic *probeFailureDiagnostic) {
 		return
 	}
 	h.log.Warn("required persistence probe failed", diagnostic.logFields()...)
+}
+
+func (h *Health) logUnconfirmedDeadline(diagnostic *probeFailureDiagnostic) {
+	if h == nil || h.log == nil {
+		return
+	}
+	h.log.Warn("required persistence probe deadline unconfirmed", diagnostic.logFields()...)
 }
 
 func (h *Health) recordUnavailable(err error) error {
@@ -347,17 +444,52 @@ func (h *Health) run(ctx context.Context, interval time.Duration, done chan stru
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || !h.runProbeCycle(ctx) {
 				return
 			}
-			checkCtx, cancel := context.WithTimeout(ctx, probeTimeout)
-			_, diagnostic, err := h.checkRuntimeDetailed(checkCtx)
-			if err != nil {
-				h.logProbeFailure(diagnostic)
-			}
-			cancel()
 		}
 	}
+}
+
+func (h *Health) runProbeCycle(ctx context.Context) bool {
+	checkCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	deferred, result, release, err := h.probeRuntime(checkCtx)
+	cancel()
+	if deferred {
+		return true
+	}
+	if err != nil {
+		if release != nil {
+			release()
+		}
+		h.logProbeFailure(result.diagnostic)
+		return true
+	}
+	if h.shouldConfirm(result) {
+		if release != nil {
+			release()
+		}
+		h.logUnconfirmedDeadline(result.diagnostic)
+		if !waitForConfirmation(ctx, h.confirmationDelayDuration()) || ctx.Err() != nil {
+			return false
+		}
+		confirmCtx, confirmCancel := context.WithTimeout(ctx, probeTimeout)
+		deferred, result, release, err = h.probeRuntime(confirmCtx)
+		confirmCancel()
+		if deferred {
+			return true
+		}
+	}
+	if err == nil {
+		err = h.record(result)
+	}
+	if release != nil {
+		release()
+	}
+	if err != nil {
+		h.logProbeFailure(result.diagnostic)
+	}
+	return true
 }
 
 // Stop terminates the periodic probe loop.

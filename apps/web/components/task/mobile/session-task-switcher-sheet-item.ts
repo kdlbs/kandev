@@ -146,6 +146,7 @@ export function toSheetItem(
     ...status,
     interrupted: task.interrupted,
     description: task.description,
+    flagNote: task.flagNote,
     workflowId: task._workflowId,
     workflowName: ctx.workflowNameById.get(task._workflowId),
     workflowStepId: task.workflowStepId,

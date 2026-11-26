@@ -82,6 +82,7 @@ function projectLocalSidebarTask(
     overview: task,
     id: task.id,
     title: task.title,
+    flagNote: task.flagNote,
     state: task.state,
     workspaceId: task.workspaceId,
     workflowId: task.workflowId,

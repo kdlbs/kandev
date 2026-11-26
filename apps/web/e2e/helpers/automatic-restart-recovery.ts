@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
@@ -130,7 +130,7 @@ export async function verifyAutomaticRestartRecovery({
       );
     }
     withDatabase(backend.tmpDir, (db) => {
-      const state = recoveryCase === "failed-session-upgrade" ? "FAILED" : "WAITING_FOR_INPUT";
+      const state = restartSessionState(recoveryCase);
       const errorMessage = recoveryCase === "failed-session-upgrade" ? "Agent process exited" : "";
       db.prepare("UPDATE task_sessions SET state = ?, error_message = ? WHERE id = ?").run(
         state,
@@ -265,7 +265,10 @@ export async function verifyAutomaticRestartRecovery({
     );
     await setupPage(replacementPage, backend);
     await replacementPage.goto(`/t/${task.id}`);
-    capture = new PrAssetCapture(replacementPage, captureFile, { captureKey: recoveryCase });
+    const pageCapture = new PrAssetCapture(replacementPage, captureFile, {
+      captureKey: recoveryCase,
+    });
+    capture = pageCapture;
     const restoredChat = new SessionPage(replacementPage);
     await restoredChat.waitForLoad();
     await expect(replacementPage.getByTestId("session-recovery-notice")).toHaveCount(1);
@@ -277,7 +280,15 @@ export async function verifyAutomaticRestartRecovery({
     await expect(editor).toBeEditable();
     await expect(editor).toContainText("/slow 1s");
     await expect(restoredChat.submitButton()).toBeEnabled();
-    await capture.screenshot("restored-chat");
+    await captureRestoredTaskWarning({
+      page: replacementPage,
+      session: restoredChat,
+      taskTitle: task.title,
+      taskId: task.id,
+      api,
+      capture: pageCapture,
+      recoveryCase,
+    });
 
     await replacementPage.reload();
     await restoredChat.waitForLoad();
@@ -285,6 +296,7 @@ export async function verifyAutomaticRestartRecovery({
     await expect(
       restoredChat.activeChat().locator(".tiptap.ProseMirror:visible").first(),
     ).toContainText("/slow 1s");
+    await expectRestoredTaskWarning(recoveryCase, replacementPage, restoredChat, task.title);
     if (recoveryCase === "failed-session-upgrade") {
       const nativeAfterReload = getNativeSessionId((await api.getTaskSession(active.id)).session);
       expect(nativeAfterReload).toBe(nativeSessionId);
@@ -332,6 +344,15 @@ export async function verifyAutomaticRestartRecovery({
     expect(followUp).toHaveLength(1);
     expect(followUp[0].turn_id).toBeTruthy();
     await expect(replacementPage.getByTestId("session-recovery-notice")).toHaveCount(1);
+    await expectAcceptedPromptClearedTaskWarning({
+      recoveryCase,
+      page: replacementPage,
+      session: restoredChat,
+      api,
+      taskId: task.id,
+      taskTitle: task.title,
+      sessionId: active.id,
+    });
     if (independentSibling) {
       await replacementPage.goto(`/t/${independentSibling.taskId}`);
       const blockedSibling = new SessionPage(replacementPage);
@@ -346,6 +367,107 @@ export async function verifyAutomaticRestartRecovery({
     if (profileId) await api.deleteAgentProfile(profileId, true).catch(() => undefined);
     fs.rmSync(tracePath, { force: true });
   }
+}
+
+function restartSessionState(recoveryCase: RecoveryCase) {
+  if (recoveryCase === "failed-session-upgrade") return "FAILED";
+  if (recoveryCase === "ordinary-restart") return "RUNNING";
+  return "WAITING_FOR_INPUT";
+}
+
+async function captureRestoredTaskWarning({
+  page,
+  session,
+  taskTitle,
+  taskId,
+  api,
+  capture,
+  recoveryCase,
+}: {
+  page: Page;
+  session: SessionPage;
+  taskTitle: string;
+  taskId: string;
+  api: ApiClient;
+  capture: PrAssetCapture;
+  recoveryCase: RecoveryCase;
+}) {
+  if (recoveryCase !== "ordinary-restart") {
+    await capture.screenshot("restored-chat");
+    return;
+  }
+  const mobile = testIsMobile(page);
+  await expectRestartWarning(page, session, taskTitle, true, capture.capturing);
+  await expect.poll(async () => Boolean((await api.getTask(taskId)).interrupted)).toBe(true);
+  await capture.screenshot("interrupted-task-warning", {
+    caption: mobile
+      ? "Phone task switcher shows the interrupted task warning"
+      : "Desktop sidebar shows the interrupted task warning",
+  });
+  if (mobile && capture.capturing) await page.keyboard.press("Escape");
+}
+
+async function expectRestoredTaskWarning(
+  recoveryCase: RecoveryCase,
+  page: Page,
+  session: SessionPage,
+  taskTitle: string,
+) {
+  if (recoveryCase !== "ordinary-restart") return;
+  await expectRestartWarning(page, session, taskTitle, true);
+}
+
+async function expectAcceptedPromptClearedTaskWarning({
+  recoveryCase,
+  page,
+  session,
+  api,
+  taskId,
+  taskTitle,
+  sessionId,
+}: {
+  recoveryCase: RecoveryCase;
+  page: Page;
+  session: SessionPage;
+  api: ApiClient;
+  taskId: string;
+  taskTitle: string;
+  sessionId: string;
+}) {
+  if (recoveryCase !== "ordinary-restart") return;
+  await expect
+    .poll(async () => (await api.getTaskSession(sessionId)).session.state)
+    .toBe("WAITING_FOR_INPUT");
+  await expect.poll(async () => Boolean((await api.getTask(taskId)).interrupted)).toBe(false);
+  await expectRestartWarning(page, session, taskTitle, false);
+}
+
+async function expectRestartWarning(
+  page: Page,
+  session: SessionPage,
+  taskTitle: string,
+  visible: boolean,
+  keepMobileDrawerOpen = false,
+) {
+  const mobile = testIsMobile(page);
+  let row: Locator;
+  if (mobile) {
+    await page.getByTestId("mobile-task-picker-trigger").tap();
+    const drawer = page.getByRole("dialog", { name: "Tasks", exact: true });
+    row = drawer.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+  } else {
+    row = session.sidebarTaskItem(taskTitle);
+  }
+  const warning = row.getByTestId("task-state-interrupted");
+  if (visible) {
+    await expect(warning).toBeVisible();
+    await expect(row.getByLabel("Interrupted by restart", { exact: true })).toBeVisible();
+  } else {
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId("task-state-running")).toHaveCount(0);
+    await expect(warning).toHaveCount(0);
+  }
+  if (mobile && !keepMobileDrawerOpen) await page.keyboard.press("Escape");
 }
 
 async function createRestartRecoveryTask(

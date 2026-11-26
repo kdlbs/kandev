@@ -68,7 +68,7 @@ test("phone creates while another task streams and keeps the other task's saved 
     `[data-testid="sidebar-task-item"][data-task-row-id="${active.taskId}"]`,
   );
   await expect(activeRow).toBeVisible();
-  await activeRow.click({ button: "right" });
+  await activeRow.getByRole("button", { name: "Task actions" }).tap();
   const colorMenu = testPage.getByRole("menuitem", { name: /color/i });
   await expect(colorMenu).toBeVisible();
   await colorMenu.tap();

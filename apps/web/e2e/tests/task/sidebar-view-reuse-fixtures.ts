@@ -25,15 +25,15 @@ function deferredVoid() {
   return { promise, resolve };
 }
 
-/** Resolves when any single sidebar query reaches its fifth rejected attempt. */
-function sidebarFailureBarrier() {
+/** Resolves when a sidebar query reaches the final failure in its recovery schedule. */
+function sidebarFailureBarrier(finalAttempt = 5) {
   const counts = new Map<string, number>();
   const exhausted = deferredVoid();
   const count = (body: unknown) => {
     const key = JSON.stringify(body);
     const attempts = (counts.get(key) ?? 0) + 1;
     counts.set(key, attempts);
-    if (attempts === 5) exhausted.resolve();
+    if (attempts === finalAttempt) exhausted.resolve();
   };
   return { count, exhausted: exhausted.promise };
 }
@@ -183,7 +183,7 @@ async function verifySidebarViewReuse(
 
   const arrived = gate(),
     release = gate();
-  const refreshFailures = sidebarFailureBarrier();
+  const refreshFailures = sidebarFailureBarrier(9);
   let failRefresh = false;
   await page.bringToFront();
   await page.route("**/sidebar/query", async (route) => {

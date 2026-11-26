@@ -595,6 +595,8 @@ separate backend services. Omitted fields and JSON `null` retain current values;
 empty strings keep the field's existing clear behavior, and `repositories: []` clears
 repository associations.
 
+Supply `flag_note` to set the plain-text note on the sidebar flag. The server trims outer whitespace. An empty string removes the flag.
+
 A supplied `metadata` object retains the existing replacement or pending-title merge
 behavior. It does not merge arbitrary keys from competing requests. Server-owned
 lifecycle and handoff records remain protected, and an explicit title resolves pending

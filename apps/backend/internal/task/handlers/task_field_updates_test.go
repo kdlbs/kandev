@@ -129,8 +129,10 @@ func (f fieldProtocolFixture) request(ctx context.Context, transport string, pay
 }
 
 // @covers AC-TASKS-FIELD-UPDATES-001.1, AC-TASKS-FIELD-UPDATES-001.2, AC-TASKS-FIELD-UPDATES-001.3, AC-TASKS-FIELD-UPDATES-001.7
+// @covers AC-TASKS-SIDEBAR-FLAGS-001.1, AC-TASKS-SIDEBAR-FLAGS-001.3, AC-TASKS-SIDEBAR-FLAGS-001.4
 func TestTaskFieldUpdatesRegisteredProtocols(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	const flagNote = "Review the release notes\nfirst."
 	for _, titleTransport := range []string{"REST", "WS"} {
 		for _, first := range []int{0, 1} {
 			t.Run(fmt.Sprintf("title_%s_first_%d", titleTransport, first), func(t *testing.T) {
@@ -142,7 +144,7 @@ func TestTaskFieldUpdatesRegisteredProtocols(t *testing.T) {
 				if titleTransport == "REST" {
 					transports[1] = "WS"
 				}
-				payloads := []map[string]interface{}{{"title": "Concurrent title"}, {"description": "Concurrent description"}}
+				payloads := []map[string]interface{}{{"title": "Concurrent title"}, {"description": "Concurrent description", "flag_note": "  " + flagNote + "  "}}
 				type outcome struct {
 					body map[string]interface{}
 					ok   bool
@@ -178,38 +180,45 @@ func TestTaskFieldUpdatesRegisteredProtocols(t *testing.T) {
 					if n == 1 {
 						require.Equal(t, "Concurrent title", result.body["title"])
 						require.Equal(t, "Concurrent description", result.body["description"])
+						require.Equal(t, flagNote, result.body["flag_note"])
 					}
 					require.Len(t, pair[i].published, 1)
 					e := <-pair[i].published
 					data := e.Data.(map[string]interface{})
 					require.Equal(t, result.body["title"], data["title"])
 					require.Equal(t, result.body["description"], data["description"])
+					require.Equal(t, result.body["flag_note"], data["flag_note"])
 				}
 				workers.Wait()
 				current, err := pair[0].gate.Repository.GetTask(ctx, "protocol-fields")
 				require.NoError(t, err)
 				require.Equal(t, "Concurrent title", current.Title)
 				require.Equal(t, "Concurrent description", current.Description)
+				require.Equal(t, flagNote, current.FlagNote)
 				for _, transport := range []string{"REST", "WS"} {
 					body, ok, err := pair[0].request(ctx, transport, map[string]interface{}{"title": nil, "description": nil, "metadata": nil, "repositories": nil, "parent_id": nil, "assignee_user_id": nil})
 					require.NoError(t, err)
 					require.True(t, ok, body)
 					require.Equal(t, current.Title, body["title"])
 					require.Equal(t, current.Description, body["description"])
+					require.Equal(t, flagNote, body["flag_note"])
 					<-pair[0].published
-					body, ok, err = pair[0].request(ctx, transport, map[string]interface{}{"title": "", "description": "", "metadata": map[string]interface{}{}, "repositories": []interface{}{}, "parent_id": "", "assignee_user_id": ""})
+					body, ok, err = pair[0].request(ctx, transport, map[string]interface{}{"title": "", "description": "", "flag_note": "", "metadata": map[string]interface{}{}, "repositories": []interface{}{}, "parent_id": "", "assignee_user_id": ""})
 					require.NoError(t, err)
 					require.True(t, ok, body)
 					require.Equal(t, "", body["title"])
 					require.Equal(t, "", body["description"])
+					require.Equal(t, "", body["flag_note"])
 					event := <-pair[0].published
 					data := event.Data.(map[string]interface{})
 					require.Equal(t, "", data["title"])
+					require.Equal(t, "", data["flag_note"])
 					persisted, err := pair[0].gate.Repository.GetTask(ctx, "protocol-fields")
 					require.NoError(t, err)
 					require.Empty(t, persisted.Metadata)
 					require.Empty(t, persisted.Repositories)
 					require.Empty(t, persisted.AssigneeUserID)
+					require.Empty(t, persisted.FlagNote)
 					current = persisted
 					body, ok, err = pair[0].request(ctx, transport, map[string]interface{}{"title": "Must reject", "priority": "invalid"})
 					require.NoError(t, err)
@@ -219,8 +228,46 @@ func TestTaskFieldUpdatesRegisteredProtocols(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, current.Title, persisted.Title)
 					require.True(t, current.UpdatedAt.Equal(persisted.UpdatedAt))
+					body, ok, err = pair[0].request(ctx, transport, map[string]interface{}{"flag_note": flagNote})
+					require.NoError(t, err)
+					require.True(t, ok, body)
+					require.Equal(t, flagNote, body["flag_note"])
+					<-pair[0].published
 				}
 			})
 		}
+	}
+}
+
+func TestTaskFlagNoteLengthInRegisteredProtocols(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	pair := fieldProtocolPair(t)
+	fixture := pair[0]
+	const taskID = "protocol-fields"
+	maximum := strings.Repeat("🙂", 512)
+	for _, transport := range []string{"REST", "WS"} {
+		t.Run(transport, func(t *testing.T) {
+			ctx := t.Context()
+			body, ok, err := fixture.request(ctx, transport, map[string]interface{}{"flag_note": " " + maximum + " "})
+			require.NoError(t, err)
+			require.True(t, ok, body)
+			require.Equal(t, maximum, body["flag_note"])
+			<-fixture.published
+
+			body, ok, err = fixture.request(ctx, transport, map[string]interface{}{
+				"flag_note": maximum + "x", "title": "Must not change",
+			})
+			require.NoError(t, err)
+			require.False(t, ok, body)
+			if transport == "WS" {
+				require.Equal(t, ws.ErrorCodeValidation, body["code"])
+			}
+			require.Empty(t, fixture.published)
+
+			persisted, err := fixture.gate.Repository.GetTask(ctx, taskID)
+			require.NoError(t, err)
+			require.Equal(t, maximum, persisted.FlagNote)
+			require.Equal(t, "Original", persisted.Title)
+		})
 	}
 }
