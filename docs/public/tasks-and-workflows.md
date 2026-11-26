@@ -1139,9 +1139,9 @@ Expand **Task row** in sidebar filters to choose the details shown below each ti
 
 To flag a task, right-click its sidebar row and choose **Add flag**. Enter a note and choose **Save**. A red flag appears beside the title. Anyone who can see the task can read the note. The limit is 1,024 UTF-16 code units. Most characters count as one unit, and many emoji count as two or more.
 
-On desktop, hover over the flag to read or edit the note in place. Choose **Save** to keep your edits or **Cancel** to discard them. You can also right-click the row and choose **Change flag** → **Edit flag**. To clear the flag immediately, choose **Change flag** → **Remove flag**.
+To read a saved note, hover over the flag or focus it with the keyboard on desktop. On a phone, tap the flag. Both previews are read-only.
 
-On a phone, tap a flag to edit its note. The row’s **Task actions** menu also offers **Add flag** or **Change flag**.
+To edit a note, right-click the row on desktop or open **Task actions** on a phone. Choose **Change flag** → **Edit flag**, then **Save** or **Cancel**. To clear the flag immediately, choose **Change flag** → **Remove flag**. For an unflagged task, the phone’s **Task actions** menu offers **Add flag**.
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 

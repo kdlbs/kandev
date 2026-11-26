@@ -1,4 +1,4 @@
-import { useCallback, useId, useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
@@ -70,7 +70,7 @@ export function TaskFlagEditor({
   );
 }
 
-export function useTaskFlagDraft(
+function useTaskFlagDraft(
   savedNote: string,
   onSubmit: (note: string) => Promise<void>,
   onClose: () => void,
@@ -81,11 +81,6 @@ export function useTaskFlagDraft(
   const submitting = useRef(false);
   const trimmedNote = note.trim();
   const canSave = Boolean(trimmedNote) && note.length <= TASK_FLAG_NOTE_MAX_LENGTH;
-
-  const reset = useCallback((saved: string) => {
-    setNote(saved);
-    setFailed(false);
-  }, []);
 
   const close = () => {
     if (!submitting.current) onClose();
@@ -110,14 +105,14 @@ export function useTaskFlagDraft(
     if (canSave) void submit(trimmedNote);
   };
 
-  return { note, setNote, failed, saving, canSave, close, reset, submitting, handleSubmit };
+  return { note, setNote, failed, saving, canSave, close, handleSubmit };
 }
 
-export function TaskFlagForm({
+function TaskFlagForm({
   draft: { note, setNote, failed, saving, canSave, close, handleSubmit },
   touch = false,
 }: {
-  draft: Omit<ReturnType<typeof useTaskFlagDraft>, "setNote"> & { setNote: (text: string) => void };
+  draft: ReturnType<typeof useTaskFlagDraft>;
   touch?: boolean;
 }) {
   const { t } = useTranslation();

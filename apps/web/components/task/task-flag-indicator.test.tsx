@@ -2,7 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { TaskFlagIndicator } from "./task-flag-indicator";
-import { TaskFlagEditorProvider } from "./task-flag-editor-provider";
+import { TaskFlagEditorProvider, useOpenTaskFlag } from "./task-flag-editor-provider";
+import type { TaskSwitcherItem } from "./task-switcher-types";
 
 const saveFlag = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/use-save-task-flag", () => ({ useSaveTaskFlag: () => saveFlag }));
@@ -11,49 +12,56 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => viewport,
 }));
 
+const task: TaskSwitcherItem = {
+  id: "flagged-task",
+  title: "Review release notes",
+  state: "IN_PROGRESS",
+  flagNote: "Saved note",
+};
+
+function Flag() {
+  const open = useOpenTaskFlag();
+  return (
+    <TaskFlagIndicator note={task.flagNote!} onOpen={(invoker) => open?.(task, invoker, true)} />
+  );
+}
+
+function renderFlag() {
+  render(
+    <TooltipProvider>
+      <TaskFlagEditorProvider>
+        <Flag />
+      </TaskFlagEditorProvider>
+    </TooltipProvider>,
+  );
+  return screen.getByRole("button", { name: "Flag" });
+}
+
 afterEach(() => {
   cleanup();
   viewport.isMobile = false;
   saveFlag.mockReset();
 });
 
-it("lets keyboard focus reveal the note and Tab enter the editor", async () => {
-  render(
-    <TooltipProvider>
-      <TaskFlagEditorProvider>
-        <TaskFlagIndicator taskId="flagged-task" note="Saved note" onOpen={() => {}} />
-      </TaskFlagEditorProvider>
-    </TooltipProvider>,
-  );
-  const flag = screen.getByRole("button", { name: "Flag" });
+it("reveals just the note when the flag receives keyboard focus", async () => {
+  const flag = renderFlag();
   flag.focus();
-  const note = await screen.findByRole("textbox", { name: "Flag note" });
+  expect((await screen.findByRole("tooltip")).textContent).toBe(task.flagNote);
   expect(document.activeElement).toBe(flag);
-  fireEvent.keyDown(flag, { key: "Tab" });
-  expect(document.activeElement).toBe(note);
-  fireEvent.change(note, { target: { value: "A new note" } });
-  fireEvent.keyDown(note, { key: "Escape" });
-  await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
-  await waitFor(() => expect(document.activeElement).toBe(flag));
-  expect(fireEvent.keyDown(flag, { key: "Tab" })).toBe(true);
+  fireEvent.click(flag);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByRole("textbox")).toBeNull();
   expect(saveFlag).not.toHaveBeenCalled();
 });
 
-it("keeps a desktop draft across a phone layout visit without saving", async () => {
-  const indicator = () => (
-    <TaskFlagEditorProvider>
-      <TaskFlagIndicator taskId="flagged-task" note="Saved note" onOpen={() => {}} />
-    </TaskFlagEditorProvider>
-  );
-  const view = render(indicator());
-  screen.getByRole("button", { name: "Flag" }).focus();
-  fireEvent.change(await screen.findByRole("textbox"), { target: { value: "Unsaved edit" } });
+it("opens the read-only flag drawer from a phone tap", async () => {
   viewport.isMobile = true;
-  view.rerender(indicator());
+  const flag = renderFlag();
+  fireEvent.click(flag);
+  const drawer = await screen.findByRole("dialog", { name: "Flag" });
+  expect(drawer.textContent).toContain(task.flagNote);
   expect(screen.queryByRole("textbox")).toBeNull();
-  viewport.isMobile = false;
-  view.rerender(indicator());
-  screen.getByRole("button", { name: "Flag" }).focus();
-  expect((await screen.findByRole<HTMLInputElement>("textbox")).value).toBe("Unsaved edit");
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(saveFlag).not.toHaveBeenCalled();
 });

@@ -47,42 +47,44 @@ test("adds, reads, edits, and removes a flag on another sidebar task", async ({
   await expect(editor).toBeHidden();
   const row = sidebar.row(target.task_id);
   const flag = row.getByRole("button", { name: "Flag", exact: true });
-  const popover = testPage.getByRole("dialog", { name: "Edit flag" });
-  const popoverNote = popover.getByRole("textbox", { name: "Flag note" });
-  const popoverSave = popover.getByRole("button", { name: "Save", exact: true });
+  const tooltip = testPage.getByRole("tooltip");
+  const editDialog = testPage.getByRole("dialog", { name: "Edit flag", exact: true });
+  const editNote = editDialog.getByRole("textbox", { name: "Flag note" });
+  const editSave = editDialog.getByRole("button", { name: "Save", exact: true });
 
   await flag.hover();
-  await expect(popoverNote).toHaveValue(initialNote);
-  await popoverNote.hover();
-  await expect(popoverNote).toBeVisible();
-  await popoverNote.fill(updatedNote);
+  await expect(tooltip).toHaveText(initialNote);
+  await expect(editor).toBeHidden();
+
+  await sidebar.rightClick(target.task_id);
+  await sidebar.menuItem("Change flag").hover();
+  await sidebar.menuItem("Edit flag").click();
+  await expect(editDialog).toHaveAttribute("data-slot", "dialog-content");
+  await expect(editNote).toHaveValue(initialNote);
+  await expect(editNote).toBeFocused();
+  await editNote.fill(updatedNote);
   await failNextSidebarFlagWrite(testPage, target.task_id);
-  await popoverSave.click();
-  await expect(popover.getByRole("alert")).toContainText("Could not update the flag");
-  await expect(popoverNote).toHaveValue(updatedNote);
-  await writeSidebarFlag(testPage, target.task_id, updatedNote, () => popoverSave.click());
-  await expect(popover).toBeHidden();
+  await editSave.click();
+  await expect(editDialog.getByRole("alert")).toContainText("Could not update the flag");
+  await expect(editNote).toHaveValue(updatedNote);
+  await writeSidebarFlag(testPage, target.task_id, updatedNote, () => editSave.click());
+  await expect(editDialog).toBeHidden();
 
   await testPage.reload();
   await row.focus();
   await testPage.keyboard.press("Tab");
   await expect(flag).toBeFocused();
-  await expect(popoverNote).toHaveValue(updatedNote);
-  await testPage.keyboard.press("Tab");
-  await expect(popoverNote).toBeFocused();
-  await testPage.keyboard.press("Escape");
-  await expect(popover).toBeHidden();
-  await expect(flag).toBeFocused();
+  await expect(tooltip).toHaveText(updatedNote);
+  await flag.press("Enter");
+  await expect(editor).toBeHidden();
 
   await sidebar.rightClick(target.task_id);
   await sidebar.menuItem("Change flag").hover();
   await sidebar.menuItem("Edit flag").click();
-  await expect(popover).toHaveAttribute("data-slot", "popover-content");
-  await expect(popoverNote).toHaveValue(updatedNote);
-  await expect(popoverNote).toBeFocused();
-  await popoverNote.fill("Discard this edit");
-  await popover.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(popover).toBeHidden();
+  await expect(editNote).toHaveValue(updatedNote);
+  await editNote.fill("Discard this edit");
+  await editDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(editDialog).toBeHidden();
   await expect(row).toBeFocused();
   await expect
     .poll(async () => (await apiClient.getTask(target.task_id)).flag_note)
@@ -99,7 +101,7 @@ test("adds, reads, edits, and removes a flag on another sidebar task", async ({
   await writeSidebarFlag(testPage, target.task_id, "", () =>
     sidebar.menuItem("Remove flag").click(),
   );
-  await expect(popover).toBeHidden();
+  await expect(editDialog).toBeHidden();
   await expect(flag).toHaveCount(0);
   await sidebar.rightClick(target.task_id);
   await expect(sidebar.menuItem("Add flag")).toBeVisible();

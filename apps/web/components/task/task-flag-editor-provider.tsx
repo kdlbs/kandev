@@ -1,12 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useSaveTaskFlag } from "@/hooks/use-save-task-flag";
 import { TaskFlagEditor } from "./task-flag-editor";
@@ -17,22 +9,8 @@ export type OpenTaskFlag = (
   invoker: HTMLElement | null,
   readOnly?: boolean,
 ) => void;
-type OpenTaskFlagPopover = (invoker: HTMLElement | null) => void;
-
-type TaskFlagContextValue = {
-  open: OpenTaskFlag;
-  save: ReturnType<typeof useSaveTaskFlag>;
-  restoreFocus: (...targets: Array<HTMLElement | null>) => void;
-  registerPopover: (anchor: HTMLElement, open: OpenTaskFlagPopover) => (() => void) | undefined;
-};
-
-const TaskFlagContext = createContext<TaskFlagContextValue | undefined>(undefined);
-export const useTaskFlagEditorContext = () => useContext(TaskFlagContext);
-export const useOpenTaskFlag = () => useTaskFlagEditorContext()?.open;
-
-function flagRow(element: HTMLElement | null) {
-  return element?.closest<HTMLElement>("[data-slot='context-menu-trigger']");
-}
+const TaskFlagContext = createContext<OpenTaskFlag | undefined>(undefined);
+export const useOpenTaskFlag = () => useContext(TaskFlagContext);
 
 export function TaskFlagEditorProvider({
   children,
@@ -52,24 +30,10 @@ export function TaskFlagEditorProvider({
     readOnly: boolean;
   } | null>(null);
   const closing = useRef(false);
-  const popovers = useRef(new WeakMap<HTMLElement, OpenTaskFlagPopover>());
-  const registerPopover = useCallback<TaskFlagContextValue["registerPopover"]>((anchor, open) => {
-    const row = flagRow(anchor);
-    if (!row) return;
-    popovers.current.set(row, open);
-    return () => popovers.current.delete(row);
-  }, []);
-  const save = useSaveTaskFlag();
+  const saveTaskFlag = useSaveTaskFlag();
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
-  const touch = isMobile || !isFinePointer;
   const open = useCallback<OpenTaskFlag>(
     (task, invoker, readOnly = false) => {
-      const row = flagRow(invoker);
-      const openPopover = !touch && task.flagNote && row && popovers.current.get(row);
-      if (openPopover) {
-        openPopover(invoker);
-        return;
-      }
       closing.current = false;
       onHandoff?.(true);
       setTarget({
@@ -79,35 +43,19 @@ export function TaskFlagEditorProvider({
         readOnly,
       });
     },
-    [onHandoff, touch],
+    [onHandoff],
   );
 
-  const restoreFocus = useCallback(
-    (...targets: Array<HTMLElement | null>) => {
-      const fallback = focusFallback?.current;
-      const target = [...targets, fallback].find(
-        (element) => element?.isConnected && element !== document.body,
-      );
-      (target ?? document.querySelector<HTMLElement>(fallbackSelector))?.focus({
-        preventScroll: true,
-      });
-    },
-    [fallbackSelector, focusFallback],
-  );
-  const context = useMemo(
-    () => ({ open, save, registerPopover, restoreFocus }),
-    [open, save, registerPopover, restoreFocus],
-  );
   return (
-    <TaskFlagContext.Provider value={context}>
+    <TaskFlagContext.Provider value={open}>
       {children}
       {target && (
         <TaskFlagEditor
           key={target.task.id}
           savedNote={target.task.flagNote ?? ""}
           readOnly={target.readOnly}
-          touch={touch}
-          onSubmit={(note) => save(target.task.id, note)}
+          touch={isMobile || !isFinePointer}
+          onSubmit={(note) => saveTaskFlag(target.task.id, note)}
           onClose={() => {
             closing.current = true;
             setTarget(null);
@@ -116,7 +64,13 @@ export function TaskFlagEditorProvider({
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             if (!closing.current) return;
-            restoreFocus(target.invoker, target.row);
+            const fallback = focusFallback?.current;
+            const focusTarget = [target.invoker, target.row, fallback].find(
+              (element) => element?.isConnected && element !== document.body,
+            );
+            (focusTarget ?? document.querySelector<HTMLElement>(fallbackSelector))?.focus({
+              preventScroll: true,
+            });
           }}
         />
       )}
