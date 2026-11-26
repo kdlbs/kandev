@@ -165,7 +165,7 @@ func TestTaskInterruptionPromptAcceptance(t *testing.T) {
 		ctx := context.Background()
 		repo, svc, manager, session := newInterruptionPromptFixture(t, "task-new-legacy", "session-new-legacy")
 		legacy := "2026-11-24T10:00:00Z"
-		newer := "2026-11-26T10:00:00Z"
+		newer := time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
 		require.NoError(t, repo.SetTaskMetadataKey(ctx, "task-new-legacy", models.MetaKeyInterruptedAt, legacy))
 		sibling := createInterruptionPromptSession(t, repo, "task-new-legacy", "session-new-legacy-sibling")
 		targetMarker := addInterruptedSessionMarker(t, repo, "task-new-legacy", session)
