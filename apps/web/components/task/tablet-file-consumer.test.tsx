@@ -33,6 +33,7 @@ import {
 import { useTabletFileRequest } from "./task-center-panel-state";
 
 const OPEN_TREE_FILE = "Open tree file";
+const CHAT_TAB = "chat";
 const data = vi.hoisted(() => ({
   client: {},
   read: vi.fn(),
@@ -158,17 +159,30 @@ afterEach(() => {
   data.open = null;
   data.files.clear();
 });
+it("falls back from a saved PR tab to Chat when the task has no linked reviews", async () => {
+  setActiveTabForSession("B", "pr");
+  setup();
+
+  await waitFor(() => {
+    expect(store.getState().tabletSession.activeTabBySessionId.B).toBe(CHAT_TAB);
+  });
+  expect(getActiveTabForSession("B", CHAT_TAB)).toBe(CHAT_TAB);
+  expect(
+    screen.getByRole("tab", { name: new RegExp(CHAT_TAB, "i") }).getAttribute("aria-selected"),
+  ).toBe("true");
+});
+
 it("does not let an older Files-tree reply replace newer tablet Chat", async () => {
   const reply = Promise.withResolvers<{ content: string }>();
   data.read.mockReturnValue(reply.promise);
   setup();
   fireEvent.click(screen.getByRole("button", { name: OPEN_TREE_FILE }));
-  act(() => choose("chat"));
+  act(() => choose(CHAT_TAB));
   await act(async () => {
     reply.resolve({ content: "old tree reply" });
     await treeOpening;
   });
-  expect(store.getState().tabletSession.activeTabBySessionId.B).toBe("chat");
+  expect(store.getState().tabletSession.activeTabBySessionId.B).toBe(CHAT_TAB);
   expect(getOpenFileTabs("B")).toEqual([]);
   data.read.mockResolvedValue({ content: "fresh tree reply" });
   fireEvent.click(screen.getByRole("button", { name: OPEN_TREE_FILE }));
@@ -199,7 +213,7 @@ it("selects the current repo alias and preserves its dirty buffer when a winning
     await opening;
   });
   expect(store.getState().tabletSession.activeTabBySessionId.B).toBe(`file:${key}`);
-  expect(getActiveTabForSession("B", "chat")).toBe(`file:${key}`);
+  expect(getActiveTabForSession("B", CHAT_TAB)).toBe(`file:${key}`);
   expect(data.files.get(key)!.file).toMatchObject({ content: "unsaved draft", isDirty: true });
   expect(screen.getByRole("tab", { name: /F.txt/ }).getAttribute("data-state")).toBe("active");
 });
@@ -216,7 +230,7 @@ it("keeps initial Changes while Git evidence is pending, then accepts nonempty e
       </TooltipProvider>
     </StateProvider>,
   );
-  expect(getActiveTabForSession("B", "chat")).toBe("changes");
+  expect(getActiveTabForSession("B", CHAT_TAB)).toBe("changes");
   expect(screen.getByRole("tab", { name: /All changes/i }).getAttribute("data-state")).toBe(
     "active",
   );
@@ -232,8 +246,8 @@ it("falls back only after ready-empty Git evidence and preserves newer explicit 
       </TooltipProvider>
     </StateProvider>,
   );
-  await waitFor(() => expect(getActiveTabForSession("B", "changes")).toBe("chat"));
-  act(() => choose("chat"));
+  await waitFor(() => expect(getActiveTabForSession("B", "changes")).toBe(CHAT_TAB));
+  act(() => choose(CHAT_TAB));
   readyGit({ "F.txt": {} });
   view.rerender(
     <StateProvider>
@@ -242,7 +256,7 @@ it("falls back only after ready-empty Git evidence and preserves newer explicit 
       </TooltipProvider>
     </StateProvider>,
   );
-  expect(store.getState().tabletSession.activeTabBySessionId.B).toBe("chat");
+  expect(store.getState().tabletSession.activeTabBySessionId.B).toBe(CHAT_TAB);
 });
 
 it.each(
@@ -274,7 +288,9 @@ it.each(
       await opening;
     });
     const fileKey = `file:${getFileTabKey({ path: openPath })}`;
-    expect(store.getState().tabletSession.activeTabBySessionId.B).toBe(success ? "chat" : fileKey);
+    expect(store.getState().tabletSession.activeTabBySessionId.B).toBe(
+      success ? CHAT_TAB : fileKey,
+    );
     expect(getOpenFileTabs("B").map((tab) => tab.path)).toEqual(success ? [] : [openPath]);
     data.read.mockResolvedValue({ content: "recreated file" });
     await act(async () => {
@@ -320,13 +336,13 @@ it.each([false, true])(
     act(() => {
       creating = createFile("new.txt");
     });
-    if (superseded) act(() => choose("chat"));
+    if (superseded) act(() => choose(CHAT_TAB));
     await act(async () => {
       reply.resolve({ success: true });
       expect(await creating).toBe(true);
     });
     expect(store.getState().tabletSession.activeTabBySessionId.B).toBe(
-      superseded ? "chat" : `file:${getFileTabKey({ path: "new.txt" })}`,
+      superseded ? CHAT_TAB : `file:${getFileTabKey({ path: "new.txt" })}`,
     );
     expect(getOpenFileTabs("B").map((tab) => tab.path)).toEqual(superseded ? [] : ["new.txt"]);
   },
@@ -358,7 +374,7 @@ it.each([false, true])(
       });
       await waitFor(() =>
         expect(store.getState().tabletSession.activeTabBySessionId.B).toBe(
-          success ? `file:${getFileTabKey({ path: "F.txt" })}` : "chat",
+          success ? `file:${getFileTabKey({ path: "F.txt" })}` : CHAT_TAB,
         ),
       );
     } finally {
@@ -371,7 +387,7 @@ it.each([false, true])(
   "rechecks a delivered file at consumer publication (deleted=%s)",
   async (deleted) => {
     const app = createAppStore();
-    app.getState().setTabletSessionTab("B", "chat");
+    app.getState().setTabletSessionTab("B", CHAT_TAB);
     const file: OpenFileTab = {
       path: "F.txt",
       name: "F.txt",
@@ -397,7 +413,7 @@ it.each([false, true])(
     if (deleted) captureTabletFileDeletion(app, "B", "F.txt")();
     await act(async () => {});
     expect(app.getState().tabletSession.activeTabBySessionId.B).toBe(
-      deleted ? "chat" : `file:${getFileTabKey(file)}`,
+      deleted ? CHAT_TAB : `file:${getFileTabKey(file)}`,
     );
     expect(acknowledged).toBe(1);
   },
