@@ -29,6 +29,7 @@ export type StepDef = {
 export type TaskLinkHandler = (taskId: string, taskTitle?: string) => void;
 
 export type TaskSwitcherItem = {
+  flagNote?: string;
   id: string;
   title: string;
   autopilot?: boolean;

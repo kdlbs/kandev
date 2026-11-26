@@ -1137,6 +1137,10 @@ When tasks are grouped, expand **Group by** and use **Indent grouped tasks** to 
 
 Expand **Task row** in sidebar filters to choose the details shown below each title and the value on the right. Choose **Nothing** on the right to hide change-request status icons; pull request numbers remain available as a separate detail. The task actions menu remains available.
 
+To flag a task, right-click its sidebar row and choose **Add flag**. Enter a note and choose **Save**. A small red flag appears beside the title. Hover over the flag or focus it with the keyboard to read the note. Choose **Flag** from the row menu to open the editor. Edit and save the note, or choose **Remove flag** in the editor to clear it. The note is shared with everyone who can see the task. It can contain up to 1,024 UTF-16 code units. Most characters count as one unit, and many emoji count as two or more.
+
+On a phone, open **Task actions** on the row to add a flag. Tap a saved flag to read or change its note.
+
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 
 An active plugin can add **Plugin groupings** to the saved-view selector. On a

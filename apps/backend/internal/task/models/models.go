@@ -1673,6 +1673,7 @@ type Task struct {
 	WorkflowAgentOverrides *WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
 	Title                  string                  `json:"title"`
 	Description            string                  `json:"description"`
+	FlagNote               string                  `json:"flag_note"`
 	State                  v1.TaskState            `json:"state"`
 	Priority               string                  `json:"priority"`
 	Position               int                     `json:"position"` // Order within workflow step
@@ -3957,6 +3958,7 @@ func (t *Task) ToAPI() *v1.Task {
 		WorkflowID:             t.WorkflowID,
 		Title:                  t.Title,
 		Description:            t.Description,
+		FlagNote:               t.FlagNote,
 		State:                  t.State,
 		Priority:               t.Priority,
 		Repositories:           repositories,

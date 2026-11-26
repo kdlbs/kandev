@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -39,6 +40,7 @@ func TestMigrate_PriorityRebuildPreservesAssignmentGeneration(t *testing.T) {
 			workflow_step_id TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL,
 			description TEXT DEFAULT '',
+			flag_note TEXT NOT NULL DEFAULT '',
 			state TEXT DEFAULT 'TODO',
 			priority INTEGER DEFAULT 0,
 			position INTEGER DEFAULT 0,
@@ -60,8 +62,8 @@ func TestMigrate_PriorityRebuildPreservesAssignmentGeneration(t *testing.T) {
 		t.Fatalf("seed legacy schema: %v", err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO tasks (id, workspace_id, title, assignment_generation, executor_actor_user_id)
-		VALUES ('task-1', 'ws-1', 'reassigned task', 3, 'alice')
+		INSERT INTO tasks (id, workspace_id, title, assignment_generation, executor_actor_user_id, flag_note, created_at, updated_at)
+		VALUES ('task-1', 'ws-1', 'reassigned task', 3, 'alice', 'Keep this note', '2024-01-02 03:04:05', '2024-01-02 03:04:06')
 	`); err != nil {
 		t.Fatalf("seed reassigned task: %v", err)
 	}
@@ -73,6 +75,12 @@ func TestMigrate_PriorityRebuildPreservesAssignmentGeneration(t *testing.T) {
 	var actor string
 	if err := db.Get(&actor, `SELECT executor_actor_user_id FROM tasks WHERE id = 'task-1'`); err != nil || actor != "alice" {
 		t.Fatalf("executor actor lost after priority rebuild: %q, %v", actor, err)
+	}
+	var note string
+	var createdAt, updatedAt time.Time
+	err = db.QueryRow(`SELECT flag_note, created_at, updated_at FROM tasks WHERE id = 'task-1'`).Scan(&note, &createdAt, &updatedAt)
+	if err != nil || note != "Keep this note" || !createdAt.Equal(time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)) || !updatedAt.Equal(time.Date(2024, 1, 2, 3, 4, 6, 0, time.UTC)) {
+		t.Fatalf("priority rebuild lost task flag or timestamps: %q %v %v, %v", note, createdAt, updatedAt, err)
 	}
 	var generation int64
 	if err := db.Get(&generation, `SELECT assignment_generation FROM tasks WHERE id = 'task-1'`); err != nil {
