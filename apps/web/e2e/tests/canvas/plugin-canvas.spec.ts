@@ -10,6 +10,7 @@ import {
   enableCanvasFeature,
   expectCanvasFrameFillsHost,
   listCanvasReleases,
+  readCanvasFeature,
   removeCanvas,
   removeCanvasSource,
   seedCanvasWorkspacePreview,
@@ -21,6 +22,27 @@ import {
 test.use({ trace: "retain-on-failure" });
 
 test.describe("Plugin-backed canvases in the desktop task workbench", () => {
+  test("hides canvas routes and navigation after an explicit opt-out", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    const restore = await backend.useEnv({ KANDEV_FEATURES_CANVASES: "false" });
+    try {
+      await testPage.goto(`/?workspaceId=${encodeURIComponent(seedData.workspaceId)}`);
+      await expect(testPage.getByTestId("kanban-board")).toBeVisible();
+      await expect(testPage.getByRole("button", { name: /canvases/i })).toHaveCount(0);
+      const response = await apiClient.rawRequest(
+        "GET",
+        `/api/v1/workspaces/${encodeURIComponent(seedData.workspaceId)}/canvases`,
+      );
+      expect(response.status).toBe(404);
+    } finally {
+      await restore();
+    }
+  });
+
   test("canvas setup opens the task dialog directly from the empty sidebar", async ({
     testPage,
     apiClient,
@@ -144,12 +166,11 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
   test("discovers and operates an owner-created task canvas from the workbench", async ({
     testPage,
     apiClient,
-    backend,
     seedData,
   }) => {
     test.setTimeout(150_000);
 
-    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    expect(await readCanvasFeature(apiClient)).toBe(true);
     let canvasId: string | undefined;
     let workspacePreview: Awaited<ReturnType<typeof seedCanvasWorkspacePreview>> | undefined;
     try {
@@ -387,7 +408,6 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
     } finally {
       if (canvasId) await removeCanvas(apiClient, canvasId);
       await workspacePreview?.cleanup();
-      await releaseFeature();
     }
   });
 

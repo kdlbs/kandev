@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { lspClientManager, toLspLanguage, type LspStatus } from "@/lib/lsp/lsp-client-manager";
 import { EMPTY_LSP_PROGRESS, type LspProgressSnapshot } from "@/lib/lsp/lsp-progress";
 
@@ -84,7 +83,6 @@ export function useLsp(
 } {
   const lspAutoStartLanguages = useAppStore((s) => s.userSettings.lspAutoStartLanguages);
   const lspServerConfigs = useAppStore((s) => s.userSettings.lspServerConfigs);
-  const continuityEnabled = useFeature("lspBrowserContinuity");
   const lspLanguage = toLspLanguage(monacoLanguage);
   const shouldAutoStart = lspLanguage ? lspAutoStartLanguages.includes(lspLanguage) : false;
   const key = lspKey(sessionId, lspLanguage);
@@ -99,9 +97,7 @@ export function useLsp(
   const hasLeaseHint = useSyncExternalStore(
     (callback) => subscribeToLspKey(key, callback),
     () =>
-      continuityEnabled && sessionId && lspLanguage
-        ? lspClientManager.hasLeaseHint(sessionId, lspLanguage)
-        : false,
+      sessionId && lspLanguage ? lspClientManager.hasLeaseHint(sessionId, lspLanguage) : false,
   );
   const startRequestGeneration = useSyncExternalStore(
     (callback) => subscribeToLspKey(key, callback),
@@ -128,18 +124,11 @@ export function useLsp(
     if ((!autoStartEnabled && !isManuallyEnabled && !hasLeaseHint) || !sessionId || !lspLanguage) {
       return;
     }
-    const disconnect = lspClientManager.connect(
-      sessionId,
-      lspLanguage,
-      lspServerConfigs,
-      continuityEnabled,
-    );
-    return disconnect;
+    return lspClientManager.connect(sessionId, lspLanguage, lspServerConfigs);
   }, [
     hasManualStopOverride,
     isManuallyEnabled,
     hasLeaseHint,
-    continuityEnabled,
     shouldAutoStart,
     sessionId,
     lspLanguage,

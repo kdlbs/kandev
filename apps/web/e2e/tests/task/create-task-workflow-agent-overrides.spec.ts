@@ -120,7 +120,7 @@ test.describe("task-specific workflow agent overrides", () => {
         `task-create-workflow-agent-override-${fixture.profileA.id}`,
       );
       await expect(restoredRow.getByTestId("agent-profile-selector")).toContainText(
-        "Use workflow profile",
+        `${fixture.profileA.name} (default)`,
       );
       await restoredRow.getByTestId("agent-profile-selector").click();
       await testPage
@@ -160,7 +160,7 @@ test.describe("task-specific workflow agent overrides", () => {
         .getByTestId("task-create-workflow-agent-overrides")
         .getByTestId(`task-create-workflow-agent-override-${fixture.profileA.id}`);
       await expect(freshRow.getByTestId("agent-profile-selector")).toContainText(
-        "Use workflow profile",
+        `${fixture.profileA.name} (default)`,
       );
       await freshDialog.getByRole("button", { name: "Cancel", exact: true }).click();
 
