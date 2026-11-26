@@ -6,6 +6,11 @@ requirements:
   - REQ-AGENTS-ACP-V2-002
   - REQ-AGENTS-ACP-V2-003
   - REQ-AGENTS-ACP-V2-004
+  - REQ-AGENTS-BACKGROUND-WORK-001
+  - REQ-AGENTS-BACKGROUND-WORK-002
+  - REQ-AGENTS-BACKGROUND-WORK-004
+  - REQ-AGENTS-BACKGROUND-WORK-005
+  - REQ-AGENTS-BACKGROUND-WORK-006
 ---
 
 # ACP v2 preview system design
@@ -22,6 +27,7 @@ prompt submission and event identity.
 | `REQ-AGENTS-ACP-V2-002` | [Session and turn handling](#session-and-turn-handling) |
 | `REQ-AGENTS-ACP-V2-003` | [Recovery and rollback](#recovery-and-rollback) |
 | `REQ-AGENTS-ACP-V2-004` | [Diagnostics and verification](#diagnostics-and-verification) |
+| `REQ-AGENTS-BACKGROUND-WORK-001`, `002`, `004`, `005`, `006` | [Background work projection](#background-work-projection) |
 
 ## Launch admission and negotiation
 
@@ -107,6 +113,49 @@ The native Codex app-server protocol has its own factory branch.
   for validated v2 requests. Keep replies, timeouts, and request cancellation
   scoped to the process generation and session. Advertise a capability only
   if Kandev can satisfy its callbacks.
+
+## Background work projection
+
+When `AgentBackgroundWorkEnabled` is on, read the attached root session's live
+`state_update.background`. Emit changed terminal and child observations in
+the same ordered batch as other adapter events. The shared workload stream
+feeds the viewer. `observeForeground` continues to settle the foreground turn.
+[Shared design](background-work.md)
+
+Keep one record per reporting session, entity kind, and wire ID. Reuse titles
+and source references from the existing terminal and child projection. A
+typed tool reference to a terminal uses that terminal's ID for correlation.
+Keep the launch prompt generation and submission ID from the matching live
+entity or typed launch reference when available. Do not attribute a later list
+or exit to the turn that happens to be active when it arrives.
+
+Decode each terminal snapshot and each output chunk from base64 before
+replacing or appending bytes in the bounded terminal cache. A child reported
+idle with a nonempty child background list remains running. Preserve explicit
+waiting and unknown child states. A terminal reference can arrive before its
+first terminal frame; keep that alias separate from whether the frame has been
+observed so the first terminal frame remains a tool-call announcement.
+
+- A concrete list replaces background membership. An empty list means that
+  the root reports no background work. If the list is omitted or null,
+  activity is unknown.
+- If a tracked item leaves the list or activity becomes unknown, remove it
+  from the running count and retain its history. An already observed exit
+  keeps its outcome. A child can return under the same identity after a
+  foreground wait. If a listed child reports `requires_action`, show it
+  as waiting. If it reports `unknown`, show unknown activity.
+- A matching terminal exit records its outcome and any exit code after
+  foreground idle or delisting. Reuse the terminal's bounded retained output
+  when publishing the observation.
+
+Keep the projection read-only. Use root snapshots for the displayed inventory
+and the existing replay boundary for live observations. Do not publish
+pre-marker background snapshots as current membership; reconcile the first
+live post-marker list even when it matches the last replayed list. Reconcile
+known keys after a same-root resume and start a fresh map after a native
+session change.
+[ACP v2 background work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+and [Codex ACP background work](https://github.com/agentclientprotocol/codex-acp/blob/v2.8.0/docs/background-work.md)
 
 ## Recovery and rollback
 

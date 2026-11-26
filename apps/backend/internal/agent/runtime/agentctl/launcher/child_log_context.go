@@ -145,7 +145,19 @@ var childLogErrorClasses = stringSet(
 	"io_error", "unknown", "agent_running", "managed_runtime_npm_resolution",
 	"managed_runtime_npm_policy", "unsupported_profile_context", "authentication_required",
 	"evidence_changed",
+	"disk_space_low", "filesystem_full", "disk_quota_exceeded", "journal_limit_reached",
+	"stream_limit_reached", "storage_write_failed", "storage_full", "storage_corrupt",
+	"storage_unavailable", "writer_failed",
 )
+
+var childLogReasons = func() map[string]struct{} {
+	reasons := make(map[string]struct{}, len(childLogErrorClasses)+1)
+	for reason := range childLogErrorClasses {
+		reasons[reason] = struct{}{}
+	}
+	reasons["event_too_large"] = struct{}{}
+	return reasons
+}()
 
 var childLogOperations = stringSet(
 	"read_directory", "read_file", "stat", "git_inspection", "submodule_discovery",
@@ -170,7 +182,7 @@ var childLogContextValidators = map[string]func(json.RawMessage) bool{
 	"request_id":           childLogUUID,
 	"state":                childLogAllowedString(childLogStates, 32),
 	"error_class":          childLogAllowedString(childLogErrorClasses, 40),
-	"reason":               childLogAllowedString(childLogErrorClasses, 40),
+	"reason":               childLogAllowedString(childLogReasons, 40),
 	"operation":            childLogAllowedString(childLogOperations, 32),
 	"trigger":              childLogAllowedString(childLogTriggers, 32),
 	"runtime":              childLogAllowedString(stringSet("desktop", "server"), 16),

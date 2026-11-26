@@ -139,6 +139,9 @@ func (a *MockAgent) Enabled() bool     { return a.enabled }
 func (a *MockAgent) DisplayOrder() int { return a.displayOrder }
 
 func (a *MockAgent) Logo(v LogoVariant) []byte {
+	if a.ID() == AntigravityACPAgentID {
+		return NewAntigravityACP().Logo(v)
+	}
 	if v == LogoDark {
 		return mockLogoDark
 	}
@@ -283,6 +286,9 @@ func (a *MockAgent) BillingType() usage.BillingType { return defaultBillingType(
 func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {
 	if a.ID() == CopilotACPAgentID {
 		return copilotPermSettings
+	}
+	if a.ID() == AntigravityACPAgentID {
+		return antigravityACPPermSettings
 	}
 	return emptyPermSettings
 }

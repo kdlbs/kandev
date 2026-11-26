@@ -1,0 +1,1 @@
+export const TASK_FLAG_NOTE_MAX_LENGTH = 1024;

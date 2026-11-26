@@ -443,6 +443,7 @@ export function primaryTaskRepository(
 }
 
 export type Task = ActiveSubagentCountFields & {
+  flag_note?: string;
   id: TaskId;
   /** Caller-supplied create-idempotency identity, absent once released. */
   external_id?: string;

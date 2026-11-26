@@ -51,9 +51,12 @@ done
 	response, err := NewACPInferenceExecutor(zap.NewNop()).Probe(ctx, &ProbeRequest{
 		AgentID: acpcompat.AntigravityAgentID,
 		InferenceConfig: &InferenceConfigDTO{
-			Command:  []string{cliPath, "acp", "--process-per-session"},
-			WorkDir:  t.TempDir(),
-			CLIFlags: []string{"--profile", "value with spaces", "--process-per-session=false", "--", "after-delimiter"},
+			Command: []string{cliPath, "acp", "--process-per-session"},
+			WorkDir: t.TempDir(),
+			CLIFlags: []string{
+				"--profile", "value with spaces", "--dangerously-skip-permissions",
+				"--process-per-session=false", "--", "after-delimiter",
+			},
 			AuthPolicy: acpcompat.AntigravityAuthPolicyForRuntime(
 				acpcompat.AntigravityRuntimeCLI, "1.5.15", false,
 			),

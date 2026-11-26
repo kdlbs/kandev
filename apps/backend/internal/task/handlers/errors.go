@@ -372,7 +372,7 @@ func isValidationError(err error) bool {
 	if errors.Is(err, service.ErrInvalidWorkflowChange) {
 		return true
 	}
-	if errors.Is(err, service.ErrTaskTitleTooLong) {
+	if errors.Is(err, service.ErrTaskTitleTooLong) || errors.Is(err, service.ErrTaskFlagNoteTooLong) {
 		return true
 	}
 	if errors.Is(err, service.ErrExternalIDInvalid) || errors.Is(err, service.ErrReservedMetadata) {

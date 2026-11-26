@@ -845,6 +845,14 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 		}
 	}
 	a.activeToolCalls = preserved
+	for key := range a.antigravityPermissionToolNames {
+		if key.sessionID != sessionID {
+			continue
+		}
+		if _, preserve := preserved[key.toolCallID]; !preserve {
+			delete(a.antigravityPermissionToolNames, key)
+		}
+	}
 	a.mu.Unlock()
 
 	for toolCallID, cancelled := range toCancel {

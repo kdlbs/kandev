@@ -102,7 +102,28 @@ An immediate probe runs before readiness. A background probe then runs every 15 
 
 Each probe pings the shared writer and reader. It also checks each descriptor's required tables through `internal/db` schema helpers.
 
-One probe error makes aggregate persistence unhealthy. A later successful probe restores runtime health without a restart.
+One recorded probe error makes aggregate persistence unhealthy. A later successful probe restores runtime health without a restart.
+
+### SQLite contention confirmation
+
+The [contention confirmation decision](../../../decisions/2026-11-25-confirm-contention-health-failures.md)
+owns AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.9.
+Split `Health.check` into a probe step that returns per-descriptor results and
+one diagnostic, and a record step that calls `RecordProbe` and logs transitions.
+Startup `Check` probes and records in one call, as before.
+
+The periodic SQLite loop records a failed probe immediately unless all of these hold:
+the aggregate state is healthy, and every failed result classifies as
+`deadline_exceeded`. In that case it logs one warning,
+`required persistence probe deadline unconfirmed`, with the existing sanitized
+diagnostic fields. It then waits three seconds, honoring loop cancellation, and
+runs one confirmation probe. That probe uses a fresh two-second context and the
+same maintenance `TryAcquire` path. The loop records its result unconditionally.
+A deferred confirmation records nothing, like any deferred probe.
+
+The confirmation does not reset the ticker. A confirmation never triggers another
+confirmation. Missing tables, driver errors, missing pools, cancellation, and
+mixed failure sets record immediately. PostgreSQL keeps its current path.
 
 Initialization errors remain fatal and cannot recover inside the same process. The process exits through the existing startup error path.
 
@@ -163,7 +184,8 @@ When admission fails, the periodic loop defers that check until its next tick.
 It does not call `RecordProbe`, change store states, or advance check timestamps.
 It emits a debug event with reason `maintenance_busy`, without database paths.
 An unhealthy store remains unhealthy, including alongside healthy stores.
-Ordinary writer contention without a maintenance lease retains current behavior.
+Ordinary writer contention without a maintenance lease uses
+[contention confirmation](#sqlite-contention-confirmation).
 
 Destructive SQLite restore and factory-reset operations notify required-store
 health before they quiesce workers or replace/drop data. The notifier records
