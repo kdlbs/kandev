@@ -54,6 +54,9 @@ The placeholder represents the reference SVG. [Full preview](plan.md#ui-02-compo
 (cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/chat/mobile-model-selector.spec.ts -- --grep 'Antigravity arch')
 ```
 
+After rebasing, the desktop and phone model-picker tests both passed and
+produced fresh captures for the PR description.
+
 ## Files likely touched
 
 - `apps/backend/internal/agent/agents/logos/antigravity_acp_light.svg`

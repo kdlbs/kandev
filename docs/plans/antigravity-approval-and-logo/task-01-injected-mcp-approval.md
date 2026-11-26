@@ -120,5 +120,6 @@ python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
 
-Review follow-up validation also passed: the ACP identity regressions under
-`go test -race` and `bash scripts/lint-go-changed` across all changed Go files.
+Review follow-up validation also passed: the full affected backend package suite
+under `go test -race -trimpath -tags fts5`, and
+`bash scripts/lint-go-changed` across all changed Go files.

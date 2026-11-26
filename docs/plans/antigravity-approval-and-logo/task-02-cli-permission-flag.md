@@ -56,6 +56,7 @@ Use the existing Settings card, save action, and phone scroll behavior. [Full pr
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm e2e:run --project chromium tests/settings/agent-profile-cli-flags.spec.ts -- --grep 'Antigravity CLI permission flag')
 (cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/settings/mobile-antigravity-runtime-setup.spec.ts -- --grep 'Antigravity CLI permission flag')
+(cd apps/web && pnpm e2e:run --no-build --project chromium tests/settings/agent-profile-cli-flags.spec.ts -- --grep 'Antigravity switch turns off a saved enabled duplicate')
 node scripts/validate-public-docs.mjs
 ```
 
@@ -104,5 +105,10 @@ Verification passed:
 (cd apps/web && pnpm run typecheck && pnpm run i18n:check)
 (cd apps/web && pnpm e2e:run --project chromium tests/settings/agent-profile-cli-flags.spec.ts -- --grep 'Antigravity CLI permission flag')
 (cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/settings/mobile-antigravity-runtime-setup.spec.ts -- --grep 'Antigravity CLI permission flag')
+(cd apps/web && pnpm e2e:run --no-build --project chromium tests/settings/agent-profile-cli-flags.spec.ts -- --grep 'Antigravity switch turns off a saved enabled duplicate')
 node scripts/validate-public-docs.mjs
 ```
+
+After rebasing, the full affected backend package suite passed under
+`-race -trimpath -tags fts5`. The separate duplicate-profile E2E passed and
+confirmed one saved disabled flag plus the unrelated enabled profile flag.

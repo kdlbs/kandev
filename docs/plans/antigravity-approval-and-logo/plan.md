@@ -129,7 +129,7 @@ Implementation and focused verification passed:
 - Work order 03 asset and endpoint tests passed. Desktop Chromium loaded the dark arch from the logo API; mobile Chromium loaded the light arch in the model picker.
 - Both frontend E2E runs built the backend. The desktop run also built the Vite web assets. Prettier, `gofmt -l`, and `git diff --check` passed.
 - Review follow-up fixes cover external plugin discovery manifests, bounded regular-file reads, qualified ACP aliases, duplicate switch entries, saved-profile launch eligibility, and exact flag token parsing. The ACP peer fixture uses the production Core catalog and exact endpoint, while legacy Core profiles are checked against their registered tools.
-- The combined focused backend suite passed with `-race -trimpath -tags fts5`; changed-Go lint reported 0 issues. The local build, web typecheck, i18n check, asset helper tests, and desktop and phone settings E2E passed. The old-head CI failures also pass their targeted local regressions; new-head CI remains authoritative after push.
+- The full affected backend package suite passed with `-race -trimpath -tags fts5`; changed-Go lint reported 0 issues. The local build, web typecheck, i18n check, asset helper tests, and desktop and phone E2E passed. The duplicate-profile UI regression also passed, checking the saved disabled choice and preserved unrelated flag. Four fresh desktop/phone settings and logo captures were validated. The old-head CI failures also pass their targeted local regressions; new-head CI remains authoritative after push.
 
 ## Risks
 
