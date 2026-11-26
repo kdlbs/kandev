@@ -3,7 +3,6 @@
 import {
   IconAlertCircleOff,
   IconArchive,
-  IconFlag,
   IconHierarchy3,
   IconLoader,
   IconPencil,
@@ -173,25 +172,6 @@ export function TaskDeleteItem({
         {t("task:delete")}
       </ContextMenuItem>
     </>
-  );
-}
-
-export function TaskFlagItem({
-  task,
-  disabled,
-  onSelect,
-}: {
-  task: TaskSwitcherItem;
-  disabled?: boolean;
-  onSelect?: () => void;
-}) {
-  const { t } = useTranslation();
-  if (task.isArchived || !onSelect) return null;
-  return (
-    <ContextMenuItem disabled={disabled || task.isPendingRemoval} onSelect={onSelect}>
-      <IconFlag className="mr-2 h-4 w-4" aria-hidden="true" />
-      {t(task.flagNote ? "sidebar:flag" : "sidebar:addFlag")}
-    </ContextMenuItem>
   );
 }
 

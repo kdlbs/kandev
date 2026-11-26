@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
@@ -23,14 +23,18 @@ export function TaskFlagEditor({
 }) {
   const { t } = useTranslation();
   const draft = useTaskFlagDraft(savedNote, onSubmit, onClose);
-  const title = t(savedNote ? "sidebar:flag" : "sidebar:addFlag");
-  const form = (
-    <TaskFlagForm
-      draft={draft}
-      hasSavedNote={Boolean(savedNote)}
-      readOnly={readOnly}
-      touch={touch}
-    />
+  const title = readOnly
+    ? t("sidebar:flag")
+    : t(savedNote ? "sidebar:editFlag" : "sidebar:addFlag");
+  const form = readOnly ? (
+    <div className="grid gap-3">
+      <p className="whitespace-pre-wrap wrap-anywhere">{savedNote}</p>
+      <Button className="ml-auto min-h-11" variant="outline" onClick={draft.close}>
+        {t("common:close")}
+      </Button>
+    </div>
+  ) : (
+    <TaskFlagForm draft={draft} touch={touch} />
   );
 
   if (touch) {
@@ -66,7 +70,7 @@ export function TaskFlagEditor({
   );
 }
 
-function useTaskFlagDraft(
+export function useTaskFlagDraft(
   savedNote: string,
   onSubmit: (note: string) => Promise<void>,
   onClose: () => void,
@@ -77,6 +81,11 @@ function useTaskFlagDraft(
   const submitting = useRef(false);
   const trimmedNote = note.trim();
   const canSave = Boolean(trimmedNote) && note.length <= TASK_FLAG_NOTE_MAX_LENGTH;
+
+  const reset = useCallback((saved: string) => {
+    setNote(saved);
+    setFailed(false);
+  }, []);
 
   const close = () => {
     if (!submitting.current) onClose();
@@ -101,29 +110,21 @@ function useTaskFlagDraft(
     if (canSave) void submit(trimmedNote);
   };
 
-  return { note, setNote, failed, saving, canSave, close, submit, handleSubmit };
+  return { note, setNote, failed, saving, canSave, close, reset, submitting, handleSubmit };
 }
 
-function preventSubmit(event: FormEvent) {
-  event.preventDefault();
-}
-
-function TaskFlagForm({
-  draft: { note, setNote, failed, saving, canSave, close, submit, handleSubmit },
-  hasSavedNote,
-  readOnly,
-  touch,
+export function TaskFlagForm({
+  draft: { note, setNote, failed, saving, canSave, close, handleSubmit },
+  touch = false,
 }: {
   draft: ReturnType<typeof useTaskFlagDraft>;
-  hasSavedNote: boolean;
-  readOnly: boolean;
-  touch: boolean;
+  touch?: boolean;
 }) {
   const { t } = useTranslation();
   const noteId = useId();
   const buttonSize = touch ? "min-h-11" : undefined;
   return (
-    <form className="grid gap-3" onSubmit={readOnly ? preventSubmit : handleSubmit}>
+    <form className="grid gap-3" onSubmit={handleSubmit}>
       <div className="grid gap-1.5">
         <label htmlFor={noteId} className="text-sm font-medium">
           {t("sidebar:flagNote")}
@@ -136,7 +137,7 @@ function TaskFlagForm({
           className={
             touch ? "md:text-base" : "max-h-[min(16rem,40dvh)] overflow-y-auto overscroll-contain"
           }
-          readOnly={readOnly || saving}
+          readOnly={saving}
           onChange={(event) => setNote(event.target.value)}
         />
       </div>
@@ -148,34 +149,19 @@ function TaskFlagForm({
           {t("sidebar:flagSaveFailed")}
         </p>
       )}
-      <div className="flex flex-wrap items-center gap-2">
-        {!readOnly && hasSavedNote && (
-          <Button
-            type="button"
-            variant="ghost"
-            className={buttonSize}
-            disabled={saving}
-            onClick={() => void submit("")}
-          >
-            {t("sidebar:removeFlag")}
-          </Button>
-        )}
-        <div className="ml-auto flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className={buttonSize}
-            disabled={saving}
-            onClick={close}
-          >
-            {t(readOnly ? "common:close" : "common:cancel")}
-          </Button>
-          {!readOnly && (
-            <Button type="submit" className={buttonSize} disabled={saving || !canSave}>
-              {t("common:save")}
-            </Button>
-          )}
-        </div>
+      <div className="ml-auto flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          className={buttonSize}
+          disabled={saving}
+          onClick={close}
+        >
+          {t("common:cancel")}
+        </Button>
+        <Button type="submit" className={buttonSize} disabled={saving || !canSave}>
+          {t("common:save")}
+        </Button>
       </div>
     </form>
   );

@@ -287,7 +287,9 @@ const SelectedTaskRow = memo(function SelectedTaskRow(props: SelectedTaskRowProp
     (selected?.has(task.id) && selected.size > 1);
   const flag = task.flagNote ? (
     <TaskFlagIndicator
+      taskId={task.id}
       note={task.flagNote}
+      readOnly={readOnly}
       onOpen={openFlag && ((invoker) => openFlag(task, invoker, readOnly))}
     />
   ) : undefined;

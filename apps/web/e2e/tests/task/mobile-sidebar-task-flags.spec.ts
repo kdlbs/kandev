@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 import { writeSidebarFlag } from "./sidebar-task-flags-helpers";
@@ -45,13 +46,24 @@ test("adds a flag from phone task actions and opens its note by touch", async ({
   await testPage.reload();
   await picker.tap();
   await row.getByRole("button", { name: "Task actions" }).tap();
-  await testPage.getByRole("menuitem", { name: "Flag", exact: true }).tap();
+  await testPage.getByRole("menuitem", { name: "Change flag", exact: true }).tap();
+  const editFlag = testPage.getByRole("menuitem", { name: "Edit flag", exact: true });
+  await expect(editFlag).toBeVisible();
+  await waitForFiniteAnimations(editFlag.locator("xpath=ancestor::*[@role='menu'][1]"));
+  expect(Math.round((await editFlag.boundingBox())!.height)).toBeGreaterThanOrEqual(44);
+  await editFlag.tap();
   await expect(note).toHaveValue(updatedNote);
-  await writeSidebarFlag(testPage, target.task_id, "", () =>
-    editor.getByRole("button", { name: "Remove flag" }).tap(),
-  );
+  await editor.getByRole("button", { name: "Cancel", exact: true }).tap();
   await expect(editor).toBeHidden();
   await picker.tap();
+  await row.getByRole("button", { name: "Task actions" }).tap();
+  await testPage.getByRole("menuitem", { name: "Change flag", exact: true }).tap();
+  const removeFlag = testPage.getByRole("menuitem", { name: "Remove flag", exact: true });
+  await expect(removeFlag).toBeVisible();
+  await waitForFiniteAnimations(removeFlag.locator("xpath=ancestor::*[@role='menu'][1]"));
+  expect(Math.round((await removeFlag.boundingBox())!.height)).toBeGreaterThanOrEqual(44);
+  await writeSidebarFlag(testPage, target.task_id, "", () => removeFlag.tap());
+  await expect(editor).toBeHidden();
   await expect(row).toBeVisible();
   await expect(flag).toHaveCount(0);
   expect(new URL(testPage.url()).pathname).toBe(`/t/${source.task_id}`);
