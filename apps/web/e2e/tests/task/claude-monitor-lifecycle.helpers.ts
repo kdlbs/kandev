@@ -86,7 +86,10 @@ async function expandMonitorCards(session: SessionPage): Promise<void> {
   await expect(cards).toHaveCount(2, { timeout: 30_000 });
 }
 
-async function expectMonitorLabels(page: Page, workIds = MONITOR_IDS): Promise<void> {
+async function expectMonitorLabels(
+  page: Page,
+  workIds: readonly (typeof MONITOR_IDS)[number][] = MONITOR_IDS,
+): Promise<void> {
   const summary = page.getByTestId("background-work-summary-list");
   await expect(summary).toBeVisible();
   for (const workId of workIds) {
