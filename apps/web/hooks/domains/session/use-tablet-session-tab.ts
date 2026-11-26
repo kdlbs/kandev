@@ -2,7 +2,6 @@ import { useCallback, useLayoutEffect, useMemo, type SetStateAction } from "reac
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getActiveTabForSession, setActiveTabForSession } from "@/lib/local-storage";
 import { hasTaskRouteFocus, consumeTaskRouteFocus } from "@/lib/state/task-navigation-focus";
-import { useNormalizedTaskReviewsState } from "@/components/task/review-panel-provider";
 
 import { beginTabletSelection } from "@/lib/state/tablet-file-authority";
 
@@ -12,7 +11,6 @@ export function useTabletSessionTab(sessionId: string | null) {
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const revision = useAppStore((state) => state.taskRemoval.navigationRevision);
   const workflowRequest = useAppStore((state) => state.workflowSessionFocus.request);
-  const { reviews, loading: reviewsLoading } = useNormalizedTaskReviewsState(taskId);
   const initialTab = useMemo(() => {
     if (typeof window !== "undefined" && sessionId) {
       const saved = getActiveTabForSession(sessionId, "chat");
@@ -40,10 +38,6 @@ export function useTabletSessionTab(sessionId: string | null) {
     if (sessionId && store.getState().tabletSession.activeTabBySessionId[sessionId] === undefined)
       store.getState().setTabletSessionTab(sessionId, initialTab);
   }, [store, sessionId, initialTab]);
-  useLayoutEffect(() => {
-    if (!sessionId || tab !== "pr" || reviewsLoading || reviews.length > 0) return;
-    setTab("chat");
-  }, [sessionId, tab, reviewsLoading, reviews.length, setTab]);
   useLayoutEffect(() => {
     if (!sessionId || !hasTaskRouteFocus(store, taskId, sessionId)) return;
     setTab("chat");

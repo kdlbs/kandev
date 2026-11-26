@@ -1,10 +1,12 @@
 import {
+  createElement,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type Dispatch,
+  type MouseEvent,
   type SetStateAction,
 } from "react";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
@@ -17,7 +19,13 @@ import { useShallow } from "zustand/react/shallow";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { resolveLatestTaskProjection } from "./task-page-content-helpers";
 import type { AppState } from "@/lib/state/store";
-import type { FileEditorTab } from "./task-center-panel-file-tabs";
+import { getFileTabKey, type FileEditorTab } from "./task-center-panel-file-tabs";
+import type { SessionTab } from "@/components/session-tabs";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
+import { executeApprove } from "@/lib/services/session-approve";
+import { useTranslation } from "react-i18next";
+import { useNormalizedTaskReviewsState } from "./review-panel-provider";
+import { useReviewItemSelection } from "./review-selection";
 
 function hasScopedFiles(
   repositories: Record<string, GitStatusEntry> | undefined,
@@ -164,4 +172,85 @@ export function useTabletFileRequest(
       current = false;
     };
   }, [request, acknowledge, addFile]);
+}
+
+export function useSessionApprove(activeSessionId: string | null, activeTaskId: string | null) {
+  const activeSession = useAppStore((state) =>
+    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
+  );
+  const setTaskSession = useAppStore((state) => state.setTaskSession);
+  const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
+  const isPassthroughMode = useMemo(() => isPassthroughSession(activeSession), [activeSession]);
+  const showApproveButton =
+    !!activeSession?.review_status && activeSession.review_status !== "approved" && !isAgentWorking;
+  const handleApprove = useCallback(async () => {
+    if (!activeSessionId || !activeTaskId) return;
+    try {
+      await executeApprove(activeSessionId, activeTaskId, setTaskSession);
+    } catch (error) {
+      console.error("Failed to approve session:", error);
+    }
+  }, [activeSessionId, activeTaskId, setTaskSession]);
+  return { activeSession, isPassthroughMode, showApproveButton, handleApprove };
+}
+
+export function useTaskReview(taskId: string | null) {
+  const { t } = useTranslation();
+  const { reviews, loading: reviewsLoading } = useNormalizedTaskReviewsState(taskId);
+  const { selectedReview, selectReview } = useReviewItemSelection(taskId, reviews);
+  return {
+    reviews,
+    reviewsLoading,
+    selectedReview,
+    selectReview,
+    reviewLabel: reviewLabelForReviews(reviews, t),
+  };
+}
+
+function reviewLabelForReviews(
+  reviews: readonly { providerId: string }[],
+  t: (key: string, options?: { count: number }) => string,
+): string | null {
+  if (reviews.length === 0) return null;
+  if (reviews.length > 1) return t("task:reviewsCount", { count: reviews.length });
+  const providerId = reviews[0]?.providerId;
+  if (providerId === "github") return t("task:pullRequest2");
+  if (providerId === "gitlab") return t("task:mergeRequestLabel");
+  return t("task:review");
+}
+
+export function useCenterPanelTabs(
+  openFileTabs: OpenFileTab[],
+  handleCloseFileTab: (fileKey: string) => void,
+  hasChanges: boolean | undefined,
+  reviewLabel: string | null,
+) {
+  const { t } = useTranslation();
+  const tabs: SessionTab[] = useMemo(() => {
+    const staticTabs: SessionTab[] = [
+      ...(hasChanges !== false ? [{ id: "changes", label: t("task:allChanges") }] : []),
+      { id: "chat", label: t("task:chat") },
+      ...(reviewLabel ? [{ id: "pr", label: reviewLabel }] : []),
+    ];
+    const fileTabs: SessionTab[] = openFileTabs.map((tab) => ({
+      id: `file:${getFileTabKey(tab)}`,
+      label: tab.isDirty ? `${tab.name} *` : tab.name,
+      icon: tab.isDirty
+        ? createElement("span", { className: "h-2 w-2 rounded-full bg-yellow-500" })
+        : undefined,
+      closable: true,
+      onClose: (e: MouseEvent) => {
+        e.stopPropagation();
+        handleCloseFileTab(getFileTabKey(tab));
+      },
+      className: "cursor-pointer group gap-1.5 data-[state=active]:bg-muted",
+    }));
+    return [...staticTabs, ...fileTabs];
+  }, [openFileTabs, handleCloseFileTab, hasChanges, reviewLabel, t]);
+  const separatorAfterIndex = useMemo(() => {
+    if (openFileTabs.length === 0) return undefined;
+    const staticCount = (hasChanges !== false ? 1 : 0) + 1 + (reviewLabel ? 1 : 0);
+    return staticCount - 1;
+  }, [openFileTabs.length, hasChanges, reviewLabel]);
+  return { tabs, separatorAfterIndex };
 }

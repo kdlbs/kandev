@@ -164,8 +164,8 @@ func TestTaskInterruptionPromptAcceptance(t *testing.T) {
 	t.Run("accepted prompt preserves a newer legacy marker", func(t *testing.T) {
 		ctx := context.Background()
 		repo, svc, manager, session := newInterruptionPromptFixture(t, "task-new-legacy", "session-new-legacy")
-		legacy := "2026-11-24T10:00:00Z"
-		newer := "2026-11-26T10:00:00Z"
+		legacy := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339Nano)
+		newer := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
 		require.NoError(t, repo.SetTaskMetadataKey(ctx, "task-new-legacy", models.MetaKeyInterruptedAt, legacy))
 		sibling := createInterruptionPromptSession(t, repo, "task-new-legacy", "session-new-legacy-sibling")
 		targetMarker := addInterruptedSessionMarker(t, repo, "task-new-legacy", session)

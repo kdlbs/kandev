@@ -417,7 +417,7 @@ test.describe("Preview owned deletion", () => {
       await expect
         .poll(() => new URL(testPage.url()).searchParams.get("sessionId"))
         .toBe(destination);
-      expect((await selection.snapshot()).navigationRevision).toBe(navigation);
+      expect((await selection.snapshot()).navigationRevision).toBe(navigation + 1);
       expect((await history.read()).slice(first).map((sample) => sample.sessionId)).not.toContain(
         null,
       );

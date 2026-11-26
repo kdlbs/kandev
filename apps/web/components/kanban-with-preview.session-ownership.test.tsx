@@ -451,7 +451,7 @@ it.each([false, true])(
         expect(getStore().getState().workflowSessionFocus.request?.sessionId).toBe(destination);
       });
       expect(getStore().getState().tasks.activeSessionId).toBe(destination);
-      expect(getStore().getState().taskRemoval.navigationRevision).toBe(navigation);
+      expect(getStore().getState().taskRemoval.navigationRevision).toBe(navigation + 1);
       await act(async () =>
         membership.resolve(
           previewMembership("alpha", [ALPHA_SESSION, destination, ALPHA_SECONDARY]),
