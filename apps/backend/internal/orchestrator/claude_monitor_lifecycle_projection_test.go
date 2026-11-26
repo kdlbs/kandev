@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 )
 
 // @covers AC-AGENTS-BACKGROUND-WORK-002.2
@@ -98,4 +99,62 @@ func TestClaudeMonitorWorkloadProjection(t *testing.T) {
 	settled, err = repo.GetBackgroundWorkload(ctx, sessionID, first.WorkID)
 	require.NoError(t, err)
 	require.Equal(t, string(streams.RunStateFailed), settled.State)
+}
+
+// @covers AC-AGENTS-BACKGROUND-WORK-010.8
+func TestClaudeMonitorRegistrationObservationPopulatesTitle(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     map[string]any
+		output    any
+		wantTitle string
+	}{
+		{
+			name: "description takes precedence",
+			input: map[string]any{"raw_input": map[string]any{
+				"description": "watch required checks", "command": "gh pr checks --watch",
+			}},
+			output:    monitorObservationOutput("output command"),
+			wantTitle: "watch required checks",
+		},
+		{
+			name:      "command fallback",
+			input:     map[string]any{"raw_input": map[string]any{"command": "gh pr checks --watch"}},
+			output:    monitorObservationOutput("output command"),
+			wantTitle: "gh pr checks --watch",
+		},
+		{
+			name:      "monitor view fallback",
+			input:     map[string]any{"raw_input": map[string]any{}},
+			output:    monitorObservationOutput("output command"),
+			wantTitle: "output command",
+		},
+		{
+			name:      "generic fallback",
+			input:     map[string]any{"raw_input": map[string]any{}},
+			wantTitle: "Monitor",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			payload := streams.NewGeneric("other", test.input)
+			payload.Generic().Output = test.output
+			payload.SetMonitorIdentity("monitor-task-1", false)
+
+			observation := buildObservationFromNormalized(&lifecycle.AgentStreamEventPayload{
+				SessionID: "session-1",
+				Data: &lifecycle.AgentStreamEventData{
+					ToolCallID: "toolu_monitor_1",
+					Normalized: payload,
+				},
+			}, "turn-1")
+
+			require.NotNil(t, observation)
+			require.Equal(t, test.wantTitle, observation.Title)
+		})
+	}
+}
+
+func monitorObservationOutput(command string) any {
+	return map[string]any{"monitor": map[string]any{"command": command}}
 }

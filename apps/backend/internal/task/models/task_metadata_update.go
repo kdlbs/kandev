@@ -27,8 +27,8 @@ type ReviewSourceApproval struct {
 }
 
 // ProtectedTaskMetadataUpdate replaces caller-owned metadata while retaining
-// the current server-owned lifecycle, handoff, causation and coordinator
-// reserved records.
+// the current server-owned lifecycle, handoff, causation, interruption and
+// coordinator reserved records.
 func ProtectedTaskMetadataUpdate(existing, requested map[string]interface{}) map[string]interface{} {
 	updated := maps.Clone(requested)
 	if updated == nil {
@@ -39,6 +39,7 @@ func ProtectedTaskMetadataUpdate(existing, requested map[string]interface{}) map
 	for _, key := range []string{
 		MetaKeyDeferredLaunch, MetaKeyStepHandoffCarry, MetaKeyHandoffSource, MetaKeyHandoffs,
 		MetaKeyAutomationStartOwned, MetaKeyRequiredSubtaskCount, MetaKeyLastTurnError,
+		MetaKeyInterruptedAt, MetaKeyInterruptedSessions, MetaKeyLegacyInterruptedAt,
 		MetaKeyReviewSource,
 	} {
 		if value, ok := existing[key]; ok {

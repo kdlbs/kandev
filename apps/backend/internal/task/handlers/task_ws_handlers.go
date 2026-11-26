@@ -317,6 +317,7 @@ type wsUpdateTaskRequest struct {
 	ID             string                    `json:"id"`
 	Title          *string                   `json:"title,omitempty"`
 	Description    *string                   `json:"description,omitempty"`
+	FlagNote       *string                   `json:"flag_note,omitempty"`
 	Priority       *string                   `json:"priority,omitempty"`
 	ExecutionGrade *string                   `json:"execution_grade,omitempty"`
 	State          *v1.TaskState             `json:"state,omitempty"`
@@ -379,6 +380,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	task, err := h.service.UpdateTaskAsHuman(ctx, req.ID, &service.UpdateTaskRequest{
 		Title:          title,
 		Description:    description,
+		FlagNote:       req.FlagNote,
 		Priority:       req.Priority,
 		ExecutionGrade: req.ExecutionGrade,
 		State:          req.State,

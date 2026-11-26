@@ -29,6 +29,8 @@ func (r *countingCompletionGateBatchRepository) GetTaskCompletionGateSummaries(
 func TestTaskStatusSummaryBatchRepair(t *testing.T) {
 	ctx := context.Background()
 	svc, eventBus, repo := createTestService(t)
+	// The cleanup worker reads svc.tasks during startup reconciliation.
+	svc.StopTaskResourceCleanupWorker()
 	createTaskWithoutRepositories(t, ctx, repo)
 	svc.statusSummaries = repo
 	reader := &countingCompletionGateBatchRepository{Repository: repo}

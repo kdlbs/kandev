@@ -217,6 +217,7 @@ type UpdateTaskRequest struct {
 	ExecutionGrade *string                `json:"execution_grade,omitempty"`
 	Title          *string                `json:"title,omitempty"`
 	Description    *string                `json:"description,omitempty"`
+	FlagNote       *string                `json:"flag_note,omitempty"`
 	Priority       *string                `json:"priority,omitempty"`
 	State          *v1.TaskState          `json:"state,omitempty"`
 	WorkflowStepID *string                `json:"workflow_step_id,omitempty"`

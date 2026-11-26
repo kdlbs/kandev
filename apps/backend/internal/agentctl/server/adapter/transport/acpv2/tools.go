@@ -1,6 +1,7 @@
 package acpv2
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"slices"
 
@@ -58,7 +59,10 @@ func (a *Adapter) projectTool(
 	state.tools[id] = old
 	for _, item := range content {
 		if item.SessionID != nil {
-			state.bindChild(*item.SessionID, id)
+			state.bindChild(*item.SessionID, id, promptIdentityFromEvent(event), true)
+		}
+		if item.TerminalID != nil {
+			state.bindTerminal(session, *item.TerminalID, id, promptIdentityFromEvent(event))
 		}
 	}
 	if !live {
@@ -145,30 +149,63 @@ func toolEventType(known bool) string {
 	return streams.EventTypeToolCall
 }
 
-func (p *projection) bindChild(session wire.SessionID, parent string) {
+func (p *projection) bindChild(session wire.SessionID, parent string, origin promptIdentity, launchReference bool) {
 	if p.children == nil {
-		p.children = make(map[wire.SessionID]string)
+		p.children = make(map[wire.SessionID]childReference)
 	}
-	p.children[session] = parent
+	previous := p.children[session]
+	if !previous.hasLaunchReference && parent != "" {
+		previous.toolCallID = parent
+		previous.hasLaunchReference = launchReference
+	}
+	if !previous.frozen && origin.available() {
+		previous.origin = origin
+		previous.frozen = true
+	}
+	p.children[session] = previous
+}
+
+func (p *projection) bindTerminal(
+	session wire.SessionID, terminal wire.TerminalID, sourceCallID string, origin promptIdentity,
+) {
+	if p.terminals == nil {
+		p.terminals = make(map[string]terminalState)
+	}
+	id := entityID(session, "terminal:"+string(terminal))
+	state := p.terminals[id]
+	if state.sourceCallID == "" {
+		state.sourceCallID = sourceCallID
+	}
+	if !state.originFrozen && origin.available() {
+		state.origin = origin
+		state.originFrozen = true
+	}
+	p.terminals[id] = state
 }
 
 func (p *projection) projectSubagent(parent wire.SessionID, update *wire.SubagentUpdate, event *streams.AgentEvent, live bool) bool {
 	if update.SessionID == "" || update.SessionID == parent || string(update.SessionID) == event.SessionID {
 		return false
 	}
-	id, known := p.children[update.SessionID]
+	child, known := p.children[update.SessionID]
+	id := child.toolCallID
 	if !known {
 		id = entityID(parent, "subagent:"+string(update.SessionID))
-		p.bindChild(update.SessionID, id)
+		origin := promptIdentityFromEvent(event)
+		key := backgroundWorkKey{session: parent, kind: streams.WorkloadKindSubagent, id: string(update.SessionID)}
+		if _, listedBeforeEntity := p.backgroundWork[key]; listedBeforeEntity {
+			origin = promptIdentity{}
+		}
+		p.bindChild(update.SessionID, id, origin, false)
 	}
 	if p.subagents == nil {
-		p.subagents = make(map[wire.SessionID]wire.SubagentUpdate)
+		p.subagents = make(map[wire.SessionID]subagentProjection)
 	}
-	snapshot := p.subagents[update.SessionID]
+	snapshot := p.subagents[update.SessionID].update
 	applyPatch(&snapshot.Title, update.Title)
 	applyPatch(&snapshot.Description, update.Description)
 	applyPatch(&snapshot.State, update.State)
-	p.subagents[update.SessionID] = snapshot
+	p.subagents[update.SessionID] = subagentProjection{update: snapshot}
 	if !live {
 		return false
 	}
@@ -189,9 +226,20 @@ func (p *projection) projectSubagent(parent wire.SessionID, update *wire.Subagen
 }
 
 type terminalState struct {
-	command, cwd, output string
-	exit                 acp.Optional[wire.TerminalExitStatus]
-	truncated            bool
+	command, cwd, output, sourceCallID string
+	exit                               acp.Optional[wire.TerminalExitStatus]
+	truncated                          bool
+	observed                           bool
+	origin                             promptIdentity
+	originFrozen                       bool
+}
+
+func decodeTerminalOutput(encoded string) string {
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return ""
+	}
+	return string(decoded)
 }
 
 func (p *projection) projectTerminal(
@@ -199,7 +247,18 @@ func (p *projection) projectTerminal(
 ) bool {
 	const maxTerminalOutput = 64 << 10
 	id := entityID(session, "terminal:"+string(update.TerminalID))
-	old, known := p.terminals[id]
+	old := p.terminals[id]
+	known := old.observed
+	if !old.originFrozen && !old.observed && old.sourceCallID == "" {
+		key := backgroundWorkKey{session: session, kind: streams.WorkloadKindShell, id: string(update.TerminalID)}
+		if _, listedBeforeEntity := p.backgroundWork[key]; !listedBeforeEntity {
+			if origin := promptIdentityFromEvent(event); origin.available() {
+				old.origin = origin
+				old.originFrozen = true
+			}
+		}
+	}
+	old.observed = true
 	if update.Cwd.IsSet() {
 		old.cwd, _ = update.Cwd.Get()
 	}
@@ -208,9 +267,9 @@ func (p *projection) projectTerminal(
 	}
 	if update.Output.IsSet() {
 		output, _ := update.Output.Get()
-		old.output, old.truncated = output.Data, false
+		old.output, old.truncated = decodeTerminalOutput(output.Data), false
 	}
-	old.output += chunk
+	old.output += decodeTerminalOutput(chunk)
 	if len(old.output) > maxTerminalOutput {
 		old.output = old.output[len(old.output)-maxTerminalOutput:]
 		old.truncated = true

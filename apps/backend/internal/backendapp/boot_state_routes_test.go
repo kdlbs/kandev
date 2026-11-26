@@ -198,14 +198,18 @@ func TestBootDependencyProjectionIncludesRelatedTasks(t *testing.T) {
 
 // The task chip's label source: a task page reached by a page load hydrates
 // kanban.tasks from this whitelist.
-func TestMapKanbanTaskStateIncludesIdentifierAndWorkspaceID(t *testing.T) {
+func TestMapKanbanTaskStateIncludesTaskLabels(t *testing.T) {
 	task := mapKanbanTaskState(taskdto.TaskDTO{
 		ID:          "task-1",
 		Identifier:  "KAN-42",
 		WorkspaceID: "ws-1",
+		FlagNote:    "Check links",
 	})
 	if task["identifier"] != "KAN-42" {
 		t.Fatalf("kanban task identifier = %#v, want KAN-42", task["identifier"])
+	}
+	if task["flagNote"] != "Check links" {
+		t.Fatalf("kanban task flagNote = %#v, want Check links", task["flagNote"])
 	}
 	if task["workspaceId"] != "ws-1" {
 		t.Fatalf("kanban task workspaceId = %#v, want ws-1", task["workspaceId"])

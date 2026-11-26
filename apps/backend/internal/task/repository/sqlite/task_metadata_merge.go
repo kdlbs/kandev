@@ -86,7 +86,7 @@ func ordinaryMetadataMergeOverlay(requested map[string]interface{}) (map[string]
 	copied := maps.Clone(requested)
 	delete(copied, models.MetaKeyReviewSource)
 	models.StripOfficeCarrierMetadata(copied)
-	for _, key := range []string{models.MetaKeyDeferredLaunch, models.MetaKeyStepHandoffCarry, models.MetaKeyHandoffSource, models.MetaKeyHandoffs, models.MetaKeyAgentTitlePending, models.MetaKeyAgentTitleOwnerSessionID, models.MetaKeyAutomationStartOwned, models.MetaKeyRequiredSubtaskCount, models.MetaKeyLastTurnError} {
+	for _, key := range []string{models.MetaKeyDeferredLaunch, models.MetaKeyStepHandoffCarry, models.MetaKeyHandoffSource, models.MetaKeyHandoffs, models.MetaKeyAgentTitlePending, models.MetaKeyAgentTitleOwnerSessionID, models.MetaKeyAutomationStartOwned, models.MetaKeyRequiredSubtaskCount, models.MetaKeyLastTurnError, models.MetaKeyInterruptedAt, models.MetaKeyInterruptedSessions, models.MetaKeyLegacyInterruptedAt} {
 		delete(copied, key)
 	}
 	encoded, err := json.Marshal(copied)

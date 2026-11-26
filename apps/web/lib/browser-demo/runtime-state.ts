@@ -71,6 +71,7 @@ export function taskEvent(task: Task) {
     workflow_step_id: task.workflow_step_id,
     title: task.title,
     description: task.description,
+    flag_note: task.flag_note,
     state: task.state,
     priority: task.priority,
     position: task.position,
