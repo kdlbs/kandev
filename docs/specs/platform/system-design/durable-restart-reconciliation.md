@@ -7,6 +7,7 @@ requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
   - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-001
+  - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002
 ---
 
 # Durable restart reconciliation system design
@@ -31,6 +32,7 @@ admission checks remain required before a restore-only operation.
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005 | Compare-and-set settlement and projection |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006 | Existing restore-only checkpoints and explicit Resume |
 | REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-001 | Automatic inconsistency repair and coherent recovery state |
+| REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002 | Retained cancellation before native resume |
 
 ## Mapping-safe capacity accounting
 
@@ -163,6 +165,39 @@ the existing path. An interrupted instruction is never sent again by recovery.
 
 The [retained remote restart package](../../../plans/retained-remote-restart-recovery/plan.md)
 records the checks for this disposition.
+
+### Retained cancellation before native resume
+
+An open, submission-bound delivery block can outlive a stopped local Worktree
+execution without a recovery snapshot. The startup worker reads the journal
+submission by the block's exact ID. The general journal inventory omits
+cancelled submissions.
+
+Replay requires the block's exact submission ID and matching session,
+incarnation, generation, stream, and payload hash. A blank block stream is
+allowed only when the exact authenticated submission proves the stream; a
+conflicting populated stream is rejected. Settlement records that proven
+stream on the resolved block. Replay also requires verified termination of
+the original owner and a complete inventory with no competing unresolved
+work. The SQL projected cursor must not pass the cancellation. A received
+cursor may be ahead of projection only within the authenticated retained
+range, because replay resumes from projection and accepts duplicate receipts.
+Incomplete evidence keeps the existing block and recovery controls available.
+
+The worker reserves automatic resume capacity and pauses queued work before
+replay. If capacity is unavailable, it leaves the block and cancellation
+pending for another pass. The runtime replays the original stream through
+ordered SQL receipt and projection. Acknowledgement follows committed
+projection. Terminal settlement records the cancellation and resolves the
+matching block through the existing terminal effect. Orchestrator settlement
+then retires the matching queue claim and publishes the cleared recovery
+state. Repeated replay uses the same cursor and effect identity.
+
+After settlement, the worker confirms no independent recovery block remains,
+reloads session and executor state, and uses normal resume admission with the
+saved native conversation required. Resume sends no prompt. If another
+restart interrupts the worker after settlement, the committed cancellation
+and block resolution allow ordinary resume.
 
 ### Existing restore reconciliation
 

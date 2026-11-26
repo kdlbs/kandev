@@ -9,6 +9,7 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/stretchr/testify/require"
 )
@@ -31,6 +32,33 @@ func TestClaudeMonitorCompletionSource(t *testing.T) {
 	}
 	if completion.FinishedAt.IsZero() {
 		t.Fatal("completion timestamp is missing")
+	}
+	currentFixture, err := os.ReadFile(filepath.Join("testdata", "claude-0.109.0-2.1.328-monitor-completion.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentLine := strings.TrimSpace(string(currentFixture))
+	currentCompletion, ok := parseClaudeMonitorCompletionRecord(currentLine, "native-session-1", "2.1.328")
+	if !ok || currentCompletion.TaskID != "monitor-task-1" || currentCompletion.ToolUseID != "toolu_monitor_1" {
+		t.Fatalf("qualified 2.1.328 notification = %+v, accepted = %t", currentCompletion, ok)
+	}
+	if _, ok := parseClaudeMonitorCompletionRecord(currentLine, "native-session-1", ""); !ok {
+		t.Fatal("qualified 2.1.328 notification was rejected without an explicit reader version")
+	}
+	if _, ok := parseClaudeMonitorCompletionRecord(currentLine, "native-session-1", "2.1.322"); ok {
+		t.Fatal("unqualified Claude native version 2.1.322 was accepted")
+	}
+	var unqualifiedVersion map[string]any
+	if err := json.Unmarshal([]byte(currentLine), &unqualifiedVersion); err != nil {
+		t.Fatal(err)
+	}
+	unqualifiedVersion["version"] = "2.1.322"
+	unqualifiedLine, err := json.Marshal(unqualifiedVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := parseClaudeMonitorCompletionRecord(string(unqualifiedLine), "native-session-1", ""); ok {
+		t.Fatal("unqualified 2.1.322 notification was accepted without an explicit reader version")
 	}
 
 	for name, mutate := range map[string]func(map[string]any){
@@ -94,6 +122,27 @@ func TestClaudeMonitorCompletionSource(t *testing.T) {
 
 	if _, ok := parseClaudeMonitorCompletionRecord(strings.TrimSuffix(line, "}"), "native-session-1", claudeNativeVersion); ok {
 		t.Fatal("incomplete JSONL record was accepted")
+	}
+}
+
+// @covers AC-AGENTS-BACKGROUND-WORK-002.2, AC-AGENTS-BACKGROUND-WORK-010.7
+func TestClaudeMonitorCompletionManagedDefaultBridge(t *testing.T) {
+	packageName := agents.NewClaudeACP().ManagedNPMRuntime().Package
+	version, err := agents.DefaultManagedNPMRuntimeVersion(packageName)
+	require.NoError(t, err)
+	require.Equal(t, verifiedClaudeTerminalBridgeCurrentVersion, version,
+		"a managed bridge version change requires a new qualified completion fixture")
+	for _, supportedVersion := range []string{verifiedClaudeTerminalBridgeManagedVersion, version} {
+		require.True(t, verifiedClaudeMonitorEvidenceBridge(claudeAgentID, claudeMonitorEvidenceBridgeName, supportedVersion))
+	}
+
+	const sessionID = "native-session-1"
+	a := newClaudeMonitorCompletionTestAdapter(t, t.TempDir(), t.TempDir(), sessionID, true)
+	for _, supportedVersion := range []string{verifiedClaudeTerminalBridgeManagedVersion, version} {
+		a.agentInfo = &AgentInfo{Name: claudeMonitorEvidenceBridgeName, Version: supportedVersion}
+		generation, _, admitted := a.claudeMonitorReaderAdmission(sessionID)
+		require.True(t, admitted, "supported bridge version %s must admit Monitor completion evidence", supportedVersion)
+		require.Equal(t, uint64(1), generation)
 	}
 }
 
@@ -363,6 +412,297 @@ func TestClaudeMonitorInterruptedCompletionMarksSourceCardCancelled(t *testing.T
 	})
 
 	requireClaudeMonitorSettlementEvents(t, drainEvents(a), taskID, toolCallID, streams.RunStateInterrupted)
+}
+
+// @covers AC-AGENTS-BACKGROUND-WORK-002.1, AC-AGENTS-BACKGROUND-WORK-002.2, AC-AGENTS-BACKGROUND-WORK-010.7
+func TestClaudeMonitorTaskStopSettlesMatchingMonitor(t *testing.T) {
+	const sessionID = "native-session-1"
+	a := newClaudeMonitorTaskStopTestAdapter(t, claudeAgentID, sessionID)
+	registerClaudeMonitorTaskStopTestMonitor(t, a, sessionID, "monitor-stopped", "toolu_monitor_stopped")
+	sibling := registerClaudeMonitorTaskStopTestMonitor(t, a, sessionID, "monitor-sibling", "toolu_monitor_sibling")
+
+	event := a.convertToolCallResultUpdate(sessionID, claudeTaskStopUpdate(
+		"toolu_task_stop", "monitor-stopped", "monitor-stopped", "monitor-stopped", toolCallStatus("completed"),
+	))
+	require.NotNil(t, event)
+	require.Equal(t, "toolu_task_stop", event.ToolCallID)
+	require.Equal(t, toolStatusComplete, event.ToolStatus, "TaskStop keeps its ordinary completed update")
+	settlementEvents := drainEvents(a)
+	requireClaudeMonitorSettlementEvents(t, settlementEvents, "monitor-stopped", "toolu_monitor_stopped", streams.RunStateInterrupted)
+	var settledTitle string
+	for _, settlementEvent := range settlementEvents {
+		if settlementEvent.Type == streams.EventTypeBackgroundWorkUpdated && settlementEvent.BackgroundWork != nil {
+			settledTitle = settlementEvent.BackgroundWork.Title
+		}
+	}
+	require.Equal(t, "watch checks", settledTitle)
+
+	require.True(t, sibling.IsActiveMonitor(), "stopping one Monitor leaves its sibling running")
+	require.False(t, a.isTrackedMonitor(sessionID, "toolu_monitor_stopped"))
+	require.True(t, a.isTrackedMonitor(sessionID, "toolu_monitor_sibling"))
+	a.mu.RLock()
+	_, stoppedActive := a.activeToolCalls["toolu_monitor_stopped"]
+	a.mu.RUnlock()
+	require.False(t, stoppedActive)
+}
+
+func TestClaudeMonitorTaskStopMultiFrameInputCrossCheck(t *testing.T) {
+	tests := []struct {
+		name           string
+		frameInputTask string
+		wantSettled    bool
+	}{
+		{name: "captured four-frame TaskStop", frameInputTask: "monitor-target", wantSettled: true},
+		{name: "rejects accumulated input mismatch", frameInputTask: "monitor-sibling"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const sessionID, taskStopToolCallID = "native-session-1", "toolu_task_stop"
+			a := newClaudeMonitorTaskStopTestAdapter(t, claudeAgentID, sessionID)
+			target := registerClaudeMonitorTaskStopTestMonitor(t, a, sessionID, "monitor-target", "toolu_monitor_target")
+			sibling := registerClaudeMonitorTaskStopTestMonitor(t, a, sessionID, "monitor-sibling", "toolu_monitor_sibling")
+
+			initial := &acp.SessionUpdateToolCall{
+				ToolCallId: acp.ToolCallId(taskStopToolCallID),
+				Title:      "TaskStop",
+				Kind:       acp.ToolKind("other"),
+				Meta:       claudeTaskStopMeta(""),
+				RawInput:   map[string]any{},
+			}
+			require.NotNil(t, a.convertToolCallUpdate(sessionID, initial), "frame 1 starts TaskStop")
+
+			inputUpdate := claudeTaskStopUpdate(taskStopToolCallID, "", "", test.frameInputTask, nil)
+			require.NotNil(t, a.convertToolCallResultUpdate(sessionID, inputUpdate), "frame 2 carries rawInput")
+			require.Empty(t, drainEvents(a), "rawInput without terminal evidence cannot settle a Monitor")
+			a.mu.RLock()
+			taskStopPayload := a.activeToolCalls[taskStopToolCallID]
+			a.mu.RUnlock()
+			require.NotNil(t, taskStopPayload)
+			payloadTaskID, consistent := taskStopInputTaskID(nil, taskStopPayload)
+			require.True(t, consistent)
+			require.Equal(t, test.frameInputTask, payloadTaskID)
+
+			responseUpdate := claudeTaskStopUpdate(taskStopToolCallID, "monitor-target", "", "", nil)
+			require.NotNil(t, a.convertToolCallResultUpdate(sessionID, responseUpdate), "frame 3 carries toolResponse")
+			require.Empty(t, drainEvents(a), "toolResponse without terminal evidence cannot settle a Monitor")
+
+			completionUpdate := claudeTaskStopUpdate(
+				taskStopToolCallID, "", "monitor-target", "", toolCallStatus("completed"),
+			)
+			completionUpdate.RawOutput = `{"task_id":"monitor-target","task_type":"local_bash","message":"Successfully stopped task: monitor-target"}`
+			require.Nil(t, completionUpdate.RawInput, "the captured terminal frame omits RawInput")
+			a.mu.RLock()
+			completionPayload := a.activeToolCalls[taskStopToolCallID]
+			a.mu.RUnlock()
+			recognizedTaskID, recognized := recognizeTaskStopCompletedTaskID(
+				completionUpdate.Meta, completionUpdate.RawOutput, completionUpdate.RawInput, completionPayload,
+			)
+			if test.wantSettled {
+				require.True(t, recognized)
+				require.Equal(t, "monitor-target", recognizedTaskID)
+			} else {
+				require.False(t, recognized, "the accumulated TaskStop input must reject a conflicting terminal output")
+			}
+			event := a.convertToolCallResultUpdate(sessionID, completionUpdate)
+			require.NotNil(t, event, "frame 4 completes TaskStop")
+			require.Equal(t, toolStatusComplete, event.ToolStatus)
+
+			settlementEvents := drainEvents(a)
+			if test.wantSettled {
+				requireClaudeMonitorSettlementEvents(
+					t, settlementEvents, "monitor-target", "toolu_monitor_target", streams.RunStateInterrupted,
+				)
+				require.False(t, a.isTrackedMonitor(sessionID, "toolu_monitor_target"))
+				require.True(t, sibling.IsActiveMonitor(), "the sibling remains live")
+				return
+			}
+			require.Empty(t, settlementEvents, "frame 2 rawInput must be cross-checked against frame 4 rawOutput")
+			require.True(t, target.IsActiveMonitor())
+			require.True(t, sibling.IsActiveMonitor())
+		})
+	}
+}
+
+// @covers AC-AGENTS-BACKGROUND-WORK-002.1, AC-AGENTS-BACKGROUND-WORK-002.2, AC-AGENTS-BACKGROUND-WORK-010.7
+func TestClaudeMonitorTaskStopRejectsFailedOrUnmatched(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       *acp.ToolCallStatus
+		metaTaskID   string
+		outputTaskID string
+		inputTaskID  string
+		sessionID    string
+		provider     string
+	}{
+		{name: "failed", status: toolCallStatus("failed"), metaTaskID: "monitor-target", outputTaskID: "monitor-target", inputTaskID: "monitor-target"},
+		{name: "intermediate status-less frame", metaTaskID: "monitor-target", outputTaskID: "monitor-target", inputTaskID: "monitor-target"},
+		{name: "mismatched raw input", status: toolCallStatus("completed"), metaTaskID: "monitor-target", outputTaskID: "monitor-target", inputTaskID: "monitor-sibling"},
+		{name: "conflicting confirmed task ids", status: toolCallStatus("completed"), metaTaskID: "monitor-target", outputTaskID: "monitor-sibling", inputTaskID: "monitor-target"},
+		{name: "unknown task", status: toolCallStatus("completed"), metaTaskID: "unknown-task", outputTaskID: "unknown-task", inputTaskID: "unknown-task"},
+		{name: "missing confirmed task id", status: toolCallStatus("completed"), inputTaskID: "monitor-target"},
+		{name: "foreign provider", status: toolCallStatus("completed"), metaTaskID: "monitor-target", outputTaskID: "monitor-target", inputTaskID: "monitor-target", provider: codexAgentID},
+		{name: "stale session", status: toolCallStatus("completed"), metaTaskID: "monitor-target", outputTaskID: "monitor-target", inputTaskID: "monitor-target", sessionID: "old-session"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const sessionID = "native-session-1"
+			a := newClaudeMonitorTaskStopTestAdapter(t, claudeAgentID, sessionID)
+			target := registerClaudeMonitorTaskStopTestMonitor(t, a, sessionID, "monitor-target", "toolu_monitor_target")
+			sibling := registerClaudeMonitorTaskStopTestMonitor(t, a, sessionID, "monitor-sibling", "toolu_monitor_sibling")
+			if test.provider != "" {
+				a.agentID = test.provider
+			}
+			updateSessionID := test.sessionID
+			if updateSessionID == "" {
+				updateSessionID = sessionID
+			}
+
+			event := a.convertToolCallResultUpdate(updateSessionID, claudeTaskStopUpdate(
+				"toolu_task_stop", test.metaTaskID, test.outputTaskID, test.inputTaskID, test.status,
+			))
+			if test.name == "stale session" {
+				require.Nil(t, event, "stale Claude native frames are discarded")
+			} else {
+				require.NotNil(t, event)
+			}
+			require.Empty(t, drainEvents(a), "unqualified TaskStop evidence must not settle a Monitor")
+			require.True(t, target.IsActiveMonitor())
+			require.True(t, sibling.IsActiveMonitor())
+			require.True(t, a.isTrackedMonitor(sessionID, "toolu_monitor_target"))
+			require.True(t, a.isTrackedMonitor(sessionID, "toolu_monitor_sibling"))
+		})
+	}
+}
+
+// @covers AC-AGENTS-BACKGROUND-WORK-002.1, AC-AGENTS-BACKGROUND-WORK-010.7
+func TestClaudeMonitorTaskStopAfterPromptHandoffPreservesSibling(t *testing.T) {
+	const sessionID = "native-session-1"
+	a := newClaudeMonitorTaskStopTestAdapter(t, claudeAgentID, sessionID)
+	registerClaudeMonitorTaskStopTestMonitor(t, a, sessionID, "monitor-stopped", "toolu_monitor_stopped")
+	sibling := registerClaudeMonitorTaskStopTestMonitor(t, a, sessionID, "monitor-sibling", "toolu_monitor_sibling")
+	a.protectActiveBackgroundWorkForHandoff(sessionID)
+	a.cancelPromptEndToolCalls(sessionID)
+	drainEvents(a)
+
+	event := a.convertToolCallResultUpdate(sessionID, claudeTaskStopUpdate(
+		"toolu_task_stop", "monitor-stopped", "monitor-stopped", "monitor-stopped", toolCallStatus("completed"),
+	))
+	require.NotNil(t, event)
+	requireClaudeMonitorSettlementEvents(t, drainEvents(a), "monitor-stopped", "toolu_monitor_stopped", streams.RunStateInterrupted)
+
+	require.True(t, sibling.IsActiveMonitor())
+	a.mu.RLock()
+	stoppedProtected := a.isPromptHandoffToolProtectedLocked("toolu_monitor_stopped")
+	siblingProtected := a.isPromptHandoffToolProtectedLocked("toolu_monitor_sibling")
+	a.mu.RUnlock()
+	require.False(t, stoppedProtected)
+	require.True(t, siblingProtected)
+}
+
+// @covers AC-AGENTS-BACKGROUND-WORK-002.2, AC-AGENTS-BACKGROUND-WORK-010.7
+func TestClaudeMonitorTaskStopDeduplicatesWithNativeCompletion(t *testing.T) {
+	const sessionID, taskID, toolCallID = "native-session-1", "monitor-stopped", "toolu_monitor_stopped"
+	a := newClaudeMonitorTaskStopTestAdapter(t, claudeAgentID, sessionID)
+	registerClaudeMonitorTaskStopTestMonitor(t, a, sessionID, taskID, toolCallID)
+
+	firstUpdate := claudeTaskStopUpdate(
+		"toolu_task_stop", "", taskID, taskID, toolCallStatus("completed"),
+	)
+	firstUpdate.RawOutput = `{"task_id":"monitor-stopped"}`
+	first := a.convertToolCallResultUpdate(sessionID, firstUpdate)
+	require.NotNil(t, first)
+	requireClaudeMonitorSettlementEvents(t, drainEvents(a), taskID, toolCallID, streams.RunStateInterrupted)
+
+	repeated := a.convertToolCallResultUpdate(sessionID, claudeTaskStopUpdate(
+		"toolu_task_stop", taskID, taskID, taskID, toolCallStatus("completed"),
+	))
+	require.NotNil(t, repeated)
+	require.Empty(t, drainEvents(a), "repeated TaskStop evidence must be idempotent")
+	a.registerClaudeMonitorCompletion(sessionID, claudeMonitorCompletion{
+		SessionID: sessionID, TaskID: taskID, ToolUseID: toolCallID,
+		State: streams.RunStateCompleted, FinishedAt: time.Now().UTC(),
+	})
+	require.Empty(t, drainEvents(a), "late native completion must not overwrite the TaskStop outcome")
+	a.mu.RLock()
+	_, stillTracked := a.activeToolCalls[toolCallID]
+	a.mu.RUnlock()
+	require.False(t, stillTracked)
+	a.mu.RLock()
+	_, completionRecorded := a.completedClaudeMonitorCompletions[sessionID][claudeMonitorCompletionKey{taskID: taskID, toolUseID: toolCallID}]
+	a.mu.RUnlock()
+	require.True(t, completionRecorded, "TaskStop settlement records the Monitor completion identity")
+}
+
+func newClaudeMonitorTaskStopTestAdapter(t *testing.T, agentID, sessionID string) *Adapter {
+	t.Helper()
+	a := newTestAdapterForAgent(agentID)
+	t.Cleanup(func() { _ = a.Close() })
+	a.sessionID = sessionID
+	if agentID == claudeAgentID {
+		a.agentInfo = &AgentInfo{Name: claudeMonitorEvidenceBridgeName, Version: claudeMonitorEvidenceBridgeBuild}
+	}
+	return a
+}
+
+func registerClaudeMonitorTaskStopTestMonitor(
+	t *testing.T,
+	a *Adapter,
+	sessionID, taskID, toolCallID string,
+) *streams.NormalizedPayload {
+	t.Helper()
+	initial := &acp.SessionUpdateToolCall{
+		ToolCallId: acp.ToolCallId(toolCallID),
+		Title:      monitorToolName,
+		Kind:       acp.ToolKind("other"),
+		Meta:       monitorMeta(),
+		RawInput:   map[string]any{"command": "gh pr checks --watch", "description": "watch checks"},
+	}
+	require.NotNil(t, a.convertToolCallUpdate(sessionID, initial))
+	registration := a.convertToolCallResultUpdate(sessionID, &acp.SessionToolCallUpdate{
+		ToolCallId: acp.ToolCallId(toolCallID),
+		Status:     toolCallStatus("completed"),
+		Meta:       monitorMeta(),
+		RawOutput:  "Monitor started (task " + taskID + ", timeout 60000ms).",
+	})
+	require.NotNil(t, registration)
+	require.Equal(t, toolStatusInProgress, registration.ToolStatus)
+	require.True(t, registration.NormalizedPayload.IsActiveMonitor())
+	drainEvents(a)
+	return registration.NormalizedPayload
+}
+
+func claudeTaskStopUpdate(
+	toolCallID, responseTaskID, outputTaskID, inputTaskID string,
+	status *acp.ToolCallStatus,
+) *acp.SessionToolCallUpdate {
+	var rawOutput any
+	if outputTaskID != "" {
+		rawOutput = map[string]any{"task_id": outputTaskID}
+	}
+	var rawInput any
+	if inputTaskID != "" {
+		rawInput = map[string]any{"task_id": inputTaskID}
+	}
+	return &acp.SessionToolCallUpdate{
+		ToolCallId: acp.ToolCallId(toolCallID),
+		Status:     status,
+		Meta:       claudeTaskStopMeta(responseTaskID),
+		RawInput:   rawInput,
+		RawOutput:  rawOutput,
+	}
+}
+
+func claudeTaskStopMeta(responseTaskID string) map[string]any {
+	claudeCode := map[string]any{"toolName": "TaskStop"}
+	if responseTaskID != "" {
+		claudeCode["toolResponse"] = map[string]any{"task_id": responseTaskID}
+	}
+	return map[string]any{"claudeCode": claudeCode}
+}
+
+func toolCallStatus(status string) *acp.ToolCallStatus {
+	value := acp.ToolCallStatus(status)
+	return &value
 }
 
 func TestClaudeMonitorCompletionBeforeRegistrationSettlesMatchingMonitor(t *testing.T) {

@@ -38,6 +38,7 @@ ordered executor access.
 
 ### Requirements
 
+- [HTTP repository IDs](requirements/http-task-repository-selection.md)
 - [Initial task brief](requirements/initial-task-brief.md)
 
 - [Bounded Session History Storage](requirements/bounded-session-history.md)
@@ -159,6 +160,7 @@ ordered executor access.
 
 ### System design
 
+- [HTTP repository IDs](system-design/http-task-repository-selection.md)
 - [Bounded Session History Storage](system-design/bounded-session-history.md)
 - [Initial task brief](system-design/initial-task-brief.md)
 

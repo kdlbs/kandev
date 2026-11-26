@@ -81,6 +81,13 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.primarySessionPendingAction).toBeUndefined();
   });
 
+  it("hydrates a saved flag note from the workflow snapshot", () => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].flag_note = "Investigate before merging";
+
+    expect(snapshotToState(snapshot).kanban?.tasks[0]?.flagNote).toBe("Investigate before merging");
+  });
+
   // The server-rendered boot payload is the first thing a board paints from,
   // so a dropped assignee here shows every card as unassigned until the first
   // WS update happens to arrive.

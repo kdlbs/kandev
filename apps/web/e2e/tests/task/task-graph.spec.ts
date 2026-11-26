@@ -203,12 +203,14 @@ test.describe("Task graph", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const g = await seedGraph(apiClient, seedData);
     await testPage.emulateMedia({ colorScheme: "dark" });
     await testPage.goto(`/t/${g.a.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    await testPage.evaluate(() => localStorage.removeItem("kandev.onboarding.completed"));
 
     const row = session.sidebar
       .locator("[data-testid='sidebar-task-item']")
@@ -225,6 +227,13 @@ test.describe("Task graph", () => {
       "true",
     );
 
+    await expect(testPage.getByRole("dialog", { name: "AI Agents" })).toHaveCount(0);
+    expect(
+      await testPage.evaluate(() => localStorage.getItem("kandev.onboarding.completed")),
+    ).toBeNull();
+    await prCapture.screenshot("graph-focused-from-sidebar", {
+      caption: "Board Graph with the task selected from the sidebar in focus",
+    });
     const kanban = new KanbanPage(testPage);
     await kanban.goto(seedData.workflowId);
     await testPage.getByTestId("view-toggle-kanban").click();

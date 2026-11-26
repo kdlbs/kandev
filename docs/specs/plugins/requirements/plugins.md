@@ -78,6 +78,11 @@ Kandev keeps growing external integrations and surface-specific behavior directl
   selection shall return a conflict. Retries shall recover the prior outcome,
   including requests without a project that predate this field. A committed
   task recovered by external identity shall retain its stored project.
+- **AC-PLUGINS-PLUGINS-001.22:** For an authorized URL install, Kandev shall
+  return the final result to the waiting client. This includes downloads that
+  complete within their time limit and take longer than the server write
+  timeout. If Kandev installs the package and activation fails, the result
+  shall include the installed plugin record and an activation warning.
 
 ## System design
 

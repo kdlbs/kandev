@@ -18,6 +18,10 @@ import {
 import { cn } from "@/lib/utils";
 import { SettingsInfo } from "@/components/settings/settings-info";
 import { MCPSelectionContent } from "@/components/mcp/mcp-selection-picker";
+import {
+  TASK_CREATE_SETTING_TRIGGER,
+  TaskCreateSettingField,
+} from "@/components/task-create-dialog-setting-field";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 import type { MCPInheritedSelection, MCPServerDefinition } from "@/lib/types/http-mcp";
@@ -123,7 +127,7 @@ export function TaskCreateMCPSettingRow({ loading, builtinPackages, ...selection
       disabled={selection.disabled || (loading && !builtinPackages)}
       className={controlSizingClassName(
         "standard",
-        "w-32 justify-between border-border/60 bg-muted/30 hover:bg-muted/60",
+        cn(TASK_CREATE_SETTING_TRIGGER, "justify-between"),
       )}
     >
       <span className="min-w-0 truncate tabular-nums">
@@ -147,13 +151,17 @@ export function TaskCreateMCPSettingRow({ loading, builtinPackages, ...selection
   );
   return (
     <div className="min-w-0" data-testid="task-create-mcp-setting-row">
-      <div className="flex min-w-0 items-center gap-2" data-testid="task-create-mcp-selection">
-        <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-          <label htmlFor={id}>{title}</label>
-          <SettingsInfo label={title} testId="task-create-mcp-info">
-            {description}
-          </SettingsInfo>
-        </div>
+      <TaskCreateSettingField
+        testId="task-create-mcp-selection"
+        label={
+          <>
+            <label htmlFor={id}>{title}</label>
+            <SettingsInfo label={title} testId="task-create-mcp-info">
+              {description}
+            </SettingsInfo>
+          </>
+        }
+      >
         {touch ? (
           <TaskCreateMCPDrawer
             open={open}
@@ -182,7 +190,7 @@ export function TaskCreateMCPSettingRow({ loading, builtinPackages, ...selection
             </PopoverContent>
           </Popover>
         )}
-      </div>
+      </TaskCreateSettingField>
     </div>
   );
 }

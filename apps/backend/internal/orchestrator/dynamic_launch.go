@@ -1961,10 +1961,12 @@ func (s *Service) startDynamicRelaunchCreatedSession(
 					go s.cleanupCancelledResumeAttempt(attempt)
 				}
 			},
-			onInitialPromptAccepted: func(executionID string) {
-				if s.acceptResumeAttemptAtPromptAcceptance(executionID, attempt) {
-					registry.finishAfterInitialPromptAcceptance(attempt)
+			acceptInitialPrompt: func(executionID string) bool {
+				if !s.acceptResumeAttemptAtPromptAcceptance(executionID, attempt) {
+					return false
 				}
+				registry.finishAfterInitialPromptAcceptance(attempt)
+				return true
 			},
 			onInitialPromptFailed: func() {
 				registry.abortInitialPromptHold(attempt)

@@ -17,33 +17,27 @@ The MCP server continues to enforce task and session authorization.
 
 | Acceptance criteria | Design section |
 | --- | --- |
-| 001.1, 001.3, 001.8 | Identity normalization |
+| 001.1, 001.3, 001.8, 001.9, 001.10 | Identity normalization |
 | 001.2, 001.4 | Injection provenance |
 | 001.5, 001.6 | Permission decision |
 | 001.7 | Lifecycle and observability |
 
 All references belong to `REQ-AGENTS-INJECTED-MCP-APPROVAL-001`.
 
-## Current path and defect
+## ACP request path
 
-`internal/agent/mcpconfig/passthrough.go:codexServerArgs` adds
-`default_tools_approval_mode=approve` for the `kandev` server.
-ACP uses a different path:
+`server/acp/client.go:forwardPermissionRequest` preserves `ToolCall.Name` and
+`ToolCall.Meta` in the internal request. The ACP adapter normalizes the
+identity and forwards it to the process manager. The manager applies the
+session policy before it creates a pending request.
 
-1. `server/acp/client.go:forwardPermissionRequest` converts the permission frame.
-2. `transport/acp/adapter_permissions.go:handlePermissionRequest` forwards it.
-3. `server/process/manager.go:handlePermissionRequest` checks only `AutoApprovePermissions`.
-4. Without blanket approval, the manager creates a pending request and waits.
-
-The ACP conversion currently drops the programmatic `ToolCall.Name` and its metadata.
-The pinned Go SDK already supports both fields. No SDK upgrade is necessary.
-The shared adapter's `AutoApprove` field does not implement the permission decision.
+Codex supplies `default_tools_approval_mode=approve` for the injected server
+through its own MCP launch configuration.
 
 ## Identity normalization
 
-Extend the internal `types.PermissionRequest` with optional `ToolName` and `ToolMeta` fields.
-Copy `ToolCall.Name` and `ToolCall.Meta` in `forwardPermissionRequest`.
-These fields remain internal. Do not expose metadata in public permission snapshots or logs.
+Keep `ToolName` and `ToolMeta` internal to the permission path.
+Public permission snapshots contain display and decision data.
 
 Use a strict qualified-name parser for `mcp__kandev__<tool>`.
 Because this flattened format uses `__` as its boundary, accept only one
@@ -62,7 +56,7 @@ The hook first reads `_meta.claudeCode.toolName` when present.
 Malformed or conflicting metadata produces no eligible identity.
 Only when both identity fields are absent can the hook use an exact qualified title with kind `other`.
 This fallback is specific to Claude's observed MCP presentation, not a generic ACP rule.
-Other provider formats retain the normal prompt path until a tested dialect supports them.
+Each other provider format requires wire evidence before it can use the injected-server policy.
 
 The upstream [Claude tool formatter](https://github.com/agentclientprotocol/claude-agent-acp/blob/v0.75.1/src/tools.ts)
 uses the tool name as the default MCP title.
@@ -70,32 +64,81 @@ Its [permission presentation](https://github.com/agentclientprotocol/claude-agen
 also supplies a programmatic name.
 Implementation fixtures must cover both shapes because installed versions can differ.
 
+### Antigravity CLI
+
+Antigravity CLI 1.5.15 reports `mcp_kandev_<tool>` in typed tool notifications.
+Use the selected `AuthPolicy.RuntimeVariant` and registered `antigravity-acp`
+identity to scope interpretation of that format to the CLI. Keep the shared
+`ParseQualifiedMCPToolName` grammar for double-underscore names. The CLI's
+flattened name and matching notification identify the tool call, but they do
+not identify which server supplied it.
+
+When `session/request_permission` omits a typed name, correlate a typed tool
+notification by both native session ID and tool-call ID. Store notification
+identity and the active-call entry while holding the same adapter lock. Keep
+conflicting notification names as an ambiguous state; a typed request name
+does not override that conflict. The wait for identity uses the same
+session-and-call key, so an active call with a reused ID in another session
+cannot satisfy it. If a notification arrives without a name, continue waiting
+for a named or conflicting update until the correlation window expires.
+Free-form titles and tool arguments cannot establish a server identity.
+
+Before resolving `mcp_<server>_<tool>`, the process manager builds a
+conservative inventory from Antigravity's documented CLI sources. Read the
+global `~/.gemini/config/mcp_config.json` and installed plugin MCP configs
+under `~/.gemini/config/plugins`. For workspaces, inspect `mcp_config.json`
+and plugin MCP configs under `.agents` and recognized legacy customization
+directory names from the work directory through the nearest repository root.
+Include each plugin's actual machine name from `plugin.json`
+(`.antigravity-plugin/plugin.json` takes precedence; a missing name uses the
+plugin folder name), then join it to each server key with `_`, matching the
+provider's plugin server namespace rule. This includes disabled plugin
+candidates as a safe superset.
+
+Antigravity's `plugins.json` discovery manifests can register plugins from
+paths outside these default directories. If a global or effective workspace
+manifest is present, keep the inventory incomplete and leave requests in the
+ordinary permission flow. Also fail closed on malformed, unreadable, oversized,
+symlinked, or special-file sources. Read only regular JSON files up to 1 MiB.
+See Google's [MCP configuration](https://antigravity.google/docs/mcp#global-and-workspace-server-configs),
+[plugin naming](https://antigravity.google/docs/build-plugins), and
+[customization discovery](https://antigravity.google/docs/customization-discovery/)
+documentation.
+
+An alias is eligible only when no configured Kandev or native server name can
+produce its `mcp_<server>_` prefix, the exact tool exists in the live Core
+registry, and `resolveInjectedKandevPermission` verifies the current injected
+endpoint. The single underscore can also appear in server names, so a
+competing global, workspace, or plugin registration leaves the request in the
+ordinary permission flow. A missing Core catalog also fails closed for
+Antigravity legacy profiles without a package manifest. Package profiles use
+the manifest, live package registry, and exact package endpoint.
+
+Classify native human questions before this lookup. The coordinator and
+managed-tool policy checks remain authoritative for their sessions.
+
 ## Injection provenance
 
-Add an internal `InjectedKandevMCP` boolean with `json:"-"` to `config.InstanceConfig`.
-Only `Config.NewInstanceConfig` sets it, immediately after local server injection with a positive instance port.
-Do not add it to `InstanceOverrides`, public DTOs, persisted profiles, or incoming JSON.
-The marker is false for configurations without host injection.
+The process manager requires the internal `InjectedKandevMCP` marker. Instance
+construction sets the marker after host injection. The manager checks the
+injected HTTP or SSE address for the current helper, including the instance
+identity when scoped routes apply. Injection owns the reserved server name.
 
-The permission predicate requires this marker and the exact injected server configuration.
-Require a URL for the current instance port at `http://localhost:<port>/mcp` or `/sse`.
-Require no stdio command and the corresponding supported HTTP/SSE transport.
-The current injector replaces user entries named `kandev`, so those entries cannot retain the reserved slot.
-Cover a mixed list containing both the injected server and unrelated servers.
-The existence of unrelated entries must not grant them approval or disable the injected entry.
+In package mode, `builtinPermissionAllowed` also checks the manifest, live tool
+catalog, and exact endpoint for the selected package. Mixed server lists can
+contain unrelated registrations. Only a proven built-in registration is eligible.
 
 ## Permission decision
 
-Keep the existing blanket approval branch first.
-Before pending-request allocation, evaluate the injected-server predicate.
-Select an offered `allow_once`, then an offered `allow_always`.
-Return its exact option ID. Never invent a choice or fall back to a reject option.
-If no allow choice exists, continue through the existing pending-request path.
-The ACP client's existing empty-options cancellation remains intact.
+Classify native questions first. Apply the actor's session policy before pending
+request allocation. In an ordinary session, blanket approval takes precedence.
+For an injected-server approval, prefer an offered `allow_once` option. If none
+exists, use an offered `allow_always` option. Return the exact option ID.
+If no allow choice exists, follow the
+[permission control integrity policy](../requirements/permission-control-integrity.md).
 
-Use a small helper in `server/process/manager_permission_policy.go`.
-Do not reuse `autoApprovePermission` for this branch: that helper falls back to the first option, including rejection.
-Keep all existing pending-request identity, cancellation, and exactly-once resolution rules unchanged.
+The manager owns option selection in `server/process/manager_permission_policy.go`.
+Requests that reach the pending path use the existing identity and resolution contract.
 
 ## Lifecycle and observability
 

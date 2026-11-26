@@ -22,19 +22,21 @@ func TestAntigravityCommandPreviewUsesSelectedLocalRuntime(t *testing.T) {
 		name           string
 		cliVersion     string
 		wantVariant    string
+		wantSkipFlag   bool
 		prepareRuntime func(*testing.T, string) string
 	}{
 		{
-			name:        "compatible CLI in a path with spaces",
-			cliVersion:  "1.5.15",
-			wantVariant: "cli",
+			name:         "compatible CLI in a path with spaces",
+			cliVersion:   "1.5.15",
+			wantVariant:  "cli",
+			wantSkipFlag: true,
 			prepareRuntime: func(t *testing.T, home string) string {
 				bin := filepath.Join(t.TempDir(), "Antigravity CLI")
 				if err := os.MkdirAll(bin, 0o755); err != nil {
 					t.Fatal(err)
 				}
 				cli := filepath.Join(bin, "agy")
-				writeAntigravityCLI(t, cli, "1.5.15")
+				writeAntigravityCLIWithSkipFlag(t, cli, "1.5.15", true)
 				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 				return cli
 			},
@@ -73,6 +75,18 @@ func TestAntigravityCommandPreviewUsesSelectedLocalRuntime(t *testing.T) {
 				return filepath.Join(bundleDir, artifact.ServerName)
 			},
 		},
+		{
+			name:        "qualified CLI without skip flag",
+			cliVersion:  "1.5.15",
+			wantVariant: "cli",
+			prepareRuntime: func(t *testing.T, home string) string {
+				bin := t.TempDir()
+				cli := filepath.Join(bin, "agy")
+				writeAntigravityCLIWithSkipFlag(t, cli, "1.5.15", false)
+				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+				return cli
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,6 +102,7 @@ func TestAntigravityCommandPreviewUsesSelectedLocalRuntime(t *testing.T) {
 			})
 			response, err := controller.PreviewAgentCommand(context.Background(), agents.AntigravityACPAgentID, CommandPreviewRequest{
 				CLIFlags: []dto.CLIFlagDTO{
+					{Flag: "--dangerously-skip-permissions", Enabled: true},
 					{Flag: "--profile 'value with spaces'", Enabled: true},
 					{Flag: "--process-per-session=false", Enabled: true},
 				},
@@ -106,6 +121,9 @@ func TestAntigravityCommandPreviewUsesSelectedLocalRuntime(t *testing.T) {
 					t.Fatalf("CLI worker flag is not effective after profile flags: %#v", response.Command)
 				}
 			}
+			if got := slices.Contains(response.Command, "--dangerously-skip-permissions"); got != tt.wantSkipFlag {
+				t.Fatalf("skip-permissions flag present = %t, want %t; command = %#v", got, tt.wantSkipFlag, response.Command)
+			}
 			if !slices.Contains(response.Command, "value with spaces") {
 				t.Fatalf("CLI flag value was not preserved as one argv token: %#v", response.Command)
 			}
@@ -114,9 +132,17 @@ func TestAntigravityCommandPreviewUsesSelectedLocalRuntime(t *testing.T) {
 }
 
 func writeAntigravityCLI(t *testing.T, path, version string) {
+	writeAntigravityCLIWithSkipFlag(t, path, version, true)
+}
+
+func writeAntigravityCLIWithSkipFlag(t *testing.T, path, version string, supportsSkip bool) {
 	t.Helper()
+	help := "Usage: agy acp [flags]\\n\\nFlags:\\n  --process-per-session  Serve each session from an isolated worker process\\n"
+	if supportsSkip {
+		help += "  --dangerously-skip-permissions  Approve all tool requests\\n"
+	}
 	script := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'agy " + version + "'; exit 0; fi\n" +
-		"if [ \"$1\" = \"acp\" ] && [ \"$2\" = \"--help\" ]; then printf 'Usage: agy acp [flags]\\n\\nFlags:\\n  --process-per-session  Serve each session from an isolated worker process\\n'; exit 0; fi\nexit 0\n"
+		"if [ \"$1\" = \"acp\" ] && [ \"$2\" = \"--help\" ]; then printf '" + help + "'; exit 0; fi\nexit 0\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-10-27
-updated: 2026-11-09
+updated: 2026-11-25
 requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
@@ -104,6 +104,14 @@ A status timeout is transport uncertainty, not proof of process death or journal
 Use existing connection-recovery limits and typed feedback.
 One unhealthy execution cannot block another execution's monitor or Stop.
 
+### Bounded observation of an unchanged failure
+
+The monitor continues status and pressure observations after it starts recovery.
+For a correlated snapshot, run one bounded reconciliation cycle for that failure revision on the attached connection.
+A new correlated revision or verified healthy transition can trigger another evaluation.
+Use the existing state-based cooldown for older peers that supply no revision.
+Explicit Retry connection and normal replay use the existing reconciliation path independently of this monitor state.
+
 ## Recovery and persistence
 
 Reuse `session_recovery_blocks`, delivery submissions, native recovery notices, and existing queue admission.
@@ -189,6 +197,11 @@ An unavailable candidate cannot prevent application startup or recovery of other
 Its existing admission restrictions remain effective until the required evidence becomes available.
 An already waiting row is a no-op. A later prompt or replacement invalidates the candidate.
 No operator database edit or automatic replay forms part of this repair.
+
+When the recovery event matches an already-settled cancellation, call the existing convergence operation with the exact terminal binding.
+Use its idle-runtime proof before the session guard. Use the existing transaction checks for the mutation.
+The synchronous subscriber tries the guard once. A busy guard or pending effect leaves the work with the existing event, outbox, or explicit recovery path.
+The writer stays blocked while source health reports a failure.
 
 SQLite and PostgreSQL must share the same predicate and interruption behavior.
 Use existing writer admission and PostgreSQL advisory locks. No schema or journal-version change is planned.

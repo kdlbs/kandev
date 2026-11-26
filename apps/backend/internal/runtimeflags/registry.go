@@ -60,6 +60,7 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
 	{key: retiredProviderInterruptionContinuationKey, envVar: retiredProviderInterruptionContinuationEnvVar},
 	{key: "features.dynamicCircuitBackoffEscalation", envVar: "KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION"},
+	{key: "features.lspBrowserContinuity", envVar: "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY"},
 }
 
 var registrations = []runtimeFlagRegistration{
@@ -110,22 +111,6 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.WorkspaceCollaboration },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.WorkspaceCollaboration = value },
-	},
-	{
-		definition: RuntimeFlagDefinition{
-			Key:             "features.lspBrowserContinuity",
-			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
-			Kind:            KindFeature,
-			Label:           "LSP browser continuity",
-			Description:     "Keeps supported task-host language-server processes available across browser disconnects.",
-			Stability:       StabilityExperimental,
-			RiskLevel:       RiskMedium,
-			RiskDescription: "Retains the task host and language-server process while an editor is detached; enable only with the bounded lease and idle-release behavior in place.",
-			RestartRequired: true,
-			Mutable:         true,
-		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.LSPBrowserContinuity },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.LSPBrowserContinuity = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -190,8 +175,7 @@ var registrations = []runtimeFlagRegistration{
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskHigh,
 			RiskDescription: "Canvas applications execute arbitrary packaged browser code in a sandboxed runtime and " +
-				"can access only explicitly granted Kandev data. Enable this only while reviewing the isolation, " +
-				"storage, and permission behavior of the experimental feature.",
+				"can access only explicitly granted Kandev data.",
 			RestartRequired: true,
 			Mutable:         true,
 		},

@@ -499,6 +499,7 @@ func (s *Service) publishTaskEventNowWithOptions(
 		"workflow_step_id":   task.WorkflowStepID,
 		"title":              task.Title,
 		"description":        task.Description,
+		"flag_note":          task.FlagNote,
 		"state":              string(task.State),
 		"priority":           task.Priority,
 		"execution_grade":    task.ExecutionGrade,
