@@ -385,7 +385,7 @@ function ToastStack({
             )}
           >
             <div className={cn("mt-0.5 flex-shrink-0", styles.icon)}>
-              <Icon className={cn("h-5 w-5", styles.spin && "animate-spin")} />
+              <Icon aria-hidden="true" className={cn("h-5 w-5", styles.spin && "animate-spin")} />
             </div>
             <div className="min-w-0 flex-1 space-y-1">
               {toast.title && (

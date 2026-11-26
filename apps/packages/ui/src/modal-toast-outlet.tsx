@@ -44,9 +44,10 @@ export function ModalToastOutlet({ className }: { className?: string }) {
         data-slot="modal-toast-outlet"
         data-testid="modal-toast-outlet"
         className={cn(
-          "max-h-[min(11rem,22dvh)] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain empty:hidden",
+          "max-h-[min(11rem,22dvh)] min-h-0 w-full min-w-0 overscroll-contain empty:hidden",
           className,
         )}
+        style={{ overflowY: content ? "auto" : "hidden" }}
       >
         {content}
       </div>

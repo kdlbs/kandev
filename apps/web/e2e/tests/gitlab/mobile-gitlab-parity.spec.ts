@@ -406,7 +406,9 @@ test.describe("Mobile GitLab parity", () => {
     await expectTouchTarget(pause, "pause watch button");
     await expectTouchTarget(check, "check watch button");
     await check.tap();
-    await expect(testPage.getByText(/Found 1 matching merge request/)).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: /Found 1 matching merge request/ }),
+    ).toBeVisible();
     const taskTitle = `[${GITLAB_PROJECT}!112] Mobile watch dispatch MR`;
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -416,7 +418,7 @@ test.describe("Mobile GitLab parity", () => {
     await settings.goto(seedData.workspaceId);
     await check.tap();
     await expect(
-      testPage.getByText("No new merge requests matched", { exact: true }),
+      testPage.getByTestId("toast-message").filter({ hasText: "No new merge requests matched" }),
     ).toBeVisible();
     await kanban.goto();
     await expect(kanban.taskCardByTitle(taskTitle)).toHaveCount(1);
