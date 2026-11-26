@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
+  chooseZoom,
   expectNoOverlap,
   itemsScript,
   openReviewQuestions,
@@ -53,6 +54,30 @@ test("reviews a pair with comparison tools and singles alone, item by item", asy
   const counts = new Map<string, number>();
   for (const id of requested) counts.set(id, (counts.get(id) ?? 0) + 1);
   for (const [id, count] of counts) expect(count, `${id} read once`).toBe(1);
+});
+
+test("returns to an item at the zoom it was left at", async ({ testPage, apiClient, seedData }) => {
+  test.setTimeout(180_000);
+  seedReviewImages(seedData.repositoryPath);
+  const { session } = await openReviewQuestions(testPage, apiClient, seedData, itemsScript());
+  await session.clarificationOverlay().getByTestId("question-review-open").click();
+  const dialog = testPage.getByTestId("question-review-dialog");
+  const position = dialog.getByTestId("question-review-item-position");
+  const level = dialog.getByTestId("question-review-zoom-level");
+  await expect(dialog.getByRole("img", { name: reviewImages.before.alt })).toBeVisible();
+  await chooseZoom(testPage, dialog, "question-review-actual");
+  await dialog.getByTestId("question-review-zoom-in").click();
+  await expect(level).toHaveText("200%");
+
+  // The single has a different size, so it starts at Fit.
+  await dialog.getByTestId("question-review-item-next").click();
+  await expect(position).toHaveText("Item 2 of 3 · Single");
+  await expect(dialog.getByRole("img", { name: reviewImages.spacing.alt })).toBeVisible();
+  await expect(level).not.toHaveText("200%");
+
+  await dialog.getByTestId("question-review-item-prev").click();
+  await expect(position).toHaveText("Item 1 of 3 · Pair");
+  await expect(level).toHaveText("200%");
 });
 
 test("shows ungrouped images as a gallery and compares two on demand", async ({
@@ -177,4 +202,31 @@ test("names the visible image at the bottom left and on the Wipe handle", async 
   await expect(labels).toHaveText(["before"]);
   const atEnd = (await handle.boundingBox())!;
   expect(atEnd.x + atEnd.width).toBeLessThanOrEqual(stageNow.x + stageNow.width + 0.5);
+});
+
+test("shows a choice's image on the stage from the answer form", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  seedReviewImages(seedData.repositoryPath);
+  const question = {
+    id: "header",
+    title: "Header",
+    prompt: "Which header do you prefer?",
+    options: [
+      { label: "Old", description: "Keep the old header", images: [reviewImages.before] },
+      { label: "New", description: "Use the new header", images: [reviewImages.after] },
+    ],
+  };
+  const script = `e2e:mcp:kandev:ask_user_question_kandev(${JSON.stringify({ questions: [question] })})\ne2e:message("Done.")`;
+  const { session } = await openReviewQuestions(testPage, apiClient, seedData, script);
+  await session.clarificationOverlay().getByTestId("question-review-open").click();
+  const dialog = testPage.getByTestId("question-review-dialog");
+  const position = dialog.getByTestId("question-review-item-position");
+  await expect(position).toHaveText("Item 1 of 2 · Image");
+  await dialog.getByRole("button", { name: "Show image after" }).click();
+  await expect(position).toHaveText("Item 2 of 2 · Image");
+  await expect(dialog.getByRole("img", { name: reviewImages.after.alt })).toBeVisible();
 });

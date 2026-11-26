@@ -125,6 +125,10 @@ export function useReviewViewport(
     (scale: number) => apply((v) => zoomAt(v, scale, center(), latest.current.minScale)),
     [apply, center],
   );
+  const restore = useCallback((next: ReviewView) => {
+    const { stage: s, image: i, clamp: c } = latest.current;
+    setManual(c(next, s, i));
+  }, []);
   const setPinnedFraction = useCallback((fraction: number) => {
     const { view: v, stage: s, image: i } = latest.current;
     setManual(clampPinnedView(pinnedViewForFraction(v, s, i, fraction), s, i));
@@ -170,6 +174,7 @@ export function useReviewViewport(
     zoomToRect,
     zoomTo,
     atFit: manual === null,
+    restore,
     pinnedFraction: pinnedWipeFraction(view, stage, image),
     setPinnedFraction,
   };

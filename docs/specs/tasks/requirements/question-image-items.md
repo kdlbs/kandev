@@ -153,6 +153,13 @@ compares only images that are comparable.
 - **AC-TASKS-QUESTION-IMAGE-ITEMS-003.8:** On phones, tapping the zoom level on
   the image shall open zoom out, zoom in, Fit, and Actual size controls next to
   it, so zooming does not need the More menu. A tap outside shall close them.
+- **AC-TASKS-QUESTION-IMAGE-ITEMS-003.9:** While the review view stays open,
+  returning to an item or question shall show its image at the zoom and pan the
+  operator left it at. A newly opened image with the same pixel size as the last
+  one viewed shall start at that zoom and pan; any other new image starts at Fit.
+- **AC-TASKS-QUESTION-IMAGE-ITEMS-003.10:** In the review view's answer form, a
+  choice with an image shall offer a **Show image** button naming that image,
+  which moves the stage to it.
 
 ### REQ-TASKS-QUESTION-IMAGE-ITEMS-004: Visible image identity
 

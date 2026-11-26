@@ -33,6 +33,7 @@ export function StageZoom({ viewport, phone, container, changes }: Props) {
       onFit={viewport.fit}
       onScale={viewport.zoomTo}
       changes={changes}
+      container={container}
     />
   );
 }

@@ -58,6 +58,7 @@ function DesktopToolbar({ model }: { model: CompareStageModel }) {
       wipe={model.wipe}
       urls={model.urls}
       pair={model.pair}
+      container={model.popoverContainer}
       leading={
         model.items.compare ? (
           <BackToGalleryButton items={model.items} aId={model.state.aId} />

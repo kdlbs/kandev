@@ -3,7 +3,7 @@
 import { Button } from "@kandev/ui/button";
 import { Slider } from "@kandev/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { COMPARE_MODES, MAX_TOLERANCE, type CompareMode } from "@/lib/question-review/compare";
 import type { ReviewImage } from "@/lib/question-review/segments";
@@ -38,9 +38,12 @@ type Props = {
   leading?: ReactNode;
   /** A pair keeps its declared order: no pickers, Swap, or candidate stepping. */
   pair?: boolean;
+  /** Where the pickers' lists render: inside the review dialog. */
+  container?: RefObject<HTMLElement | null>;
 };
 
-export function ReviewCompareToolbar({ compare, images, wipe, urls, leading, pair }: Props) {
+export function ReviewCompareToolbar(props: Props) {
+  const { compare, images, wipe, urls, leading, pair, container } = props;
   const { t } = useTranslation();
   const modeLabel = useCompareModeLabel();
   const { state, dispatch } = compare;
@@ -71,6 +74,7 @@ export function ReviewCompareToolbar({ compare, images, wipe, urls, leading, pai
           onPick={(slot, id) => dispatch({ type: "pick", slot, id })}
           onSwap={() => dispatch({ type: "swap" })}
           urls={urls}
+          container={container}
           stepper={
             state.mode === "toggle" || state.mode === "side"
               ? { position: compare.position, onStep: compare.step }

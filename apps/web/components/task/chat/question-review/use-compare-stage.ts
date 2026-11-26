@@ -14,7 +14,10 @@ import type { Size } from "@/lib/question-review/viewport";
 import { useReviewLayout } from "./review-layout";
 import type { StageImages } from "./review-stage-shared";
 import type { ReviewAnnotationController } from "./use-review-annotations";
-import { useReviewCompare, type CompareSettingsCarry } from "./use-review-compare";
+import { useReviewCompare } from "./use-review-compare";
+import { useRememberedView } from "./use-remembered-view";
+import type { ImageRequest } from "./review-image-request";
+import type { ReviewCarry } from "@/lib/question-review/review-carry";
 import type { RegionReveal } from "./use-region-reveal";
 import type { OperatorCompare, ReviewItems } from "./use-review-items";
 import { useChangesZoom } from "./use-changes-zoom";
@@ -29,7 +32,9 @@ export type CompareStageProps = {
   segment: ReviewSegment;
   annotations: ReviewAnnotationController;
   popoverContainer: RefObject<HTMLElement | null>;
-  compareCarry?: CompareSettingsCarry;
+  carry?: ReviewCarry;
+  /** The answer form asked to show this image (Show image on a choice). */
+  imageRequest?: ImageRequest | null;
 };
 
 /** One item's stage: the segment's loaded images, its item navigation, and a pending region reveal. */
@@ -137,7 +142,7 @@ function stageFlags(
 export function useCompareStage(props: CompareItemProps) {
   const { segment, annotations, images, compareImages, items } = props;
   const layout = useReviewLayout();
-  const compare = useReviewCompare(compareImages, props.compareCarry, {
+  const compare = useReviewCompare(compareImages, props.carry, {
     initial: props.initial,
     fixed: props.pair,
   });
@@ -168,6 +173,7 @@ export function useCompareStage(props: CompareItemProps) {
   useEffect(() => {
     fitView();
   }, [pinned, fitView]);
+  useRememberedView(viewport, props.carry, stageViewKey(segment.questionId, props), imageSize);
   useCarryPinnedSplit({
     pinned,
     measured: viewport.stage.width > 0 && imageSize.width > 0,
@@ -278,4 +284,13 @@ function useCarryPinnedSplit(args: {
       dispatch({ type: "wipe", value: fraction });
     }
   }, [pinned, measured, fraction, wipe, dispatch]);
+}
+
+/** A pair keeps its own view; an operator comparison keeps one per segment. */
+function stageViewKey(
+  questionId: string,
+  props: { pair?: boolean; compareImages: readonly { id: string }[] },
+) {
+  const ids = props.pair ? props.compareImages.map((image) => image.id).join("|") : "compare";
+  return `${questionId}:${ids}`;
 }

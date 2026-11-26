@@ -47,7 +47,7 @@ const WIPE_NAME_MAX_LETTERS = 12;
 const WIPE_NAME_MIN_LETTERS = 3;
 /** Stage height kept clear of the handle's names: its bottom offset, padding, and top margin. */
 const WIPE_NAME_RESERVED_PX = 112;
-const WIPE_LETTER_PX = 14;
+const WIPE_LETTER_PX = 12;
 
 /** How many stacked letters a Wipe name gets on a stage of this height. */
 export function wipeNameMaxLetters(stageHeight: number): number {

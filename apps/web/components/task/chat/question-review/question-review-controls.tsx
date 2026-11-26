@@ -1,6 +1,6 @@
 "use client";
 
-import type { RefObject } from "react";
+import { useContext, type RefObject } from "react";
 import { IconPhoto } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
@@ -10,6 +10,7 @@ import {
   imageShortName,
   segmentImageIndex,
 } from "@/lib/question-review/segments";
+import { ShowImageContext } from "./review-image-request";
 
 /** Opens the large review view from the compact question panel. */
 export function QuestionReviewButton({
@@ -53,7 +54,7 @@ export function QuestionReviewPlaceholder() {
   );
 }
 
-/** Links a choice to its image on the review stage, which replaces the compact thumbnail. */
+/** Shows a choice's image on the review stage, which replaces the compact thumbnail. */
 export function ChoiceStageImageRef({
   question,
   option,
@@ -62,15 +63,25 @@ export function ChoiceStageImageRef({
   option: ClarificationOption;
 }) {
   const { t } = useTranslation();
+  const show = useContext(ShowImageContext);
   const imageId = option.images?.find((image) => typeof image?.id === "string")?.id;
   const images = buildSegmentImages(question);
   const index = imageId ? segmentImageIndex(images, imageId) : 0;
-  if (index === 0) return null;
+  if (!imageId || index === 0) return null;
   return (
-    <p className="mt-1 text-xs text-muted-foreground" data-testid="question-review-choice-image">
+    <Button
+      type="button"
+      variant="link"
+      size="sm"
+      className="h-auto cursor-pointer gap-1.5 p-0 text-xs max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+      data-testid="question-review-choice-image"
+      disabled={!show}
+      onClick={() => show?.(imageId)}
+    >
+      <IconPhoto className="h-3.5 w-3.5" aria-hidden="true" />
       {t("task:questionReviewChoiceImageRef", {
         index: imageShortName(images[index - 1], index - 1),
       })}
-    </p>
+    </Button>
   );
 }

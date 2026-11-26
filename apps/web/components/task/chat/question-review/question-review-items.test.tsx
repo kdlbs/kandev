@@ -166,31 +166,6 @@ describe("item-by-item review", () => {
     expect(onion.closest("button")?.getAttribute("data-state")).toBe("on");
   });
 
-  it("names the owning choice when two choice images share a description", () => {
-    renderOverlay([
-      pendingMessage({
-        options: [
-          {
-            option_id: "o1",
-            label: "Old",
-            description: "",
-            images: [{ id: "old", path: "old.png", alt: "Preview" }],
-          },
-          {
-            option_id: "o2",
-            label: "New",
-            description: "",
-            images: [{ id: "new", path: "new.png", alt: "Preview" }],
-          },
-        ],
-      }),
-    ]);
-    const dialog = openReview();
-    expect(within(dialog).getByText(/Preview \(choice: Old\)/)).toBeTruthy();
-    fireEvent.click(within(dialog).getByTestId(NEXT_ITEM));
-    expect(within(dialog).getByText(/Preview \(choice: New\)/)).toBeTruthy();
-  });
-
   // @covers AC-TASKS-QUESTION-IMAGE-ITEMS-003.6
   it("does not fetch images again when moving between items", async () => {
     renderOverlay([mixed()]);
@@ -233,6 +208,59 @@ describe("item-by-item review", () => {
     const dialog = openReview();
     expect(within(dialog).queryByTestId(POSITION)).toBeNull();
     expect(within(dialog).queryByTestId(COMPARE_IMAGES)).toBeNull();
+  });
+});
+
+describe("choice images on the stage", () => {
+  it("names the owning choice when two choice images share a description", () => {
+    renderOverlay([
+      pendingMessage({
+        options: [
+          {
+            option_id: "o1",
+            label: "Old",
+            description: "",
+            images: [{ id: "old", path: "old.png", alt: "Preview" }],
+          },
+          {
+            option_id: "o2",
+            label: "New",
+            description: "",
+            images: [{ id: "new", path: "new.png", alt: "Preview" }],
+          },
+        ],
+      }),
+    ]);
+    const dialog = openReview();
+    expect(within(dialog).getByText(/Preview \(choice: Old\)/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByTestId(NEXT_ITEM));
+    expect(within(dialog).getByText(/Preview \(choice: New\)/)).toBeTruthy();
+  });
+
+  // @covers AC-TASKS-QUESTION-IMAGE-ITEMS-003.10
+  it("shows a choice's image on the stage from the answer form", () => {
+    renderOverlay([
+      pendingMessage({
+        options: [
+          {
+            option_id: "o1",
+            label: "Old",
+            description: "",
+            images: [{ id: "old", path: "old.png", alt: "Old header" }],
+          },
+          {
+            option_id: "o2",
+            label: "New",
+            description: "",
+            images: [{ id: "new", path: "new.png", alt: "New header" }],
+          },
+        ],
+      }),
+    ]);
+    const dialog = openReview();
+    expect(within(dialog).getByTestId(POSITION).textContent).toBe("Item 1 of 2 · Image");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Show image 2" }));
+    expect(within(dialog).getByTestId(POSITION).textContent).toBe("Item 2 of 2 · Image");
   });
 });
 
@@ -284,6 +312,17 @@ describe("visible image identity", () => {
     expect(identity(dialog)).toEqual(["TopB · after50%BelowA · before"]);
     chooseMode(dialog, "Difference");
     expect(identity(dialog)).toEqual(["A · before vs B · after"]);
+  });
+
+  // @covers AC-TASKS-QUESTION-IMAGE-ITEMS-003.4
+  it("opens the A and B picker lists inside the review dialog", async () => {
+    renderOverlay([pendingMessage({ images: [before, after, billing] })]);
+    const dialog = openReview();
+    fireEvent.click(within(dialog).getByTestId(COMPARE_IMAGES));
+    await waitFor(() => expect(within(dialog).getAllByTestId(IMAGE)).toHaveLength(2));
+    fireEvent.click(within(dialog).getByTestId("question-review-pick-b"));
+    const options = await screen.findAllByTestId("question-review-pick-b-option");
+    expect(dialog.contains(options[0])).toBe(true);
   });
 
   // @covers AC-TASKS-QUESTION-IMAGE-ITEMS-004.2

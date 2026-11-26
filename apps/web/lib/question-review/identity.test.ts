@@ -62,7 +62,7 @@ describe("wipeNameMaxLetters", () => {
   it("fits the names to the stage height within fixed bounds", () => {
     expect(wipeNameMaxLetters(0)).toBe(12);
     expect(wipeNameMaxLetters(1000)).toBe(12);
-    expect(wipeNameMaxLetters(224)).toBe(8);
+    expect(wipeNameMaxLetters(224)).toBe(9);
     expect(wipeNameMaxLetters(120)).toBe(3);
   });
 });

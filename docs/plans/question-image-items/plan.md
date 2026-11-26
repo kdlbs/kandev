@@ -55,6 +55,7 @@ Decisions made in this design turn, without a user interview:
 | 3 | [04 Visible image identity](task-04-visible-identity.md) | 03 | Identity badges and announcements for pairs and comparisons. |
 | 4 | [05 Test-round controls](task-05-test-round-controls.md) | 04 | Pair controls, identity placement, phone labels, and phone zoom. |
 | 5 | [06 Wipe handle names](task-06-wipe-handle-names.md) | 05 | Names on the Wipe handle, Onion layer list, and no swipe navigation. |
+| 6 | [07 View memory and Show image](task-07-view-memory-show-image.md) | 06 | Remembered zoom and pan, Show image on choices, picker inside the dialog. |
 
 Wave 1 work orders touch separate files. Work order 01 touches the overlay and
 header; 02 is backend plus the web type. Work order 03 needs the web type from 02.

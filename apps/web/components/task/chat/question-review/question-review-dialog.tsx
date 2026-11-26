@@ -8,7 +8,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import type { CompareSettings } from "@/lib/question-review/compare";
+import { createReviewCarry } from "@/lib/question-review/review-carry";
 import { IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@kandev/ui/dialog";
@@ -22,10 +22,10 @@ import { QuestionReviewSegments } from "./question-review-segments";
 import { QuestionReviewStage } from "./question-review-stage";
 import { ReviewLayoutProvider } from "./review-layout";
 import { RegionsSheet, RegionsSidePanel } from "./review-region-panel";
+import { ShowImageContext, useImageRequest } from "./review-image-request";
 import { WipeLiftContext } from "./review-wipe-grip";
 import type { QuestionReviewController } from "./use-question-review";
 import { useReviewAnnotations, type ReviewAnnotations } from "./use-review-annotations";
-import type { CompareSettingsCarry } from "./use-review-compare";
 
 export type QuestionReviewSubmit = {
   show: boolean;
@@ -71,17 +71,6 @@ function useTextEntryFocus() {
   };
 }
 
-/** One holder per dialog, so every item and question starts from the last settings. */
-function createCompareCarry(): CompareSettingsCarry {
-  let settings: CompareSettings | undefined;
-  return {
-    read: () => settings,
-    write: (next) => {
-      settings = next;
-    },
-  };
-}
-
 export function QuestionReviewDialog(props: Props) {
   const breakpoint = useResponsiveBreakpoint();
   const phone = breakpoint.isMobile;
@@ -90,7 +79,8 @@ export function QuestionReviewDialog(props: Props) {
   useClarificationEscapeGuard(guard);
   const annotations = useReviewAnnotations(props.annotations, props.setAnnotations);
   const [bottomBar, setBottomBar] = useState<HTMLDivElement | null>(null);
-  const [compareCarry] = useState(createCompareCarry);
+  const [carry] = useState(createReviewCarry);
+  const imageRequest = useImageRequest();
   const focus = useTextEntryFocus();
   const layout = useMemo(
     () => ({ phone, touch: phone || !breakpoint.isFinePointer, bottomBar }),
@@ -105,7 +95,8 @@ export function QuestionReviewDialog(props: Props) {
       segment={segment}
       annotations={annotations}
       popoverContainer={review.scopeRef}
-      compareCarry={compareCarry}
+      carry={carry}
+      imageRequest={imageRequest.request}
     />
   ) : null;
   const form = (
@@ -146,30 +137,32 @@ export function QuestionReviewDialog(props: Props) {
       >
         <ReviewLayoutProvider value={layout}>
           <WipeLiftContext.Provider value={review.wipeLift}>
-            <div
-              ref={review.scopeRef}
-              tabIndex={-1}
-              className="relative flex min-h-0 flex-1 flex-col outline-none"
-            >
-              <ReviewHeader {...props} />
-              {phone ? (
-                <PhoneBody
-                  stage={stage}
-                  form={form}
-                  hideBar={focus.typing}
-                  barRef={setBottomBar}
-                  regions={segment && <RegionsSheet segment={segment} controller={annotations} />}
-                />
-              ) : (
-                <DesktopBody
-                  stage={stage}
-                  form={form}
-                  regions={
-                    segment && <RegionsSidePanel segment={segment} controller={annotations} />
-                  }
-                />
-              )}
-            </div>
+            <ShowImageContext.Provider value={imageRequest.show}>
+              <div
+                ref={review.scopeRef}
+                tabIndex={-1}
+                className="relative flex min-h-0 flex-1 flex-col outline-none"
+              >
+                <ReviewHeader {...props} />
+                {phone ? (
+                  <PhoneBody
+                    stage={stage}
+                    form={form}
+                    hideBar={focus.typing}
+                    barRef={setBottomBar}
+                    regions={segment && <RegionsSheet segment={segment} controller={annotations} />}
+                  />
+                ) : (
+                  <DesktopBody
+                    stage={stage}
+                    form={form}
+                    regions={
+                      segment && <RegionsSidePanel segment={segment} controller={annotations} />
+                    }
+                  />
+                )}
+              </div>
+            </ShowImageContext.Provider>
           </WipeLiftContext.Provider>
         </ReviewLayoutProvider>
       </DialogContent>

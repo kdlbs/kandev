@@ -18,6 +18,7 @@ import type { CompareStageProps, ItemStageProps } from "./use-compare-stage";
 import { useRegionReveal } from "./use-region-reveal";
 import { useReviewItems } from "./use-review-items";
 import { useStageAnnotations } from "./use-stage-annotations";
+import { useRememberedView } from "./use-remembered-view";
 import { useReviewViewport } from "./use-review-viewport";
 
 const EMPTY_SIZE: Size = { width: 0, height: 0 };
@@ -30,7 +31,12 @@ const EMPTY_SIZE: Size = { width: 0, height: 0 };
 export function QuestionReviewStage(props: CompareStageProps) {
   const images = useStageImages(props.pendingId, props.sessionId, props.segment);
   const items = useReviewItems(props.segment);
-  const reveal = useRegionReveal(props.annotations, props.segment, items.showImage);
+  const reveal = useRegionReveal(
+    props.annotations,
+    props.segment,
+    items.showImage,
+    props.imageRequest,
+  );
   const comparing = Boolean(items.compare) || items.item?.kind === "pair";
   const { imageId: revealing, consume } = reveal;
   // A single or gallery item already shows the revealed image.
@@ -111,12 +117,14 @@ function useSingleImageStage({
   segment,
   annotations,
   popoverContainer,
+  carry,
 }: SingleStageProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const imageSize = (selected && images.sizes[selected.id]) || EMPTY_SIZE;
   const viewport = useReviewViewport(stageRef, imageSize, {
     panEnabled: !annotations.annotating,
   });
+  useRememberedView(viewport, carry, `${segment.questionId}:image:${selected.id}`, imageSize);
   const state = selected ? images.states[selected.id] : undefined;
   const regions = useStageAnnotations({
     controller: annotations,

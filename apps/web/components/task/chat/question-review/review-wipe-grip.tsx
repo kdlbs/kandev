@@ -41,7 +41,7 @@ export function useWipeGrip(
 ) {
   const a = names.a ? wipeNameLetters(names.a, names.maxLetters) : [];
   const b = names.b ? wipeNameLetters(names.b, names.maxLetters) : [];
-  const height = `max(2.75rem, calc(${Math.max(a.length, b.length)} * 1.15em + 1rem))`;
+  const height = `max(2.75rem, calc(${Math.max(a.length, b.length)} * 1em + 1rem))`;
   const round = useContext(WipeLiftContext);
   const [bottom, setBottom] = useState(round?.value ?? LIFT_DEFAULT_PX);
   const drag = useRef<{ y: number; bottom: number; max: number } | null>(null);
@@ -122,7 +122,7 @@ function GripHalf({ slot, letters }: { slot: "a" | "b"; letters: string[] }) {
   return (
     <span
       className={cn(
-        "pointer-events-none absolute inset-y-0 flex flex-col items-center justify-center px-1.5 py-2 leading-[1.15] font-semibold forced-color-adjust-auto max-md:px-2 [@media(pointer:coarse)]:px-2",
+        "pointer-events-none absolute inset-y-0 flex flex-col items-center justify-center px-1.5 py-2 leading-none font-semibold forced-color-adjust-auto max-md:px-2 [@media(pointer:coarse)]:px-2",
         nameText,
         slot === "a" ? "right-1/2 mr-0.5" : "left-1/2 ml-0.5",
       )}
@@ -131,7 +131,7 @@ function GripHalf({ slot, letters }: { slot: "a" | "b"; letters: string[] }) {
       data-slot={slot}
     >
       {letters.map((letter, index) => (
-        <span key={index} className="min-h-[1.15em]">
+        <span key={index} className="min-h-[1em]">
           {letter}
         </span>
       ))}

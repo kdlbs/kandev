@@ -239,10 +239,27 @@ starting images of a new comparison.
 
 Compare settings keep carrying over through the dialog's `CompareSettings`, so
 the mode and sliders survive item changes ([AC-TASKS-QUESTION-IMAGE-REVIEW-003.5](../requirements/question-image-review.md)).
-The dialog owns one `CompareSettingsCarry` holder (`read`/`write`) that every
-comparison stage reads when it mounts and writes as values change. Item stages
-mount below the dialog, so they read the latest values directly, and dragging a
-slider re-renders only the stage, not the dialog and its answer form.
+The dialog owns one `ReviewCarry` holder (`lib/question-review/review-carry.ts`)
+that every stage reads when it mounts and writes as values change: the
+comparison settings (`read`/`write`) and each stage's zoom and pan
+(`recallView`/`rememberView`, AC-003.9). Item stages mount below the dialog, so
+they read the latest values directly, and dragging a slider re-renders only the
+stage, not the dialog and its answer form. `useRememberedView` recalls a view
+once, when the image size is first known: the view kept for the stage's key
+(`questionId` plus the single image, the pair's two images, or `compare` for an
+operator comparison), or else the last view when the image size matches; Fit
+clears a stage's view. The holder lives as long as the dialog.
+
+**Show image.** In the dialog's answer form, `ChoiceStageImageRef` renders a
+**Show image {name}** button (AC-003.10). The dialog provides `ShowImageContext`
+and keeps an `ImageRequest` (`useImageRequest`), which `useRegionReveal` turns
+into the same one-time reveal as a region selection: move to the item with that
+image, then let a comparison show it.
+
+The image pickers', zoom level, and shortcut-help popovers render into the
+dialog's popover container, like the region and zoom-chip popovers. A popover
+portaled outside the modal dialog lands in content the dialog has made inert,
+which kept the A/B picker from opening in Safari.
 
 ## Visible identity
 
