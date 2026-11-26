@@ -32,19 +32,21 @@ type Adapter struct {
 	projectMu sync.Mutex
 	// commands serializes setup and configuration RPCs with prompt admission.
 	// Notifications and server requests use mu and can run during those RPCs.
-	commands chan struct{}
-	mu       sync.Mutex
-	client   *wire.ClientSideConnection
-	info     *wire.InitializeResponse
-	session  wire.SessionID
-	attach   *sessionAttachment
-	state    projection
-	blocked  bool
-	turn     *promptTurn
-	settings []streams.ConfigOption
-	revision uint64
-	approval types.PermissionHandler
-	input    types.UserInputRequestHandler
+	commands          chan struct{}
+	mu                sync.Mutex
+	client            *wire.ClientSideConnection
+	info              *wire.InitializeResponse
+	session           wire.SessionID
+	attach            *sessionAttachment
+	state             projection
+	blocked           bool
+	turn              *promptTurn
+	settings          []streams.ConfigOption
+	settingsComplete  bool
+	verifiedOptionIDs []string
+	revision          uint64
+	approval          types.PermissionHandler
+	input             types.UserInputRequestHandler
 }
 
 func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {

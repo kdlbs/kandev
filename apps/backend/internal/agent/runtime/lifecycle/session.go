@@ -671,13 +671,9 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	if effectiveModel.decision.Warning {
 		sm.publishModelSelectionWarningEvent(execution, result.SessionID, effectiveModel.decision)
 	}
-	// The layers apply the policy-decided model; the runtime override is
-	// neutralized because the decision already accounted for it. When the
-	// policy ran it already applied the model via SetModel — the layers must
-	// not apply it again (a second SetModel failure would be only logged,
-	// and the original-config snapshot could disagree with reality).
+	// The policy resolves and applies the profile or runtime model before
+	// either settings layer runs.
 	profileModel = effectiveModel.model
-	runtimeModel = ""
 	thinkingConfigID := ""
 	var thinkingModelState *CachedModelState
 	if agentConfig.ID() == acpcompat.PiAgentID {
@@ -691,9 +687,13 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 			profileMode, runtimeMode = "", ""
 		}
 	}
+	var optionCatalog *CachedModelState
+	if len(profileConfigOptions) > 0 || len(runtimeConfigOptions) > 0 {
+		optionCatalog = startupModelCatalog(ctx, execution, result.SessionID, effectiveModel)
+	}
 	finalConfigID, profileModelApplied, profileConfigOptionsApplied := sm.applyProfileSessionLayers(
-		ctx, execution, result.SessionID, profileModel, profileConfigOptions,
-		effectiveModel.handled, effectiveModel.appliedModel,
+		ctx, execution, profileModel, profileConfigOptions,
+		effectiveModel.handled, effectiveModel.appliedModel, optionCatalog,
 	)
 
 	// Capture the effective profile state before runtime overrides or workflow
@@ -707,10 +707,7 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	}
 	sm.publishOriginalConfigOptionsWithProfile(execution, result.SessionID, profileModelApplied, profileConfigOptionsApplied)
 
-	finalConfigID, runtimeFailures := sm.applyRuntimeSessionLayers(
-		ctx, execution, result.SessionID, finalConfigID,
-		profileModelApplied, profileMode, runtimeModel, runtimeMode, runtimeConfigOptions,
-	)
+	finalConfigID, runtimeFailures := sm.applyRuntimeSessionLayers(ctx, execution, finalConfigID, runtimeConfigOptions, optionCatalog)
 	requestedMode := runtimeMode
 	if requestedMode == "" {
 		requestedMode = profileMode
@@ -755,13 +752,7 @@ func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 	acpSessionID string,
 	profileModel, runtimeModel string,
 	startModelPolicy StartModelPolicy,
-) (effective struct {
-	model        string
-	appliedModel string
-	handled      bool
-	decision     ModelSelectionDecision
-	err          error
-}) {
+) (effective startupModelSelection) {
 	effective.model = profileModel
 	if runtimeModel != "" {
 		effective.model = runtimeModel
@@ -776,10 +767,13 @@ func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 	// profile layers must not retry an outcome that was already handled.
 	effective.handled = true
 	startModelPolicy.Model = effective.model
+	applier := &startupModelApplier{client: client}
+	effective.captureModelBeforeSelection(client, acpSessionID)
 	decision, policyErr := applyStartModelPolicy(
-		ctx, sm.logger, client,
+		ctx, sm.logger, applier,
 		execution.GetModelState(), startModelPolicy,
 	)
+	effective.configuration = applier.result
 	if policyErr != nil {
 		sm.logger.Error("start model unavailable, failing session start",
 			zap.String("execution_id", execution.ID),
@@ -942,11 +936,11 @@ func submissionNeedsRecoveryRetirement(submission journal.Submission) bool {
 func (sm *SessionManager) applyProfileSessionLayers(
 	ctx context.Context,
 	execution *AgentExecution,
-	acpSessionID string,
 	profileModel string,
 	profileConfigOptions map[string]string,
 	modelPolicyHandled bool,
 	policyAppliedModel string,
+	optionCatalog *CachedModelState,
 ) (string, string, map[string]string) {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
@@ -981,7 +975,7 @@ func (sm *SessionManager) applyProfileSessionLayers(
 				zap.String("execution_id", execution.ID), zap.String("model", profileModel))
 		}
 	}
-	sanitizedOptions := sanitizeProfileConfigOptions(profileConfigOptions, execution.GetModelState())
+	sanitizedOptions := verifiedStartupOptions(profileConfigOptions, optionCatalog)
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
 		if err := setStartupSessionConfigOption(ctx, execution, client, configID, value); err != nil {
@@ -1001,13 +995,9 @@ func (sm *SessionManager) applyProfileSessionLayers(
 func (sm *SessionManager) applyRuntimeSessionLayers(
 	ctx context.Context,
 	execution *AgentExecution,
-	acpSessionID string,
 	finalConfigID string,
-	profileModel string,
-	profileMode string,
-	runtimeModel string,
-	runtimeMode string,
 	runtimeConfigOptions map[string]string,
+	optionCatalog *CachedModelState,
 ) (string, []string) {
 	failed := make([]string, 0)
 	client, releaseClient := execution.AcquireAgentCtlClient()
@@ -1015,31 +1005,7 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 	if client == nil {
 		return finalConfigID, failed
 	}
-	if runtimeModel != "" && runtimeModel != profileModel {
-		if err := client.SetModel(ctx, runtimeModel); err != nil {
-			failed = append(failed, "model")
-			sm.logger.Warn("failed to set runtime model via ACP",
-				zap.String("execution_id", execution.ID), zap.String("model", runtimeModel), zap.Error(err))
-		} else {
-			finalConfigID = modelConfigIDFromState(execution.GetModelState())
-			// Logged like the profile layer above: without this line a trace
-			// shows only the profile write, and a runtime layer that never ran
-			// is indistinguishable from one that ran and was overwritten.
-			sm.logger.Info("set runtime model on ACP session",
-				zap.String("execution_id", execution.ID), zap.String("model", runtimeModel))
-		}
-	}
-	// Fail safe: when the current agent's option catalog is not yet known, we
-	// cannot verify which persisted options it supports, so replay nothing
-	// rather than sending a prior agent's keys (spec failure mode: unknown
-	// catalog must not send unverified options). This covers flat-model-list
-	// agents whose startup wait exits on the model list before any config
-	// options settle.
-	modelState := execution.GetModelState()
-	var sanitizedOptions map[string]string
-	if _, catalogKnown := capturedRuntimeConfigOptionCatalog(modelState); catalogKnown {
-		sanitizedOptions = sanitizeRuntimeConfigOptionsWithCatalog(runtimeConfigOptions, modelState)
-	}
+	sanitizedOptions := verifiedStartupOptions(runtimeConfigOptions, optionCatalog)
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
 		if err := setStartupSessionConfigOption(ctx, execution, client, configID, value); err != nil {
@@ -1064,20 +1030,6 @@ func setStartupSessionConfigOption(
 		return client.SetConfigOptionWithPolicy(ctx, configID, value, streams.SessionSettingsPolicyProviderRestored)
 	}
 	return client.SetConfigOption(ctx, configID, value)
-}
-
-func sanitizeProfileConfigOptions(options map[string]string, state *CachedModelState) map[string]string {
-	cleaned := profileconfig.SanitizeConfigOptions(options)
-	catalog, catalogKnown := capturedRuntimeConfigOptionCatalog(state)
-	if !catalogKnown || len(cleaned) == 0 {
-		return cleaned
-	}
-	for id := range cleaned {
-		if strings.EqualFold(catalog[id], "mode") {
-			delete(cleaned, id)
-		}
-	}
-	return cleaned
 }
 
 func sanitizeProviderRestoredConfigOptions(options map[string]string, state *CachedModelState) map[string]string {
@@ -1216,16 +1168,28 @@ func (sm *SessionManager) publishSettledConfigOptions(
 	if !ready || baselineCandidate == nil || live == nil {
 		return
 	}
-	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
+	event := agentctl.AgentEvent{
 		Type:                    streams.EventTypeSessionModels,
 		SessionID:               acpSessionID,
 		SessionSettingsPolicy:   providerRestoredSettingsPolicy(execution),
 		CurrentModelID:          live.CurrentModelID,
 		SessionModels:           live.Models,
 		ConfigOptions:           live.ConfigOptions,
+		VerifiedConfigOptionIDs: live.VerifiedConfigOptionIDs,
 		ConfigBaselineCandidate: baselineCandidate.ConfigOptions,
 		Data:                    map[string]any{"config_options_settled": true},
-	})
+	}
+	if live.ConfigOptionsComplete {
+		event.Data[streams.ConfigOptionsCompleteKey] = true
+	}
+	if live.ConfigOptionsDisplayOnly {
+		event.Data[streams.ConfigOptionsDisplayOnlyKey] = true
+		event.Data[streams.ConfigOptionsConfigIDKey] = live.ConfigID
+	}
+	if live.ConfigOptionsComplete || len(live.VerifiedConfigOptionIDs) > 0 || live.ConfigOptionsDisplayOnly {
+		event.SessionSettingsGeneration = live.SessionSettingsGeneration
+	}
+	sm.eventPublisher.PublishAgentStreamEvent(execution, event)
 }
 
 // publishModelFallbackEvent broadcasts an explicit "using fallback model"

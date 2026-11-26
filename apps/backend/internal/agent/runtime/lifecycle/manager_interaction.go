@@ -992,12 +992,7 @@ func sessionModelStateFromClient(client *agentctlclient.Client) (*CachedModelSta
 	if state == nil {
 		return nil, false
 	}
-	cached := &CachedModelState{
-		CurrentModelID:       state.CurrentModelID,
-		Models:               state.Models,
-		ConfigOptions:        state.ConfigOptions,
-		ConfigOptionsSettled: state.ConfigOptionsSettled,
-	}
+	cached := cachedModelStateFromStream(state)
 	if !freshSessionModelCatalogReady(cached) {
 		return nil, false
 	}
