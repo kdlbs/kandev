@@ -100,14 +100,37 @@ export function seedReviewImages(repositoryPath: string) {
   }
 }
 
+/** Removes what `seedReviewImages` wrote, so the worker's checkout stays clean. */
+export function removeReviewImages(repositoryPath: string) {
+  for (const image of [
+    reviewImages.before,
+    reviewImages.after,
+    reviewImages.taller,
+    reviewImages.spacing,
+  ]) {
+    fs.rmSync(path.join(repositoryPath, image.path), { force: true });
+  }
+}
+
 const options = [
   { label: "Approve", description: "Accept" },
   { label: "Revise", description: "Request changes" },
 ];
 
+type ScriptImage = { id: string };
+
+/** "pairs" declares any two-image list as a before/after pair; "gallery" leaves lists ungrouped. */
+type Grouping = "pairs" | "gallery";
+
+function imageGroups(images: ScriptImage[], grouping: Grouping) {
+  if (grouping === "gallery" || images.length !== 2) return {};
+  return { image_groups: [{ kind: "pair", image_ids: images.map((image) => image.id) }] };
+}
+
 export function reviewScript(
-  firstImages: object[] = [reviewImages.before, reviewImages.after],
-  secondImages: object[] = [reviewImages.spacing],
+  firstImages: ScriptImage[] = [reviewImages.before, reviewImages.after],
+  secondImages: ScriptImage[] = [reviewImages.spacing],
+  grouping: Grouping = "pairs",
 ) {
   const questions = [
     {
@@ -115,6 +138,7 @@ export function reviewScript(
       title: "Header",
       prompt: "Is the new header spacing acceptable?",
       images: firstImages,
+      ...imageGroups(firstImages, grouping),
       options,
     },
     {
@@ -122,6 +146,7 @@ export function reviewScript(
       title: "Spacing",
       prompt: "Does the settings spacing look right?",
       images: secondImages,
+      ...imageGroups(secondImages, grouping),
       options,
     },
   ];
@@ -193,10 +218,13 @@ export async function expectThumbnailsShareRow(overlay: Locator) {
   expect(second.x).toBeGreaterThan(first.x + first.width - 1);
 }
 
-/** Drags with real touch events from the center of `target` to `toX` on the same row. */
-export async function touchDrag(page: Page, target: Locator, toX: number) {
+/**
+ * Drags with real touch events from the horizontal center of `target`, at
+ * `row` of its height (the middle by default), to `toX` on the same row.
+ */
+export async function touchDrag(page: Page, target: Locator, toX: number, row = 0.5) {
   const box = (await target.boundingBox())!;
-  const y = box.y + box.height / 2;
+  const y = box.y + box.height * row;
   const fromX = box.x + box.width / 2;
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Input.dispatchTouchEvent", {
@@ -209,6 +237,26 @@ export async function touchDrag(page: Page, target: Locator, toX: number) {
   }
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await cdp.detach();
+}
+
+/**
+ * Touches the center of `target` with a real touch, moves it `dy` pixels
+ * vertically, and returns a function that lifts the finger.
+ */
+export async function touchPress(page: Page, target: Locator, dy = 0) {
+  const box = (await target.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  for (let step = 1; dy !== 0 && step <= 8; step++) {
+    const touchPoints = [{ x, y: y + (dy * step) / 8 }];
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints });
+  }
+  return async () => {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await cdp.detach();
+  };
 }
 
 /** Phone: picks a comparison mode from the mode sheet. */
@@ -243,8 +291,71 @@ export async function expectTouchTargets(scope: Locator) {
   }
 }
 
+/** Every visible button in `scope` lies fully inside the viewport, not just inside a clipping parent. */
+export async function expectWithinViewport(page: Page, scope: Locator) {
+  const width = page.viewportSize()!.width;
+  for (const button of await scope.getByRole("button").all()) {
+    if (!(await button.isVisible())) continue;
+    const box = (await button.boundingBox())!;
+    const name = (await button.getAttribute("data-testid")) ?? "button";
+    expect(box.x, name).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, name).toBeLessThanOrEqual(width + 0.5);
+  }
+}
+
 /** Desktop: picks a zoom level from the on-image zoom level menu. */
 export async function chooseZoom(page: Page, dialog: Locator, testId: string) {
   await dialog.getByTestId("question-review-zoom-level").click();
   await page.getByTestId(testId).click();
+}
+
+/**
+ * Makes the pending bundle inactive (the respond route reports `not_active`),
+ * then opens its late-answer form from chat history. Returns the form's root.
+ */
+export async function openLateAnswerForm(page: Page, session: SessionPage) {
+  await page.route("**/api/v1/clarification/*/respond", (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ code: "not_active" }),
+    }),
+  );
+  await session.clarificationSkip().click();
+  await expect(session.clarificationOverlay()).not.toBeVisible();
+  // Each question of the bundle offers the action; any of them opens the whole bundle.
+  const answer = page.getByTestId("clarification-answer-as-new-message").first();
+  await expect(answer).toBeVisible({ timeout: 15_000 });
+  await answer.click();
+  const form = page.getByTestId("clarification-overlay");
+  await expect(form.getByTestId("clarification-late-submit")).toBeVisible();
+  return form;
+}
+
+/** One question with a before/after pair, then two standalone screens, or all ungrouped. */
+export function itemsScript(grouped = true) {
+  const question = {
+    id: "screens",
+    title: "Screens",
+    prompt: "Approve the header change and the two new screens?",
+    images: [reviewImages.before, reviewImages.after, reviewImages.spacing, reviewImages.taller],
+    ...(grouped && {
+      image_groups: [
+        { kind: "pair", image_ids: [reviewImages.before.id, reviewImages.after.id] },
+        { kind: "single", image_ids: [reviewImages.spacing.id] },
+        { kind: "single", image_ids: [reviewImages.taller.id] },
+      ],
+    }),
+    options,
+  };
+  return `e2e:mcp:kandev:ask_user_question_kandev(${JSON.stringify({ questions: [question] })})\ne2e:message("Review questions complete.")`;
+}
+
+/** The two elements' boxes do not intersect. */
+export async function expectNoOverlap(first: Locator, second: Locator, message: string) {
+  const a = (await first.boundingBox())!;
+  const b = (await second.boundingBox())!;
+  const overlaps =
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+  expect(overlaps, message).toBe(false);
 }

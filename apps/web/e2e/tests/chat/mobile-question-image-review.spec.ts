@@ -4,13 +4,17 @@ import {
   expectNoHorizontalOverflow,
   expectThumbnailsShareRow,
   expectTouchTargets,
+  expectWithinViewport,
   openPhoneMore,
   openReviewQuestions,
+  removeReviewImages,
   reviewImages,
   reviewScript,
   seedReviewImages,
   touchDrag,
 } from "./question-image-review-helpers";
+
+test.afterEach(({ seedData }) => removeReviewImages(seedData.repositoryPath));
 
 const threeImages = [reviewImages.before, reviewImages.after, reviewImages.taller];
 
@@ -33,6 +37,7 @@ test("phone review uses a top row, the image, the form, and a thumb-zone bar", a
   await overlay.getByTestId("question-review-open").tap();
 
   const dialog = testPage.getByTestId("question-review-dialog");
+  await dialog.getByTestId("question-review-compare-images").tap();
   const viewport = testPage.viewportSize()!;
   expect((await dialog.boundingBox())!.height).toBeGreaterThan(viewport.height - 3);
   const stage = dialog.getByTestId("question-review-stage");
@@ -72,12 +77,29 @@ test("phone review uses a top row, the image, the form, and a thumb-zone bar", a
   await testPage.keyboard.press("Escape");
   await expect(bar.getByTestId("question-review-picker-button")).toContainText("B: after");
 
+  // The zoom chip opens the zoom controls beside it; More no longer holds zoom.
   const chip = dialog.getByTestId("question-review-zoom-chip");
   const fitLevel = await chip.textContent();
   await chip.tap();
+  const zoomPopover = testPage.getByTestId("question-review-zoom-popover");
+  await expect(zoomPopover).toBeVisible();
+  await expectTouchTargets(zoomPopover);
+  await expectWithinViewport(testPage, zoomPopover);
+  await prCapture.screenshot("phone-question-review-zoom", {
+    caption: "The zoom chip opens zoom controls on the image",
+  });
+  await zoomPopover.getByTestId("question-review-actual").tap();
   await expect(chip).toHaveText("100%");
-  await chip.tap();
+  await zoomPopover.getByTestId("question-review-zoom-in").tap();
+  await expect(zoomPopover.getByTestId("question-review-zoom-level")).not.toHaveText("100%");
+  await zoomPopover.getByTestId("question-review-fit").tap();
   await expect(chip).toHaveText(fitLevel!);
+  await card.getByText("Is the new header spacing acceptable?").tap();
+  await expect(zoomPopover).toHaveCount(0);
+  const more = await openPhoneMore(testPage, dialog);
+  await expect(more.getByTestId("question-review-zoom-in")).toHaveCount(0);
+  await testPage.keyboard.press("Escape");
+  await expect(more).toHaveCount(0);
 
   await card.getByTestId("clarification-input").tap();
   await expect(bar).toBeHidden();
@@ -100,9 +122,15 @@ test("phone wipe pins its line and scrubs the images; Side by side fits", async 
 }) => {
   test.setTimeout(180_000);
   seedReviewImages(seedData.repositoryPath);
-  const { session } = await openReviewQuestions(testPage, apiClient, seedData, reviewScript());
+  const { session } = await openReviewQuestions(
+    testPage,
+    apiClient,
+    seedData,
+    reviewScript(undefined, undefined, "gallery"),
+  );
   await session.clarificationOverlay().getByTestId("question-review-open").tap();
   const dialog = testPage.getByTestId("question-review-dialog");
+  await dialog.getByTestId("question-review-compare-images").tap();
   await expect(dialog.getByRole("img", { name: reviewImages.before.alt })).toBeVisible();
   await choosePhoneMode(testPage, dialog, "Wipe");
   const handle = dialog.getByTestId("question-review-wipe-handle");
@@ -114,11 +142,13 @@ test("phone wipe pins its line and scrubs the images; Side by side fits", async 
   const box = (await stage.boundingBox())!;
   const center = box.x + box.width / 2;
   const width = testPage.viewportSize()!.width;
-  await touchDrag(testPage, stage, center + Math.min(box.width / 2, width / 2 - 60));
-  await touchDrag(testPage, stage, center + Math.min(box.width / 2, width / 2 - 60));
+  // Scrub above the handle: touching the handle moves the handle instead.
+  const reach = Math.min(box.width / 2, width / 2 - 60);
+  await touchDrag(testPage, stage, center + reach, 0.2);
+  await touchDrag(testPage, stage, center + reach, 0.2);
   await expect(handle).toHaveAttribute("aria-valuenow", "0");
   for (let attempt = 0; attempt < 3; attempt++) {
-    await touchDrag(testPage, stage, center - Math.min(box.width / 2, width / 2 - 60));
+    await touchDrag(testPage, stage, center - reach, 0.2);
   }
   await expect(handle).toHaveAttribute("aria-valuenow", "100");
 
