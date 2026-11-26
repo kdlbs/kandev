@@ -1,7 +1,7 @@
 ---
 id: "07-authoring-bundle-and-scaffold"
 title: "Reduce authoring skill reads"
-status: in_progress
+status: done
 wave: 7
 depends_on:
   - "06-isolated-application-appearance"
@@ -96,12 +96,17 @@ and SSH-compatible executors. Updated the authoring prompt and browser
 reference to document the generated scaffold and appearance contract. The
 authoring contract is versioned as skill version 2.
 
-The handler-level ACP-compatible regression proves that the normal path makes
-one pathless core read and does not issue an invalid path call. The response
-parity regression covers local, Docker, and SSH executor labels. An external
-ACP provider evaluation artifact has not been captured in this worktree, so
-this work order remains in progress until that evaluation is run and recorded.
+The handler-level regression uses one pathless core read and zero invalid
+paths. Response parity tests cover local, Docker, and SSH executor labels.
+Focused backend tests cover rollback, versioning, parity, and handlers.
 
-Focused backend coverage for the affected packages and the new rollback,
-version, parity, and handler tests passes. The external ACP evaluation remains
-the only outstanding acceptance item.
+On 2026-11-25, an isolated Local PC task on `c671d8080883` used Codex ACP
+to create and publish a counter canvas through the normal authoring tools.
+The normalized trace records these results.
+
+| Check | Result |
+| --- | --- |
+| Pathless core skill reads | 1 |
+| Optional reference reads | 1 (`references/manifest.md`) |
+| Invalid skill paths | 0 |
+| Result from the canvas API | Active canvas with a valid release |

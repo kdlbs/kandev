@@ -6,6 +6,37 @@ import {
 } from "../../helpers/profile-capability-discovery";
 
 test.describe("Onboarding agent setup", () => {
+  test("opens the install catalog from a first run with no installed agents", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await testPage.route("**/api/v1/agents/available", async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json();
+      await route.fulfill({
+        response,
+        json: {
+          ...payload,
+          agents: payload.agents.map((agent: object) => ({ ...agent, available: false })),
+        },
+      });
+    });
+    await testPage.addInitScript(() => localStorage.removeItem("kandev.onboarding.completed"));
+    await testPage.goto("/");
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "AI Agents" })).toBeVisible();
+    const install = dialog.getByRole("link", { name: "Install agents" });
+    await expect(install).toBeInViewport();
+    await prCapture.screenshot("empty-agent-step");
+    await install.click();
+    await expect(testPage.getByRole("heading", { name: "Browse available agents" })).toBeVisible();
+    await expect(testPage.getByTestId("install-button-mock-agent")).toBeEnabled();
+    await expect(dialog).toHaveCount(0);
+    expect(
+      await testPage.evaluate(() => localStorage.getItem("kandev.onboarding.completed")),
+    ).toBeNull();
+  });
+
   // @covers AC-AGENTS-FIRST-RUN-SETUP-001.5
   test("bounds a long agent catalog on tall and short viewports while navigation stays fixed", async ({
     testPage,

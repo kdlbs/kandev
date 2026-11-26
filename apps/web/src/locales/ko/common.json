@@ -309,6 +309,7 @@
   "onboardingExecutorSpritesDescription": "원격 제공자 샌드박스에서 실행됩니다. 먼저 Sprites 제공자와 실행기 프로필을 설정하세요.",
   "onboardingExecutorSshDescription": "신뢰할 수 있는 SSH 호스트에서 실행됩니다. 먼저 연결과 실행기 프로필을 설정하고 확인하세요.",
   "onboardingExecutorWorktreeDescription": "작업 변경 사항을 위한 별도의 Git 체크아웃을 만듭니다. 호스트 계정과 그 접근 권한을 공유합니다.",
+  "onboardingNoInstalledAgents": "설치된 에이전트를 찾을 수 없습니다.",
   "onboardingStepAgentsDescription": "검색된 에이전트를 관리하고 새 에이전트를 설치합니다.",
   "onboardingStepAgentsTitle": "AI 에이전트",
   "onboardingStepCommandPanelDescription": "키보드 단축키로 어디서나 작업에 빠르게 접근합니다.",

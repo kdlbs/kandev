@@ -59,11 +59,8 @@ describe("TaskCreatePrioritySelect", () => {
     expect(onChange).toHaveBeenCalledWith("critical");
   });
 
-  it("matches dialog selector styling and explains the setting", async () => {
+  it("explains the setting from its help control", async () => {
     renderPrioritySelect({ value: "medium", onChange: vi.fn() });
-
-    const select = screen.getByTestId("task-create-priority-select");
-    expect(select.className).toContain("bg-muted/30");
 
     const info = screen.getByTestId("task-create-priority-setting-info");
     expect(info.getAttribute("aria-label")).toBe("About task priority");

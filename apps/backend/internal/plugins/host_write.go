@@ -40,6 +40,7 @@ type TaskCreateInput struct {
 	WorkspaceID    string
 	WorkflowID     string
 	WorkflowStepID string
+	ProjectID      string
 	Title          string
 	Description    string
 	ParentID       string
@@ -328,6 +329,9 @@ func (r taskReader) prepareCreate(ctx context.Context, in pluginsdk.CreateTaskIn
 	if in.Priority != "" && taskmodels.ValidateTaskPriority(in.Priority) != nil {
 		return TaskCreateInput{}, TaskLaunchInput{}, invalidArgument(fmt.Sprintf("invalid task priority %q", in.Priority))
 	}
+	if in.ProjectID != nil && strings.TrimSpace(*in.ProjectID) == "" {
+		return TaskCreateInput{}, TaskLaunchInput{}, invalidArgument("project_id cannot be empty")
+	}
 	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
 	if err != nil {
 		return TaskCreateInput{}, TaskLaunchInput{}, err
@@ -345,6 +349,7 @@ func (r taskReader) prepareCreate(ctx context.Context, in pluginsdk.CreateTaskIn
 	}
 	return TaskCreateInput{
 		WorkspaceID: workspaceID, WorkflowID: workflowID,
+		ProjectID:      strDeref(in.ProjectID),
 		WorkflowStepID: strDeref(in.WorkflowStepID), Title: in.Title,
 		Description: in.Description, ParentID: strDeref(in.ParentID),
 		Source: r.host.pluginSource(), Repositories: in.Repositories,

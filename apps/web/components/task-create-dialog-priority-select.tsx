@@ -17,6 +17,10 @@ import { TASK_PRIORITY_LABEL_KEYS, TASK_PRIORITY_TOKENS } from "@/lib/tasks/task
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { TaskPriority } from "@/lib/types/http";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import {
+  TASK_CREATE_SETTING_TRIGGER,
+  TaskCreateSettingField,
+} from "@/components/task-create-dialog-setting-field";
 
 function PriorityInfo({ label, description }: { label: string; description: string }) {
   const usesTouchDrawer = useTouchDrawer();
@@ -72,11 +76,15 @@ export function TaskCreatePrioritySelect({
   const priorityInfoLabel = t("task:priorityInfoLabel");
   const priorityInfo = t("task:priorityInfo");
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex min-h-11 shrink-0 items-center gap-1 text-xs text-muted-foreground md:min-h-6">
-        <label htmlFor="task-create-priority-select">{priorityLabel}</label>
-        <PriorityInfo label={priorityInfoLabel} description={priorityInfo} />
-      </div>
+    <TaskCreateSettingField
+      testId="task-create-priority-setting-row"
+      label={
+        <>
+          <label htmlFor="task-create-priority-select">{priorityLabel}</label>
+          <PriorityInfo label={priorityInfoLabel} description={priorityInfo} />
+        </>
+      }
+    >
       <Select
         value={value}
         onValueChange={(next) => onChange(next as TaskPriority)}
@@ -86,10 +94,7 @@ export function TaskCreatePrioritySelect({
           id="task-create-priority-select"
           data-testid="task-create-priority-select"
           aria-label={priorityLabel}
-          className={controlSizingClassName(
-            "standard",
-            "w-32 border-border/60 bg-muted/30 hover:bg-muted/60",
-          )}
+          className={TASK_CREATE_SETTING_TRIGGER}
         >
           <SelectValue />
         </SelectTrigger>
@@ -106,6 +111,6 @@ export function TaskCreatePrioritySelect({
           ))}
         </SelectContent>
       </Select>
-    </div>
+    </TaskCreateSettingField>
   );
 }
