@@ -360,6 +360,10 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 		delete(metadata, MetadataKeyTerminalCausingRunID)
 	}
 	delete(metadata, mcpprofile.ManagedToolPolicyMetadataKey)
+	delete(metadata, mcpprofile.SurfaceMetadataKey)
+	if req.McpProfile != nil {
+		metadata[mcpprofile.SurfaceMetadataKey] = string(req.McpProfile.Surface)
+	}
 	if req.McpProfile != nil && req.McpProfile.ManagedToolPolicy != nil {
 		encoded, err := mcpprofile.MarshalManagedToolPolicy(*req.McpProfile.ManagedToolPolicy)
 		if err != nil {
@@ -692,11 +696,15 @@ func newAgentCommands(args, continueArgs []string) agentCommands {
 // doesn't block the task. command_prefix is launcher policy, so it fails closed:
 // a profile that configured a prefix which cannot be resolved returns an error
 // and aborts the launch rather than running the agent unwrapped.
-func (m *Manager) resolveProfileLaunchTokens(profileInfo *AgentProfileInfo) (cliFlagTokens, commandPrefixTokens []string, err error) {
+func (m *Manager) resolveProfileLaunchTokens(profileInfo *AgentProfileInfo, agentIDs ...string) (cliFlagTokens, commandPrefixTokens []string, err error) {
 	if profileInfo == nil {
 		return nil, nil, nil
 	}
-	if tokens, resolveErr := cliflags.Resolve(profileInfo.CLIFlags); resolveErr != nil {
+	profileFlags := profileInfo.CLIFlags
+	if len(agentIDs) > 0 && agentIDs[0] == agents.AntigravityACPAgentID {
+		profileFlags = cliflags.NormalizeExactFlag(profileFlags, cliflags.AntigravitySkipPermissionsFlag)
+	}
+	if tokens, resolveErr := cliflags.Resolve(profileFlags); resolveErr != nil {
 		m.logger.Warn("failed to resolve cli_flags for profile, launching without user-configured flags",
 			zap.String("profile_id", profileInfo.ProfileID),
 			zap.Error(resolveErr))
@@ -751,7 +759,7 @@ func (m *Manager) buildAgentCommandWithRuntimeOptions(
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
 	}
-	cliFlagTokens, commandPrefixTokens, err := m.resolveProfileLaunchTokens(profileInfo)
+	cliFlagTokens, commandPrefixTokens, err := m.resolveProfileLaunchTokens(profileInfo, agentConfig.ID())
 	if err != nil {
 		return agentCommands{}, err
 	}
@@ -918,6 +926,10 @@ func (m *Manager) applyLocalRuntimeCommand(
 	resumingNativeConversation bool,
 ) (*acpcompat.AuthPolicy, map[string]string, []string, []string, error) {
 	if runtime != agentruntime.RuntimeStandalone {
+		if acpcompat.IsAntigravity(agentConfig.ID()) {
+			args = antigravityruntime.FilterDangerouslySkipPermissions(args, false)
+			continueArgs = antigravityruntime.FilterDangerouslySkipPermissions(continueArgs, false)
+		}
 		return nil, nil, args, continueArgs, nil
 	}
 	var env map[string]string
@@ -965,10 +977,14 @@ func (m *Manager) applyLocalRuntimeCommand(
 				args = antigravityruntime.RequireWorkerMode(args)
 				continueArgs = antigravityruntime.RequireWorkerMode(continueArgs)
 			}
+			args = filterAntigravitySkipPermissions(args, local, req)
+			continueArgs = filterAntigravitySkipPermissions(continueArgs, local, req)
 			return acpcompat.AntigravityAuthPolicyForRuntime(local.Variant, local.Version, false), env, args, continueArgs, nil
 		}
 	}
 	if acpcompat.IsAntigravity(agentConfig.ID()) {
+		args = filterAntigravitySkipPermissions(args, agents.LocalRuntimeSelection{}, req)
+		continueArgs = filterAntigravitySkipPermissions(continueArgs, agents.LocalRuntimeSelection{}, req)
 		return acpcompat.AntigravityAuthPolicy(false), env, args, continueArgs, nil
 	}
 	return nil, env, args, continueArgs, nil
@@ -2215,6 +2231,11 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		execution.AuthPolicy = req.AuthPolicy
 		execution.LocalRuntimeSelection = req.LocalRuntimeSelection
 		execution.LocalRuntimeEnv = cloneStringMap(req.LocalRuntimeEnv)
+		execution.McpProfile = nil
+		if req.McpProfile != nil {
+			profile := mcpprofile.Normalize(*req.McpProfile)
+			execution.McpProfile = &profile
+		}
 		execution.ExecutionProfileID = executionProfileID(req)
 		if profileInfo != nil {
 			execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
@@ -2737,6 +2758,13 @@ func (m *Manager) buildExecutionFromInstance(
 	execution.InterruptedHarnessGeneration = req.InterruptedHarnessGeneration
 	execution.ResumeAttemptID = ResumeAttemptIDFromContext(ctx)
 	execution.RuntimeName = rt.Name()
+	execution.McpProfile = nil
+	if req.McpProfile != nil {
+		profile := mcpprofile.Normalize(*req.McpProfile)
+		execution.McpProfile = &profile
+	} else {
+		execution.McpProfile = restoreMcpProfileContext(execution.metadata)
+	}
 	execution.WorkspaceID = req.WorkspaceID
 	execution.RunID = req.Owner.RunID
 	execution.RunSessionID = req.Owner.RunSessionID

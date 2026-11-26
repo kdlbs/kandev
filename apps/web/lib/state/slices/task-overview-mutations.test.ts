@@ -120,6 +120,25 @@ it("keeps live create, archive and unarchive membership across older workflow re
   store.getState().finishTaskOverviewRead(read);
 });
 
+it("keeps a live flag note across omitted fields and clears it on explicit removal", () => {
+  const { store, task, event } = fixture();
+  const read = store.getState().beginTaskOverviewRead();
+  const address = { task_id: task.id, workspace_id: "ws", workflow_id: "a" };
+
+  event(TASK_UPDATED, { ...address, flag_note: "Check the logs" });
+  event(TASK_UPDATED, { ...address, title: "Retitled" });
+
+  const state = store.getState();
+  expect(state.taskOverview.byId.task.flagNote).toBe("Check the logs");
+  expect(reconcileTaskOverviewRead(state.taskOverview, [task], read)?.[0]?.flagNote).toBe(
+    "Check the logs",
+  );
+
+  event(TASK_UPDATED, { ...address, flag_note: "" });
+  expect(store.getState().kanbanMulti.snapshots.a.tasks[0].flagNote).toBe("");
+  store.getState().finishTaskOverviewRead(read);
+});
+
 it("preserves nanosecond task freshness independently of newer summaries", () => {
   const { store, task } = fixture();
   store

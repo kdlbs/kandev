@@ -324,13 +324,41 @@ func TestWireRejectsMismatchedUserMessageInEitherOrder(t *testing.T) {
 
 func TestWireResumeFencesReplayAndPreservesIdentity(t *testing.T) {
 	fixture := newWireFixture(t)
+	fixture.adapter.cfg.AgentBackgroundWorkEnabled = true
 	fixture.initialize()
+	fixture.newSession(fixtureSession)
+	addBackgroundTerminal(fixture, "terminal")
+	addBackgroundChild(fixture, "child", "child-launch")
+	fixture.update(fixtureSession, backgroundState(backgroundEntries("terminal", "child"), true))
+	initial := backgroundEventsBeforeMarker(fixture, "before-resume-marker")
+	require.Len(t, initial, 2)
+	terminalWorkID := initial[0].BackgroundWork.WorkID
+	if initial[0].BackgroundWork.Kind != streams.WorkloadKindShell {
+		terminalWorkID = initial[1].BackgroundWork.WorkID
+	}
 	load := func() error { return fixture.adapter.LoadSession(fixture.ctx, fixtureSession, nil) }
 	done := asyncCall(load)
 	request := fixture.read("session/resume")
 	require.Equal(t, fixtureSession, request.Params["sessionId"])
 	require.Equal(t, map[string]any{"type": "start"}, request.Params["replayFrom"])
 	fixture.chunk(fixtureSession, "old", "persisted text")
+	fixture.update(fixtureSession, map[string]any{
+		"sessionUpdate": "terminal_update", "terminalId": "terminal",
+		"command": "go test ./...", "output": map[string]any{"data": encodeTerminalOutput("replayed output")},
+	})
+	fixture.update(fixtureSession, map[string]any{
+		"sessionUpdate": "tool_call_update", "toolCallId": "shell-launch", "title": "Run tests",
+		"status": "completed", "content": []any{map[string]any{"type": "terminal", "terminalId": "terminal"}},
+	})
+	fixture.update(fixtureSession, map[string]any{
+		"sessionUpdate": "tool_call_update", "toolCallId": "child-launch", "title": "Spawn child",
+		"status": "completed", "content": []any{map[string]any{"type": "session", "sessionId": "child"}},
+	})
+	fixture.update(fixtureSession, map[string]any{
+		"sessionUpdate": "subagent_update", "sessionId": "child", "title": "Inspect files",
+		"description": "Find the entry point", "state": map[string]any{"state": "running"},
+	})
+	fixture.update(fixtureSession, backgroundState(backgroundEntries("child", "replay-terminal"), true))
 	fixture.reply(request, map[string]any{})
 	select {
 	case err := <-done:
@@ -341,6 +369,18 @@ func TestWireResumeFencesReplayAndPreservesIdentity(t *testing.T) {
 	require.NoError(t, fixture.wait(done))
 	require.Equal(t, streams.SessionStatusResumed, fixture.event(streams.EventTypeSessionStatus).SessionStatus)
 	fixture.event(streams.EventTypeSessionModels)
+	require.Empty(t, backgroundEventsBeforeMarker(fixture, "replay-marker"))
+	fixture.update(fixtureSession, backgroundState(backgroundEntries("child", "replay-terminal"), true))
+	current := backgroundEventsBeforeMarker(fixture, "current-snapshot-marker")
+	require.Len(t, current, 2)
+	byWorkID := make(map[string]streams.WorkloadRunObservation, len(current))
+	for _, event := range current {
+		byWorkID[event.BackgroundWork.WorkID] = *event.BackgroundWork
+	}
+	require.Equal(t, streams.RunStateUnknown, byWorkID[terminalWorkID].State)
+	replayTerminal := byWorkID[entityID(fixtureSession, "shell:replay-terminal")]
+	require.Equal(t, streams.WorkloadKindShell, replayTerminal.Kind)
+	require.Equal(t, streams.RunStateRunning, replayTerminal.State)
 	fixture.chunk(fixtureSession, "new", "live text")
 	require.Equal(t, "live text", fixture.event(streams.EventTypeMessageChunk).Text)
 	done = asyncCall(load)

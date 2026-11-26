@@ -1258,7 +1258,7 @@ fn request_health(port: u16, expected_health_token: &str) -> Result<bool, String
         )
         .map_err(|err| err.to_string())?;
     let response = read_http_response_head(&mut stream)?;
-    if !(response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200")) {
+    if !response_status_is_ok(&response) {
         return Ok(false);
     }
     Ok(response_has_header(
@@ -1272,10 +1272,7 @@ fn ready_ready(port: u16) -> bool {
     request_ready(port).unwrap_or(false)
 }
 
-// request_ready hits /ready rather than /health. /ready never sets
-// DESKTOP_HEALTH_TOKEN_HEADER (that header is /health-only — see
-// docs/specs/health-endpoint-version/spec.md AC-21), so unlike
-// request_health this does not check for one.
+// Only /health carries the desktop ownership token.
 fn request_ready(port: u16) -> Result<bool, String> {
     let addr = (LOOPBACK_HOST, port)
         .to_socket_addrs()
@@ -1296,7 +1293,21 @@ fn request_ready(port: u16) -> Result<bool, String> {
         )
         .map_err(|err| err.to_string())?;
     let response = read_http_response_head(&mut stream)?;
-    Ok(response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200"))
+    Ok(response_status_is_ok(&response))
+}
+
+fn response_status_is_ok(response: &[u8]) -> bool {
+    let Some(status_line) = response
+        .split_inclusive(|&byte| byte == b'\n')
+        .next()
+        .and_then(|line| line.strip_suffix(b"\r\n"))
+    else {
+        return false;
+    };
+    let mut fields = status_line.splitn(3, |&byte| byte == b' ');
+    matches!(fields.next(), Some(b"HTTP/1.0" | b"HTTP/1.1"))
+        && fields.next() == Some(b"200")
+        && fields.next().is_some()
 }
 
 fn read_http_response_head<R: Read>(reader: &mut R) -> Result<Vec<u8>, String> {
@@ -2778,43 +2789,48 @@ mod tests {
 
     #[test]
     fn request_ready_accepts_response_without_health_token_header() {
-        // readyHandler never sets X-Kandev-Desktop-Health-Token (that header
-        // is /health-only); request_ready must accept a bare 2xx.
-        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("bind ready listener");
-        let port = listener.local_addr().expect("listener addr").port();
-        thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buf = [0_u8; 512];
-                let _ = stream.read(&mut buf);
-                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
-            }
-        });
-
-        let ready = request_ready(port).expect("request_ready");
-        assert!(
-            ready,
-            "request_ready must treat a bare 2xx as ready with no token check"
-        );
+        let response = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        assert!(probe_response(response, request_ready));
+        let healthy = probe_response(response, |port| request_health(port, "token"));
+        assert!(!healthy);
     }
 
     #[test]
-    fn request_ready_rejects_non_2xx_response() {
-        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("bind ready listener");
-        let port = listener.local_addr().expect("listener addr").port();
-        thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buf = [0_u8; 512];
-                let _ = stream.read(&mut buf);
-                let _ = stream
-                    .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n");
-            }
-        });
+    fn startup_probes_require_exact_http_status_200() {
+        for (status_line, expected) in [
+            ("HTTP/1.1 200 OK", true),
+            ("HTTP/1.0 200 ", true),
+            ("HTTP/1.1 204 No Content", false),
+            ("HTTP/1.1 503 Service Unavailable", false),
+            ("HTTP/1.1 2000 OK", false),
+            ("HTTP/1.0 200OK", false),
+            ("HTTP/1.1 200", false),
+            ("HTTP/2.0 200 OK", false),
+        ] {
+            let response = format!(
+                "{status_line}\r\n{DESKTOP_HEALTH_TOKEN_HEADER}: token\r\nContent-Length: 0\r\n\r\n"
+            );
+            let ready = probe_response(response.as_bytes(), request_ready);
+            let healthy = probe_response(response.as_bytes(), |port| request_health(port, "token"));
+            assert_eq!((ready, healthy), (expected, expected), "{status_line:?}");
+        }
+        assert!(!probe_response(b"HTTP/1.1 200 OK", request_ready));
+    }
 
-        let ready = request_ready(port).expect("request_ready");
-        assert!(
-            !ready,
-            "request_ready must reject a non-2xx response (bootstrap-not-ready-yet)"
-        );
+    fn probe_response(response: &[u8], probe: impl FnOnce(u16) -> Result<bool, String>) -> bool {
+        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("bind probe listener");
+        let port = listener.local_addr().expect("listener addr").port();
+        thread::scope(|scope| {
+            scope.spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept probe connection");
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(1)))
+                    .expect("set probe request timeout");
+                read_http_response_head(&mut stream).expect("read probe request");
+                stream.write_all(response).expect("write probe response");
+            });
+            probe(port).expect("request probe")
+        })
     }
 
     #[cfg(unix)]

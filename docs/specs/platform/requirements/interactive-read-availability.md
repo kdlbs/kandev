@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-09-12
-updated: 2026-11-05
+updated: 2026-11-25
 owners:
   - kandev
 ---
@@ -101,9 +101,9 @@ The [journey loading design](../system-design/journey-data-loading.md) owns this
 #### Acceptance criteria
 
 - **AC-PLATFORM-INTERACTIVE-READS-007.1:** During automatic recovery, eligible retained task details and sidebar pages shall remain visible without a refresh warning or layout shift. Progress shall remain accessible. A successful recovery shall preserve the selected conversation, draft, and list scroll position.
-- **AC-PLATFORM-INTERACTIVE-READS-007.2:** One sidebar recovery cycle shall permit five total attempts within thirty seconds of visible-tab time. Each attempt shall finish within ten seconds. A temporary outage of fifteen seconds shall recover automatically when individual attempts settle within one second.
+- **AC-PLATFORM-INTERACTIVE-READS-007.2:** Without eligible retained rows, one sidebar recovery cycle shall permit five total attempts within thirty seconds of visible-tab time. With eligible retained rows, one cycle shall permit up to nine total attempts within one hundred fifty seconds of visible-tab time, with retry delays that do not decrease. Each attempt shall finish within ten seconds. A temporary outage of fifteen seconds shall recover automatically when individual attempts settle within one second. With retained rows, a temporary outage of ninety seconds shall recover without a refresh warning.
 - **AC-PLATFORM-INTERACTIVE-READS-007.3:** Concurrent consumers of the same sidebar query shall share its recovery cycle. Live updates, provisional results, foreground events, and rerenders shall not shorten retry delays or renew an active cycle's budget.
-- **AC-PLATFORM-INTERACTIVE-READS-007.4:** After automatic recovery ends unsuccessfully, the affected surface shall show one stable localized warning and Retry. New background events shall not restart exhausted recovery. Manual Retry or a later foreground episode can start one new cycle. Its warning shall remain until success or scope invalidation.
+- **AC-PLATFORM-INTERACTIVE-READS-007.4:** After automatic recovery ends unsuccessfully, the affected surface shall show one stable localized warning and Retry. Manual Retry or a later foreground episode can start one new cycle. A later background event, such as a live task update, can start one new sidebar cycle no sooner than sixty seconds after the previous cycle ended. Background events inside that interval shall not send requests. The warning shall remain until success or scope invalidation.
 - **AC-PLATFORM-INTERACTIVE-READS-007.5:** Authorization, missing-resource, invalid-filter, and other permanent failures shall retain immediate handling. Access denial shall clear affected content. Quiet recovery shall not reuse another account, workspace, view, or task's content.
 - **AC-PLATFORM-INTERACTIVE-READS-007.6:** Hidden tabs shall pause scheduled retries and the visible-time budget. A server retry delay shall never be shortened. Scope changes and final consumer release shall cancel obsolete requests and timers.
 - **AC-PLATFORM-INTERACTIVE-READS-007.7:** Desktop and phone shall share recovery semantics. Phone task pickers and app navigation shall retain touch recovery, contained scrolling, safe areas, and focus return. Each visible surface shall announce progress once per cycle, without announcements for every failed attempt.
@@ -138,3 +138,4 @@ environment membership and delivery results.
 
 - [Quiet task refresh recovery](../../../plans/quiet-task-refresh-recovery/plan.md) covers the shared warning policy and bounded sidebar recovery.
 - [Delivery environment lookup index](../../../plans/delivery-sweep-environment-index/plan.md) covers REQ-PLATFORM-INTERACTIVE-READS-008.
+- [Sustained sidebar recovery](../../../plans/sustained-sidebar-recovery/plan.md) extends quiet sidebar recovery and confirms contention-only health failures.

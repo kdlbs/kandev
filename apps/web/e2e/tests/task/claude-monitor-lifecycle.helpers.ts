@@ -8,7 +8,7 @@ import { SessionPage } from "../../pages/session-page";
 
 const MONITOR_IDS = ["monitor-task-first", "monitor-task-second"] as const;
 const MONITOR_PROMPT = "/claude-monitor-lifecycle";
-const DRAFT = "keep this draft while both Monitors finish";
+const DRAFT = "keep this draft while the second Monitor finishes";
 
 async function createClaudeMonitorProfile(
   apiClient: ApiClient,
@@ -86,13 +86,19 @@ async function expandMonitorCards(session: SessionPage): Promise<void> {
   await expect(cards).toHaveCount(2, { timeout: 30_000 });
 }
 
-async function expectMonitorLabels(page: Page): Promise<void> {
+async function expectMonitorLabels(
+  page: Page,
+  workIds: readonly (typeof MONITOR_IDS)[number][] = MONITOR_IDS,
+): Promise<void> {
   const summary = page.getByTestId("background-work-summary-list");
   await expect(summary).toBeVisible();
-  for (const workId of MONITOR_IDS) {
+  for (const workId of workIds) {
     const item = summary.getByTestId(`background-work-summary-item-${workId}`);
     await expect(item).toBeVisible();
     await expect(item).toContainText("Monitor");
+    await expect(page.getByTestId(`background-work-summary-title-${workId}`)).toHaveText(
+      workId === MONITOR_IDS[0] ? "gh pr checks --watch" : "go test ./...",
+    );
   }
 }
 
@@ -229,12 +235,13 @@ export async function expectClaudeMonitorLifecycle(
     })
     .toBe(2);
 
-  const editor = await session.fillMessage(DRAFT);
-  fs.writeFileSync(signalFile, "complete-first\n");
-  await expectMonitorState(apiClient, sessionId, MONITOR_IDS[0], "completed");
+  await session.sendMessageViaButton("/claude-monitor-stop-first");
+  await session.expectChatResponseVisible("The first Monitor was stopped.");
+  await session.waitForChatIdle({ timeout: 30_000 });
+  await expectMonitorState(apiClient, sessionId, MONITOR_IDS[0], "interrupted");
   await expect
     .poll(() => runningMonitorCount(apiClient, sessionId), {
-      message: "the first completion should leave its sibling running",
+      message: "TaskStop should leave the sibling Monitor running",
       timeout: 30_000,
     })
     .toBe(1);
@@ -243,11 +250,19 @@ export async function expectClaudeMonitorLifecycle(
   await expect(chip).toBeVisible();
   await expect(chip).toContainText("1 Background Job");
   await expect(chip).not.toContainText("2 Background Jobs");
+  if ((page.viewportSize()?.width ?? 0) < 768) {
+    await chip.tap();
+  } else {
+    await chip.click();
+  }
+  await expectMonitorLabels(page, [MONITOR_IDS[1]]);
+  await closeMonitorSummary(page);
 
+  const editor = await session.fillMessage(DRAFT);
   await expect(editor).toHaveText(DRAFT);
   await page.reload();
   await session.waitForLoad();
-  await expectMonitorState(apiClient, sessionId, MONITOR_IDS[0], "completed");
+  await expectMonitorState(apiClient, sessionId, MONITOR_IDS[0], "interrupted");
   await expect
     .poll(() => runningMonitorCount(apiClient, sessionId), {
       message: "the sibling Monitor should stay live after reload",
@@ -259,6 +274,11 @@ export async function expectClaudeMonitorLifecycle(
   await expectMonitorCardStatus(session, 0, "ended");
   await expectMonitorCardStatus(session, 1, "watching");
   await expect(page.getByTestId("background-work-chip")).toContainText("1 Background Job");
+  const reloadedEditor = session
+    .activeChat()
+    .locator('.tiptap.ProseMirror[contenteditable="true"]')
+    .first();
+  await expect(reloadedEditor).toHaveText(DRAFT);
   fs.appendFileSync(signalFile, "complete-second\n");
   await expectMonitorState(apiClient, sessionId, MONITOR_IDS[1], "completed");
   await expect
@@ -270,12 +290,15 @@ export async function expectClaudeMonitorLifecycle(
   await expect(chip).toHaveCount(0);
   await expectMonitorCardStatus(session, 0, "ended");
   await expectMonitorCardStatus(session, 1, "ended");
+  await expect(reloadedEditor).toHaveText(DRAFT);
 
   await openHistory(page, sessionId);
-  for (const workId of MONITOR_IDS) {
-    await expect(page.getByTestId(`background-workload-card-${workId}`)).toBeVisible();
-    await expect(page.getByTestId(`background-work-state-${workId}`)).toHaveText("Completed");
-  }
+  await expect(page.getByTestId(`background-workload-card-${MONITOR_IDS[0]}`)).toBeVisible();
+  await expect(page.getByTestId(`background-work-state-${MONITOR_IDS[0]}`)).toHaveText(
+    "Interrupted",
+  );
+  await expect(page.getByTestId(`background-workload-card-${MONITOR_IDS[1]}`)).toBeVisible();
+  await expect(page.getByTestId(`background-work-state-${MONITOR_IDS[1]}`)).toHaveText("Completed");
 
   await page.reload();
   if ((page.viewportSize()?.width ?? 0) < 768) {
@@ -286,8 +309,10 @@ export async function expectClaudeMonitorLifecycle(
     await expect(addPanelButton).toBeVisible();
   }
   await openHistory(page, sessionId);
-  for (const workId of MONITOR_IDS) {
-    await expect(page.getByTestId(`background-workload-card-${workId}`)).toBeVisible();
-    await expect(page.getByTestId(`background-work-state-${workId}`)).toHaveText("Completed");
-  }
+  await expect(page.getByTestId(`background-workload-card-${MONITOR_IDS[0]}`)).toBeVisible();
+  await expect(page.getByTestId(`background-work-state-${MONITOR_IDS[0]}`)).toHaveText(
+    "Interrupted",
+  );
+  await expect(page.getByTestId(`background-workload-card-${MONITOR_IDS[1]}`)).toBeVisible();
+  await expect(page.getByTestId(`background-work-state-${MONITOR_IDS[1]}`)).toHaveText("Completed");
 }
