@@ -7,7 +7,7 @@ requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
 created: 2026-08-24
-updated: 2026-11-08
+updated: 2026-11-25
 owners:
   - cfl12
 ---
@@ -383,16 +383,9 @@ REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004 maps to this section. Delivery:
 
 ### Problem
 
-The first session of a task wins the workspace election in
-`createTaskSessionWithWorkspaceBinding` and inserts a `creating` environment that
-it owns through `materialization_session_id`. Only two exits of
-`LaunchPreparedSession` release that claim: a `LaunchAgent` error and a
-persistence error. Every earlier return, and every `startTask` return between
-session preparation and launch, leaves the claim in place. A Kanban task keeps
-its `CREATED` session, so the election returns `workspace_preparing` forever. A
-session that reaches `FAILED` lets the next election mark the row `failed`, and
-from then on every binding and launch returns `workspace_reuse_unsafe` until a
-manual environment reset. Neither state has a physical workspace to protect.
+An early launch error once left an abandoned `creating` claim or a bare
+`failed` environment. Starts returned `workspace_preparing` or
+`workspace_reuse_unsafe` until a reset.
 
 ### Claim release by the owner
 
@@ -538,6 +531,16 @@ mutates inherited owners, or settles historical outcomes.
 
 A binding that loses election can wait for the winner. If the winner becomes
 failed, the wait ends with the existing refusal. The next start re-elects.
+
+### Workspace requests during initial launch
+
+For AC-004.12, `validateBoundWorkspaceEnvironment` marks a refusal for a
+`creating` environment and retains `ErrSessionWorkspaceNotReady` for callers.
+`coalesceSessionLaunch` re-enters the same session slot when it receives this
+result from a workspace-only operation. The caller's context bounds its wait.
+Creating-environment refusals do not consume the recovery-admission retry
+budget. The next launch owner runs normal admission. Concurrent launches share
+that result. A launch error follows the existing settlement rules.
 
 ### Verification
 

@@ -104,7 +104,7 @@ func (s *Service) settleExecutionLessRestart(ctx context.Context, sid string, lo
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForSession(sid)
 	}
-	if settled, err := s.settleExecutionLessSessionTurn(ctx, sid); settled || err != nil {
+	if _, settled, err := s.settleExecutionLessSessionTurn(ctx, sid); settled || err != nil {
 		return err
 	}
 	return lookupErr

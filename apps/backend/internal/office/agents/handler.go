@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/routing"
@@ -59,16 +61,24 @@ func RegisterRoutes(group *gin.RouterGroup, svc *AgentService, log *logger.Logge
 	group.GET("/agents/:id/memory/export", h.exportMemory)
 }
 
-// AgentAuthMiddleware returns a gin.HandlerFunc that extracts and validates agent JWTs.
-// Requests without a JWT are treated as UI/admin requests and pass through.
+// AgentAuthMiddleware returns a gin.HandlerFunc that accepts globally verified
+// user PATs and extracts and validates Office agent JWTs.
 func AgentAuthMiddleware(svc *AgentService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		auth := c.GetHeader("Authorization")
-		if auth == "" || !strings.HasPrefix(auth, "Bearer ") {
+		authorization := c.GetHeader("Authorization")
+		if authorization == "" || !strings.HasPrefix(authorization, "Bearer ") {
 			c.Next()
 			return
 		}
-		token := strings.TrimPrefix(auth, "Bearer ")
+		token := strings.TrimPrefix(authorization, "Bearer ")
+		if auth.IsPATFormat(strings.TrimSpace(token)) {
+			if _, ok := authn.FromGin(c); !ok {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+				return
+			}
+			c.Next()
+			return
+		}
 		claims, err := svc.ValidateAgentJWT(token)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  acknowledgeRelease,
   createDeferred,
   createLspManagerHarness,
   FakeWebSocket,
@@ -150,7 +151,11 @@ describe("LSP editor readiness", () => {
     await Promise.resolve();
 
     expect(mocks.registerLspProviders).not.toHaveBeenCalled();
-    expect(lspClientManager.getStatus("session", "typescript")).toEqual({ state: "disabled" });
+    expect(lspClientManager.getStatus("session", "typescript")).toEqual({ state: "stopping" });
+    acknowledgeRelease(socket, "stop");
+    await vi.waitFor(() =>
+      expect(lspClientManager.getStatus("session", "typescript")).toEqual({ state: "disabled" }),
+    );
   });
 });
 
@@ -261,10 +266,10 @@ describe("LSP client connection cleanup", () => {
     createPlaceholder(0, placeholderUri);
     const placeholder = requireModel(models, placeholderModelUri);
 
-    socket.failClosed(1006, "language server crashed");
+    socket.failClosed(4006, "language server crashed");
 
     const status = lspClientManager.getStatus("session", "typescript");
-    expect(status).toEqual({ state: "error", reason: "language server crashed" });
+    expect(status).toEqual({ state: "error", reason: "language server exited" });
     expect(providerDispose).toHaveBeenCalledOnce();
     expect(placeholder.dispose).toHaveBeenCalledOnce();
     expect(monaco.editor.setModelMarkers).toHaveBeenCalledWith(
@@ -306,7 +311,7 @@ describe("LSP client connection cleanup", () => {
     publishDiagnostic(firstSocket, documentUri, "first issue");
     publishDiagnostic(secondSocket, documentUri, "second issue");
 
-    firstSocket.failClosed(1006, "first language server crashed");
+    firstSocket.failClosed(4006, "first language server crashed");
 
     expect(firstPlaceholder.dispose).toHaveBeenCalledOnce();
     expect(secondPlaceholder.dispose).not.toHaveBeenCalled();
@@ -314,7 +319,7 @@ describe("LSP client connection cleanup", () => {
     expect(markerMessages(markersByUri, firstModelUri)).not.toContain("first issue");
     expect(markerMessages(markersByUri, secondModelUri)).toContain("second issue");
 
-    secondSocket.failClosed(1006, "second language server crashed");
+    secondSocket.failClosed(4006, "second language server crashed");
 
     expect(secondPlaceholder.dispose).toHaveBeenCalledOnce();
   });
@@ -666,7 +671,7 @@ describe("LSP shared placeholder cleanup", () => {
     const secondModel = requireModel(models, modelUri(sharedUri, SECOND_SESSION_ID));
     expect(firstModel).not.toBe(secondModel);
 
-    firstSocket.failClosed(1006, "first language server crashed");
+    firstSocket.failClosed(4006, "first language server crashed");
     firstContent.resolve({ content: "stale first-session content" });
     secondContent.resolve({ content: "surviving second-session content" });
 
