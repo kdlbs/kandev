@@ -32,6 +32,8 @@ const NOTICE_TEST_ID = "session-delivery-storage-notice";
 const DETAILS_TEST_ID = "session-delivery-storage-details";
 const DETAILS_PANEL_TEST_ID = "session-delivery-storage-details-panel";
 const SETTINGS_TEST_ID = "session-delivery-storage-settings";
+const STORAGE_ADVISORY_USAGE = "task:storageAdvisoryUsage";
+const STORAGE_ADVISORY_LOCAL_GUIDANCE = "task:storageAdvisoryGuidanceLocal";
 
 afterEach(() => {
   cleanup();
@@ -39,11 +41,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("SessionDeliveryStorageNotice", () => {
+describe("storage notice display", () => {
   it("renders one compact local warning row with settings and details", () => {
     render(<SessionDeliveryStorageNotice health={health} />);
     const row = screen.getByTestId(NOTICE_TEST_ID);
-    expect(row.textContent).toContain("task:storageAdvisoryUsage");
+    expect(row.textContent).toContain(STORAGE_ADVISORY_USAGE);
     expect(row.textContent).toContain("task:storageAdvisoryFree");
     expect(screen.getByTestId(SETTINGS_TEST_ID).getAttribute("href")).toBe(
       "/settings/system/storage",
@@ -51,7 +53,7 @@ describe("SessionDeliveryStorageNotice", () => {
     expect(screen.queryByTestId(DETAILS_PANEL_TEST_ID)).toBeNull();
     fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
     const panel = screen.getByTestId(DETAILS_PANEL_TEST_ID);
-    expect(panel.textContent).toContain("task:storageAdvisoryGuidanceLocal");
+    expect(panel.textContent).toContain(STORAGE_ADVISORY_LOCAL_GUIDANCE);
     expect(panel.textContent).toContain("task:storageAdvisoryCapacityObserved");
     const detailsButton = screen.getByTestId(DETAILS_TEST_ID);
     expect(detailsButton.className).toContain("[@media(pointer:coarse)]:h-11");
@@ -67,7 +69,7 @@ describe("SessionDeliveryStorageNotice", () => {
     );
     const row = screen.getByTestId(NOTICE_TEST_ID);
     expect(row.textContent).toContain("task:storageAdvisoryRemotePrefix");
-    expect(row.textContent).toContain("task:storageAdvisoryUsage");
+    expect(row.textContent).toContain(STORAGE_ADVISORY_USAGE);
     expect(screen.queryByTestId(SETTINGS_TEST_ID)).toBeNull();
   });
 
@@ -84,12 +86,14 @@ describe("SessionDeliveryStorageNotice", () => {
       />,
     );
     const row = screen.getByTestId(NOTICE_TEST_ID);
-    expect(row.textContent).toContain("task:storageAdvisoryUsage");
+    expect(row.textContent).toContain(STORAGE_ADVISORY_USAGE);
     expect(row.querySelector(".flex-wrap")).toBeNull();
     fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
     expect(screen.getByTestId(DETAILS_PANEL_TEST_ID).textContent).toContain(executor);
   });
+});
 
+describe("capacity pressure guidance", () => {
   it("renders blocked delivery below 90% without claiming work continues", () => {
     render(
       <SessionDeliveryStorageNotice
@@ -107,13 +111,165 @@ describe("SessionDeliveryStorageNotice", () => {
     const row = screen.getByTestId(NOTICE_TEST_ID);
     expect(row.getAttribute("data-pressure")).toBe("true");
     expect(row.textContent).toContain("task:storagePressureQuota");
-    expect(row.textContent).not.toContain("task:storageAdvisoryGuidanceLocal");
+    expect(row.textContent).not.toContain(STORAGE_ADVISORY_LOCAL_GUIDANCE);
     fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
     const panel = screen.getByTestId(DETAILS_PANEL_TEST_ID);
-    expect(panel.textContent).toContain("task:storageAdvisoryPressureGuidance");
+    expect(panel.textContent).toContain("task:storageRecoveryQuotaBodyLocal");
     expect(panel.textContent).toContain("task:storageAdvisoryPressureCause");
   });
 
+  it("uses low-space guidance for a typed physical-capacity guard", () => {
+    render(
+      <SessionDeliveryStorageNotice
+        health={{
+          ...health,
+          state: "normal",
+          total_bytes: 1_000_000_000_000,
+          available_bytes: 159_500_000_000,
+          write_pressure: true,
+          delivery_state: "delivery_failed",
+          failure_storage: { reason: "disk_space_low", location: "local_runtime" },
+        }}
+      />,
+    );
+    const row = screen.getByTestId(NOTICE_TEST_ID);
+    expect(row.textContent).toContain("task:storagePressureLowSpace");
+    expect(row.textContent).toContain(STORAGE_ADVISORY_USAGE);
+    expect(screen.getByTestId(SETTINGS_TEST_ID).getAttribute("href")).toBe(
+      "/settings/system/storage",
+    );
+    fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
+    expect(screen.getByTestId(DETAILS_PANEL_TEST_ID).textContent).toContain(
+      "task:storageAdvisoryPressureGuidance",
+    );
+  });
+
+  it("uses allocation guidance for a typed full-filesystem cause", () => {
+    render(
+      <SessionDeliveryStorageNotice
+        health={{
+          ...health,
+          state: "normal",
+          write_pressure: true,
+          failure_storage: { reason: "filesystem_full", location: "local_runtime" },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
+    expect(screen.getByTestId(DETAILS_PANEL_TEST_ID).textContent).toContain(
+      "task:storageRecoveryFilesystemBodyLocal",
+    );
+  });
+
+  it("uses neutral guidance when pressure has no typed cause", () => {
+    render(
+      <SessionDeliveryStorageNotice
+        health={{
+          ...health,
+          state: "normal",
+          total_bytes: 1000,
+          available_bytes: 350,
+          write_pressure: true,
+          delivery_state: "delivery_failed",
+        }}
+      />,
+    );
+    const row = screen.getByTestId(NOTICE_TEST_ID);
+    expect(row.textContent).toContain("task:storagePressureUnknown");
+    expect(row.textContent).not.toContain(STORAGE_ADVISORY_USAGE);
+    expect(screen.queryByTestId(SETTINGS_TEST_ID)).toBeNull();
+    fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
+    const panel = screen.getByTestId(DETAILS_PANEL_TEST_ID);
+    expect(panel.textContent).toContain("task:storageAdvisoryPressureGuidanceUnknown");
+    expect(panel.textContent).not.toContain(STORAGE_ADVISORY_LOCAL_GUIDANCE);
+  });
+});
+
+describe("stream pressure guidance", () => {
+  it("keeps stream-limit guidance and labels independent high usage in details", () => {
+    render(
+      <SessionDeliveryStorageNotice
+        health={{
+          ...health,
+          state: "warning",
+          total_bytes: 1000,
+          available_bytes: 50,
+          write_pressure: true,
+          delivery_state: "delivery_failed",
+          failure_storage: { reason: "stream_limit_reached", location: "local_runtime" },
+        }}
+      />,
+    );
+    const row = screen.getByTestId(NOTICE_TEST_ID);
+    expect(row.textContent).toContain("task:storagePressureStreamLimit");
+    expect(row.textContent).not.toContain(STORAGE_ADVISORY_USAGE);
+    fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
+    const panel = screen.getByTestId(DETAILS_PANEL_TEST_ID);
+    expect(panel.textContent).toContain("task:storageAdvisoryPressureGuidanceLimit");
+    expect(panel.textContent).toContain("task:storageAdvisoryHighUsage");
+    expect(panel.textContent).toContain("task:storageAdvisoryFree");
+    expect(panel.textContent).not.toContain(STORAGE_ADVISORY_LOCAL_GUIDANCE);
+  });
+});
+
+describe("delivery pressure hysteresis", () => {
+  it("keeps the disk advisory through the warning hysteresis during delivery pressure", () => {
+    const failure = {
+      reason: "stream_limit_reached",
+      location: "local_runtime",
+    } as const;
+    const { rerender } = render(
+      <SessionDeliveryStorageNotice
+        health={{
+          ...health,
+          state: "warning",
+          total_bytes: 1000,
+          available_bytes: 50,
+          write_pressure: true,
+          delivery_state: "delivery_failed",
+          failure_storage: failure,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
+    const panel = screen.getByTestId(DETAILS_PANEL_TEST_ID);
+    expect(panel.textContent).toContain('task:storageAdvisoryHighUsage {"usage":"95"}');
+
+    rerender(
+      <SessionDeliveryStorageNotice
+        health={{
+          ...health,
+          state: "warning",
+          total_bytes: 1000,
+          available_bytes: 120,
+          write_pressure: true,
+          delivery_state: "delivery_failed",
+          failure_storage: failure,
+        }}
+      />,
+    );
+    expect(panel.textContent).toContain('task:storageAdvisoryHighUsage {"usage":"88"}');
+    expect(screen.getByTestId(SETTINGS_TEST_ID)).toBeTruthy();
+
+    rerender(
+      <SessionDeliveryStorageNotice
+        health={{
+          ...health,
+          state: "normal",
+          total_bytes: 1000,
+          available_bytes: 200,
+          write_pressure: true,
+          delivery_state: "delivery_failed",
+          failure_storage: failure,
+        }}
+      />,
+    );
+    expect(panel.textContent).not.toContain("task:storageAdvisoryHighUsage");
+    expect(screen.queryByTestId(SETTINGS_TEST_ID)).toBeNull();
+  });
+});
+
+describe("storage notice states", () => {
   it("does not recommend freeing disk space for an oversized output", () => {
     render(
       <SessionDeliveryStorageNotice

@@ -1,6 +1,6 @@
 ---
 created: 2026-08-30
-status: in_progress
+status: implemented
 requirements:
   - REQ-CANVASES-AGENT-WEB-APPS-001
   - REQ-CANVASES-AGENT-WEB-APPS-005
@@ -22,7 +22,7 @@ legacy_specs:
 The [direct canvas creation package](../canvas-direct-creation/plan.md) replaces
 Task 02's sidebar settings redirect with direct task-dialog launch. Completed
 results below remain historical. The new package owns replacement navigation
-and prompt tests; Task 07's outstanding external ACP evaluation is unchanged.
+and prompt tests. Task 07 records the external ACP evaluation.
 
 ## Overview
 
@@ -133,7 +133,7 @@ Docker, and SSH executors.
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `AC-CANVASES-AGENT-WEB-APPS-001.2`      | Lifecycle handler and Dockview deduplication tests, desktop and phone Playwright                         |
 | `AC-CANVASES-AGENT-WEB-APPS-001.7`      | Feature-off catalog, count, launcher, route, and event tests                                             |
-| `AC-CANVASES-AGENT-WEB-APPS-001.8`      | Core-bundle and inventory golden tests, handler-level ACP contract test; external ACP evaluation pending |
+| `AC-CANVASES-AGENT-WEB-APPS-001.8`      | Core-bundle and inventory golden tests, handler-level ACP contract test and external Codex ACP evaluation |
 | `AC-CANVASES-AGENT-WEB-APPS-001.9`      | Local, Docker, and SSH response-shape tests                                                              |
 | `AC-CANVASES-AGENT-WEB-APPS-005.2-.9`   | Sidebar state, settings catalog, responsive card, route, and navigation tests                            |
 | `AC-CANVASES-AGENT-WEB-APPS-006.1-.7`   | Host action tests and rendered desktop and phone geometry assertions                                     |
@@ -161,7 +161,7 @@ Docker, and SSH executors.
 - [x] [Task 04: Explain canvas lifecycle actions](task-04-canvas-action-guidance.md)
 - [x] [Task 05: Fill the canvas host viewport](task-05-canvas-host-viewport.md)
 - [x] [Task 06: Add isolated application appearance](task-06-isolated-application-appearance.md)
-- [ ] [Task 07: Reduce authoring skill reads](task-07-authoring-bundle-and-scaffold.md)
+- [x] [Task 07: Reduce authoring skill reads](task-07-authoring-bundle-and-scaffold.md)
 
 Implementation is sequential in the primary conversation. A later user request
 can authorize Codex implementation subagents. No work order authorizes Kandev
@@ -169,9 +169,9 @@ task or session delegation.
 
 ## Verification results
 
-Tasks 01 through 06 are implemented. Task 07 has the implementation and
-in-process contract coverage, but remains in progress until an external ACP
-provider evaluation is captured. Earlier focused web verification passed 7
+Tasks 01 through 07 are implemented. The external Codex ACP evaluation
+published a valid canvas with one pathless core read and zero invalid paths.
+Earlier focused web verification passed 7
 test files and 69 tests. The follow-up focused web suite passed 15 files and
 73 tests. The affected backend packages passed 1,149 tests, and the full
 backend suite passed with the repository config override cleared. The full web
@@ -179,7 +179,7 @@ suite passed 1,687 files, 14,375 tests, and 4 skipped tests. Desktop and phone
 canvas Playwright flows passed with retries disabled. Web typecheck, lint, i18n
 checks, the new-code ratchet, specification lint, harness lint, shell syntax,
 and diff checks passed. Current remediation-focused backend, lifecycle, and
-resource-guard tests also pass; the external ACP evaluation is outstanding.
+resource-guard tests also passed.
 
 The local web test runners now bound Vitest parallelism and E2E shard/worker
 counts by default. E2E runs use one worker per shard and at most three local
@@ -192,8 +192,7 @@ defaults for future sessions.
 The [canvas runtime and permission repair](../canvas-runtime-permission-fixes/plan.md)
 adds startup acknowledgement before appearance reveal and replaces the release
 review layout. Its work orders 03-04 own those changes and desktop/mobile tests.
-The external ACP evaluation remains pending here; this repair neither completes
-that evaluation nor replaces this package's historical results.
+Task 07 records the separate external ACP evaluation.
 
 ## Risks
 

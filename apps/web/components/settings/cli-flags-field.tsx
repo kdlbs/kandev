@@ -12,7 +12,15 @@ import type { CLIFlag, PermissionSetting } from "@/lib/types/http";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { SettingsFieldLabel } from "@/components/settings/settings-typography";
-import { settingsActionClassName } from "@/components/settings/settings-control";
+import {
+  curatedFlagEnabled,
+  isCuratedFlagMatch,
+  setCuratedFlagEnabled,
+} from "@/components/settings/cli-flags-field-model";
+import {
+  SETTINGS_SWITCH_CLASS_NAME,
+  settingsActionClassName,
+} from "@/components/settings/settings-control";
 
 /**
  * Editor-side representation of a single custom CLI flag. The persisted
@@ -126,32 +134,41 @@ export function CLIFlagsField({
   const isCompact = variant === "compact";
 
   const curated = useMemo(() => extractCuratedSettings(permissionSettings), [permissionSettings]);
-  const curatedFlagTexts = useMemo(() => new Set(curated.map((s) => s.flag)), [curated]);
+  const curatedFlagTexts = useMemo(() => curated.map((s) => s.flag), [curated]);
   const customFlags = useMemo(
     () =>
       flags
         .map((f, i) => ({ flag: f, index: i }))
-        .filter((e) => !curatedFlagTexts.has(e.flag.flag)),
+        .filter(
+          (e) =>
+            !curatedFlagTexts.some((curatedFlag) => isCuratedFlagMatch(e.flag.flag, curatedFlag)),
+        ),
     [flags, curatedFlagTexts],
   );
 
   const toggleCurated = (setting: CuratedSetting, enabled: boolean) => {
-    const existingIdx = flags.findIndex((f) => f.flag === setting.flag);
-    if (existingIdx >= 0) {
-      onChange(flags.map((f, i) => (i === existingIdx ? { ...f, enabled } : f)));
-      return;
-    }
-    // No existing entry: append an explicit record. The displayed switch
-    // state derives from setting.default when absent, so we must persist
-    // the user's choice (even when turning off) to actually flip it.
-    onChange([...flags, { flag: setting.flag, description: setting.description, enabled }]);
+    onChange(setCuratedFlagEnabled(flags, setting.flag, setting.description, enabled));
   };
 
   const updateRowAt = (index: number, next: CLIFlag) => {
     onChange(flags.map((f, i) => (i === index ? next : f)));
   };
   const removeAt = (index: number) => onChange(flags.filter((_, i) => i !== index));
-  const appendCustom = (next: CLIFlag) => onChange([...flags, next]);
+  const appendCustom = (next: CLIFlag) => {
+    const matchingCurated = curated.find((setting) => isCuratedFlagMatch(next.flag, setting.flag));
+    if (matchingCurated) {
+      onChange(
+        setCuratedFlagEnabled(
+          [...flags, next],
+          matchingCurated.flag,
+          matchingCurated.description,
+          next.enabled,
+        ),
+      );
+      return;
+    }
+    onChange([...flags, next]);
+  };
 
   return (
     <div className={isCompact ? "space-y-3" : "space-y-4"} data-testid="cli-flags-field">
@@ -221,13 +238,18 @@ function CuratedFlagsSection({
   return (
     <div className="space-y-2" data-testid="cli-flags-curated">
       {curated.map((setting) => {
-        const entry = flags.find((f) => f.flag === setting.flag);
-        const enabled = entry ? entry.enabled : setting.default;
+        const enabled = curatedFlagEnabled(flags, setting.flag, setting.default);
         const isLongContext = setting.key === "long_context";
-        const label = isLongContext ? t("agents:copilotLongContextFlag") : setting.label;
-        const description = isLongContext
-          ? t("agents:copilotLongContextFlagDescription")
-          : setting.description;
+        const isAntigravitySkipPermissions = setting.key === "antigravity_skip_permissions";
+        let label = setting.label;
+        let description = setting.description;
+        if (isLongContext) {
+          label = t("agents:copilotLongContextFlag");
+          description = t("agents:copilotLongContextFlagDescription");
+        } else if (isAntigravitySkipPermissions) {
+          label = t("agents:antigravitySkipPermissionsFlag");
+          description = t("agents:antigravitySkipPermissionsFlagDescription");
+        }
         return (
           <div
             key={setting.key}
@@ -241,6 +263,7 @@ function CuratedFlagsSection({
             </div>
             <Switch
               size={switchSize}
+              className={SETTINGS_SWITCH_CLASS_NAME}
               checked={enabled}
               onCheckedChange={(checked) => onToggle(setting, checked)}
               data-testid={`cli-flag-curated-enabled-${setting.key}`}
@@ -435,14 +458,17 @@ export function CustomCLIFlagsCard({
 }: CustomCLIFlagsCardProps) {
   const { t } = useTranslation();
   const curatedFlagTexts = useMemo(
-    () => new Set(extractCuratedSettings(permissionSettings).map((s) => s.flag)),
+    () => extractCuratedSettings(permissionSettings).map((s) => s.flag),
     [permissionSettings],
   );
   const customFlags = useMemo(
     () =>
       flags
         .map((f, i) => ({ flag: f, index: i }))
-        .filter((e) => !curatedFlagTexts.has(e.flag.flag)),
+        .filter(
+          (e) =>
+            !curatedFlagTexts.some((curatedFlag) => isCuratedFlagMatch(e.flag.flag, curatedFlag)),
+        ),
     [flags, curatedFlagTexts],
   );
   const enabledCount = customFlags.filter((e) => e.flag.enabled).length;

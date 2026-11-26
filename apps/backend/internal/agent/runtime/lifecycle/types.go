@@ -112,6 +112,9 @@ type AgentExecution struct {
 	// LocalRuntimeSelection pins host-local command provenance across later promotion.
 	LocalRuntimeSelection *agents.LocalRuntimeSelection
 	LocalRuntimeEnv       map[string]string
+	// McpProfile preserves the launch permission surface when a context reset
+	// rebuilds the provider command without a new LaunchRequest.
+	McpProfile *mcpprofile.Context
 	// CopilotNativeSessionEvents reports whether this launch requested the
 	// Copilot native event stream from a capable agentctl peer.
 	CopilotNativeSessionEvents bool

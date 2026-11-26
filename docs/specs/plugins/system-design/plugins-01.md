@@ -19,6 +19,7 @@ This design preserves the technical source detail for `REQ-PLUGINS-PLUGINS-001` 
 | --- | --- |
 | `REQ-PLUGINS-PLUGINS-001` | [Migrated source detail](#migrated-source-detail) |
 | `REQ-PLUGINS-PLUGINS-001` (`AC-PLUGINS-PLUGINS-001.14`) | [Host release compatibility](#host-release-compatibility) |
+| `REQ-PLUGINS-PLUGINS-001` (`AC-PLUGINS-PLUGINS-001.22`) | [URL install response deadline](#url-install-response-deadline) |
 
 ## Migrated source detail
 
@@ -284,6 +285,31 @@ Uninstall stops the subprocess and removes the record, all installed versions, a
 plugin state (no 24-hour grace period in v1). `POST /api/plugins/register` is removed;
 there is no operator-supplied manifest, no generated credentials, and no cleartext
 secret returned at install time.
+
+### URL install response deadline
+
+The JSON branch of `POST /api/plugins/install` uses a separate write window
+for the final result. The multipart branch uses the normal server deadline.
+Both branches run behind `RequireAdmin`.
+
+After it binds a JSON request with a nonempty URL, `Controller.installFromRequest`
+reads `WriteTimeout` from the server in `http.ServerContextKey`. For a positive
+timeout, the handler uses `http.ResponseController` on the Gin writer to clear
+the write deadline before `Service.InstallFromURL`. If the controller cannot
+clear the deadline, the handler returns the install error before the download.
+The handler sets a fresh deadline of `now + WriteTimeout` on return, before
+`Controller.install` writes the JSON result. If the server has no write
+timeout, the handler proceeds directly to the install.
+
+`Service.InstallFromURL` uses the request context, a 60-second download limit,
+and the package size limit. It passes the downloaded bytes to the existing
+verification and activation pipeline. The handler returns `201` with the
+plugin record and any activation warning. It uses the existing error mapping
+for a failed download, invalid package, or duplicate version.
+
+The Settings > Plugins dialog and marketplace use the same JSON endpoint on
+desktop and phone. They apply the final response through the existing plugin
+list update and error handling.
 
 ### Host release compatibility
 

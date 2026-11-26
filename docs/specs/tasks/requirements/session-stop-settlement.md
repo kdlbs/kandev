@@ -40,13 +40,23 @@ with an open turn or a failed resume.
   row and state. A session in any other state shall keep the original
   not-found error and its turn, and a turn lookup or settlement failure shall
   be returned instead of a success.
+- **AC-TASKS-SESSION-STOP-SETTLEMENT-001.3:** When an execution-less stop
+  settles, background work tracked for executions that no longer exist shall
+  stop counting as active: the session's `active_subagent_count` shall drop to
+  zero for those executions, and their non-terminal background workloads shall
+  settle under the existing process-end rule (AC-AGENTS-BACKGROUND-WORK-010.1).
+  Settlement shall not clear work owned by a live or newly registered
+  execution, and shall not change the session state or outcome. Cancelling the
+  stop request after turn closure is confirmed shall not prevent settlement.
 
 ## Compatibility and exclusions
 
 No new state, setting, or retry. Stops of a live execution, forced cleanup
-arbitration, and the synchronous cleanup variant are unchanged.
+arbitration, and the synchronous cleanup variant are unchanged. Registrations
+are never cleared by age.
 
 ## Design and delivery
 
 - [System design](../system-design/session-stop-settlement.md)
 - [Delivery package](../../../plans/session-stop-settlement/plan.md)
+- [Orphaned activity fix package](../../../plans/execution-less-stop-activity/plan.md)

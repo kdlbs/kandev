@@ -539,6 +539,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitClaudeBackgroundTerminalFixture(e, cmd)
 	case strings.EqualFold(cmd, "/claude-monitor-lifecycle"):
 		emitClaudeMonitorLifecycleFixture(e)
+	case strings.EqualFold(cmd, "/claude-monitor-stop-first"):
+		emitClaudeMonitorTaskStopFirst(e)
 	case strings.EqualFold(cmd, "/async-subagent-lifecycle") || strings.HasPrefix(strings.ToLower(cmd), "/async-subagent-lifecycle "):
 		emitAsyncSubagentLifecycle(e, cmd, true)
 	case strings.EqualFold(cmd, "/async-subagent-teardown"):

@@ -227,6 +227,9 @@ func TestFeatures_ProductionDefaults(t *testing.T) {
 	if cfg.Features.Auth {
 		t.Error("Features.Auth = true, want false (authentication must remain opt-in by default)")
 	}
+	if !cfg.Features.Canvases {
+		t.Error("Features.Canvases = false, want true in the production profile")
+	}
 	if cfg.Features.ClaudeBackgroundPromptHandoff {
 		t.Error("Features.ClaudeBackgroundPromptHandoff = true, want false (experiment must remain opt-in by default)")
 	}

@@ -84,10 +84,8 @@ never delivered its entry prompt, not an interrupted conversation.
 
 ## Interruption visibility
 
-Interrupted tasks retain the [interruption warning](interrupted-task-indicator.md)
-until successful agent recovery. The warning uses the shared triangle and
-warning color on sidebar rows and task cards, including phone surfaces.
-Focus or an unsuccessful resume attempt alone does not clear it.
+The [interruption warning](interrupted-task-indicator.md) identifies tasks that
+still need to continue interrupted work. The same warning applies on phone.
 
 ## Historical requirement
 

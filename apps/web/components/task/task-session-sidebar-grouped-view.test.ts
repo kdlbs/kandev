@@ -47,8 +47,8 @@ function task(id: string, workflowId: string): TaskSwitcherItem {
 }
 
 describe("useGroupedSidebarView", () => {
-  it("preserves an unaffected group reference when a task in another group updates", () => {
-    const taskA = task("Task A", WORKFLOW_A);
+  it("updates a flag note while preserving an unaffected group reference", () => {
+    const taskA = { ...task("Task A", WORKFLOW_A), flagNote: "Initial note" };
     const taskB = task("Task B", "Workflow B");
     const hook = renderHook(({ tasks }) => useGroupedSidebarView(tasks), {
       initialProps: { tasks: [taskA, taskB] },
@@ -57,8 +57,9 @@ describe("useGroupedSidebarView", () => {
       (group) => group.key === "Workflow B",
     );
 
-    hook.rerender({ tasks: [{ ...taskA, title: "Task A updated" }, { ...taskB }] });
+    hook.rerender({ tasks: [{ ...taskA, flagNote: "Edited note" }, { ...taskB }] });
 
+    expect(hook.result.current.grouped.groups[0].tasks[0].flagNote).toBe("Edited note");
     expect(hook.result.current.grouped.groups[1]).toBe(unaffectedGroup);
   });
 });

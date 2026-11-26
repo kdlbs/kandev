@@ -97,19 +97,16 @@ test.describe("Task creation — priority control", () => {
     await waitForFiniteAnimations(dialog);
     const select = dialog.getByTestId("task-create-priority-select");
     await expect(select).toContainText("Medium");
-    const dependencyRow = dialog.getByTestId("task-create-dependency-setting-row");
-    const priorityRow = dialog.getByTestId("task-create-priority-setting-row");
+    const dependency = dialog.getByTestId("task-create-dependencies-trigger");
     const [dependencyBox, priorityBox] = await Promise.all([
-      dependencyRow.boundingBox(),
-      priorityRow.boundingBox(),
+      dependency.boundingBox(),
+      select.boundingBox(),
     ]);
     expect(dependencyBox).not.toBeNull();
     expect(priorityBox).not.toBeNull();
-    expect(priorityBox!.x).toBeGreaterThan(dependencyBox!.x);
-    await expect(priorityRow).toHaveClass(/md:col-start-2/);
-    await expect(priorityRow).toHaveClass(/md:justify-self-start/);
-    await expect(priorityRow).not.toHaveClass(/md:justify-self-end/);
-    await expect(select).toHaveClass(/bg-muted\/30/);
+    expect(priorityBox!.x).toBeCloseTo(dependencyBox!.x, 0);
+    expect(priorityBox!.width).toBeCloseTo(dependencyBox!.width, 0);
+    await expect(select).toHaveCSS("border-top-width", "1px");
 
     const priorityInfo = dialog.getByTestId("task-create-priority-setting-info");
     await priorityInfo.hover();

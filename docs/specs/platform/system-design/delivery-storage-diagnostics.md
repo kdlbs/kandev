@@ -1,7 +1,7 @@
 ---
 status: current
 system: platform
-updated: 2026-11-16
+updated: 2026-11-25
 requirements:
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002
@@ -30,26 +30,10 @@ Existing delivery and recovery documents remain authoritative for their outcomes
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001 | Source classification; Wire and persistence; Compatibility |
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002 | Live observations; Ownership and failure behavior |
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003 | Shared presentation; Mobile composition; Recovery actions |
-
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004 | Composer notice dismissal |
 
-## Current behavior
-
-`journal.reserveDiskCapacity` returns `ErrJournalFull` for insufficient filesystem capacity.
-Logical journal limits and oversized producer queue items can return the same sentinel.
-Oversized journal events instead use `ErrStreamFull`, which also represents a stream limit.
-
-`process.DeliveryHealth` already exposes `journal.Capacity` through `/api/v1/status`.
-The backend `agentctl.StatusResponse` currently retains only state and two control booleans.
-It drops the capacity object.
-
-`persistLastAgentError` preserves typed `AgentErrorCause` records for other failure classes.
-The shared recovery card selects its headline through `recoveryCopy`.
-Unknown failures use the generic session recovery title.
-
-The October 27 incident establishes host exhaustion and delayed cleanup.
-It does not establish the exact first recovery action or every session's capacity at failure.
-Committed artifacts must not contain that incident's private session records.
+The backend reads `journal.Capacity` and the writer's failure snapshot from authenticated status.
+The separate runtime storage sample supplies filesystem measurements to the composer.
 
 ## Source classification
 
@@ -115,6 +99,15 @@ Update cause normalization, equality, status-summary copies, and WebSocket error
 `LastAgentError.Causes` preserves the snapshot in existing session metadata.
 Transcript metadata retains the same stamp and evidence for the existing history renderer.
 No SQL schema or journal version change is required.
+
+### Evidence from a failed write
+
+Reuse `DeliveryFailureSnapshot.Storage` in `delivery_health.failure` and its existing projection to `RuntimeStorageHealth.failure_storage`.
+Associate a host error event with its recorded prompt generation before the write.
+Keep the existing typed reason, measurements, and revision when the same unresolved prompt produces an untyped follow-up.
+A different typed cause or a different verified owner gets its own snapshot.
+Capacity waits use the existing guard and pause fields.
+The [runtime log relay](runtime-diagnostic-signal.md#safe-context-allowlist) carries the closed reason and known measurements.
 
 ## Live observations
 
@@ -326,11 +319,16 @@ Combine matching current and terminal evidence into one visible region rather th
 | Usage falls below 85%, without write pressure | Remove the advisory | Keep normal running state and unrelated recovery controls |
 | Fresh capacity recovery after failure | Keep the historical interruption headline | Explain that capacity is available; retain normal recovery controls |
 | Old or unavailable sample | Keep its supported cause | Label numbers as last reported; do not claim current capacity |
-| Missing typed evidence | Existing generic recovery fallback | Sanitized existing details; no invented disk cause or numeric values |
+| Missing typed evidence during write pressure | Delivery is blocked | Details explains that the cause is unknown and points to session recovery or runtime logs |
+| Journal limit, stream limit, or oversized event | Specific delivery cause | Details gives the existing cause-specific guidance |
+| Filesystem allocation or quota exhaustion | Specific filesystem cause | Details gives guidance for the allocation or quota failure |
 
 Quota, retention, and oversized-event reasons use their own localized explanations.
 An absent sample never displays `0 B available`.
 Format byte values and observation times with the existing locale helpers.
+Show disk usage in the pressure row only for `disk_space_low`.
+During another kind of pressure, show an independent high-usage warning's measurements under a labeled Details entry.
+Use the existing Storage link for an eligible local capacity issue or high-usage advisory.
 
 ## Recovery actions
 

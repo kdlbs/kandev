@@ -113,7 +113,7 @@ func TestManagedRuntimeProbeRepairWithCLIArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rewrite flagged probe command: %v", err)
 	}
-	launch, err := prepareACPLaunch(cfg, "npx", rewritten, sanitizeEnvForAgent(cfg))
+	launch, err := prepareACPLaunch(cfg, "test-agent", "npx", rewritten, sanitizeEnvForAgent(cfg))
 	if err != nil {
 		t.Fatalf("compose flagged probe command: %v", err)
 	}
