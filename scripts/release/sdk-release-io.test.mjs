@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { digest } from "./sdk-artifact.mjs";
+import { isDefiniteUploadRejection } from "./sdk-upload-attempts.mjs";
 
 test("release build preserves the packed record identity through real consumer verification", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "sdk-release-build-"));
@@ -104,6 +105,32 @@ test("npm adapter publishes the retained archive without changing latest implici
       "https://registry.npmjs.org",
     ],
   ]);
+});
+
+test("E403 keeps its authentication diagnostic category without proving a refused write", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sdk-npm-e403-"));
+  try {
+    const io = new ReleaseIO({
+      root,
+      directory: join(root, "work"),
+      repository: {},
+      source: {},
+      env: {},
+      run: async () => {
+        throw Object.assign(new Error("npm failed"), {
+          stdout: "npm error code E403",
+        });
+      },
+    });
+    await assert.rejects(io.npm(["publish"]), (error) => {
+      assert.equal(error.npmCode, "E403");
+      assert.equal(error.category, "authentication");
+      assert.equal(isDefiniteUploadRejection(error), false);
+      return true;
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("public consumer visibility retries are bounded and never report exhausted verification as success", async () => {

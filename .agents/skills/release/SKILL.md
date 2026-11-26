@@ -49,8 +49,16 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 5. `publish-npm` publishes 5 `@kdlbs/runtime-*` packages + main `kandev` package to npmjs.
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
 7. `update-scoop-bucket` pushes updated `bucket/kandev.json` to `kdlbs/scoop-kandev` via its SSH deploy key.
-8. `prepare-plugin-sdk` retains the exact tested archive, receipt, and signature on a `pluginsdk/vS` draft, then creates/verifies the signed SDK tag and finalizes the release with `make_latest=false`. Complete legacy host evidence is reused read-only. `publish-plugin-sdk` requires finalized evidence, uses OIDC without signing secrets, then verifies both public consumers. Both jobs run on backfill.
+8. `prepare-plugin-sdk` retains the exact tested archive, receipt, and signature on a `pluginsdk/vS` draft, then creates/verifies the signed SDK tag and finalizes the release with `make_latest=false`. Complete legacy host evidence is reused read-only. `publish-plugin-sdk` requires finalized evidence, uses OIDC without signing secrets, retains version-scoped upload intent and result artifacts for 90 days, then verifies both public consumers. Both jobs run on backfill.
 9. `stable-complete` and automatic contributor notices require successful SDK verification. `bootstrap_required` is incomplete; maintainers publish only the retained bytes and retry after configuring trusted publishing. Never add a token fallback or overwrite conflicting immutable evidence.
+
+For an accepted, uncertain, or interrupted SDK upload, rerun the failed job in
+the same workflow run. It observes the retained attempt and does not upload
+again. After a confirmed rejection or proven skipped upload, fix the publisher
+if needed and use a new Stable backfill for the same tag. Missing, expired, or
+conflicting history blocks a fresh upload. A matching public archive can finish
+an older release without attempt artifacts; an absent version requires trusted
+history.
 
 ## Contributor notices
 
