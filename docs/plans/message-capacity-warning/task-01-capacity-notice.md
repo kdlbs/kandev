@@ -5,7 +5,13 @@ status: done
 wave: 1
 depends_on: []
 plan: plan.md
-spec: ../../specs/agents/requirements/session-concurrency-ceiling.md
+requirements:
+  - REQ-AGENTS-SESSION-CEILING-003
+acceptance_criteria:
+  - AC-AGENTS-SESSION-CEILING-003.9
+  - AC-AGENTS-SESSION-CEILING-003.10
+system_design:
+  - ../../specs/agents/system-design/message-capacity-warning.md
 ---
 
 # Show the capacity admission reason in chat
