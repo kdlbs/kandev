@@ -21,7 +21,9 @@ Retain the intent before issuing `npm publish`.
 Bind both records to the signed archive and the protected release workflow.
 An accepted result, an uncertain result, or an intent with no proven outcome leads to registry observation on recovery.
 
-Use the existing release-wide concurrency group and the Actions artifact lookup to reconcile attempts across reruns and backfills.
+Use the existing release-wide concurrency group, artifact lookup, and authenticated workflow-run/job-attempt metadata to reconcile attempts across reruns and backfills.
+The authenticated job history remains authoritative when retained artifacts are missing: successful intent retention with a missing record blocks another upload.
+Name the publisher job with its host tag so workflow-run history identifies attempts for the signed release.
 A fresh write following a proven refusal uses a new backfill run for the same signed release.
 Require a complete retained history for fresh upload authorization.
 The public registry and signed receipt establish publication success.
@@ -29,6 +31,7 @@ The public registry and signed receipt establish publication success.
 ## Consequences
 
 An interrupted runner leaves enough information for the next run to observe the version safely.
+Artifact loss cannot silently turn an earlier upload into an untouched release because authenticated job outcomes provide an independent completeness check.
 The workflow uses GitHub Actions storage and read permissions with the existing OIDC publisher.
 The retention floor covers GitHub's 30-day rerun window.
 Longer recovery or missing legacy history can require maintainer reconciliation when the version is still absent.

@@ -9,10 +9,12 @@ import { ReleaseIO } from "./sdk-release-io.mjs";
 import { assertReleaseContext } from "./sdk-runtime.mjs";
 import {
   loadPublicationEvidence,
+  loadPublicationCandidate,
   preparePublication,
   publishPublication,
   boundedRegistryValue,
   readRegistryWithRetry,
+  verifyPublicationRegistry,
 } from "./sdk-publication-state.mjs";
 import { PHASES, SdkDiagnostics, collectSecrets } from "./sdk-diagnostics.mjs";
 import { verifyTools } from "../pluginsdk/pack-candidate.mjs";
@@ -51,7 +53,8 @@ function uploadWorkflowIdentity(env) {
 }
 
 async function authorizeUpload(io, source, context, env) {
-  const { candidate, registry } = await loadPublicationEvidence(io, context);
+  const registry = await readRegistryWithRetry(io, source.record.sdk_version);
+  const { candidate } = await loadPublicationEvidence(io, context, registry);
   if (registry.version) {
     io.diagnostics?.phase("npm_upload", "skipped", {
       reason: "version_already_public",
@@ -89,6 +92,7 @@ async function authorizeUpload(io, source, context, env) {
     return {
       status: "bootstrap_required",
       sdk_version: source.record.sdk_version,
+      candidate,
     };
   }
   await io.uploadAttempts.writeIntent(
@@ -105,52 +109,74 @@ async function authorizeUpload(io, source, context, env) {
 }
 
 async function uploadAuthorizedArchive(io, source, context, env) {
-  const { candidate, registry } = await loadPublicationEvidence(io, context);
+  const { candidate } = await loadPublicationCandidate(io, context);
   const workflow = uploadWorkflowIdentity(env);
-  const intent = await io.uploadAttempts.verifyRetainedIntent(
-    source,
-    candidate,
-    workflow,
-    env.SDK_UPLOAD_INTENT_ARTIFACT_ID,
-    env.SDK_UPLOAD_INTENT_ARTIFACT_DIGEST,
-  );
+  const intentArtifactId = env.SDK_UPLOAD_INTENT_ARTIFACT_ID;
+  let uploadInvoked = false;
+  let resultWriteAttempted = false;
+  const recordOutcome = async (outcome) => {
+    if (resultWriteAttempted) return;
+    resultWriteAttempted = true;
+    await io.uploadAttempts.writeResult(
+      source,
+      candidate,
+      workflow,
+      intentArtifactId,
+      outcome,
+    );
+  };
   let outcome = "already_public";
-  if (registry.version) {
-    io.diagnostics?.phase("npm_upload", "skipped", {
-      reason: "version_already_public",
-    });
-  } else {
-    if (!registry.packageExists && !context.firstPublishOIDCReady)
-      throw new Error(
-        candidate.receipt.bootstrap_allowed
-          ? "first SDK package requires approved manual bootstrap"
-          : "absent package is not an approved initial bootstrap",
-      );
-    io.diagnostics?.start("npm_upload");
-    try {
-      await io.publish(candidate);
-      outcome = "accepted";
-      io.diagnostics?.setWriteOutcome(outcome);
-      io.diagnostics?.phase("npm_upload", "passed", {
-        write_outcome: outcome,
+  try {
+    await io.uploadAttempts.verifyRetainedIntent(
+      source,
+      candidate,
+      workflow,
+      intentArtifactId,
+      env.SDK_UPLOAD_INTENT_ARTIFACT_DIGEST,
+    );
+    const registry = await readRegistryWithRetry(io, source.record.sdk_version);
+    verifyPublicationRegistry(registry, candidate, source);
+    if (registry.version) {
+      io.diagnostics?.phase("npm_upload", "skipped", {
+        reason: "version_already_public",
       });
-    } catch (error) {
-      outcome = isDefiniteUploadRejection(error) ? "rejected" : "uncertain";
-      io.diagnostics?.setWriteOutcome(outcome);
-      io.diagnostics?.phase(
-        "npm_upload",
-        outcome === "rejected" ? "failed" : "pending",
-        { write_outcome: outcome },
-      );
+    } else {
+      if (!registry.packageExists && !context.firstPublishOIDCReady)
+        throw new Error(
+          candidate.receipt.bootstrap_allowed
+            ? "first SDK package requires approved manual bootstrap"
+            : "absent package is not an approved initial bootstrap",
+        );
+      io.diagnostics?.start("npm_upload");
+      uploadInvoked = true;
+      try {
+        await io.publish(candidate);
+        outcome = "accepted";
+        io.diagnostics?.setWriteOutcome(outcome);
+        io.diagnostics?.phase("npm_upload", "passed", {
+          write_outcome: outcome,
+        });
+      } catch (error) {
+        outcome = isDefiniteUploadRejection(error) ? "rejected" : "uncertain";
+        io.diagnostics?.setWriteOutcome(outcome);
+        io.diagnostics?.phase(
+          "npm_upload",
+          outcome === "rejected" ? "failed" : "pending",
+          { write_outcome: outcome },
+        );
+      }
     }
+    await recordOutcome(outcome);
+  } catch (error) {
+    if (!uploadInvoked && !resultWriteAttempted) {
+      try {
+        await recordOutcome("never_started");
+      } catch {
+        // The retained intent remains unresolved if its result cannot be saved.
+      }
+    }
+    throw error;
   }
-  await io.uploadAttempts.writeResult(
-    source,
-    candidate,
-    workflow,
-    intent.artifact_id,
-    outcome,
-  );
   io.diagnostics?.setUploadAttempt({
     outcome,
     run_id: workflow.run_id,
@@ -169,13 +195,13 @@ async function completePublication(io, source, context, env) {
   const evidence = await loadPublicationEvidence(io, context, registry);
   const { candidate } = evidence;
   let uploadAttempt = null;
-  if (!registry.version) {
-    const attempts = await io.uploadAttempts.history(
-      source,
-      candidate,
-      uploadWorkflowIdentity(env),
-      { includeCurrentAttempt: true },
-    );
+  const attempts = await io.uploadAttempts.history(
+    source,
+    candidate,
+    uploadWorkflowIdentity(env),
+    { includeCurrentAttempt: true },
+  );
+  if (attempts.length) {
     uploadAttempt =
       attempts.find((attempt) =>
         ["accepted", "uncertain", "already_public"].includes(attempt.outcome),

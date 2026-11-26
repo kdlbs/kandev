@@ -278,6 +278,7 @@ export class ReleaseIO {
       "--access",
       "public",
       "--ignore-scripts",
+      "--fetch-retries=0",
       "--registry",
       "https://registry.npmjs.org",
       "--tag",
@@ -290,6 +291,7 @@ export class ReleaseIO {
       "add",
       `@kdlbs/plugin-sdk@${version}`,
       "latest",
+      "--fetch-retries=0",
       "--registry",
       "https://registry.npmjs.org",
     ]);

@@ -293,3 +293,29 @@ test("classifies registry transport and response-body failures", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("does not retry authentication statuses when their JSON body is unreadable", async () => {
+  for (const status of [401, 403]) {
+    let bodyReads = 0;
+    const responseWithBrokenBody = {
+      status,
+      ok: false,
+      url: "https://registry.npmjs.org/@kdlbs%2fplugin-sdk",
+      headers: new Headers({ "content-type": "application/json" }),
+      text: async () => {
+        bodyReads += 1;
+        throw new Error("body down");
+      },
+    };
+    await assert.rejects(
+      readPackage("0.1.0", async () => responseWithBrokenBody),
+      (error) => {
+        assert.equal(error.code, "REGISTRY_READ_FAILURE");
+        assert.equal(error.retryable, false);
+        assert.match(error.message, new RegExp(`HTTP ${status}`));
+        return true;
+      },
+    );
+    assert.equal(bodyReads, 0);
+  }
+});

@@ -94,6 +94,7 @@ Use accepted, uncertain, rejected, never started, or already public.
 Only a proven refusal of the publish request qualifies as a rejection.
 Use uncertain for ambiguous npm responses, including an error that says the version already exists.
 Treat npm `E403` as ambiguous even when its diagnostic category is authentication; it does not prove that the publish request was refused.
+Set `--fetch-retries=0` on npm publication and dist-tag mutations so the CLI cannot repeat a write after a transient response; the release state machine owns observation and registry-read retries.
 For a definitive authentication error, end the job promptly and record uncertainty if the command might have submitted the archive.
 
 1. Decide whether a fresh upload is eligible and write the intent file.
@@ -110,20 +111,27 @@ An authorization or integrity failure stops the job while successful Stable comp
 ### Trust and retention
 
 Use the GitHub Actions repository artifact API with an exact name filter to find records across runs.
+Use the authenticated workflow-run and job-attempt APIs as an independent index of SDK publisher attempts.
+The publisher job name includes the exact host tag so a recovery run can distinguish attempts for this SDK from other Stable releases.
+Require the canonical API workflow path `.github/workflows/release.yml`, the expected repository, `workflow_dispatch` event, `main` branch, and matching workflow SHA.
 Use a small read-only helper within `scripts/release` to resolve records.
 Validate the artifact ID and digest, bounded JSON payload, and its producer metadata.
 Only accept records that bind to the expected repository and protected `main` release workflow.
 Resolve the producer run and exact attempt and reconcile the artifact identity against the finalized SDK receipt.
 Ignore artifacts whose metadata proves that they belong to other workflows or branches.
 Treat malformed or contradictory evidence from the trusted workflow as unresolved history.
+If authenticated job metadata shows that intent retention succeeded but the intent artifact is missing, leave upload authorization unresolved even when the registry reports absence.
+A completed publisher job skipped before any steps proves that no upload attempt started.
+Do not infer that history is empty from an artifact lookup alone.
 
 Request 90-day artifact retention and confirm at least 30 days of retention on the intent before starting npm.
 Keep the attempt artifacts and producer runs throughout the evidence window.
 An absence check can grant authorization only when the signed receipt's producer run falls within the 30-day evidence window and its trusted workflow revision contains the intent gate.
 Use the receipt's existing run ID and workflow SHA to establish that boundary.
-If the origin or a prior attempt of the current run retained an intent, require its record.
+If the origin or any prior attempt retained an intent, require its record.
 Missing or expired known evidence, incomplete API responses, and legacy producer workflows require reconciliation before any fresh upload.
-A matching public archive can complete an older release directly.
+A matching public archive can complete an older release directly when authenticated attempt history is complete; retain discovered accepted or uncertain attempts for the provenance check.
+An unreadable history response must not turn a visible first package into a manual bootstrap.
 The operating guide directs maintainers to retain unresolved evidence and use the same release tag for recovery.
 
 Use `actions: read` for artifact reads and the standard Actions upload step for writes.

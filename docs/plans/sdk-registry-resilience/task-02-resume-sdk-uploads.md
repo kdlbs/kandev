@@ -37,6 +37,7 @@ Complete the existing promotion and public consumer checks when the version appe
 ## In scope
 
 - Validate Actions artifacts against the signed candidate and trusted workflow metadata.
+- Reconcile authenticated workflow-run/job-attempt metadata when retained artifacts are missing.
 - Wire the intent, upload, result, and completion steps into the protected SDK job.
 - Document reruns, confirmed rejection, legacy evidence, and expired history in the release procedure and repository release skill.
 
@@ -107,8 +108,9 @@ git diff --check
 
 Passed:
 
-- The release SDK suite passed 88 tests with Node 24.19.0 and npm 11.21.0. It includes a real archive pack and public consumer verification.
-- Static review regressions cover the canonical workflow API path, missing retained artifacts after a successful retain step, incomplete job metadata, E403 uncertainty, transient completion reads, first-package policy rechecks, and `already_public` observation.
+- The release SDK suite passed 99 tests with Node 24.19.0 and npm 11.21.0. It includes a real archive pack and public consumer verification.
+- Static review regressions cover the canonical workflow API path, missing retained artifacts after successful intent retention, incomplete job metadata, skipped publisher jobs, E403 uncertainty, transient completion reads, first-package policy rechecks, pre-publish interruption, `already_public` observation, and disabled npm CLI retries for writes.
+- PR review follow-up indexes attempts through authenticated workflow-run and job-attempt metadata, carries history into visible-version completion, and blocks when that history is unreadable.
 - `python3 .github/scripts/release-workflow-contract_test.py` passed 79 tests.
 - `python3 .github/scripts/lint-action-pinning_test.py` passed 9 tests.
 - Public documentation tests passed 63 tests; the validator checked 56 pages.

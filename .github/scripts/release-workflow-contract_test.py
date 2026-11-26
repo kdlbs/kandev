@@ -1862,6 +1862,10 @@ class PluginSDKReleaseTests(unittest.TestCase):
         self.assertNotIn("id-token: write", prepare)
         self.assertNotIn("gh auth setup-git", prepare)
         self.assertIn("id-token: write", publish)
+        self.assertIn(
+            "name: Publish and verify public plugin SDK for ${{ needs.prepare.outputs.tag }}",
+            publish,
+        )
         self.assertIn("contents: read", publish)
         self.assertNotIn("RELEASE_GPG_PRIVATE_KEY", publish)
         self.assertIn("timeout-minutes: 30", publish)

@@ -8,13 +8,13 @@ import { packageName } from "./sdk-registry.mjs";
 const execute = promisify(execFile);
 const repositoryName = "kdlbs/kandev";
 const workflowPath = ".github/workflows/release.yml";
-const publishJobName = "Publish and verify public plugin SDK";
 const publishStepName = "Publish exact SDK archive";
 const intentFileName = "intent.json";
 const resultFileName = "result.json";
 const maximumRecordBytes = 16 * 1024;
 const maximumArchiveBytes = 1024 * 1024;
 const maximumArtifacts = 100;
+const maximumWorkflowRuns = 1000;
 export const UPLOAD_EVIDENCE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 export const UPLOAD_ATTEMPT_OUTCOMES = [
   "accepted",
@@ -31,6 +31,10 @@ function attemptError(version, message) {
   error.code = "SDK_UPLOAD_HISTORY_UNRESOLVED";
   error.category = "upload_history";
   return error;
+}
+
+function publishJobName(hostTag) {
+  return `Publish and verify public plugin SDK for ${hostTag}`;
 }
 
 function artifactNames(version) {
@@ -152,6 +156,7 @@ export class SDKUploadAttempts {
   }) {
     Object.assign(this, { root, directory, repository, env, run, now });
     this.runCache = new Map();
+    this.workflowRunListCache = new Map();
     this.revisionCache = new Map();
     this.jobCache = new Map();
   }
@@ -208,6 +213,38 @@ export class SDKUploadAttempts {
     return this.runCache.get(runId);
   }
 
+  async workflowRunsSince(startDate, version) {
+    if (!this.workflowRunListCache.has(startDate)) {
+      const endpoint = `repos/${repositoryName}/actions/workflows/release.yml/runs?event=workflow_dispatch&branch=main&created=>=${encodeURIComponent(startDate)}&per_page=100`;
+      this.workflowRunListCache.set(
+        startDate,
+        (async () => {
+          const { stdout } = await this.gh([
+            "api",
+            "--paginate",
+            "--jq",
+            ".workflow_runs[] | {id,run_attempt,path,event,head_branch,head_sha,created_at,repository:{full_name:.repository.full_name}} | @base64",
+            endpoint,
+          ]);
+          const lines = String(stdout).split(/\r?\n/).filter(Boolean);
+          if (lines.length > maximumWorkflowRuns)
+            throw attemptError(
+              version,
+              "workflow run history exceeds the lookup limit",
+            );
+          return lines.map((line) => {
+            try {
+              return JSON.parse(Buffer.from(line, "base64").toString("utf8"));
+            } catch {
+              throw attemptError(version, "workflow run listing is malformed");
+            }
+          });
+        })(),
+      );
+    }
+    return this.workflowRunListCache.get(startDate);
+  }
+
   trustedRun(run, version) {
     const repository = run?.repository;
     return Boolean(
@@ -236,6 +273,9 @@ export class SDKUploadAttempts {
         }
         return (
           workflow.includes('SDK_UPLOAD_ATTEMPT_PROTOCOL: "1"') &&
+          workflow.includes(
+            "name: Publish and verify public plugin SDK for ${{ needs.prepare.outputs.tag }}",
+          ) &&
           workflow.includes("id: retain_sdk_upload_intent") &&
           workflow.includes("--mode authorize") &&
           workflow.includes("--mode upload") &&
@@ -627,8 +667,12 @@ export class SDKUploadAttempts {
         group.intent.record.run_id,
         group.intent.record.run_attempt,
         version,
+        source.currentHostTag,
       );
-      if (evidence.retainedIntent.conclusion !== "success")
+      if (
+        !evidence.retainedIntent ||
+        evidence.retainedIntent.conclusion !== "success"
+      )
         throw attemptError(
           version,
           "retained intent artifact conflicts with producer job evidence",
@@ -654,6 +698,7 @@ export class SDKUploadAttempts {
           group.intent.record.run_id,
           group.intent.record.run_attempt,
           version,
+          source.currentHostTag,
         ))
           ? "never_started"
           : "uncertain";
@@ -674,8 +719,14 @@ export class SDKUploadAttempts {
     return attempts;
   }
 
-  async jobAttemptEvidence(runId, runAttempt, version) {
-    const key = `${runId}/${runAttempt}`;
+  async jobAttemptEvidence(
+    runId,
+    runAttempt,
+    version,
+    hostTag,
+    { required = true } = {},
+  ) {
+    const key = `${runId}/${runAttempt}/${hostTag}`;
     if (!this.jobCache.has(key)) {
       this.jobCache.set(
         key,
@@ -699,20 +750,35 @@ export class SDKUploadAttempts {
           } catch {
             throw attemptError(version, "producer job evidence is malformed");
           }
-          const job = jobs.find((entry) => entry.name === publishJobName);
+          const job = jobs.find(
+            (entry) => entry.name === publishJobName(hostTag),
+          );
+          if (!job) {
+            if (!required) return null;
+            throw attemptError(version, "producer job evidence is incomplete");
+          }
+          if (
+            job.status === "completed" &&
+            job.conclusion === "skipped" &&
+            (!Array.isArray(job.steps) || job.steps.length === 0)
+          )
+            return { job, retainedIntent: null, publish: null };
           const retainedIntent = job?.steps?.find(
             (entry) => entry.name === "Retain SDK upload intent",
           );
           const publish = job?.steps?.find(
             (entry) => entry.name === publishStepName,
           );
-          if (!job || !Array.isArray(job.steps) || !retainedIntent || !publish)
+          if (!Array.isArray(job.steps) || !retainedIntent || !publish)
             throw attemptError(version, "producer job evidence is incomplete");
           return { job, retainedIntent, publish };
         })(),
       );
     }
-    return this.jobCache.get(key);
+    const evidence = await this.jobCache.get(key);
+    if (!evidence && required)
+      throw attemptError(version, "producer job evidence is incomplete");
+    return evidence;
   }
 
   async reconcileMissingRetainedIntents(
@@ -757,6 +823,63 @@ export class SDKUploadAttempts {
         add(current.run_id, attempt, current.workflow_sha);
     }
 
+    const originRun = await this.workflowRun(candidate.receipt.run_id, version);
+    const originCreatedAt = Date.parse(originRun?.created_at ?? "");
+    if (!Number.isFinite(originCreatedAt))
+      throw attemptError(version, "origin workflow timestamp is unavailable");
+    const runs = await this.workflowRunsSince(
+      new Date(originCreatedAt).toISOString().slice(0, 10),
+      version,
+    );
+    for (const listedRun of runs) {
+      if (
+        listedRun?.repository?.full_name !== repositoryName ||
+        listedRun.path !== workflowPath ||
+        listedRun.event !== "workflow_dispatch" ||
+        listedRun.head_branch !== "main"
+      )
+        continue;
+      const runId = safeArtifactId(listedRun.id);
+      const runAttemptCount = Number(listedRun.run_attempt);
+      const createdAt = Date.parse(listedRun.created_at ?? "");
+      if (
+        !/^[0-9a-f]{40}$/.test(listedRun.head_sha ?? "") ||
+        !Number.isSafeInteger(runAttemptCount) ||
+        runAttemptCount < 1 ||
+        !Number.isFinite(createdAt)
+      )
+        throw attemptError(version, "workflow run metadata is incomplete");
+      if (createdAt < originCreatedAt) continue;
+      const lastAttempt =
+        current && runId === current.run_id
+          ? Number(current.run_attempt) - (includeCurrentAttempt ? 0 : 1)
+          : runAttemptCount;
+      for (
+        let attempt = 1;
+        attempt <= Math.min(runAttemptCount, lastAttempt);
+        attempt++
+      ) {
+        const attemptNumber = String(attempt);
+        const run = await this.validateRunAttempt(
+          runId,
+          attemptNumber,
+          listedRun.head_sha,
+          version,
+          { requireUploadGate: false },
+        );
+        if (!(await this.workflowUsesUploadGate(run.head_sha, version)))
+          continue;
+        const evidence = await this.jobAttemptEvidence(
+          runId,
+          attemptNumber,
+          version,
+          source.currentHostTag,
+          { required: false },
+        );
+        if (evidence) add(runId, attemptNumber, run.head_sha);
+      }
+    }
+
     for (const expectedAttempt of expected.values()) {
       const run = await this.validateRunAttempt(
         expectedAttempt.run_id,
@@ -770,10 +893,26 @@ export class SDKUploadAttempts {
         expectedAttempt.run_id,
         expectedAttempt.run_attempt,
         version,
+        source.currentHostTag,
       );
       const group = groups.get(
         `${expectedAttempt.run_id}/${expectedAttempt.run_attempt}`,
       );
+      if (
+        evidence.job.status === "completed" &&
+        evidence.job.conclusion === "skipped" &&
+        !evidence.retainedIntent &&
+        !evidence.publish
+      ) {
+        if (group?.intent)
+          throw attemptError(
+            version,
+            "retained intent artifact conflicts with a skipped publisher job",
+          );
+        continue;
+      }
+      if (!evidence.retainedIntent || !evidence.publish)
+        throw attemptError(version, "producer job evidence is incomplete");
       if (evidence.retainedIntent.conclusion === "success") {
         if (!group?.intent)
           throw attemptError(version, "retained intent record is missing");
@@ -794,13 +933,17 @@ export class SDKUploadAttempts {
     }
   }
 
-  async publishStepSkipped(runId, runAttempt, version) {
+  async publishStepSkipped(runId, runAttempt, version, hostTag) {
     const { job, publish } = await this.jobAttemptEvidence(
       runId,
       runAttempt,
       version,
+      hostTag,
     );
-    return job.status === "completed" && publish.conclusion === "skipped";
+    return (
+      job.status === "completed" &&
+      (job.conclusion === "skipped" || publish?.conclusion === "skipped")
+    );
   }
 
   async validateCurrentWorkflow(workflow, version) {

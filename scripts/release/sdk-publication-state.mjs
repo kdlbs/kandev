@@ -58,6 +58,10 @@ function verifyRegistry(registry, candidate, source) {
   )
     throw new Error("npm version integrity or record conflict");
 }
+export function verifyPublicationRegistry(registry, candidate, source) {
+  verifyRegistry(registry, candidate, source);
+  return registry;
+}
 async function readState(io, context) {
   const tag = await io.readTag(context.source);
   const registry = await io.readRegistry(context.source.record.sdk_version);
@@ -65,17 +69,11 @@ async function readState(io, context) {
   return { tag, registry };
 }
 
-export async function loadPublicationEvidence(
-  io,
-  context,
-  initialRegistry = undefined,
-) {
+export async function loadPublicationCandidate(io, context) {
   validateContext(context);
   const { source } = context;
   io.diagnostics?.start("source_verification");
   const tag = await io.readTag(source);
-  const registry =
-    initialRegistry ?? (await io.readRegistry(source.record.sdk_version));
   verifyTag(tag, context);
   if (!tag)
     throw new Error("signed SDK tag is missing; run SDK preparation first");
@@ -89,11 +87,23 @@ export async function loadPublicationEvidence(
     bootstrapAllowed: false,
   });
   verifyCandidate(candidate, context);
-  verifyRegistry(registry, candidate, source);
   await io.verifyFinalizedCandidate(candidate, source);
   io.diagnostics?.phase("candidate_verification", "passed", {
     integrity: candidate.integrity,
   });
+  return { tag, candidate };
+}
+
+export async function loadPublicationEvidence(
+  io,
+  context,
+  initialRegistry = undefined,
+) {
+  const { tag, candidate } = await loadPublicationCandidate(io, context);
+  const { source } = context;
+  const registry =
+    initialRegistry ?? (await io.readRegistry(source.record.sdk_version));
+  verifyPublicationRegistry(registry, candidate, source);
   return { tag, registry, candidate };
 }
 async function observe(io, read, valid, label, writeError) {

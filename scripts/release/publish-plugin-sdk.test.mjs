@@ -35,6 +35,9 @@ const tag = () => ({
 const candidate = () => ({
   fingerprint,
   integrity: "sha512-example",
+  retention: {
+    urls: ["https://github.com/kdlbs/kandev/releases/download/sdk.tgz"],
+  },
   receipt: {
     schema_version: 1,
     sdk_version: "0.1.0",
@@ -782,6 +785,57 @@ test("authorize rejects a fresh write for an absent unapproved first package", a
   }
 });
 
+test("authorize bootstrap result includes the candidate used in its summary", async () => {
+  const f = fixture({ tagged: true, packageExists: false });
+  const runner = await makeReleaseRunner(f);
+  const exitCode = process.exitCode;
+  try {
+    const summary = await runner.run("authorize");
+    assert.equal(summary.release_status, "bootstrap_required");
+    assert.equal(summary.integrity, f.state.candidate.integrity);
+    assert.deepEqual(summary.assets, f.state.candidate.retention.urls);
+    assert.match(summary.instructions, /exact archive/);
+  } finally {
+    process.exitCode = exitCode;
+    await rm(runner.directory, { recursive: true, force: true });
+  }
+});
+
+test("authorize retries a transient registry read before resuming a prior upload", async () => {
+  const f = fixture({ tagged: true });
+  const readRegistry = f.io.readRegistry;
+  let reads = 0;
+  f.io.readRegistry = async (...args) => {
+    reads += 1;
+    if (reads === 1)
+      throw Object.assign(new Error("registry metadata HTTP 503"), {
+        code: "REGISTRY_READ_FAILURE",
+        retryable: true,
+      });
+    return readRegistry(...args);
+  };
+  let intents = 0;
+  const runner = await makeReleaseRunner(f, {
+    uploadAttempts: {
+      authorize: async () => ({
+        action: "observe",
+        attempt: { outcome: "accepted", run_id: "800", run_attempt: "1" },
+      }),
+      writeIntent: async () => (intents += 1),
+    },
+  });
+  try {
+    const summary = await runner.run("authorize");
+    assert.equal(summary.release_status, "observing_prior_upload");
+    assert.equal(summary.upload_attempt.outcome, "accepted");
+    assert.equal(reads, 2);
+    assert.deepEqual(f.clock.waits, [10_000]);
+    assert.equal(intents, 0);
+  } finally {
+    await rm(runner.directory, { recursive: true, force: true });
+  }
+});
+
 test("upload rechecks first-package readiness after the package disappears", async () => {
   const f = fixture({ tagged: true, packageExists: true });
   f.state.candidate.receipt.bootstrap_allowed = false;
@@ -827,6 +881,96 @@ test("upload records an E403 with authentication diagnostics as uncertain", asyn
     assert.equal(summary.status, "upload_attempt_recorded");
     assert.equal(summary.upload_attempt.outcome, "uncertain");
     assert.equal(recordedOutcome, "uncertain");
+  } finally {
+    await rm(runner.directory, { recursive: true, force: true });
+  }
+});
+
+test("upload records a failure before npm starts as never_started", async () => {
+  const f = fixture({ tagged: true });
+  f.io.readRegistry = async () => {
+    throw Object.assign(new Error("registry authentication HTTP 403"), {
+      code: "REGISTRY_READ_FAILURE",
+      retryable: false,
+    });
+  };
+  let verifiedIntent = false;
+  let recordedOutcome;
+  const runner = await makeReleaseRunner(f, {
+    uploadAttempts: {
+      verifyRetainedIntent: async () => {
+        verifiedIntent = true;
+        return { artifact_id: "501" };
+      },
+      writeResult: async (_source, _candidate, _workflow, _id, outcome) => {
+        recordedOutcome = outcome;
+      },
+    },
+  });
+  try {
+    await assert.rejects(runner.run("upload"), /HTTP 403/);
+    assert.equal(verifiedIntent, true);
+    assert.equal(recordedOutcome, "never_started");
+    assert.equal(f.events.filter(([event]) => event === "publish").length, 0);
+  } finally {
+    await rm(runner.directory, { recursive: true, force: true });
+  }
+});
+
+test("complete preserves a visible accepted attempt before checking OIDC provenance", async () => {
+  const f = fixture({ tagged: true, published: true });
+  f.state.registry.version.provenance = false;
+  let historyReads = 0;
+  const runner = await makeReleaseRunner(f, {
+    uploadAttempts: {
+      history: async () => {
+        historyReads += 1;
+        return [{ outcome: "accepted", run_id: "800", run_attempt: "1" }];
+      },
+    },
+  });
+  try {
+    await assert.rejects(runner.run("complete"), /workflow provenance/);
+    assert.equal(historyReads, 1);
+    assert.equal(f.events.filter(([event]) => event === "publish").length, 0);
+    assert.equal(f.events.filter(([event]) => event === "consumers").length, 0);
+  } finally {
+    await rm(runner.directory, { recursive: true, force: true });
+  }
+});
+
+test("complete does not treat unreadable visible upload history as manual bootstrap", async () => {
+  const f = fixture({ tagged: true, published: true });
+  f.state.registry.version.provenance = false;
+  const runner = await makeReleaseRunner(f, {
+    uploadAttempts: {
+      history: async () => {
+        throw new Error("authenticated upload history is unavailable");
+      },
+    },
+  });
+  try {
+    await assert.rejects(
+      runner.run("complete"),
+      /authenticated upload history is unavailable/,
+    );
+    assert.equal(f.events.filter(([event]) => event === "latest").length, 0);
+    assert.equal(f.events.filter(([event]) => event === "consumers").length, 0);
+  } finally {
+    await rm(runner.directory, { recursive: true, force: true });
+  }
+});
+
+test("complete preserves a genuine manual bootstrap with complete empty history", async () => {
+  const f = fixture({ tagged: true, published: true });
+  f.state.registry.version.provenance = false;
+  const runner = await makeReleaseRunner(f, {
+    uploadAttempts: { history: async () => [] },
+  });
+  try {
+    const summary = await runner.run("complete");
+    assert.equal(summary.origin, "manual_bootstrap");
+    assert.equal(f.events.filter(([event]) => event === "publish").length, 0);
   } finally {
     await rm(runner.directory, { recursive: true, force: true });
   }

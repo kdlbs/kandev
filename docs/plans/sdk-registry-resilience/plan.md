@@ -51,6 +51,7 @@ The plugin system owns the [signed SDK identity and consumer contract](../../spe
    Set the `publish-plugin-sdk` job limit in `.github/workflows/release.yml`.
 2. Add a narrow Actions artifact adapter for SDK attempts.
    Use `runRelease` and the protected job to retain intent, issue one upload, and retain its result.
+   Index authenticated workflow runs and job attempts independently of artifact retention, keyed to the exact host tag.
    Reuse `publishPublication` and `ensureLatest` for registry verification and completion.
    Update the public operating procedure with the same release.
 
@@ -77,10 +78,16 @@ The two version-specific artifacts give a retry enough evidence to resume the ex
 
 Task 01 and Task 02 implementation checks passed. Task 02 used Node 24.19.0
 and npm 11.21.0 for the real SDK pack and consumer verification; the SDK suite
-passed 88 tests after static review regressions were added. The full
+passed 99 tests after PR review regressions were added. The full
 `zizmor .github/workflows` scan ran but returned existing findings in unrelated
 workflows and an informational `softprops/action-gh-release` finding in the
 release workflow. It reported no finding on the new SDK upload steps.
+
+PR review follow-up adds authenticated workflow-run/job-attempt reconciliation
+for missing retained artifacts, carries visible upload history into completion,
+retries transient first reads, and records a result when publication never
+started. It also covers skipped jobs with no step records and keeps unreadable
+history from being treated as a manual bootstrap.
 
 ### Design checks
 

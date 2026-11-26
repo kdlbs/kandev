@@ -3367,7 +3367,7 @@ jobs:
         run: bash scripts/release/publish-plugin-sdk.sh --mode prepare --host-tag "$SDK_HOST_TAG"
 
   publish-plugin-sdk:
-    name: Publish and verify public plugin SDK
+    name: Publish and verify public plugin SDK for ${{ needs.prepare.outputs.tag }}
     needs: [prepare, publish-release, prepare-plugin-sdk]
     if: >-
       ${{ !cancelled() && github.event_name == 'workflow_dispatch' &&

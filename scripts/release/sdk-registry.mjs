@@ -37,6 +37,8 @@ export async function readPackage(version, fetchImpl = fetch) {
       undefined,
       { retryable: true },
     );
+  if (!response.ok && response.status !== 404)
+    throw registryFailure(`registry read failed with HTTP ${response.status}`);
   if (!response.headers.get("content-type")?.includes("application/json"))
     throw registryFailure("registry returned a non-JSON response");
   let text;

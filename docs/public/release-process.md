@@ -277,10 +277,16 @@ recorded rejection or proof that the upload never started.
 - If the attempt history is missing, expired, conflicting, or unreadable, do
   not publish. Keep the attempt artifacts and producer runs. Reconcile the
   exact public version and signed receipt before allowing another upload.
+- The job also checks authenticated workflow-run and job-attempt records. If
+  those records show that intent retention succeeded but the intent artifact is
+  missing, the release is unresolved. Do not treat an empty artifact lookup as
+  proof that no upload was attempted.
 
-An older release can finish without attempt artifacts when the public npm
-archive matches its signed receipt. An absent version without trusted history
-requires reconciliation. Never rebuild or replace the signed SDK archive.
+A release from before attempt recording can finish without attempt artifacts
+when the public npm archive matches its signed receipt. A release with recorded
+publisher attempts requires complete history even when its archive is public.
+An absent version without trusted history requires reconciliation. Never
+rebuild or replace the signed SDK archive.
 
 ### First-package bootstrap
 

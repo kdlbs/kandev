@@ -33,6 +33,8 @@ const currentWorkflow = {
   run_attempt: "1",
   backfill_tag: "",
 };
+const publishJobName = (hostTag = source.currentHostTag) =>
+  `Publish and verify public plugin SDK for ${hostTag}`;
 
 function record(
   kind,
@@ -69,11 +71,13 @@ function makeFixture() {
   const kinds = new Map();
   const runAttempts = new Map();
   const jobResults = new Map();
+  const workflowRuns = [];
   const createdAt = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
   const repository = {
     file: async () =>
       [
         'SDK_UPLOAD_ATTEMPT_PROTOCOL: "1"',
+        "name: Publish and verify public plugin SDK for ${{ needs.prepare.outputs.tag }}",
         "id: retain_sdk_upload_intent",
         "--mode authorize",
         "--mode upload",
@@ -116,6 +120,12 @@ function makeFixture() {
     run.head_branch = headBranch;
     runAttempts.set(`${runId}/${runAttempt}`, run);
     if (kind === "intent") jobsFor(runId, runAttempt, "success", "success");
+    runAttempts.set(`${runId}/${runAttempt}`, run);
+    const runIndex = workflowRuns.findIndex(
+      (entry) => String(entry.id) === String(runId),
+    );
+    if (runIndex < 0) workflowRuns.push(run);
+    else workflowRuns[runIndex] = run;
     artifacts.push({
       id: Number(id),
       name: `sdk-npm-upload-${kind}-v${source.record.sdk_version}`,
@@ -138,14 +148,25 @@ function makeFixture() {
     runAttempt,
     publishConclusion = "skipped",
     retainConclusion = "success",
+    { conclusion = "success", hostTag = source.currentHostTag, steps } = {},
   ) => {
-    runAttempts.set(`${runId}/${runAttempt}`, trustedRun(runId, runAttempt));
+    const run = trustedRun(runId, runAttempt);
+    runAttempts.set(`${runId}/${runAttempt}`, run);
+    const existingRun = workflowRuns.findIndex(
+      (entry) => String(entry.id) === String(runId),
+    );
+    if (existingRun < 0) workflowRuns.push(run);
+    else workflowRuns[existingRun] = run;
     jobResults.set(`${runId}/${runAttempt}`, [
       {
-        name: "Publish and verify public plugin SDK",
+        name: publishJobName(hostTag),
         status: "completed",
-        steps: [
-          { name: "Retain SDK upload intent", conclusion: retainConclusion },
+        conclusion,
+        steps: steps ?? [
+          {
+            name: "Retain SDK upload intent",
+            conclusion: retainConclusion,
+          },
           { name: "Publish exact SDK archive", conclusion: publishConclusion },
         ],
       },
@@ -166,6 +187,25 @@ function makeFixture() {
       (argument) =>
         typeof argument === "string" && argument.includes("/actions/"),
     );
+    if (endpoint.includes("/actions/workflows/release.yml/runs?"))
+      return {
+        stdout: workflowRuns
+          .map((run) =>
+            Buffer.from(
+              JSON.stringify({
+                id: run.id,
+                run_attempt: run.run_attempt,
+                path: run.path,
+                event: run.event,
+                head_branch: run.head_branch,
+                head_sha: run.head_sha,
+                created_at: run.created_at,
+                repository: run.repository,
+              }),
+            ).toString("base64"),
+          )
+          .join("\n"),
+      };
     if (
       endpoint.includes("/actions/artifacts?") &&
       endpoint.includes("name=")
@@ -221,6 +261,7 @@ function makeFixture() {
     addArtifact,
     jobsFor,
     jobResults,
+    workflowRuns,
     makeAdapter,
     runAttempts,
   };
@@ -351,13 +392,94 @@ test("a completed origin with skipped retention and upload steps permits a fresh
   }
 });
 
+test("a completed skipped publisher job with no steps proves the origin never uploaded", async () => {
+  const fixture = makeFixture();
+  const directory = await fixture.directory;
+  try {
+    fixture.jobsFor("700", "1", "skipped", "skipped", {
+      conclusion: "skipped",
+      steps: [],
+    });
+    const decision = await fixture
+      .makeAdapter(directory)
+      .authorize(source, candidate, {
+        ...currentWorkflow,
+        backfill_tag: source.currentHostTag,
+      });
+    assert.equal(decision.action, "upload");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a missing artifact from a separate backfill blocks a third upload", async () => {
+  const fixture = makeFixture();
+  const directory = await fixture.directory;
+  try {
+    fixture.jobsFor("700", "1", "skipped", "skipped");
+    fixture.jobsFor("800", "1", "success", "success");
+    await assert.rejects(
+      fixture.makeAdapter(directory).authorize(source, candidate, {
+        ...currentWorkflow,
+        backfill_tag: source.currentHostTag,
+      }),
+      /retained intent record is missing/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a surviving intent from a separate backfill still authorizes observation", async () => {
+  const fixture = makeFixture();
+  const directory = await fixture.directory;
+  try {
+    fixture.jobsFor("700", "1", "skipped", "skipped");
+    fixture.jobsFor("800", "1", "success", "success");
+    fixture.addArtifact(201, "intent", record("intent", { runId: "800" }), {
+      runId: "800",
+    });
+    const decision = await fixture
+      .makeAdapter(directory)
+      .authorize(source, candidate, {
+        ...currentWorkflow,
+        backfill_tag: source.currentHostTag,
+      });
+    assert.equal(decision.action, "observe");
+    assert.equal(decision.attempt.outcome, "uncertain");
+    assert.equal(decision.attempt.run_id, "800");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a different host release does not enter this SDK attempt history", async () => {
+  const fixture = makeFixture();
+  const directory = await fixture.directory;
+  try {
+    fixture.jobsFor("700", "1", "skipped", "skipped");
+    fixture.jobsFor("650", "1", "success", "success", {
+      hostTag: "v9.9.9",
+    });
+    const decision = await fixture
+      .makeAdapter(directory)
+      .authorize(source, candidate, {
+        ...currentWorkflow,
+        backfill_tag: source.currentHostTag,
+      });
+    assert.equal(decision.action, "upload");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("authorization ignores the current in-flight producer attempt before intent retention", async () => {
   const fixture = makeFixture();
   const directory = await fixture.directory;
   try {
     fixture.jobResults.set("700/1", [
       {
-        name: "Publish and verify public plugin SDK",
+        name: publishJobName(),
         status: "in_progress",
         steps: [
           {
@@ -425,7 +547,7 @@ test("incomplete producer job metadata blocks fresh upload authorization", async
   try {
     fixture.jobResults.set("700/1", [
       {
-        name: "Publish and verify public plugin SDK",
+        name: publishJobName(),
         status: "completed",
         steps: [{ name: "Retain SDK upload intent", conclusion: "success" }],
       },
