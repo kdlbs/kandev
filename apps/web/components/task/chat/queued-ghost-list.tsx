@@ -558,7 +558,7 @@ function QueueCapacityWarning({
     <ComposerWarning data-testid="queue-capacity-notice">
       <ComposerWarningRow icon={IconClock}>
         <span className="min-w-0 flex-1 break-words text-xs font-medium">
-          {t("queueCapacityNoticeReason")} {limitStatus} {deliveryHint}
+          {[t("queueCapacityNoticeReason"), limitStatus, deliveryHint].filter(Boolean).join(" ")}
         </span>
       </ComposerWarningRow>
     </ComposerWarning>

@@ -299,7 +299,7 @@ describe("QueueAffordance capacity notice", () => {
     useQueueMock.mockReturnValue(queueState([deferred], { cancellationPending: true }));
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
     const notice = screen.getByTestId(noticeId);
-    expect(notice.textContent).toContain(reason);
+    expect(notice.textContent).toBe(reason);
     expect(notice.textContent).not.toContain(autoSend);
     expect(notice.textContent).not.toContain(enableAutoRun);
   });

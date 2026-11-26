@@ -100,3 +100,8 @@ The Go command above passed in all three packages. The chat Vitest command
 passed 2,464 tests during implementation. Each focused Playwright command
 passed both scenarios on the final warning layout. Catalog validation,
 specification lint and the diff check passed after the review fixes.
+
+The notice joins only non-empty, fully translated sentences. Queue handler
+tests verify that client-supplied admission reasons are ignored. The shared
+capacity query refreshes every ten seconds while a warning is visible so an
+administrator's limit change can appear without reloading chat.
