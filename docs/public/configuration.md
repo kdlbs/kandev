@@ -93,7 +93,7 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | YAML key                | Environment variable                                                | Default     | Current behavior                                                                                                                                                                                                                                                                                                                                                                                   |
 | ----------------------- | ------------------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `homeDir`               | `KANDEV_HOME_DIR`                                                   | `~/.kandev` | Root for data, tasks, worktrees, cloned repositories, sessions, and logs. A leading `~/` expands.                                                                                                                                                                                                                                                                                                  |
-| `server.host`           | `KANDEV_SERVER_HOST`                                                | `0.0.0.0`   | HTTP listen address. It accepts one hostname/IP or a comma-separated list. Use `127.0.0.1` for local-only access.                                                                                                                                                                                                                                                                                  |
+| `server.host`           | `KANDEV_SERVER_HOST`                                                | `127.0.0.1` | HTTP listen address. It accepts an address or a comma-separated list. The official container and Kandev-managed services default to `0.0.0.0`.                                                                                                                                                                                                                                                                                  |
 | `server.port`           | `KANDEV_SERVER_PORT` (`KANDEV_BACKEND_PORT`, `KANDEV_PORT` aliases) | `38429`     | UI, HTTP API, WebSocket, and MCP port; must be `1`-`65535`. The launcher normally supplies its selected port.                                                                                                                                                                                                                                                                                      |
 | `server.readTimeout`    | `KANDEV_SERVER_READTIMEOUT`                                         | `30`        | HTTP read timeout in seconds.                                                                                                                                                                                                                                                                                                                                                                      |
 | `server.writeTimeout`   | `KANDEV_SERVER_WRITETIMEOUT`                                        | `30`        | HTTP write timeout in seconds. URL plugin installs get a fresh timeout for the final response after processing; downloads are limited to 60 seconds.                                                                                                                                                                                                                                                                                                                                                                     |
@@ -101,7 +101,14 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX`                                           | empty       | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. `make dev` defaults to `Dev`; `make start-debug` keeps production defaults, enables diagnostics, and defaults to `Debug`; PR previews use `Preview`. An explicit value overrides these defaults. Empty keeps the plain `Kandev` title. |
 | `server.trustedProxies` | `KANDEV_TRUSTED_PROXIES`                                            | empty list  | IP addresses or CIDR ranges for proxies whose forwarded client headers Kandev accepts. See [Trusted proxies](#trusted-proxies-for-x-forwarded-for).                                                                                                                                                                                                                                                |
 
-When `server.host` is unset, `server.hosts` may provide a YAML list of bind addresses. The launcher derives its health targets and access URL from this resolved set. It probes an IPv4 wildcard through `127.0.0.1` and keeps `localhost` as the default browser/access URL, while it probes and accesses an IPv6 wildcard through `[::1]`. The backend still listens on every interface for a wildcard bind. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
+When `server.host` is unset, `server.hosts` may provide a YAML list of bind
+addresses. `KANDEV_SERVER_HOST` overrides both. The launcher uses the resolved
+addresses for readiness and for the access URL. The implicit loopback bind
+and IPv4 wildcard both keep `http://localhost:<port>` as the access URL. An IPv6
+wildcard uses `[::1]` for readiness and access.
+
+For remote access, use a trusted authenticated tunnel or proxy, or isolate
+the network at the deployment layer. See [Security and trust](security.md).
 
 ### Notifications
 
@@ -792,10 +799,10 @@ no public YAML key:
   `KANDEV_INTERNAL_CONFIG_HOME_FILE`,
   `KANDEV_INTERNAL_AGENTCTL_STARTUP_CONFIG`,
   `KANDEV_LAUNCHER_PARENT_PID`, `KANDEV_BACKEND_PID_FILE`,
-  `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS`, `KANDEV_TASK_ID`,
+  `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS`, `KANDEV_RUNNING_AS_SERVICE`, `KANDEV_TASK_ID`,
   `KANDEV_SESSION_ID`, and `KANDEV_WORKSPACE_ID`.
 - Generated or packaging values: `KANDEV_DESKTOP_HEALTH_TOKEN`,
-  `KANDEV_BUNDLE_DIR`, and `KANDEV_WEB_DIST_DIR`.
+  `KANDEV_BUNDLE_DIR`, `KANDEV_INTERNAL_CONTAINER_RUNTIME`, and `KANDEV_WEB_DIST_DIR`.
 - Test and profile selectors: `KANDEV_E2E_MOCK`, `KANDEV_MOCK_AGENT`,
   `KANDEV_MOCK_GITHUB`, `KANDEV_MOCK_GITLAB`, `KANDEV_MOCK_JIRA`,
   `KANDEV_MOCK_LINEAR`, and `AGENTCTL_AUTO_APPROVE_PERMISSIONS`.

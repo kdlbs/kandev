@@ -142,13 +142,13 @@ Executors support profiles for reusable runtime configuration: prepare scripts, 
 
 ## Quick Start
 
-These commands keep Kandev on your computer. See [Security and trust](docs/public/security.md) for remote access.
+Standalone Kandev listens on `127.0.0.1` by default. On v0.104.0 and earlier, set `KANDEV_SERVER_HOST` to `127.0.0.1` before starting Kandev. See [Security and trust](docs/public/security.md) for remote access.
 
 ### Homebrew (macOS, Linux)
 
 ```bash
 brew install kdlbs/kandev/kandev
-KANDEV_SERVER_HOST=127.0.0.1 kandev
+kandev
 ```
 
 ### Scoop (Windows)
@@ -156,31 +156,24 @@ KANDEV_SERVER_HOST=127.0.0.1 kandev
 ```powershell
 scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
 scoop install kandev
-$env:KANDEV_SERVER_HOST = "127.0.0.1"
 kandev
 ```
 
 Installs the native bundle — no Node.js required.
 
-For a local npm launch on Windows, set `$env:KANDEV_SERVER_HOST = "127.0.0.1"` in PowerShell first.
-
 ### NPX
 
-Run this command on macOS or Linux.
-
 ```bash
-KANDEV_SERVER_HOST=127.0.0.1 npx kandev@latest
+npx kandev@latest
 ```
 
 Requires npm 7+. Installs the CLI plus a platform-matched runtime bundle in one step.
 
 ### NPM (global)
 
-Run these commands on macOS or Linux.
-
 ```bash
 npm install -g kandev@latest
-KANDEV_SERVER_HOST=127.0.0.1 kandev
+kandev
 ```
 
 ### Run your first task
@@ -191,13 +184,13 @@ Follow the [first-task guide](docs/public/use-kandev.md#add-a-local-repository) 
 
 - `brew upgrade kandev`
 - `scoop update kandev`
-- `KANDEV_SERVER_HOST=127.0.0.1 npx kandev@latest` (runs the latest stable version on macOS or Linux)
+- `npx kandev@latest` (runs the latest stable version)
 - `npm install -g kandev@latest`
 
 To try the current prerelease from `main`, use npm's `nightly` tag:
 
 ```bash
-KANDEV_SERVER_HOST=127.0.0.1 npx -y kandev@nightly
+npx -y kandev@nightly
 # or
 npm install -g kandev@nightly
 ```
@@ -221,7 +214,7 @@ git clone git@github.com:kdlbs/kandev.git
 cd kandev
 
 # Start in production mode
-KANDEV_SERVER_HOST=127.0.0.1 make start
+make start
 ```
 
 **Prerequisites:** Go 1.26.0, Node.js 24, and pnpm 9.15.9 (pinned in `mise.toml`). Docker is optional and needed only for container runtimes.

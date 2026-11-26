@@ -25,7 +25,7 @@ Kandev runs the selected agent with the access exposed by its executor, profile,
 
 ## Install and start
 
-Keep Kandev on your computer during setup. The CLI listens on all network interfaces by default, and authentication is off by default. Set `KANDEV_SERVER_HOST=127.0.0.1` each time you start a local-only instance. See [Security and trust](security.md) for remote access.
+Standalone Kandev listens on `127.0.0.1` by default. On v0.104.0 and earlier, set `KANDEV_SERVER_HOST` to `127.0.0.1` before starting Kandev. See [Security and trust](security.md) for remote access.
 
 Choose one install method on Linux or macOS.
 
@@ -33,20 +33,20 @@ Choose one install method on Linux or macOS.
 
 ```bash
 brew install kdlbs/kandev/kandev
-KANDEV_SERVER_HOST=127.0.0.1 kandev
+kandev
 ```
 
 **Run once with npm**
 
 ```bash
-KANDEV_SERVER_HOST=127.0.0.1 npx kandev@latest
+npx kandev@latest
 ```
 
 **Global npm installation**
 
 ```bash
 npm install -g kandev@latest
-KANDEV_SERVER_HOST=127.0.0.1 kandev
+kandev
 ```
 
 On Windows, install and start Kandev from PowerShell.
@@ -54,14 +54,11 @@ On Windows, install and start Kandev from PowerShell.
 ```powershell
 scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
 scoop install kandev
-$env:KANDEV_SERVER_HOST = "127.0.0.1"
 kandev
 ```
 
 Scoop installs the native runtime bundle, so Node.js is not required to install or start Kandev. It
 is still needed for the agent CLIs Kandev installs through its own interface.
-
-If you use npm on Windows, set the same environment variable in PowerShell before you start Kandev.
 
 Stable package-manager and Desktop installs use the standard runtime. Local work starts without a
 remote-helper download. A remote task needs outbound HTTPS to `github.com` and
@@ -72,14 +69,14 @@ Stable is the default and is selected by npm's `latest` tag. To test the current
 `main` on Linux or macOS, use the npm-only `nightly` tag.
 
 ```bash
-KANDEV_SERVER_HOST=127.0.0.1 npx -y kandev@nightly
+npx -y kandev@nightly
 ```
 
 To replace a global Stable installation with Nightly, run these commands.
 
 ```bash
 npm install -g kandev@nightly
-KANDEV_SERVER_HOST=127.0.0.1 kandev
+kandev
 ```
 
 The global command replaces the installed `kandev` channel. Return to Stable with
