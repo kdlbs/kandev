@@ -3269,7 +3269,7 @@
   "questionReviewAnnounceDiff": "差分: {{a}} と {{b}} を比較",
   "questionReviewImageLabel": "画像 {{index}}：{{alt}}",
   "questionReviewChoiceImageLabel": "画像 {{index}}：{{alt}}（選択肢：{{choice}}）",
-  "questionReviewChoiceImageRef": "画像 {{index}} を表示",
+  "questionReviewChoiceImageHint": "画像 {{index}}",
   "questionReviewZoomIn": "拡大",
   "questionReviewZoomOut": "縮小",
   "questionReviewZoomStatus": "ズーム {{level}}",

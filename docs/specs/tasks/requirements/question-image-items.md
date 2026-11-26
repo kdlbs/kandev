@@ -158,8 +158,11 @@ compares only images that are comparable.
   operator left it at. A newly opened image with the same pixel size as the last
   one viewed shall start at that zoom and pan; any other new image starts at Fit.
 - **AC-TASKS-QUESTION-IMAGE-ITEMS-003.10:** In the review view's answer form, a
-  choice with an image shall offer a **Show image** button naming that image,
-  which moves the stage to it.
+  choice with an image shall carry a passive marker naming that image inside the
+  choice itself. Selecting the choice, by pointer, touch, or number key, shall
+  move the stage to that image, including when it is selected again after the
+  operator navigated away. Selecting a choice without an image shall leave the
+  stage where it is.
 
 ### REQ-TASKS-QUESTION-IMAGE-ITEMS-004: Visible image identity
 

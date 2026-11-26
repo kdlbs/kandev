@@ -250,11 +250,16 @@ once, when the image size is first known: the view kept for the stage's key
 operator comparison), or else the last view when the image size matches; Fit
 clears a stage's view. The holder lives as long as the dialog.
 
-**Show image.** In the dialog's answer form, `ChoiceStageImageRef` renders a
-**Show image {name}** button (AC-003.10). The dialog provides `ShowImageContext`
-and keeps an `ImageRequest` (`useImageRequest`), which `useRegionReveal` turns
-into the same one-time reveal as a region selection: move to the item with that
-image, then let a comparison show it.
+**Choice images.** In the dialog's answer form, `ClarificationOptions` renders
+`ChoiceStageImageHint` inside each choice that has an image: a photo icon and the
+image's short name, announced as "Image {name}" (AC-003.10). It is not a
+separate control. Selecting a choice calls `ShowImageContext` with the choice's
+first image (`choiceStageImageId`); clicks and number-key picks share that
+handler. The dialog keeps an `ImageRequest` (`useImageRequest`), and each call
+makes a new request, so re-selecting a choice after navigating away moves the
+stage again. `useRegionReveal` turns a request into the same one-time reveal as
+a region selection: move to the item with that image, then let a comparison
+show it.
 
 The image pickers', zoom level, and shortcut-help popovers render into the
 dialog's popover container, like the region and zoom-chip popovers. A popover

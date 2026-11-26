@@ -3269,7 +3269,7 @@
   "questionReviewAnnounceDiff": "Ďĩƒƒēŕēńćē: {{a}} ćōḿƥàŕēď ŵĩţĥ {{b}}",
   "questionReviewImageLabel": "Ĩḿàĝē {{index}}: {{alt}}",
   "questionReviewChoiceImageLabel": "Ĩḿàĝē {{index}}: {{alt}} (ćĥōĩćē: {{choice}})",
-  "questionReviewChoiceImageRef": "Śĥōŵ ĩḿàĝē {{index}}",
+  "questionReviewChoiceImageHint": "Ĩḿàĝē {{index}}",
   "questionReviewZoomIn": "Źōōḿ ĩń",
   "questionReviewZoomOut": "Źōōḿ ōũţ",
   "questionReviewZoomStatus": "Źōōḿ {{level}}",

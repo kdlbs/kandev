@@ -74,5 +74,6 @@ by the cause (portal inside the modal) and the DOM test, not in Safari itself.
 - Views: kept per stage key and carried to same-size images; recall waits for
   the image size and happens once per mount.
 - Show image: a link-style button with a 44px touch target on phones.
+  Superseded by work order 08, where selecting the choice shows its image.
 - Popovers: picker, zoom level, and shortcut help render inside the dialog.
 - Letters: 1em rows instead of 1.15em.

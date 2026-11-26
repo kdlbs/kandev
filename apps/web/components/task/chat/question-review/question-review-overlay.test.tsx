@@ -329,7 +329,7 @@ describe("question image review segments and submission", () => {
     await waitFor(() => expect(screen.queryByTestId(REVIEW_DIALOG)).toBeNull());
   });
 
-  it("offers to show a choice's stage image instead of its thumbnail", () => {
+  it("marks a choice's stage image on the choice instead of its thumbnail", () => {
     renderOverlay([
       message(0, 1, {
         images: [before],
@@ -340,9 +340,8 @@ describe("question image review segments and submission", () => {
       }),
     ]);
     const dialog = openReview();
-    expect(within(dialog).getByTestId("question-review-choice-image").textContent).toBe(
-      "Show image 2",
-    );
+    const [wide] = within(dialog).getAllByTestId(OPTION);
+    expect(wide.textContent).toContain("Image 2");
   });
 });
 

@@ -50,6 +50,7 @@ const COMPARE_IMAGES = "question-review-compare-images";
 const IDENTITY_BADGE = "question-review-identity-badge";
 const ONION_SKIN = "Onion skin";
 const FLIP = "question-review-flip";
+const CHOICE_IMAGE = "question-review-choice-image";
 const before = { id: "before", path: "before.png", alt: "Before" };
 const after = { id: "after", path: "after.png", alt: "After" };
 const billing = { id: "billing", path: "billing.png", alt: "Billing" };
@@ -238,9 +239,10 @@ describe("choice images on the stage", () => {
   });
 
   // @covers AC-TASKS-QUESTION-IMAGE-ITEMS-003.10
-  it("shows a choice's image on the stage from the answer form", () => {
+  it("shows a choice's image when the choice is selected, by click or number key", () => {
     renderOverlay([
       pendingMessage({
+        images: [billing],
         options: [
           {
             option_id: "o1",
@@ -248,8 +250,9 @@ describe("choice images on the stage", () => {
             description: "",
             images: [{ id: "old", path: "old.png", alt: "Old header" }],
           },
+          { option_id: "o2", label: "Plain", description: "" },
           {
-            option_id: "o2",
+            option_id: "o3",
             label: "New",
             description: "",
             images: [{ id: "new", path: "new.png", alt: "New header" }],
@@ -258,9 +261,21 @@ describe("choice images on the stage", () => {
       }),
     ]);
     const dialog = openReview();
-    expect(within(dialog).getByTestId(POSITION).textContent).toBe("Item 1 of 2 · Image");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Show image 2" }));
-    expect(within(dialog).getByTestId(POSITION).textContent).toBe("Item 2 of 2 · Image");
+    const position = () => within(dialog).getByTestId(POSITION).textContent;
+    expect(position()).toBe("Item 1 of 3 · Image");
+    expect(within(dialog).queryByRole("button", { name: /^Show image/ })).toBeNull();
+    const [old, plain, fresh] = within(dialog).getAllByTestId("clarification-option");
+    expect(within(old).getByTestId(CHOICE_IMAGE).textContent).toContain("Image 2");
+    expect(within(plain).queryByTestId(CHOICE_IMAGE)).toBeNull();
+    fireEvent.click(fresh);
+    expect(position()).toBe("Item 3 of 3 · Image");
+    fireEvent.click(plain);
+    expect(position()).toBe("Item 3 of 3 · Image");
+    fireEvent.keyDown(within(dialog).getByTestId("clarification-question-card"), { key: "1" });
+    expect(position()).toBe("Item 2 of 3 · Image");
+    fireEvent.click(within(dialog).getByTestId(NEXT_ITEM));
+    fireEvent.click(old);
+    expect(position()).toBe("Item 2 of 3 · Image");
   });
 });
 

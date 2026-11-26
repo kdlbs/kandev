@@ -3269,7 +3269,7 @@
   "questionReviewAnnounceDiff": "차이: {{a}}와 {{b}} 비교",
   "questionReviewImageLabel": "이미지 {{index}}: {{alt}}",
   "questionReviewChoiceImageLabel": "이미지 {{index}}: {{alt}} (선택지: {{choice}})",
-  "questionReviewChoiceImageRef": "이미지 {{index}} 보기",
+  "questionReviewChoiceImageHint": "이미지 {{index}}",
   "questionReviewZoomIn": "확대",
   "questionReviewZoomOut": "축소",
   "questionReviewZoomStatus": "확대/축소 {{level}}",

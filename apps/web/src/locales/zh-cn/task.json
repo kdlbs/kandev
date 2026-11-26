@@ -3269,7 +3269,7 @@
   "questionReviewAnnounceDiff": "差异：{{a}} 与 {{b}} 对比",
   "questionReviewImageLabel": "图像 {{index}}：{{alt}}",
   "questionReviewChoiceImageLabel": "图像 {{index}}：{{alt}}（选项：{{choice}}）",
-  "questionReviewChoiceImageRef": "显示图像 {{index}}",
+  "questionReviewChoiceImageHint": "图像 {{index}}",
   "questionReviewZoomIn": "放大",
   "questionReviewZoomOut": "缩小",
   "questionReviewZoomStatus": "缩放 {{level}}",

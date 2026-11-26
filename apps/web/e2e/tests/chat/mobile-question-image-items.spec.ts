@@ -211,3 +211,39 @@ test("phone Wipe keeps the scrubbed split when returning to a pair", async ({
   await expect(dialog.getByRole("img", { name: reviewImages.before.alt })).toBeVisible();
   await expect(handle).toHaveAttribute("aria-valuenow", scrubbed!);
 });
+
+test("phone shows a choice's image when the choice is selected", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  seedReviewImages(seedData.repositoryPath);
+  const question = {
+    id: "header",
+    title: "Header",
+    prompt: "Which header do you prefer?",
+    options: [
+      { label: "Old", description: "Keep the old header", images: [reviewImages.before] },
+      { label: "New", description: "Use the new header", images: [reviewImages.after] },
+    ],
+  };
+  const script = `e2e:mcp:kandev:ask_user_question_kandev(${JSON.stringify({ questions: [question] })})\ne2e:message("Done.")`;
+  const { session } = await openReviewQuestions(testPage, apiClient, seedData, script);
+  await session.clarificationOverlay().getByTestId("question-review-open").tap();
+  const dialog = testPage.getByTestId("question-review-dialog");
+  const position = dialog
+    .getByTestId("question-review-bottom-bar")
+    .getByTestId("question-review-item-position");
+  await expect(position).toHaveText("1/2 · Image");
+  const choice = dialog.getByTestId("clarification-option").nth(1);
+  const hint = choice.getByTestId("question-review-choice-image");
+  await expect(hint).toContainText("after");
+  const [hintBox, choiceBox] = [(await hint.boundingBox())!, (await choice.boundingBox())!];
+  expect(hintBox.x + hintBox.width).toBeLessThanOrEqual(choiceBox.x + choiceBox.width);
+  expect(choiceBox.height).toBeGreaterThanOrEqual(44);
+  await choice.tap();
+  await expect(position).toHaveText("2/2 · Image");
+  await expect(dialog.getByRole("img", { name: reviewImages.after.alt })).toBeVisible();
+  await expectNoHorizontalOverflow(testPage);
+});

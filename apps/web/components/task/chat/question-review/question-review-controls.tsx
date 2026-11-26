@@ -1,6 +1,6 @@
 "use client";
 
-import { useContext, type RefObject } from "react";
+import type { RefObject } from "react";
 import { IconPhoto } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
@@ -10,7 +10,6 @@ import {
   imageShortName,
   segmentImageIndex,
 } from "@/lib/question-review/segments";
-import { ShowImageContext } from "./review-image-request";
 
 /** Opens the large review view from the compact question panel. */
 export function QuestionReviewButton({
@@ -54,8 +53,13 @@ export function QuestionReviewPlaceholder() {
   );
 }
 
-/** Shows a choice's image on the review stage, which replaces the compact thumbnail. */
-export function ChoiceStageImageRef({
+/** The image a choice shows on the review stage when it is selected, if any. */
+export function choiceStageImageId(option: ClarificationOption | undefined): string | undefined {
+  return option?.images?.find((image) => typeof image?.id === "string")?.id;
+}
+
+/** Marks a choice whose image the review stage shows when the choice is selected. */
+export function ChoiceStageImageHint({
   question,
   option,
 }: {
@@ -63,25 +67,21 @@ export function ChoiceStageImageRef({
   option: ClarificationOption;
 }) {
   const { t } = useTranslation();
-  const show = useContext(ShowImageContext);
-  const imageId = option.images?.find((image) => typeof image?.id === "string")?.id;
+  const imageId = choiceStageImageId(option);
   const images = buildSegmentImages(question);
   const index = imageId ? segmentImageIndex(images, imageId) : 0;
-  if (!imageId || index === 0) return null;
+  if (index === 0) return null;
+  const name = imageShortName(images[index - 1], index - 1);
   return (
-    <Button
-      type="button"
-      variant="link"
-      size="sm"
-      className="h-auto cursor-pointer gap-1.5 p-0 text-xs max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+    <span
       data-testid="question-review-choice-image"
-      disabled={!show}
-      onClick={() => show?.(imageId)}
+      className="mt-0.5 inline-flex flex-shrink-0 items-center gap-1 text-xs text-muted-foreground"
     >
       <IconPhoto className="h-3.5 w-3.5" aria-hidden="true" />
-      {t("task:questionReviewChoiceImageRef", {
-        index: imageShortName(images[index - 1], index - 1),
-      })}
-    </Button>
+      <span className="sr-only">{t("task:questionReviewChoiceImageHint", { index: name })}</span>
+      <span aria-hidden="true" className="max-w-24 truncate">
+        {name}
+      </span>
+    </span>
   );
 }

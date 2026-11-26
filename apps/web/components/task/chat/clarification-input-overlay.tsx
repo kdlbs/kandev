@@ -4,6 +4,7 @@
 
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -46,11 +47,13 @@ import { QuestionImageGallery } from "./question-image-gallery";
 import { buildReviewSegments } from "@/lib/question-review/segments";
 import { regionCommentsReady } from "@/lib/question-review/regions";
 import {
-  ChoiceStageImageRef,
+  ChoiceStageImageHint,
+  choiceStageImageId,
   QuestionReviewButton,
   QuestionReviewPlaceholder,
 } from "./question-review/question-review-controls";
 import { QuestionReviewDialog } from "./question-review/question-review-dialog";
+import { ShowImageContext } from "./question-review/review-image-request";
 import {
   isQuestionReviewAvailable,
   useQuestionReview,
@@ -195,9 +198,8 @@ function clarificationAttachmentInputProps(props: CardProps) {
 }
 
 function renderCardOptionPreview(props: CardProps, option: ClarificationOption): ReactNode {
-  const { question, metadata } = props.meta;
-  if (props.stageOwnsImages) return <ChoiceStageImageRef question={question} option={option} />;
-  if (!option.images?.length) return null;
+  const { metadata } = props.meta;
+  if (props.stageOwnsImages || !option.images?.length) return null;
   return (
     <QuestionImages
       pendingId={metadata.pending_id}
@@ -276,6 +278,11 @@ function ClarificationCard(props: CardProps) {
           customActive={customActive}
           onSelectOption={onSelectOption}
           renderOptionPreview={(option) => renderCardOptionPreview(props, option)}
+          renderOptionBadge={
+            props.stageOwnsImages
+              ? (option) => <ChoiceStageImageHint question={question} option={option} />
+              : undefined
+          }
         />
         {showAgentDisconnected && (
           <div
@@ -606,6 +613,24 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
     },
   };
 }
+function anyAgentDisconnected(messages: Message[]): boolean {
+  return messages.some(
+    (m) => (m.metadata as ClarificationRequestMetadata | undefined)?.agent_disconnected === true,
+  );
+}
+
+/** Selecting a choice in the review view also brings its image onto the stage. */
+function useSelectAndShowImage(meta: SingleQuestionMeta | null, stageOwnsImages?: boolean) {
+  const showStageImage = useContext(ShowImageContext);
+  return (optionId: string, select: (optionId: string) => void) => {
+    select(optionId);
+    if (!stageOwnsImages || !meta) return;
+    const option = meta.question.options.find((candidate) => candidate.option_id === optionId);
+    const imageId = choiceStageImageId(option);
+    if (imageId) showStageImage?.(imageId);
+  };
+}
+
 function ClarificationCarouselBody({
   previewsEnabled,
   stageOwnsImages,
@@ -631,12 +656,9 @@ function ClarificationCarouselBody({
   onFinalSubmit,
   onDismiss,
 }: CarouselBodyProps) {
+  const selectAndShow = useSelectAndShowImage(meta, stageOwnsImages);
   const total = sortedMessages.length;
-  const showAgentDisconnectedAtTop =
-    agentDisconnected ||
-    sortedMessages.some(
-      (m) => (m.metadata as ClarificationRequestMetadata | undefined)?.agent_disconnected === true,
-    );
+  const showAgentDisconnectedAtTop = agentDisconnected || anyAgentDisconnected(sortedMessages);
   const isSingleQuestion = total === 1;
 
   if (!meta) return null;
@@ -647,7 +669,7 @@ function ClarificationCarouselBody({
     customDrafts,
   );
 
-  const { onSelectOption, onCustomDraftChange, onSubmitCustom } = buildQuestionHandlers({
+  const handlers = buildQuestionHandlers({
     meta,
     group,
     // The review view keeps the images of the answered question on screen.
@@ -657,6 +679,8 @@ function ClarificationCarouselBody({
     setActiveIndex,
     setCustomDrafts,
   });
+  const { onCustomDraftChange, onSubmitCustom } = handlers;
+  const onSelectOption = (optionId: string) => selectAndShow(optionId, handlers.onSelectOption);
 
   return (
     <>

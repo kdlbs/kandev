@@ -204,7 +204,7 @@ test("names the visible image at the bottom left and on the Wipe handle", async 
   expect(atEnd.x + atEnd.width).toBeLessThanOrEqual(stageNow.x + stageNow.width + 0.5);
 });
 
-test("shows a choice's image on the stage from the answer form", async ({
+test("shows a choice's image when the choice is selected", async ({
   testPage,
   apiClient,
   seedData,
@@ -226,7 +226,13 @@ test("shows a choice's image on the stage from the answer form", async ({
   const dialog = testPage.getByTestId("question-review-dialog");
   const position = dialog.getByTestId("question-review-item-position");
   await expect(position).toHaveText("Item 1 of 2 · Image");
-  await dialog.getByRole("button", { name: "Show image after" }).click();
+  const choices = dialog.getByTestId("clarification-option");
+  await expect(choices.nth(1).getByTestId("question-review-choice-image")).toContainText("after");
+  await choices.nth(1).click();
   await expect(position).toHaveText("Item 2 of 2 · Image");
   await expect(dialog.getByRole("img", { name: reviewImages.after.alt })).toBeVisible();
+  await dialog.getByTestId("question-review-item-prev").click();
+  await expect(position).toHaveText("Item 1 of 2 · Image");
+  await choices.nth(1).click();
+  await expect(position).toHaveText("Item 2 of 2 · Image");
 });

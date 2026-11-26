@@ -3269,7 +3269,7 @@
   "questionReviewAnnounceDiff": "Difference: {{a}} compared with {{b}}",
   "questionReviewImageLabel": "Image {{index}}: {{alt}}",
   "questionReviewChoiceImageLabel": "Image {{index}}: {{alt}} (choice: {{choice}})",
-  "questionReviewChoiceImageRef": "Show image {{index}}",
+  "questionReviewChoiceImageHint": "Image {{index}}",
   "questionReviewZoomIn": "Zoom in",
   "questionReviewZoomOut": "Zoom out",
   "questionReviewZoomStatus": "Zoom {{level}}",
