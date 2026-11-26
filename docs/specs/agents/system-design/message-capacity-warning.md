@@ -20,7 +20,7 @@ session's visible entries. Use historical wording because the admission reason
 describes the send attempt. Show “Message queued because the session limit was
 reached.” With Auto-run enabled, add “It will send automatically when capacity
 is available” for an otherwise eligible queue. If another delivery barrier is
-known, omit this promise. With Auto-run off, add “Turn on Auto-run to send it
+known, including a paused or detached managed conversation, omit this promise. With Auto-run off, add “Turn on Auto-run to send it
 automatically.” Preserve the existing queue controls and transcript identity.
 
 Place the notice above the queue chip in the composer region. Use the shared

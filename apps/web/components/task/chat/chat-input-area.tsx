@@ -1,5 +1,6 @@
 "use client";
 
+import { managedConversationBlocksQueueDelivery } from "@/lib/plugins/retained-managed-conversation";
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { useCallback, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -565,6 +566,7 @@ function blocksQueueAutoDelivery(
 ): boolean {
   return (
     panelState.hasPendingClarification ||
+    managedConversationBlocksQueueDelivery(panelState.task) ||
     Boolean(panelState.task?.queuedForStepId) ||
     panelState.session?.route_state === "action_required" ||
     composerProps.needsRecovery ||

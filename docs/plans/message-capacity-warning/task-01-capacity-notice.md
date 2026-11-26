@@ -35,11 +35,32 @@ Implement AC-AGENTS-SESSION-CEILING-003.9 and .10 under the
 ## Verification commands
 
 ```sh
-(cd apps/backend && go test ./internal/task/handlers ./internal/orchestrator/messagequeue)
+(cd apps/backend && go test -trimpath ./internal/task/handlers ./internal/orchestrator/messagequeue ./internal/orchestrator/handlers)
 (cd apps && pnpm --filter @kandev/web exec vitest run components/task/chat)
 (cd apps/web && e2e/scripts/run-e2e.sh --host --project chromium -- tests/session/message-turn-capacity.spec.ts)
 (cd apps/web && e2e/scripts/run-e2e.sh --host --project mobile-chrome -- tests/session/mobile-message-turn-capacity.spec.ts)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
 ```
+
+## Acceptance evidence
+
+- **AC-AGENTS-SESSION-CEILING-003.9:** In both `message-turn-capacity.spec.ts`
+  and `mobile-message-turn-capacity.spec.ts`, “keeps one accepted follow-up
+  pending, then delivers it after release” checks the collapsed warning and
+  delivery. “Keeps the accepted follow-up pending while Auto-run is off”
+  checks the alternate delivery instructions. In
+  `message_capacity_admission_test.go`,
+  `TestMessageCapacityAdmission_QueuesOrdinaryMessageAtFullCapacity` and
+  `TestMessageCapacityAdmission_SteerFallbackQueuesInsteadOfFailing` cover
+  both refusal paths.
+- **AC-AGENTS-SESSION-CEILING-003.10:** The delivery scenario in both browser
+  specs checks reload and disappearance. In `queued-ghost-list.test.tsx`,
+  “shows one polite notice above the collapsed queue and clears it on session
+  switch” checks session isolation. In `service_capacity_admission_test.go`,
+  `TestSnapshotProjectsKnownCapacityAdmissionReason` verifies the persisted
+  marker and omission for ordinary entries.
 
 ## ASCII UI preview
 
@@ -72,3 +93,10 @@ above the same queue control. The explanation requires no tap or hover.
 - The yellow warning and effective limit passed 92 focused frontend tests and
   all four desktop and mobile browser cases. The Tailscale test chat showed
   the enforced limit of 1 while the saved setting was 5.
+- Review fixup covers paused managed conversations and restores the automatic
+  delivery hint when the conversation resumes. The focused chat suite passed.
+
+The Go command above passed in all three packages. The chat Vitest command
+passed 2,464 tests during implementation. Each focused Playwright command
+passed both scenarios on the final warning layout. Catalog validation,
+specification lint and the diff check passed after the review fixes.
