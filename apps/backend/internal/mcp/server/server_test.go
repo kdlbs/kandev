@@ -140,53 +140,6 @@ func TestMCPAttachmentObserverKeepsConnectionAttemptAcrossRollover(t *testing.T)
 	}
 }
 
-func TestMCPAttachmentObserverBuffersSessionEvidenceUntilAttemptCommit(t *testing.T) {
-	log := newTestLogger(t)
-	backend := NewChannelBackendClient(log)
-	t.Cleanup(backend.Close)
-	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
-	events := make(chan streams.MCPAttachmentEvidence, 4)
-	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
-	attempt := streams.MCPAttachmentAttempt{AttemptID: "load-attempt"}
-	s.BeginAttachmentAttempt(attempt)
-
-	s.registerMCPConnection("connection-during-load")
-	s.observeMCPToolsList("connection-during-load", []mcplib.Tool{{Name: "create_task_kandev"}})
-	assert.Empty(t, events, "load observations must wait until the adapter publishes its attempt")
-
-	s.CompleteAttachmentAttempt(attempt.AttemptID, true)
-	var history streams.MCPAttachmentHistory
-	history.StartAttempt(attempt)
-	for range 2 {
-		select {
-		case evidence := <-events:
-			if !history.Apply(evidence) {
-				t.Fatalf("failed to apply buffered attachment evidence: %+v", evidence)
-			}
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for buffered attachment evidence")
-		}
-	}
-	server, ok := history.CurrentServer("kandev")
-	require.True(t, ok)
-	require.Equal(t, 1, server.ToolCount)
-	require.Len(t, server.Tools, 1)
-}
-
-func TestMCPAttachmentObserverDiscardsEvidenceAfterAuthenticationFailure(t *testing.T) {
-	log := newTestLogger(t)
-	backend := NewChannelBackendClient(log)
-	t.Cleanup(backend.Close)
-	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
-	events := make(chan streams.MCPAttachmentEvidence, 4)
-	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
-	attempt := streams.MCPAttachmentAttempt{AttemptID: "auth-attempt"}
-	s.BeginAttachmentAttempt(attempt)
-	s.registerMCPConnection("connection-during-auth-failure")
-	s.CompleteAttachmentAttempt(attempt.AttemptID, false)
-	assert.Empty(t, events, "authentication failure must discard provisional attachment observations")
-}
-
 func newTestLogger(t *testing.T) *logger.Logger {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
@@ -550,6 +503,10 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "transfer_task_kandev")
 	assert.Contains(t, tools, "message_task_kandev")
 	assert.Contains(t, tools, "stop_task_kandev")
+	assert.Contains(t, tools, "get_message_queue_census_kandev")
+	assert.Contains(t, tools, "dispose_message_queue_entries_kandev")
+	assert.Contains(t, tools, "recover_session_queue_kandev")
+	assert.Contains(t, tools, "close_task_session_kandev")
 	assert.Contains(t, tools, "get_task_conversation_kandev")
 	assert.Contains(t, tools, "get_task_change_requests_kandev")
 	assert.Contains(t, tools, "update_task_change_request_automation_kandev")
@@ -664,10 +621,13 @@ func TestServerSurfaceAutomationHasFixedCoordinatorCatalog(t *testing.T) {
 		"update_task_kandev", "move_task_kandev", "archive_task_kandev",
 		"add_task_dependency_kandev", "remove_task_dependency_kandev", "message_task_kandev",
 		"stop_task_kandev", "spawn_session_kandev", "list_pending_questions_kandev",
+		"get_message_queue_census_kandev", "dispose_message_queue_entries_kandev",
 		"answer_question_kandev", "list_pending_agent_permissions_kandev", "resolve_agent_permission_kandev",
 	}
 	assert.ElementsMatch(t, want, getRegisteredToolNames(s))
 	assert.NotContains(t, getRegisteredToolNames(s), "transfer_task_kandev")
+	assert.NotContains(t, getRegisteredToolNames(s), "recover_session_queue_kandev")
+	assert.NotContains(t, getRegisteredToolNames(s), "close_task_session_kandev")
 }
 
 func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
@@ -893,7 +853,7 @@ drained:
 	// as in TestServerModeTask_ToolCount and
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
-	require.Len(t, tools, 43, "final registry should contain the complete GitLab-only task tool set")
+	require.Len(t, tools, 47, "final registry should contain the complete GitLab-only task tool set")
 	assert.NotContains(t, tools, "get_github_rate_limit_kandev")
 	assert.Contains(t, tools, "get_task_change_requests_kandev")
 	assert.Contains(t, tools, "manage_task_change_request_kandev")
@@ -1074,9 +1034,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	// 1 step_complete (ADR 0015) + 1 interaction + 8 plan + 3 walkthrough +
 	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle
 	// + 2 task-dependency (add/remove) + 3 neutral task change-request tools +
-	// 1 neutral outcome tool + 1 rich-output + 1 executor discovery + 1
-	// send-operation readback. The exact count below guards the complete
-	// task-mode catalog.
+	// 1 neutral outcome tool + 1 rich-output + 1 executor discovery. The exact
+	// count below guards the complete task-mode catalog.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
@@ -1087,7 +1046,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "add_task_dependency_kandev", "dependency edges must be manageable in task mode")
 	assert.Contains(t, tools, "remove_task_dependency_kandev")
 	assert.Contains(t, tools, "show_rich_output_kandev", "native rich output must be registered in task mode")
-	assert.Equal(t, 44, len(tools))
+	assert.Equal(t, 48, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {

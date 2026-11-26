@@ -328,4 +328,3 @@ guard release. A per-plugin completion guard preserves the existing cleanup
 order and releases before synchronous publication. The native disclosure fixture
 supplies explicit workflow identity and permits a 1 MiB test-writer input; the
 production action response and public query caps remain unchanged.
-

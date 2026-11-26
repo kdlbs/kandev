@@ -45,6 +45,32 @@ func TestSessionSummaryProjectionSelectsOnlySummaryFields(t *testing.T) {
 	}
 }
 
+func TestSessionSummaryProjectionPreservesArchivedAt(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := t.Context()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-archived-summary", Title: "Archived summary"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-archived-summary", TaskID: "task-archived-summary",
+		State: models.TaskSessionStateCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	archivedAt := time.Date(2026, time.October, 25, 0, 0, 0, 0, time.UTC)
+	if _, err := repo.DB().ExecContext(ctx,
+		`UPDATE task_sessions SET archived_at = ? WHERE id = ?`, archivedAt, "session-archived-summary"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.ListTaskSessionSummaryObservations(ctx, "task-archived-summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ArchivedAt == nil || !rows[0].ArchivedAt.Equal(archivedAt) {
+		t.Fatalf("archived summary = %+v", rows)
+	}
+}
+
 func assertSessionSummaryProjection(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := context.Background()

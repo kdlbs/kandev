@@ -33,7 +33,8 @@ var ErrMergeReferenceOverflow = errors.New("merge would exceed the per-message e
 // reserved in-flight targets are never mergeable.
 func mergeAllowed(source, target *QueuedMessage, queuedBy string) bool {
 	if target == nil || target.IsReservedInFlight() ||
-		hasPlanCommentAdmission(source.Metadata) || hasPlanCommentAdmission(target.Metadata) {
+		hasPlanCommentAdmission(source.Metadata) || hasPlanCommentAdmission(target.Metadata) ||
+		hasRecoveryProvenance(source.Metadata) || hasRecoveryProvenance(target.Metadata) {
 		return false
 	}
 	if source.QueuedBy == QueuedByAgent {
@@ -48,6 +49,11 @@ func mergeAllowed(source, target *QueuedMessage, queuedBy string) bool {
 	}
 	return queuedBy != "" && !IsReservedQueuedBy(queuedBy) &&
 		source.QueuedBy == queuedBy && target.QueuedBy == queuedBy
+}
+
+func hasRecoveryProvenance(metadata map[string]interface{}) bool {
+	_, recovered := metadata["recovery_source_session_id"]
+	return recovered
 }
 
 func hasPlanCommentAdmission(metadata map[string]interface{}) bool {

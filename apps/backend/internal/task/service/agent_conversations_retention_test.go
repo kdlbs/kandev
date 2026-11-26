@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kdlbs/kandev/pluginsdk"
 )
 
@@ -42,7 +43,7 @@ func TestDeliveryRetentionDeletion(t *testing.T) {
 	})
 }
 
-func verifyOrdinaryConversationReuse(t *testing.T, ctx context.Context, svc *AgentConversationService, repo conversationDeliveryRepository) {
+func verifyOrdinaryConversationReuse(t *testing.T, ctx context.Context, svc *AgentConversationService, repo *sqliterepo.Repository) {
 	t.Helper()
 	const pluginID, workspaceID, conversationKey = "plugin-retention", "retention-workspace", "ordinary"
 	original, _, err := svc.Ensure(ctx, pluginID, pluginsdk.AgentConversationSpec{WorkspaceID: workspaceID, ConversationKey: conversationKey})
@@ -54,9 +55,7 @@ func verifyOrdinaryConversationReuse(t *testing.T, ctx context.Context, svc *Age
 		t.Fatalf("load ordinary primary: %v", err)
 	}
 	seedConversationDeliveryEvidence(t, repo, oldSession)
-	if err := repo.DeleteTaskSession(ctx, oldSession); err != nil {
-		t.Fatalf("delete ordinary primary: %v", err)
-	}
+	retireLegacyConversationPrimaryForTest(t, ctx, repo, oldSession)
 	if _, _, err := svc.Ensure(ctx, pluginID, pluginsdk.AgentConversationSpec{WorkspaceID: workspaceID, ConversationKey: conversationKey}); !errors.Is(err, repoerrors.ErrAgentDeliveryIdentityRetiring) {
 		t.Fatalf("ordinary deterministic ID retry error = %v, want retirement conflict", err)
 	}
@@ -68,7 +67,7 @@ func verifyOrdinaryConversationReuse(t *testing.T, ctx context.Context, svc *Age
 	assertFreshConversationIncarnation(t, ctx, repo, repaired.SessionID, oldSession.QueueIncarnationID)
 }
 
-func verifyManagedConversationReuse(t *testing.T, ctx context.Context, svc *AgentConversationService, repo conversationDeliveryRepository) {
+func verifyManagedConversationReuse(t *testing.T, ctx context.Context, svc *AgentConversationService, repo *sqliterepo.Repository) {
 	t.Helper()
 	spec := pluginsdk.ManagedAgentConversationSpec{
 		WorkspaceID: "retention-workspace", InstanceKey: "managed",
@@ -84,9 +83,7 @@ func verifyManagedConversationReuse(t *testing.T, ctx context.Context, svc *Agen
 		t.Fatalf("load managed primary: %v", err)
 	}
 	seedConversationDeliveryEvidence(t, repo, oldSession)
-	if err := repo.DeleteTaskSession(ctx, oldSession); err != nil {
-		t.Fatalf("delete managed primary: %v", err)
-	}
+	retireLegacyConversationPrimaryForTest(t, ctx, repo, oldSession)
 	spec.ExpectedRevision = original.Revision
 	if _, _, err := svc.EnsureManaged(ctx, "plugin-retention", "installation-retention", spec, "managed-repair", "managed-repair-digest"); !errors.Is(err, repoerrors.ErrAgentDeliveryIdentityRetiring) {
 		t.Fatalf("managed deterministic ID retry error = %v, want retirement conflict", err)
@@ -97,6 +94,21 @@ func verifyManagedConversationReuse(t *testing.T, ctx context.Context, svc *Agen
 		t.Fatalf("managed retry after purge = %+v, %v", repaired, err)
 	}
 	assertFreshConversationIncarnation(t, ctx, repo, repaired.SessionID, oldSession.QueueIncarnationID)
+}
+
+func retireLegacyConversationPrimaryForTest(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, session *models.TaskSession) {
+	t.Helper()
+	// Model a primary removed before cleanup began protecting primary sessions.
+	if _, err := repo.DB().ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, session.ID); err != nil {
+		t.Fatalf("remove legacy primary: %v", err)
+	}
+	if _, err := repo.DB().ExecContext(ctx, `
+		INSERT INTO agent_delivery_cleanup_jobs
+			(session_id, incarnation_id, retired_at, phase, created_at, updated_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, session.ID, session.QueueIncarnationID); err != nil {
+		t.Fatalf("schedule legacy delivery retirement: %v", err)
+	}
 }
 
 type conversationDeliveryRepository interface {

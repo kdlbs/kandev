@@ -50,6 +50,17 @@ describe("session tab close visibility", () => {
     ).toBe(false);
   });
 
+  it.each([
+    { name: "primary", isPrimary: true, isArchived: false },
+    { name: "archived", isPrimary: false, isArchived: true },
+  ])("keeps $name hide-panel close while blocking destructive deletion", (identity) => {
+    const session = { ...state, ...identity };
+    expect(shouldShowSessionTabCloseAction("hide_panel", "WAITING_FOR_INPUT", session)).toBe(true);
+    expect(shouldShowSessionTabCloseAction("delete_session", "WAITING_FOR_INPUT", session)).toBe(
+      false,
+    );
+  });
+
   it("keeps the last session unavailable for deletion", () => {
     expect(
       shouldShowSessionTabCloseAction("delete_session", "WAITING_FOR_INPUT", {

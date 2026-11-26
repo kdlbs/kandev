@@ -608,6 +608,34 @@ describe("hidden session panels", () => {
   });
 });
 
+it("keeps hidden history IDs in maximize layout reconciliation", () => {
+  const { api } = makeReorderingAutoSessionApi();
+  const baseStore = makeAutoSessionAppStore(AUTO_TASK_ID, ["primary", "helper"]);
+  const appStore = {
+    getState: () => ({
+      ...baseStore.getState(),
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          [AUTO_TASK_ID]: [
+            { id: "primary", state: "WAITING_FOR_INPUT", is_primary: true },
+            { id: "helper", state: "COMPLETED", is_primary: false },
+          ],
+        },
+        loadedByTaskId: { [AUTO_TASK_ID]: true },
+      },
+    }),
+  };
+  const reconcile = vi.spyOn(useDockviewStore.getState(), "reconcileMaximizeSessionList");
+  try {
+    withDockviewState({ api, currentLayoutEnvId: null, preMaximizeLayout: null }, () => {
+      runAutoSessionTabEffect("primary", appStore as never, makeAutoSessionRefs(), false);
+    });
+    expect(reconcile).toHaveBeenCalledWith("primary", ["primary", "helper"]);
+  } finally {
+    reconcile.mockRestore();
+  }
+});
+
 describe("runAutoSessionTabEffect", () => {
   it("keeps chat active when replacing its placeholder beside a Plan tab", () => {
     const sessionId = "session-current";

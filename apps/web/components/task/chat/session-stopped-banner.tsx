@@ -43,7 +43,8 @@ export function useSessionProfileExists(sessionId: string | null): boolean {
 }
 
 type RecoveryTranslator = ReturnType<typeof useTranslation>["t"];
-type StoppedRecoveryProps = SessionStoppedBannerProps & { actions: SessionRecoveryActions };
+type ResolvedSessionStoppedBannerProps = SessionStoppedBannerProps & { archivedSession: boolean };
+type StoppedRecoveryProps = ResolvedSessionStoppedBannerProps & { actions: SessionRecoveryActions };
 
 function managedCloneRecoveryChoice(onRelocateRequested: () => void, t: RecoveryTranslator) {
   return {
@@ -170,6 +171,18 @@ function useStoppedRecoveryChoices(
   onRelocateRequested: () => void,
 ): RecoveryChoice[] {
   const { t } = useTranslation();
+  if (props.archivedSession) {
+    return props.taskId
+      ? [
+          {
+            kind: "fresh_start",
+            label: t("task:newAgent"),
+            testId: "archived-session-new-agent-button",
+            onClick: () => props.onShowDialog(true),
+          },
+        ]
+      : [];
+  }
   if (props.uncertainDelivery && props.mode !== "completed") {
     return uncertainDeliveryRecoveryChoices(props, profileExists, t);
   }
@@ -388,7 +401,7 @@ function StoppedSessionRecoveryControls({
   blocked: boolean;
 }) {
   const { busyAction } = props.actions;
-  if (props.uncertainDelivery && props.mode !== "completed") {
+  if (props.uncertainDelivery && props.mode !== "completed" && !props.archivedSession) {
     return (
       <UncertainDeliveryActions
         actions={choices}
@@ -431,7 +444,7 @@ function StoppedSessionContent(props: StoppedRecoveryProps) {
   const profileExists = useSessionProfileExists(props.sessionId);
   const { busyAction, guardDetails } = props.actions;
   const completed = props.mode === "completed";
-  const blocked = Boolean(guardDetails && !guardDetails.retryable);
+  const blocked = !props.archivedSession && Boolean(guardDetails && !guardDetails.retryable);
   const managedCloneRecovery =
     Boolean(props.actions.managedCloneRecoveryStamp) ||
     props.actions.workspaceRecoveryMatchesCurrentFailure === true;
@@ -513,7 +526,7 @@ function StoppedSessionContent(props: StoppedRecoveryProps) {
   );
 }
 
-function LocalStoppedSession(props: SessionStoppedBannerProps) {
+function LocalStoppedSession(props: ResolvedSessionStoppedBannerProps) {
   const actions = useSessionRecoveryActions({
     taskId: props.taskId ?? "",
     sessionId: props.sessionId ?? "",
@@ -522,9 +535,13 @@ function LocalStoppedSession(props: SessionStoppedBannerProps) {
 }
 
 export function SessionStoppedBanner(props: SessionStoppedBannerProps) {
+  const archivedSession = useAppStore((state) =>
+    Boolean(props.sessionId && state.taskSessions.items[props.sessionId]?.archived_at),
+  );
+  const resolvedProps = { ...props, archivedSession };
   return props.recoveryActions ? (
-    <StoppedSessionContent {...props} actions={props.recoveryActions} />
+    <StoppedSessionContent {...resolvedProps} actions={props.recoveryActions} />
   ) : (
-    <LocalStoppedSession {...props} />
+    <LocalStoppedSession {...resolvedProps} />
   );
 }
