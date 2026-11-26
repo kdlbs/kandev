@@ -10,10 +10,13 @@ import (
 )
 
 const (
-	cursorAgentID                     = "cursor-acp"
-	cursorRetriableStreamResetPrefix  = "Error: RetriableError:"
-	cursorRetriableStreamResetMessage = "Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)"
-	cursorRetriableStreamResetMaxTail = 256
+	cursorAgentID                      = "cursor-acp"
+	cursorPromptStreamClosedRPCCode    = -32603
+	cursorPromptStreamClosedRPCMessage = "Internal error"
+	cursorPromptStreamClosedDetails    = "WritableIterable is closed"
+	cursorRetriableStreamResetPrefix   = "Error: RetriableError:"
+	cursorRetriableStreamResetMessage  = "Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)"
+	cursorRetriableStreamResetMaxTail  = 256
 )
 
 func newCursorACPDialect() acpDialect {
@@ -22,6 +25,24 @@ func newCursorACPDialect() acpDialect {
 		cursorShellWatch:    parseCursorShellWatchFrame,
 		continuationSupport: streams.ContinuationAgentManagedToolsV3,
 	}
+}
+
+func cursorPromptStreamClosed(err error) bool {
+	requestErr, ok := remotePromptRequestError(err)
+	if !ok || requestErr.Code != cursorPromptStreamClosedRPCCode ||
+		requestErr.Message != cursorPromptStreamClosedRPCMessage {
+		return false
+	}
+	return cursorPromptStreamClosedData(requestErr.Data)
+}
+
+func cursorPromptStreamClosedData(data any) bool {
+	object, ok := data.(map[string]any)
+	if !ok || len(object) != 1 {
+		return false
+	}
+	details, ok := object["details"].(string)
+	return ok && details == cursorPromptStreamClosedDetails
 }
 
 type cursorShellWatchFrameKind string
