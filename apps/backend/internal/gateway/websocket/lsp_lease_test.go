@@ -642,14 +642,9 @@ func TestLSPContinuityReconnectsToSameTaskHostStream(t *testing.T) {
 		runtimeName: agentruntime.RuntimeStandalone,
 		execution:   execution,
 	}
-	handler := &LSPHandler{
-		lifecycleMgr: manager,
-		capacity:     newLSPCapacityLimiter(2),
-		logger:       testLogger(),
-	}
 	var fenceHeld atomic.Bool
 	fenceReleased := make(chan struct{}, 1)
-	handler.EnableContinuity(func(string) func() {
+	handler := newLSPHandler(manager, nil, testLogger(), 2, func(string) func() {
 		fenceHeld.Store(true)
 		return func() {
 			fenceHeld.Store(false)

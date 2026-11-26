@@ -7,6 +7,9 @@ import { StepAgents } from "./step-agents";
 import type { AgentSetting } from "./agent-settings";
 import type { AvailableAgent, DynamicModelsResponse } from "@/lib/types/http";
 
+const { useIsAdmin } = vi.hoisted(() => ({ useIsAdmin: vi.fn() }));
+vi.mock("@/hooks/domains/auth/use-is-admin", () => ({ useIsAdmin }));
+
 const TEST_AGENT_NAME = "test-agent";
 const MODEL_SELECTOR_LABEL = "Profile start model settings";
 
@@ -362,4 +365,24 @@ it("keeps discovery and options when a provider is collapsed and reopened", asyn
   );
   expect(probeAgentProfileMock).toHaveBeenCalledTimes(1);
   expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1);
+});
+
+it("offers the catalog to administrators for a local-install agent without a copy command", () => {
+  const step = () => (
+    <StepAgents
+      availableAgents={[{ ...mockAgent, available: false, supports_local_install: true }]}
+      tools={[]}
+      agentSettings={{}}
+      loading={false}
+      onUpdateSetting={vi.fn()}
+    />
+  );
+  useIsAdmin.mockReturnValue(false);
+  const view = render(step());
+  expect(screen.queryByRole("link", { name: "Install agents" })).toBeNull();
+  useIsAdmin.mockReturnValue(true);
+  view.rerender(step());
+  expect(screen.getByRole("link", { name: "Install agents" }).getAttribute("href")).toBe(
+    "/settings/agents/browse",
+  );
 });

@@ -13,8 +13,8 @@ const FAKE_AVAILABLE_AGENTS = {
     {
       name: "claude-code",
       display_name: "Claude Code (Anthropic CLI)",
-      available: true,
-      install_script: "",
+      available: false,
+      install_script: "npm install -g @anthropic-ai/claude-code",
       info_url: "",
       model_config: {
         default_model: "claude-sonnet-4-5",
@@ -79,6 +79,7 @@ const FAKE_AVAILABLE_AGENTS = {
 test.describe("First-run onboarding with realistic agent data — mobile", () => {
   test("opens on a larger viewport after a phone visit and keeps agent data contained", async ({
     testPage,
+    prCapture,
   }) => {
     await testPage.route("**/api/v1/agents/available**", async (route) => {
       await route.fulfill({
@@ -108,10 +109,17 @@ test.describe("First-run onboarding with realistic agent data — mobile", () =>
     await expect(dialog).toBeVisible();
     await expect(testPage.getByRole("heading", { name: "AI Agents" })).toBeVisible();
     await expect(testPage.getByText("Claude Code (Anthropic CLI)", { exact: true })).toBeVisible();
+    const install = dialog.getByRole("link", { name: "Install agents" });
+    await expect(install).toBeInViewport();
+    expect((await install.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await prCapture.screenshot("tablet-empty-agent-step");
 
     await assertNoDescendantOverflowsRight(dialog, "larger viewport AI Agents");
     expect(
       await testPage.evaluate(() => localStorage.getItem("kandev.onboarding.completed")),
     ).toBeNull();
+    await install.tap();
+    await expect(testPage.getByRole("heading", { name: "Browse available agents" })).toBeVisible();
+    await expect(testPage.getByTestId("install-button-codex")).toBeEnabled();
   });
 });

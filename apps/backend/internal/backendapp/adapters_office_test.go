@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/testutil"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -443,6 +445,29 @@ func newOfficeTaskAdapterHarnessWithTaskRepo(t *testing.T) (*taskCreatorAdapter,
 	}
 	database := sqlx.NewDb(dbConn, "sqlite3")
 	t.Cleanup(func() { _ = database.Close() })
+	adapter, taskSvc, officeRepo, taskRepo := newOfficeTaskAdapterHarnessWithDB(t, database)
+	return adapter, taskSvc, officeRepo, taskRepo
+}
+
+func newOfficeTaskAdapterHarnessWithTestDB(t *testing.T) (*taskCreatorAdapter, *taskservice.Service, *officesqlite.Repository, *tasksqlite.Repository, *sqlx.DB) {
+	t.Helper()
+	if dsn := os.Getenv("KANDEV_TEST_POSTGRES_DSN"); dsn != "" {
+		database := testutil.OpenIsolatedPostgres(t, dsn)
+		adapter, taskSvc, officeRepo, taskRepo := newOfficeTaskAdapterHarnessWithDB(t, database)
+		return adapter, taskSvc, officeRepo, taskRepo, database
+	}
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "office-adapter-project.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	database := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = database.Close() })
+	adapter, taskSvc, officeRepo, taskRepo := newOfficeTaskAdapterHarnessWithDB(t, database)
+	return adapter, taskSvc, officeRepo, taskRepo, database
+}
+
+func newOfficeTaskAdapterHarnessWithDB(t *testing.T, database *sqlx.DB) (*taskCreatorAdapter, *taskservice.Service, *officesqlite.Repository, *tasksqlite.Repository) {
+	t.Helper()
 	repo, cleanup, err := repository.Provide(database, database, nil)
 	if err != nil {
 		t.Fatalf("task repository: %v", err)

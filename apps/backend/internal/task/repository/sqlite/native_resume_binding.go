@@ -268,10 +268,18 @@ func (r *Repository) nativeResumeIncidentBlocksTx(ctx context.Context, tx *sqlx.
 		found = found || block.ID == id
 		blocks = append(blocks, block)
 	}
-	if !found {
+	if !found || rows.Err() != nil {
 		return nil, rows.Err()
 	}
-	return blocks, rows.Err()
+	if !bindGenericNativeIncident(blocks, proof) {
+		// Fully authenticated legacy history can retire without a notice.
+		// A saved recovery snapshot still requires an exact incident binding.
+		record, _, valid, err := r.readAuthenticatedNativeNoticeTx(ctx, tx, proof)
+		if err != nil || !valid || record != nil {
+			return nil, err
+		}
+	}
+	return blocks, nil
 }
 
 func nativeResumeIncidentBlockMatches(block models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence) bool {
@@ -507,14 +515,37 @@ func nativeResumeProofCoversNotice(proof *models.NativeResumeDeliveryEvidence, r
 func validNativeResumeProof(proof *models.NativeResumeDeliveryEvidence) bool {
 	return proof != nil && proof.SessionID != "" && proof.IncarnationID != "" && proof.HarnessGeneration > 0 && proof.NativeSessionID != "" && proof.StreamID != "" && proof.ExecutionID != ""
 }
+
+// A sole generic fence can attest to a notice only when the authenticated
+// inventory identifies one interrupted submission in its generation. Set its ID
+// on blocks[0] for the transaction that persists the binding and pending notice.
+func bindGenericNativeIncident(blocks []models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence) bool {
+	if len(blocks) != 1 || blocks[0].DeliverySubmissionID != "" {
+		return true
+	}
+	block := &blocks[0]
+	var submissionID string
+	for _, row := range proof.Submissions {
+		if row.HarnessGeneration != block.ExpectedGeneration || !validLaterInterruptedIncidentRow(proof, "", row) {
+			continue
+		}
+		if submissionID != "" {
+			return false
+		}
+		submissionID = row.ID
+	}
+	block.DeliverySubmissionID = submissionID
+	return true
+}
+
 func (r *Repository) resolveNativeIncidentBlocksTx(ctx context.Context, tx *sqlx.Tx, blocks []models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence, completedAt time.Time) (bool, error) {
 	for _, block := range blocks {
 		stream := block.DeliveryStreamID
 		if block.DeliverySubmissionID != "" && stream == "" {
 			stream = proof.StreamID
 		}
-		result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE session_recovery_blocks SET delivery_stream_id = ?, state = ?, authorized_action = ?, updated_at = ?, resolved_at = ? WHERE id = ? AND state = ?`),
-			stream, models.RecoveryBlockResolved, nativeResumeRecoveryAction, completedAt, completedAt, block.ID, models.RecoveryBlockOpen)
+		result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE session_recovery_blocks SET delivery_submission_id = ?, delivery_stream_id = ?, state = ?, authorized_action = ?, updated_at = ?, resolved_at = ? WHERE id = ? AND state = ?`),
+			block.DeliverySubmissionID, stream, models.RecoveryBlockResolved, nativeResumeRecoveryAction, completedAt, completedAt, block.ID, models.RecoveryBlockOpen)
 		if err != nil {
 			return false, err
 		}

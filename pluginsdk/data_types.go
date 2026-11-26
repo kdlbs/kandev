@@ -1127,8 +1127,11 @@ func messageFilterFromProto(p *pluginv1.MessageFilter) MessageFilter {
 // first workflow); the host returns a gRPC InvalidArgument when a default
 // cannot be resolved unambiguously.
 type CreateTaskInput struct {
-	WorkspaceID    string
-	WorkflowID     string
+	WorkspaceID string
+	WorkflowID  string
+	// ProjectID optionally selects an Office project in the task workspace.
+	// Nil omits it; an empty value is explicit and invalid.
+	ProjectID      *string `json:"project_id,omitempty"`
 	WorkflowStepID *string
 	Title          string
 	Description    string
@@ -1152,6 +1155,7 @@ func (in CreateTaskInput) toProto() (*pluginv1.CreateTaskRequest, error) {
 	return &pluginv1.CreateTaskRequest{
 		WorkspaceId:    in.WorkspaceID,
 		WorkflowId:     in.WorkflowID,
+		ProjectId:      in.ProjectID,
 		WorkflowStepId: in.WorkflowStepID,
 		Title:          in.Title,
 		Description:    in.Description,
@@ -1175,6 +1179,7 @@ func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) (CreateTaskInput, e
 	return CreateTaskInput{
 		WorkspaceID:    p.GetWorkspaceId(),
 		WorkflowID:     p.GetWorkflowId(),
+		ProjectID:      p.ProjectId,
 		WorkflowStepID: p.WorkflowStepId,
 		Title:          p.GetTitle(),
 		Description:    p.GetDescription(),

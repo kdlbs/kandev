@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"go.uber.org/zap"
@@ -496,6 +497,39 @@ func (s *Service) ActiveSubagentCount(sessionID string) int {
 	}
 	defer ta.mu.Unlock()
 	return ta.activeSubagentCountLocked()
+}
+
+// executionIDsWithActivity returns distinct, non-empty owner execution IDs from background registrations, tool ownership, and claims.
+// Callers may retire them only after confirming runtime absence under lifecycle and admission guards.
+func (s *Service) executionIDsWithActivity(sessionID string) []string {
+	ta := s.lockTurnActivity(sessionID, false)
+	if ta == nil {
+		return nil
+	}
+	defer ta.mu.Unlock()
+
+	seen := make(map[string]struct{}, len(ta.background)+len(ta.tools)+len(ta.executionClaims))
+	add := func(executionID string) {
+		if executionID != "" {
+			seen[executionID] = struct{}{}
+		}
+	}
+	for _, work := range ta.background {
+		add(work.executionID)
+	}
+	for _, record := range ta.tools {
+		add(record.executionID)
+	}
+	for executionID := range ta.executionClaims {
+		add(executionID)
+	}
+
+	executionIDs := make([]string, 0, len(seen))
+	for executionID := range seen {
+		executionIDs = append(executionIDs, executionID)
+	}
+	sort.Strings(executionIDs)
+	return executionIDs
 }
 
 func (ta *turnActivity) activeSubagentCountLocked() int {

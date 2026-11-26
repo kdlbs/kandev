@@ -51,6 +51,7 @@ export type TaskCreateDependenciesProps = {
   value: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
+  triggerClassName?: string;
   /** Optional server-backed candidates for the edit dialog. */
   candidates?: TaskDependencyCandidate[];
   /** Titles for selected tasks that are outside the current search page. */
@@ -401,6 +402,7 @@ export function TaskCreateDependencies({
   value,
   onChange,
   disabled,
+  triggerClassName,
   candidates: providedCandidates,
   selectedTitles,
   candidatesLoading = false,
@@ -465,6 +467,7 @@ export function TaskCreateDependencies({
             className={cn(
               "h-12 min-h-12 w-full min-w-0 justify-between md:h-7 md:min-h-7",
               !disabled && "cursor-pointer",
+              triggerClassName,
             )}
             disabled={disabled}
             data-testid="task-create-dependencies-trigger"

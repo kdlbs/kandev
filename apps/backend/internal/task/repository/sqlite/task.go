@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
@@ -429,6 +430,9 @@ func (r *Repository) prepareTaskForCreate(task *models.Task) error {
 }
 
 func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task) (entryID string, err error) {
+	if err := r.validateProjectWorkspaceTx(ctx, tx, task); err != nil {
+		return "", err
+	}
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
@@ -488,6 +492,32 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		return "", err
 	}
 	return entryID, nil
+}
+
+func (r *Repository) validateProjectWorkspaceTx(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	expectation, ok := admission.ProjectWorkspaceValidation(ctx)
+	if !ok {
+		return nil
+	}
+	if task.ProjectID != expectation.ProjectID || task.WorkspaceID != expectation.WorkspaceID {
+		return repoerrors.ErrProjectMembershipChanged
+	}
+	query := `SELECT workspace_id FROM office_projects WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR SHARE`
+	}
+	var workspaceID string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(query), expectation.ProjectID).Scan(&workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return repoerrors.ErrProjectMembershipChanged
+	}
+	if err != nil {
+		return err
+	}
+	if workspaceID != expectation.WorkspaceID {
+		return repoerrors.ErrProjectMembershipChanged
+	}
+	return nil
 }
 
 func (r *Repository) lockWorkflowStepsForAdmission(ctx context.Context, tx *sql.Tx, targetStepID, feederStepID string) error {

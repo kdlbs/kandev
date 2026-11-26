@@ -963,6 +963,31 @@ Every create response from both the MCP tool result and the REST response body a
 
 Deleting or archiving the task that holds an identity does not carry the identity forward: archiving leaves it in place, but deleting the task frees the identity for reuse by a later create. `external_id` cannot be changed after creation; update requests that include it leave the task's identity untouched. The WebSocket `task.create` action and the plugin host's `Tasks().Create` do not accept `external_id`; use `create_task_kandev` or `POST /api/v1/tasks` for idempotent creates.
 
+### Select repositories when you create a task
+
+`POST /api/v1/tasks` accepts an ordered `repositories` array. Each entry can use
+`repository_id`, `base_branch`, `checkout_branch`, `branch_policy_id`,
+`pr_number`, and `checkout_options`. Local execution also accepts the fresh
+branch fields `fresh_branch`, `new_branch_name`, `confirm_discard`, and
+`consented_dirty_files`. Use this form when a repository needs its own settings.
+
+For ID-only selections, send `repository_ids` instead. The server attaches the
+listed repositories in the given order, with the same defaults as entries that
+contain only `repository_id`.
+
+An empty array skips automatic project sources for a root task. A subtask with
+an empty repository list can still inherit its parent's repositories.
+
+Treat an omitted or `null` field as no selection. If neither field contains an
+array, a root task can use its project's repository sources and a subtask can
+inherit its parent's repositories. If one field contains an array, that array
+supplies the selection, subject to subtask inheritance when it is empty.
+
+Send only one of `repositories` or `repository_ids`. If both fields contain
+arrays, the server returns HTTP `400` with `creation_rejected: true`, even when
+one or both arrays are empty. A malformed ID list or a repository outside the
+workspace also rejects task creation.
+
 For normal deletion when workspace inspection fails, `delete_task_kandev`
 requires both `discard_worktree_changes: true` and
 `allow_unverified_workspace_changes: true`. These flags acknowledge possible
