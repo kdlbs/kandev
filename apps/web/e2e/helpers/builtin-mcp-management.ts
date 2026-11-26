@@ -265,7 +265,9 @@ export async function checkBuiltinCreationLoading(page: Page, touch: boolean) {
     await expect(trigger).toBeEnabled();
     await activate(trigger, touch);
     const options = page.getByTestId("task-create-mcp-options");
-    await expect(options.getByRole("status")).toContainText("Loading");
+    // The additional-server status follows the built-in package status.
+    const additionalServersLoading = options.getByRole("status").last();
+    await expect(additionalServersLoading).toContainText("Loading");
     await activate(options.getByTestId("builtin-mcp-package-configuration"), touch);
     await chooseBuiltin(page, "configuration", "On", touch);
     await expect(options.getByTestId("builtin-mcp-choice-configuration")).toContainText("On");
@@ -274,7 +276,7 @@ export async function checkBuiltinCreationLoading(page: Page, touch: boolean) {
     );
     release.resolve();
     expect((await response).ok()).toBe(true);
-    await expect(options.getByRole("status")).toBeHidden();
+    await expect(additionalServersLoading).toBeHidden();
     await expect(options.getByTestId("builtin-mcp-choice-configuration")).toContainText("On");
     await closeCreationMCP(page, options, touch);
   } finally {
