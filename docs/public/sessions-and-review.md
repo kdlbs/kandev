@@ -398,6 +398,14 @@ prompt. A disk warning can remain after that headline clears. An older backend
 that does not report pressure freshness continues to show **Last reported**
 instead of treating capacity time as pressure time.
 
+Delivery pressure shows the cause when the runtime reports one. **Details**
+gives guidance for that cause. If the cause is unknown, the row says **Delivery
+is blocked**. Open **Details** for guidance to inspect runtime logs or use
+session recovery. The pressure headline shows disk usage only for a low-space
+guard. If another cause blocks delivery and a capacity sample is at least 90%
+used, **Details** labels that usage as a separate high-usage sample. Its free
+and total values come from the capacity sample, not the failed write.
+
 A session that stops because storage is full shows **Session interrupted by low
 disk space**. Free space on the executor filesystem, then use **Resume
 session**. Do not delete delivery data or start a fresh conversation to fix

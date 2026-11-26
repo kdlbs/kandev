@@ -221,8 +221,8 @@ func (sm *StreamManager) probeDeliveryHealth(
 		return
 	}
 	now := sm.deliveryHealthNow()
-	if failure != nil {
-		if failure.Revision == state.failureRevision && now.Before(state.nextAllowed) {
+	if failure != nil && failure.Revision > 0 {
+		if failure.Revision <= state.failureRevision {
 			return
 		}
 		state.failureRevision = failure.Revision

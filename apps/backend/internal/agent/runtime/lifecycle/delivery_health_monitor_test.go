@@ -260,6 +260,43 @@ func TestDeliveryHealthRecoveryDoesNotResend(t *testing.T) {
 	}
 }
 
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.4
+func TestDeliveryHealthPersistentFailureRunsOneCycle(t *testing.T) {
+	execution := newDeliveryReconciliationTestExecution()
+	sm := newDeliveryHealthTestManager()
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	sm.deliveryHealthClock = func() time.Time { return now }
+	failure := correlatedFailure(execution)
+	reconciles, pressureUpdates := 0, 0
+	owner := deliveryHealthOwner{
+		execution: execution,
+		probe: func(context.Context) (*agentctl.StatusResponse, error) {
+			return deliveryFailureStatus(failure), nil
+		},
+		applyPressure: func(context.Context, RuntimeStoragePressure) { pressureUpdates++ },
+		current:       func() bool { return true },
+		reconcile: func(context.Context) DeliveryReconciliationResult {
+			reconciles++
+			return DeliveryReconciliationResult{Outcome: DeliveryReconciliationBlocked}
+		},
+		submission:       func() string { return "submission-1" },
+		promptGeneration: func() uint64 { return 1 },
+	}
+	state := &deliveryHealthProbeState{}
+	for range 8 {
+		sm.probeDeliveryHealth(context.Background(), owner, time.Second, 10*time.Second, state)
+		now = now.Add(11 * time.Second)
+	}
+	if reconciles != 1 || pressureUpdates != 8 {
+		t.Fatalf("reconciles=%d pressure updates=%d; want one cycle and eight observations", reconciles, pressureUpdates)
+	}
+	failure.Revision++
+	sm.probeDeliveryHealth(context.Background(), owner, time.Second, 10*time.Second, state)
+	if reconciles != 2 {
+		t.Fatalf("reconciles=%d after a changed failure revision, want 2", reconciles)
+	}
+}
+
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.26
 func TestDeliveryHealthRecoveryKeepsIndependentFence(t *testing.T) {
 	clock := newReconciliationTestClock()
