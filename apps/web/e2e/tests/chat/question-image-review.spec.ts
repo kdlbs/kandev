@@ -3,6 +3,7 @@ import {
   CHANGED_PIXELS,
   chooseZoom,
   expectThumbnailsShareRow,
+  expectToastsAvoidControls,
   REVIEW_IMAGE_SIZE,
   expectNoHorizontalOverflow,
   openReviewQuestions,
@@ -10,7 +11,9 @@ import {
   reviewImages,
   reviewScript,
   seedReviewImages,
+  showReviewUpdateToasts,
 } from "./question-image-review-helpers";
+import { installRuntimeUpdateFixture } from "../settings/agent-runtime-update-helpers";
 
 test("reviews images in a large view that shares the answer form", async ({
   testPage,
@@ -89,6 +92,46 @@ test("reviews images in a large view that shares the answer form", async ({
   const { messages } = await apiClient.listSessionMessages(task.session_id!);
   const questions = messages.filter((message) => message.type === "clarification_request");
   expect(questions.every((message) => message.metadata?.status === "answered")).toBe(true);
+});
+
+// @covers AC-UI-TOAST-INTERACTION-001.1 through AC-UI-TOAST-INTERACTION-001.4
+test("update toasts keep review actions clear", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  test.setTimeout(180_000);
+  await testPage.setViewportSize({ width: 1600, height: 1440 });
+  const runtime = await installRuntimeUpdateFixture(testPage);
+  seedReviewImages(seedData.repositoryPath);
+  const { session } = await openReviewQuestions(testPage, apiClient, seedData, reviewScript());
+  const open = session.clarificationOverlay().getByTestId("question-review-open");
+  await open.click();
+
+  const dialog = testPage.getByTestId("question-review-dialog");
+  const submit = dialog.getByTestId("question-review-submit");
+  const close = dialog.getByTestId("question-review-close");
+  await testPage.clock.install();
+  const { releaseToast, runtimeToast } = await showReviewUpdateToasts(testPage, runtime);
+  await prCapture.screenshot("desktop-update-toasts-review", {
+    caption: "Release and runtime update notices sit below the review actions.",
+  });
+  await expectToastsAvoidControls([releaseToast, runtimeToast], [submit, close]);
+
+  const releaseDismiss = releaseToast.getByRole("button", { name: "Dismiss notification" });
+  const runtimeLink = runtimeToast.getByRole("link", { name: "Review runtime" });
+  await close.focus();
+  await testPage.keyboard.press("Tab");
+  await expect(releaseDismiss).toBeFocused();
+  await testPage.keyboard.press("Enter");
+  await expect(releaseToast).toHaveCount(0);
+  await expect(runtimeLink).toBeVisible();
+  await expect(dialog).toBeVisible();
+
+  await close.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(open).toBeFocused();
 });
 
 test("compares a baseline and a candidate in all five modes", async ({

@@ -160,6 +160,7 @@
   "discardLocalChangesAtPathDescription": "启动此任务将永久丢弃本地克隆 {{repoPath}} 中未提交的更改。继续前请备份需要保留的内容。",
   "discardLocalChangesDescription": "启动此任务将永久丢弃本地克隆中未提交的更改。继续前请备份需要保留的内容。",
   "discoveringAgents": "正在发现智能体…",
+  "dismissNotification": "关闭通知",
   "doNotShowThisAgain": "不再显示",
   "edit": "编辑",
   "editTask": "编辑任务",

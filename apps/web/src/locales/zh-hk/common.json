@@ -160,6 +160,7 @@
   "discardLocalChangesAtPathDescription": "啓動此任務將永久丟棄本地複製 {{repoPath}} 中未提交的更改。繼續前請備份需要保留的內容。",
   "discardLocalChangesDescription": "啓動此任務將永久丟棄本地複製中未提交的更改。繼續前請備份需要保留的內容。",
   "discoveringAgents": "正在發現代理程式…",
+  "dismissNotification": "關閉通知",
   "doNotShowThisAgain": "不再顯示",
   "edit": "編輯",
   "editTask": "編輯任務",
