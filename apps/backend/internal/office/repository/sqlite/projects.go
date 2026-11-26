@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 )
+
+// ErrProjectNotFound distinguishes an absent project from an Office read failure.
+var ErrProjectNotFound = errors.New("project not found")
 
 // CreateProject creates a new project.
 func (r *Repository) CreateProject(ctx context.Context, project *models.Project) error {
@@ -55,7 +59,7 @@ func (r *Repository) GetProject(ctx context.Context, id string) (*models.Project
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
 		`SELECT * FROM office_projects WHERE id = ?`), id).StructScan(&project)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("project not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrProjectNotFound, id)
 	}
 	return &project, err
 }

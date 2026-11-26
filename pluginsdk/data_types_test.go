@@ -257,6 +257,7 @@ func TestExecutorProfileProtoRoundTrip(t *testing.T) {
 	require.Equal(t, profile, executorProfileFromProto(profile.toProto()))
 }
 
+// @covers AC-PLUGINS-PLUGINS-001.17
 func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 	defaultBranch := "main"
 	baseBranch := "release"
@@ -267,6 +268,7 @@ func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 	input := CreateTaskInput{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
+		ProjectID:   strPtr("project-1"),
 		Title:       "Plugin-created task",
 		Priority:    "high",
 		Repositories: []PluginTaskRepository{{
@@ -283,9 +285,35 @@ func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
 
 	proto, err := input.toProto()
 	require.NoError(t, err)
+	require.NotNil(t, proto.ProtoReflect().Descriptor().Fields().ByName("project_id"),
+		"CreateTaskRequest must carry optional project selection")
 	back, err := createTaskInputFromProto(proto)
 	require.NoError(t, err)
 	require.Equal(t, input, back)
+}
+
+// @covers AC-PLUGINS-PLUGINS-001.17
+func TestCreateTaskInputProjectIDProtoRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		project *string
+		present bool
+	}{
+		{name: "omitted"},
+		{name: "set", project: strPtr("project-1"), present: true},
+		{name: "explicit empty", project: strPtr(""), present: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			proto, err := (CreateTaskInput{ProjectID: tc.project}).toProto()
+			require.NoError(t, err)
+			field := proto.ProtoReflect().Descriptor().Fields().ByName("project_id")
+			require.NotNil(t, field)
+			require.Equal(t, tc.present, proto.ProtoReflect().Has(field))
+			back, err := createTaskInputFromProto(proto)
+			require.NoError(t, err)
+			require.Equal(t, tc.project, back.ProjectID)
+		})
+	}
 }
 
 func TestCreateTaskInputProtoRoundTripPreservesPriority(t *testing.T) {

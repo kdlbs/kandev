@@ -22,6 +22,10 @@ authoritative for launch context, authorization, cache identity, generations,
 secrets, and provider failures. The [first-run availability design](../../ui/system-design/first-run-dialog-availability.md)
 remains authoritative for the phone exclusion and completion marker.
 
+When discovery returns only unavailable agents, show the Settings install-catalog
+link above the command list if the caller can manage installations and the catalog
+has an installable agent. Following the link leaves the completion marker unset.
+
 ## Requirement mapping
 
 | Requirement | Design sections |
