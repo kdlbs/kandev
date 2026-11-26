@@ -139,7 +139,19 @@ export async function installOpenCodeReinstallFixture(
 ) {
   const runtimeSource = options.runtimeSource ?? "managed";
   let installRequests = 0;
+  let profileMutationRequests = 0;
   let installed = false;
+
+  page.on("request", (request) => {
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) return;
+    const { pathname } = new URL(request.url());
+    if (
+      pathname.startsWith("/api/v1/agent-profiles/") ||
+      /^\/api\/v1\/agents\/[^/]+\/profiles(?:\/[^/]+)?$/.test(pathname)
+    ) {
+      profileMutationRequests += 1;
+    }
+  });
 
   await page.route("**/api/v1/agent-update/status**", (route) =>
     route.fulfill({
@@ -200,5 +212,8 @@ export async function installOpenCodeReinstallFixture(
     });
   });
 
-  return { installRequests: () => installRequests };
+  return {
+    installRequests: () => installRequests,
+    profileMutationRequests: () => profileMutationRequests,
+  };
 }

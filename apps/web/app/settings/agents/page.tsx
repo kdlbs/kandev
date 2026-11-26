@@ -44,7 +44,7 @@ import type {
   RuntimeUpdate,
 } from "@/lib/types/http";
 import { useProfileOrder } from "@/hooks/domains/settings/use-profile-order";
-import { useAgentPageState } from "./use-agent-page-state";
+import { useAgentPageState } from "@/hooks/domains/settings/use-agent-page-state";
 
 const installedAgentsActionClassName = settingsActionClassName("cursor-pointer");
 

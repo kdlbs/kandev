@@ -82,10 +82,14 @@ Use route and job fixtures for the browser checks so npm access is unnecessary.
 
 ```bash
 (cd apps/backend && go test -tags fts5 -trimpath ./internal/agent/agents ./internal/agent/settings/controller -run 'TestOpenCodeACPManagedIsInstalled|TestOpenCodeInstallPreparesSelectedManagedRuntime' -count=1)
+(cd apps && pnpm install --frozen-lockfile)
 (cd apps && pnpm --filter @kandev/web run i18n:check)
 (cd apps && pnpm --filter @kandev/web e2e:run --project chromium e2e/tests/settings/agents-browse-page.spec.ts)
 (cd apps && pnpm --filter @kandev/web e2e:run --project mobile-chrome e2e/tests/settings/mobile-agents-browse-page.spec.ts)
 node scripts/validate-public-docs.mjs
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
 ```
 
 ## Files likely touched
@@ -119,8 +123,11 @@ Implemented the localized Reinstall action for eligible configured managed
 OpenCode runtimes, routed it to the existing catalog with OpenCode first, and
 documented the recovery path. Desktop and phone browser coverage confirms
 eligibility, install retry, refreshed availability, and saved profile retention.
+The follow-up checks arm the install responses and WebSocket subscription,
+reload Settings after recovery, and confirm no profile mutation requests occur.
 
 Verification passed: focused Go tests; web typecheck, lint, i18n completeness,
 and formatting; desktop E2E (4 cases); mobile E2E (2 cases); public docs
 validation (56 documents) and tests (63 cases); specification catalog and lint;
-and `git diff --check`.
+and `git diff --check`. Post-review desktop E2E passed 4 cases and phone E2E
+passed 2 cases with the added reload and no-mutation assertions.

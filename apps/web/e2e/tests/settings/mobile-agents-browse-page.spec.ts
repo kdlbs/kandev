@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import type { ListAvailableAgentsResponse } from "../../../lib/types/http";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { installOpenCodeReinstallFixture } from "./agents-opencode-reinstall-helpers";
 
 // Same interception as the desktop spec: the default mock-agent is discovered
@@ -44,7 +45,10 @@ test.describe("Agents browse page on mobile", () => {
   test("retries managed OpenCode installation from Settings", async ({ testPage }) => {
     // @covers AC-AGENTS-OPENCODE-V2-001.14
     const fixture = await installOpenCodeReinstallFixture(testPage, { failFirstAttempt: true });
+    const ws = watchWs(testPage);
+    const subscription = ws.waitForResponse("user.subscribe");
     await testPage.goto("/settings/agents");
+    await subscription;
 
     const card = testPage.getByTestId("agent-group-opencode-acp");
     await expect(card).toBeVisible({ timeout: 15_000 });
@@ -57,16 +61,42 @@ test.describe("Agents browse page on mobile", () => {
     await expect(testPage).toHaveURL(/\/settings\/agents\/browse\?agent=opencode-acp$/);
     const installCards = testPage.locator('[data-testid^="install-card-"]');
     await expect(installCards.first()).toHaveAttribute("data-testid", "install-card-opencode-acp");
+    const firstInstallResponse = waitForHttp(
+      testPage,
+      "POST",
+      /\/api\/v1\/agent-install\/opencode-acp$/,
+    );
     await testPage.getByTestId("install-button-opencode-acp").tap();
+    expect((await firstInstallResponse).ok()).toBe(true);
     await expect(testPage.getByTestId("install-error-opencode-acp")).toHaveText(
       "Temporary registry failure",
     );
     await expect(testPage.getByTestId("install-button-opencode-acp")).toHaveText("Retry");
+    const retryResponse = waitForHttp(testPage, "POST", /\/api\/v1\/agent-install\/opencode-acp$/);
     await testPage.getByTestId("install-button-opencode-acp").tap();
+    expect((await retryResponse).ok()).toBe(true);
     await expect.poll(fixture.installRequests).toBe(2);
     await expect(testPage.getByTestId("install-card-opencode-acp")).toHaveCount(0);
 
     await testPage.goBack();
+    await expect(card).toBeVisible();
+    await expect(card.getByText("Saved OpenCode profile", { exact: true })).toBeVisible();
+    await expect(card.getByText("Not installed", { exact: true })).toHaveCount(0);
+    await expect(card.getByTestId("reinstall-opencode-acp")).toHaveCount(0);
+    const reloadedSettings = Promise.all([
+      ws.waitForResponse("user.subscribe"),
+      waitForHttp(testPage, "GET", /\/api\/v1\/agents\/discovery$/),
+      waitForHttp(testPage, "GET", /\/api\/v1\/agents\/available$/),
+      waitForHttp(testPage, "GET", /\/api\/v1\/agent-update\/status$/),
+    ]);
+    await testPage.reload();
+    const [, discoveryResponse, availableResponse, runtimeStatusResponse] = await reloadedSettings;
+    expect([discoveryResponse.ok(), availableResponse.ok(), runtimeStatusResponse.ok()]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect(fixture.profileMutationRequests()).toBe(0);
     await expect(card).toBeVisible();
     await expect(card.getByText("Saved OpenCode profile", { exact: true })).toBeVisible();
     await expect(card.getByText("Not installed", { exact: true })).toHaveCount(0);

@@ -129,6 +129,8 @@ profile retention. Public documentation validation passed for 56 documents,
 and its test suite passed 63 cases. The real-package and isolated-backend
 checks reproduced the missing cache and verified recovery. Specification
 catalog, specification lint, and local PR documentation coverage checks passed.
+The review follow-up also verified post-install availability after reload and
+no saved-profile mutations in both Settings E2E flows.
 
 ## Risks
 
