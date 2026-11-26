@@ -1,6 +1,6 @@
 ---
 created: 2026-11-26
-status: done
+status: implemented
 requirements:
   - REQ-UI-TOAST-INTERACTION-001
 system_design:

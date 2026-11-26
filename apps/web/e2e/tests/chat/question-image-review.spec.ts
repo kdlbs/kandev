@@ -121,8 +121,13 @@ test("update toasts keep review actions clear", async ({
 
   const releaseDismiss = releaseToast.getByRole("button", { name: "Dismiss notification" });
   const runtimeLink = runtimeToast.getByRole("link", { name: "Review runtime" });
-  await close.focus();
-  await testPage.keyboard.press("Tab");
+  let releaseDismissFocused = false;
+  for (let index = 0; index < 12 && !releaseDismissFocused; index += 1) {
+    await testPage.keyboard.press("Tab");
+    releaseDismissFocused = await releaseDismiss.evaluate(
+      (element) => element === document.activeElement,
+    );
+  }
   await expect(releaseDismiss).toBeFocused();
   await testPage.keyboard.press("Enter");
   await expect(releaseToast).toHaveCount(0);

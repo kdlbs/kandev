@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-TOAST-INTERACTION-001
@@ -30,11 +30,14 @@ either location.
 Toast controls stop Enter from reaching dialog-level key handlers while
 leaving the browser's native button and link activation intact.
 
-`ToastProvider` owns the announcement text and keeps one `role="status"`
-polite live region in the active accessibility scope. The provider renders it
-outside a modal; the active modal outlet renders it inside the modal focus
-scope. The region exists while the queue is empty and updates when a toast is
-created or updated. Visual toast containers do not have live-region semantics.
+`ToastProvider` queues announcements in creation and update order. It clears
+the current live-region text before restoring each notice so repeated messages
+produce a separate text change. A newer notice cancels and restarts a pending
+restore; unmount cancels its timer. The provider keeps one polite `aria-live`
+region in the active accessibility scope. It renders outside a modal; the
+active modal outlet renders the same region inside the modal focus scope. The
+region exists while the queue is empty and updates independently of toast
+placement. Visual toast containers do not have live-region semantics.
 
 ## Modal placement and focus
 
@@ -76,5 +79,5 @@ Pixel 5 layout probe used a height cap of `min(11rem, 22dvh)`.
 | ---------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `AC-UI-TOAST-INTERACTION-001.1`, `001.2` | [Toast controls and lifetime](#toast-controls-and-lifetime) | Provider dismissal and action tests. Browser keyboard and phone target measurements.                            |
 | `AC-UI-TOAST-INTERACTION-001.3`          | [Modal layout](#modal-layout)                               | Two real update notices during image review on desktop and phone. Compare rendered bounds with review controls. |
-| `AC-UI-TOAST-INTERACTION-001.4`          | [Modal placement and focus](#modal-placement-and-focus)     | Nested real primitives, active focus, one instance per toast, and one persistent polite status node.            |
+| `AC-UI-TOAST-INTERACTION-001.4`          | [Modal placement and focus](#modal-placement-and-focus)     | Nested real primitives, active focus, one instance per toast, and one persistent polite live region.            |
 | `AC-UI-TOAST-INTERACTION-001.5`          | [Toast controls and lifetime](#toast-controls-and-lifetime) | Provider lifetime tests with a fake clock.                                                                      |

@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -38,6 +39,12 @@ type Toast = {
 
 type ToastInput = Omit<Toast, "id"> & { duration?: number };
 
+type ToastAnnouncementQueue = {
+  messages: string[];
+  phase: "idle" | "clearing" | "announcing";
+  timer: ReturnType<typeof setTimeout> | null;
+};
+
 type ToastContextValue = {
   toast: (input: ToastInput) => string;
   updateToast: (id: string, input: Partial<ToastInput>) => void;
@@ -45,6 +52,67 @@ type ToastContextValue = {
 };
 
 const ToastContext = createContext<ToastContextValue | null>(null);
+
+const ANNOUNCEMENT_RESTORE_DELAY_MS = 50;
+const ANNOUNCEMENT_HOLD_MS = 750;
+
+function scheduleNextToastAnnouncement(
+  queue: ToastAnnouncementQueue,
+  setAnnouncement: (message: string) => void,
+) {
+  if (queue.phase !== "idle" || queue.messages.length === 0) return;
+
+  queue.phase = "clearing";
+  setAnnouncement("");
+  queue.timer = setTimeout(() => {
+    queue.timer = null;
+    const message = queue.messages.shift();
+    if (message === undefined) {
+      queue.phase = "idle";
+      return;
+    }
+
+    queue.phase = "announcing";
+    setAnnouncement(message);
+    queue.timer = setTimeout(() => {
+      queue.timer = null;
+      queue.phase = "idle";
+      scheduleNextToastAnnouncement(queue, setAnnouncement);
+    }, ANNOUNCEMENT_HOLD_MS);
+  }, ANNOUNCEMENT_RESTORE_DELAY_MS);
+}
+
+function useToastAnnouncementQueue() {
+  const [announcement, setAnnouncement] = useState("");
+  const queueRef = useRef<ToastAnnouncementQueue>({
+    messages: [],
+    phase: "idle",
+    timer: null,
+  });
+
+  useEffect(
+    () => () => {
+      const timer = queueRef.current.timer;
+      if (timer !== null) clearTimeout(timer);
+    },
+    [],
+  );
+
+  const announceToast = useCallback((toast: Toast) => {
+    const queue = queueRef.current;
+    queue.messages.push(
+      [toast.title, toast.description, toast.action?.label].filter(Boolean).join(". "),
+    );
+    if (queue.phase === "clearing" && queue.timer !== null) {
+      clearTimeout(queue.timer);
+      queue.timer = null;
+      queue.phase = "idle";
+    }
+    scheduleNextToastAnnouncement(queue, setAnnouncement);
+  }, []);
+
+  return { announcement, announceToast };
+}
 
 const variantStyles: Record<
   ToastVariant,
@@ -75,8 +143,7 @@ const variantStyles: Record<
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [announcement, setAnnouncement] = useState("");
-  const announcedToastIdRef = useRef<string | null>(null);
+  const { announcement, announceToast } = useToastAnnouncementQueue();
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const toastsRef = useRef(new Map<string, Toast>());
 
@@ -84,17 +151,6 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
     timersRef.current.delete(id);
     toastsRef.current.delete(id);
-    if (announcedToastIdRef.current === id) {
-      announcedToastIdRef.current = null;
-      setAnnouncement("");
-    }
-  }, []);
-
-  const announceToast = useCallback((toast: Toast) => {
-    announcedToastIdRef.current = toast.id;
-    setAnnouncement(
-      [toast.title, toast.description, toast.action?.label].filter(Boolean).join(". "),
-    );
   }, []);
 
   const scheduleRemoval = useCallback(

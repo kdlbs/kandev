@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: ui
 created: 2026-11-26
 owners:
@@ -44,9 +44,10 @@ drawers.
   access to the review controls and answer form within the viewport.
 - **AC-UI-TOAST-INTERACTION-001.4:** The topmost active modal shall expose the
   toast controls in its normal focus order. Toast arrival shall leave focus
-  where it is and announce the message politely regardless of its visual
-  placement. Modal transitions shall preserve a single visible instance of
-  each toast with its content, action, and remaining lifetime.
+  where it is and announce messages politely in arrival order, including when
+  consecutive messages have identical text, regardless of visual placement.
+  Modal transitions shall preserve a single visible instance of each toast
+  with its content, action, and remaining lifetime.
 - **AC-UI-TOAST-INTERACTION-001.5:** Without a modal, each toast shall use its
   normal top or bottom placement. Timed toasts shall expire at their configured
   duration. Toasts created in the loading state shall stay until dismissed or

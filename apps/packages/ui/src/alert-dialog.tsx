@@ -14,12 +14,10 @@ function appendModalToastOutlet(children: React.ReactNode) {
   if (!React.isValidElement<{ children?: React.ReactNode }>(child)) return child;
 
   return React.cloneElement(child, {
-    children: (
-      <>
-        {child.props.children}
-        <ModalToastOutlet />
-      </>
-    ),
+    children: [
+      ...React.Children.toArray(child.props.children),
+      <ModalToastOutlet key="modal-toast-outlet" />,
+    ],
   });
 }
 

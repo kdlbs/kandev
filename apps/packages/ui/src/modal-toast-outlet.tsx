@@ -17,7 +17,6 @@ export function ToastAnnouncementRegion({ announcement }: { announcement: string
     <div
       data-slot="toast-announcer"
       data-testid="toast-announcer"
-      role="status"
       aria-live="polite"
       aria-atomic="true"
       className="sr-only"

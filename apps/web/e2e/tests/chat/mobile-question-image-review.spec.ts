@@ -165,14 +165,27 @@ test("update toasts keep review actions clear", async ({
   );
   for (const toast of [releaseToast, runtimeToast]) {
     const dismiss = toast.getByRole("button", { name: "Dismiss notification" });
+    await dismiss.scrollIntoViewIfNeeded();
     const box = await dismiss.boundingBox();
+    const outletBox = await scrollRegion.boundingBox();
     expect(box).not.toBeNull();
+    expect(outletBox).not.toBeNull();
     expect(box!.width).toBeGreaterThanOrEqual(44);
     expect(box!.height).toBeGreaterThanOrEqual(44);
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.y).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+    expect(box!.x).toBeGreaterThanOrEqual(outletBox!.x);
+    expect(box!.y).toBeGreaterThanOrEqual(outletBox!.y);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(outletBox!.x + outletBox!.width);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(outletBox!.y + outletBox!.height);
+    expect(
+      await dismiss.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const target = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        return target === element || element.contains(target);
+      }),
+    ).toBe(true);
   }
 
   const more = await openPhoneMore(testPage, dialog);
@@ -194,6 +207,9 @@ test("update toasts keep review actions clear", async ({
   await dialog.getByTestId("question-review-submit").tap();
   await expect(dialog).toHaveCount(0);
   await expect(session.chat).toContainText("Review questions complete.");
+  await expect(runtimeToast).toBeVisible();
+  await runtimeToast.getByRole("button", { name: "Dismiss notification" }).tap();
+  await expect(runtimeToast).toHaveCount(0);
   await expectNoHorizontalOverflow(testPage);
 });
 

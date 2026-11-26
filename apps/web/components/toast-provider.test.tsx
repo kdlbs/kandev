@@ -30,6 +30,9 @@ vi.mock("@/lib/api/domains/frontend-error-log-api", () => ({
 
 import { ToastProvider, useToast } from "./toast-provider";
 
+const TOAST_ANNOUNCER_TEST_ID = "toast-announcer";
+const REPEATED_NOTICE_TITLE = "Repeated notice";
+
 describe("ToastProvider error reporting", () => {
   it("reports error creation without changing the rendered toast", () => {
     const api = renderProvider();
@@ -83,26 +86,73 @@ describe("ToastProvider error reporting", () => {
 
 describe("ToastProvider announcements", () => {
   // @covers AC-UI-TOAST-INTERACTION-001.4
-  it("keeps one polite status node in the active modal before its first toast", () => {
+  it("keeps one polite live region in the active modal before its first toast", async () => {
     const api = renderProviderWithAnnouncementDialog();
     const dialog = screen.getByTestId("announcement-dialog");
-    const announcer = screen.getByTestId("toast-announcer");
+    const announcer = screen.getByTestId(TOAST_ANNOUNCER_TEST_ID);
 
     expect(announcer.getAttribute("aria-live")).toBe("polite");
     expect(dialog.contains(announcer)).toBe(true);
     expect(announcer.closest('[aria-hidden="true"]')).toBeNull();
-    expect(screen.getAllByTestId("toast-announcer")).toHaveLength(1);
+    expect(screen.getAllByTestId(TOAST_ANNOUNCER_TEST_ID)).toHaveLength(1);
     expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
 
+    vi.useFakeTimers();
     act(() => {
       api.toast({ title: "Update ready", description: "Version 2 is available." });
     });
+    await act(async () => vi.advanceTimersToNextTimerAsync());
 
-    expect(screen.getByTestId("toast-announcer")).toBe(announcer);
+    expect(screen.getByTestId(TOAST_ANNOUNCER_TEST_ID)).toBe(announcer);
     expect(dialog.contains(announcer)).toBe(true);
     expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
     expect(announcer.textContent).toContain("Update ready");
     expect(announcer.textContent).toContain("Version 2 is available.");
+  });
+
+  it("queues notices and re-announces repeated text with a live-region mutation", async () => {
+    const api = renderProviderWithAnnouncementDialog();
+    vi.useFakeTimers();
+    const announcer = screen.getByTestId(TOAST_ANNOUNCER_TEST_ID);
+
+    act(() => {
+      api.toast({ title: "First notice", variant: "loading" });
+      api.toast({ title: REPEATED_NOTICE_TITLE, variant: "loading" });
+    });
+    expect(announcer.textContent).toBe("");
+
+    await act(async () => vi.advanceTimersToNextTimerAsync());
+    expect(announcer.textContent).toBe("First notice");
+    await act(async () => vi.advanceTimersToNextTimerAsync());
+    expect(announcer.textContent).toBe("");
+    await act(async () => vi.advanceTimersToNextTimerAsync());
+    expect(announcer.textContent).toBe(REPEATED_NOTICE_TITLE);
+
+    act(() => api.toast({ title: REPEATED_NOTICE_TITLE, variant: "loading" }));
+    await act(async () => vi.advanceTimersToNextTimerAsync());
+    expect(announcer.textContent).toBe("");
+    await act(async () => vi.advanceTimersToNextTimerAsync());
+    expect(announcer.textContent).toBe(REPEATED_NOTICE_TITLE);
+  });
+
+  it("cancels the pending announcement timer on unmount", () => {
+    vi.useFakeTimers();
+    let api!: ReturnType<typeof useToast>;
+    function Capture() {
+      api = useToast();
+      return null;
+    }
+    const view = render(
+      <ToastProvider>
+        <Capture />
+      </ToastProvider>,
+    );
+
+    act(() => api.toast({ title: "Pending notice", variant: "loading" }));
+    expect(vi.getTimerCount()).toBe(1);
+
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

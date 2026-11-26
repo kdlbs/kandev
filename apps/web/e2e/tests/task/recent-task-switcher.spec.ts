@@ -218,7 +218,13 @@ test.describe("Recent task switcher", () => {
     const toast = testPage.getByTestId("toast-message").filter({ hasText: "v99.0.2" });
     await expect(toast).toHaveCount(1);
 
-    await toast.getByRole("button", { name: "Dismiss notification" }).focus();
+    const dismiss = toast.getByRole("button", { name: "Dismiss notification" });
+    let dismissFocused = false;
+    for (let index = 0; index < 20 && !dismissFocused; index += 1) {
+      await testPage.keyboard.press("Tab");
+      dismissFocused = await dismiss.evaluate((element) => element === document.activeElement);
+    }
+    await expect(dismiss).toBeFocused();
     await testPage.keyboard.press("Enter");
 
     await expect(toast).toHaveCount(0);
