@@ -31,15 +31,16 @@ providers. An old report must not authorize a write after a model switch.
 - Replace the Cursor checks in lifecycle and orchestration with the report
   from Task 03. For startup, use the correlated reply or wait for a newer
   matching report in the agentctl client. A different model, native session,
-  or attempt invalidates old evidence. A current setup report can supply
-  options when startup keeps its model.
+  or attempt invalidates old evidence. When startup keeps its model, it can
+  use the current setup report or wait within the same budget for that report.
 - Filter the saved profile and runtime options using the verified IDs.
   Preserve mode confirmation and provider-restored recovery. Keep the
   existing warning for an attempted write that the provider rejects.
 - Apply complete reports to the effective option map under the existing
   settings fences and repository comparison. Merge only observed entries
-  from partial reports. Keep saved choices, and prevent copied display
-  options and concurrent model-only writes from restoring removed keys.
+  from partial reports, including when they carry copied display options.
+  Keep saved choices and preserve the generation for retry if a sequenced
+  report's runtime write fails.
 
 ## Out of scope
 
@@ -66,7 +67,9 @@ Parameterize `TestInitializeAndPromptWithLayersCursorModelScopedReplay` and
 stream fixture and the real SQLite-backed model-event handler. Cover reply,
 delayed report, wrong-model and wrong-session reports, missing evidence, and
 a supported rejection. Include the newer different-model report and an
-unverified copied list after a complete report.
+unverified copied list after a complete report. Cover a late same-model setup
+report and a synchronous display-only setup snapshot. In the SQLite fixture,
+redeliver a partial report after a failed write at the same generation.
 
 Keep the concurrency case in
 `TestPersistRuntimeModelMetadataPreservesConcurrentCursorCatalog`. Run it
@@ -119,3 +122,8 @@ The orchestrator and executor package suites passed. The full lifecycle suite
 passed on the rerun with the active-model profile fixture. The focused
 lifecycle tests and changed-package lint passed after simplifying the
 model-switch predicate.
+
+The review checks reproduced a dropped verified value on a display-only event,
+a missed late same-model report, and a partial runtime write that could not
+be retried at the same generation. The lifecycle, orchestrator, and executor
+suites passed after the fixes in the [review verification](plan.md#verification-results).

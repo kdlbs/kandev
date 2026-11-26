@@ -96,3 +96,69 @@ func TestSetupCatalogCanIdentifyModelSeparately(t *testing.T) {
 	require.True(t, state.ConfigOptionsComplete)
 	require.Equal(t, "active", state.CurrentModelID)
 }
+
+func TestLoadSnapshotKeepsConvergenceProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		converge func(*Adapter, string, []streams.ConfigOption)
+	}{
+		{name: "model", converge: func(a *Adapter, sessionID string, config []streams.ConfigOption) {
+			a.emitSetModelEvent(sessionID, "next", nil, config)
+		}},
+		{name: "setting", converge: func(a *Adapter, sessionID string, config []streams.ConfigOption) {
+			a.emitSetConfigOptionEvent(sessionID, "fast", "false", nil, config)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, _ := newSessionResumeAdapter(t, true, true)
+			const sessionID = "saved-session"
+			require.NoError(t, a.LoadSession(t.Context(), sessionID, nil))
+			setup := a.GetSessionModelState()
+			require.NotNil(t, setup)
+			require.False(t, setup.ConfigOptionsDisplayOnly)
+
+			tc.converge(a, sessionID, append(setup.ConfigOptions, streams.ConfigOption{ID: "fast", CurrentValue: "true"}))
+			snapshot := a.GetSessionModelState()
+			require.NotNil(t, snapshot)
+			require.True(t, snapshot.ConfigOptionsDisplayOnly)
+			require.False(t, snapshot.HasConfigOptionEvidence())
+			require.Greater(t, snapshot.SessionSettingsGeneration, setup.SessionSettingsGeneration)
+
+			require.NoError(t, a.LoadSession(t.Context(), sessionID, nil))
+			refreshed := a.GetSessionModelState()
+			require.NotNil(t, refreshed)
+			require.False(t, refreshed.ConfigOptionsDisplayOnly)
+			require.Equal(t, setup.ConfigOptions, refreshed.ConfigOptions)
+		})
+	}
+}
+
+func TestGrokModelSwitchEvidenceUsesReportedEffort(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		efforts  []any
+		verified []string
+	}{
+		{name: "advertised default", efforts: []any{map[string]any{"value": "medium", "default": true}}, verified: []string{configOptionIDReasoningEffort}},
+		{name: "display fallback", efforts: []any{"medium", "low"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			models := []modelInfo{{ModelId: "next", Meta: map[string]any{
+				"supportsReasoningEffort": true,
+				"reasoningEfforts":        tc.efforts,
+			}}}
+			a := grokAdapterWithModels(t, models, []streams.ConfigOption{
+				{ID: configOptionIDModel, Category: configOptionIDModel, CurrentValue: "previous"},
+				{ID: configOptionIDReasoningEffort, CurrentValue: "high"},
+			})
+			peer := &fakeGrokSetModelConn{}
+			require.NoError(t, a.setModelWithConn(t.Context(), peer, a.sessionID, "next"))
+			require.Len(t, peer.reqs, 1)
+			require.Empty(t, peer.reqs[0].Meta)
+			event := findSessionModelsEvent(t, drainEvents(a))
+			require.Equal(t, "medium", currentGrokEffortFromConfig(event.ConfigOptions))
+			require.Equal(t, tc.verified, event.VerifiedConfigOptionIDs)
+			require.Equal(t, tc.verified, a.GetSessionModelState().VerifiedConfigOptionIDs)
+		})
+	}
+}

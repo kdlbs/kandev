@@ -5342,7 +5342,8 @@ func (s *Service) persistSessionModelAndRuntimeConfigWithSettlementAndAttempt(
 	if model != "" {
 		s.persistSessionModelOnSession(ctx, sessionID, session, model)
 	}
-	if !s.persistSessionRuntimeConfigOnSession(ctx, session, model, mode, runtimeOptions) && runtimeOptions.complete {
+	persisted := s.persistSessionRuntimeConfigOnSession(ctx, session, model, mode, runtimeOptions)
+	if !persisted && (identity.SettingsGeneration > 0 || runtimeOptions.complete) {
 		return false
 	}
 	s.persistSessionModelsSnapshot(ctx, sessionID, session, model, availableModels, options, configOptionsSettled, identity, "")

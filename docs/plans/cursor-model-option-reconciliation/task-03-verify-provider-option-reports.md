@@ -66,6 +66,9 @@ check setup, correlated model reply, and live update. The fixture includes a
 supported boolean with value `false`. The ACP v1 test covers projection loss.
 Extend Grok's existing model-switch tests for models with and without
 Reasoning Effort. Keep their stale-session cases.
+Exercise both legacy convergence setters after load and check that the
+synchronous snapshot retains the display-only marker until the next load.
+Check Grok's advertised default and its display fallback separately.
 
 ## Verification
 
@@ -78,6 +81,9 @@ go test -trimpath -tags fts5 -p=2 -count=1 -timeout=20m \
   ./internal/agentctl/server/api \
   ./internal/agent/runtime/agentctl
 go test -trimpath -tags fts5 -p=1 -count=1 ./internal/agentctl/types/streams
+go test -trimpath -tags fts5 -p=2 -count=1 -timeout=20m \
+  ./internal/agentctl/acpcompat \
+  ./internal/agentctl/server/adapter/transport/acp
 ```
 
 ## Likely files
@@ -102,3 +108,7 @@ The ACP v1 red check returned no evidence for the non-Cursor fixture. The
 ACP v2 red check found no completeness marker on the setup event.
 The ACP v1, ACP v2, agentctl API, runtime agentctl, and stream types package
 suites passed after the evidence changes.
+
+The review checks reproduced missing provenance after both convergence setters
+and a Grok display fallback marked as verified. Both cases passed after the
+fix in the [full review verification](plan.md#verification-results).

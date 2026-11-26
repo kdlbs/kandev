@@ -870,6 +870,7 @@ func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 		Models:                    cloneSessionModels(convertSessionModels(a.availableModels)),
 		ConfigOptions:             cloneConfigOptions(a.availableConfigOptions),
 		SessionSettingsGeneration: a.sessionSettingsGeneration,
+		ConfigOptionsDisplayOnly:  a.modelCatalog.displayOnly,
 	}
 	if a.modelCatalog.generation != 0 {
 		state.CurrentModelID = a.modelCatalog.modelID

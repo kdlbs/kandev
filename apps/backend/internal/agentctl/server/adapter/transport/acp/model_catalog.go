@@ -8,10 +8,11 @@ import (
 )
 
 type modelCatalogEvidence struct {
-	modelID    string
-	generation uint64
-	complete   bool
-	verified   []string
+	modelID     string
+	generation  uint64
+	complete    bool
+	verified    []string
+	displayOnly bool
 }
 
 func (a *Adapter) stampModelCatalogLocked(event *AgentEvent, raw []acp.SessionConfigOption, reportedModelID string) {
@@ -51,6 +52,7 @@ func (a *Adapter) recordModelCatalogLocked(event *AgentEvent, verified []string,
 	}
 	a.modelCatalog = modelCatalogEvidence{
 		modelID: event.CurrentModelID, generation: event.SessionSettingsGeneration, complete: complete,
+		displayOnly: a.modelCatalog.displayOnly,
 	}
 	if complete {
 		event.Data[streams.ConfigOptionsCompleteKey] = true

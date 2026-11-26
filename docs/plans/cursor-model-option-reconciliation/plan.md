@@ -86,11 +86,11 @@ defines the evidence and the storage boundary.
 
 | Source | Evidence | Startup and persistence behavior |
 | --- | --- | --- |
-| Cursor ACP v1 typed setup for the active native session | Identified model and complete option IDs | Replay when this is the effective setup. Reconcile after startup settles. |
-| Cursor ACP v1 typed setter reply | Correlated model and complete option IDs | Replay supported options without waiting for the lifecycle event. Reconcile via the accepted event. |
-| Cursor ACP v1 typed update | Matching native session and a fresh settings generation for the selected model | Use within the startup wait. A later accepted report can reconcile the saved map. |
-| Cursor acknowledgment, partial projection, or older agentctl | Missing qualified catalog | Defer unverified options. Preserve omitted saved keys. |
-| Other agents and transports | Existing replay and settings contracts | Existing cross-agent filtering, explicit recovery, and Pi coverage guard those paths. |
+| ACP v1 or v2 typed setup | Identified model and complete option IDs | Replay from the current setup. Reconcile after startup settles. |
+| ACP v1 or v2 typed setter reply | Correlated model and complete option IDs | Replay supported options as soon as the reply arrives. Reconcile via the accepted event. |
+| Delayed provider report | Matching native session and a fresh settings generation for the effective model | Use within the startup wait, including a resume that keeps the same model. A later accepted report can reconcile the saved map. |
+| Partial provider report, such as Grok's verified reasoning value | Individually verified entries | Replay and save verified entries. Preserve omitted saved keys. |
+| Copied display options or an acknowledgment with missing evidence | No verified entries | Defer replay and keep the saved values. |
 
 Task 03 adds provider-neutral evidence to the existing agentctl results and
 events. Task 04 replaces the Cursor gates in the consumers. A partial report
@@ -144,6 +144,26 @@ option calls, and transcript for the reported warning.
 - All eight package suites for provider-neutral replay and persistence passed.
   The lifecycle suite passed after the profile fixture supplied the active
   model's options. The final focused lifecycle checks and Go lint passed.
+- The review regressions reproduced lost display provenance, a guessed
+  reasoning value treated as evidence, missed late setup options, and a
+  partial write that could not be retried. All nine suites below passed after
+  remediation. The spec catalog, spec lint, and PR document coverage checks
+  passed again.
+
+Run the review verification from `apps/backend`.
+
+```bash
+go test -trimpath -tags fts5 -p=2 -count=1 -timeout=20m \
+  ./internal/agentctl/acpcompat \
+  ./internal/agentctl/server/adapter/transport/acp \
+  ./internal/agentctl/server/adapter/transport/acpv2 \
+  ./internal/agentctl/server/api \
+  ./internal/agentctl/types/streams \
+  ./internal/agent/runtime/agentctl \
+  ./internal/agent/runtime/lifecycle \
+  ./internal/orchestrator \
+  ./internal/orchestrator/executor
+```
 
 ## Risks
 

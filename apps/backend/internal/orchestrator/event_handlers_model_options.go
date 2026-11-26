@@ -15,14 +15,7 @@ func runtimeOptionsFromModelEvent(payload *runtimeapi.AgentStreamEventPayload, s
 	data, _ := event.Data.(map[string]any)
 	complete, _ := data[streams.ConfigOptionsCompleteKey].(bool)
 	displayOnly, _ := data[streams.ConfigOptionsDisplayOnlyKey].(bool)
-	if displayOnly {
-		// A successful legacy setter confirms only the option it changed.
-		id, _ := data[streams.ConfigOptionsConfigIDKey].(string)
-		if id == "" {
-			return runtimeConfigOptionsUpdate{}
-		}
-		return runtimeConfigOptionsUpdate{options: streams.ConfigOptionsForIDs(event.ConfigOptions, []string{id})}
-	}
+	complete = complete && !displayOnly
 	if complete || len(event.VerifiedConfigOptionIDs) > 0 {
 		if _, valid := streams.ModelConfigOptionIDs(event.CurrentModelID, event.ConfigOptions); !valid ||
 			event.ACPSessionID == "" || event.SessionSettingsGeneration == 0 {
@@ -32,6 +25,14 @@ func runtimeOptionsFromModelEvent(payload *runtimeapi.AgentStreamEventPayload, s
 			return runtimeConfigOptionsUpdate{options: event.ConfigOptions, complete: true}
 		}
 		return runtimeConfigOptionsUpdate{options: streams.ConfigOptionsForIDs(event.ConfigOptions, event.VerifiedConfigOptionIDs)}
+	}
+	if displayOnly {
+		// A successful legacy setter confirms only the option it changed.
+		id, _ := data[streams.ConfigOptionsConfigIDKey].(string)
+		if id == "" {
+			return runtimeConfigOptionsUpdate{}
+		}
+		return runtimeConfigOptionsUpdate{options: streams.ConfigOptionsForIDs(event.ConfigOptions, []string{id})}
 	}
 	switch source {
 	case streams.ConfigOptionsSourceSessionSetup, streams.ConfigOptionsSourceProviderResponse, streams.ConfigOptionsSourceProviderUpdate:

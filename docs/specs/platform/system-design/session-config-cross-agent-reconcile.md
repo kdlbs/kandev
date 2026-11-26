@@ -82,16 +82,15 @@ verify the entries it preserves. Deletion requires the complete set of IDs.
 [ACP v1 session options](https://agentclientprotocol.com/protocol/v1/session-config-options)
 [ACP v2 session options](https://agentclientprotocol.com/protocol/v2/session-config-options)
 
-Legacy transports can verify individual options from provider evidence. For
-example, Grok's model metadata can establish which reasoning choices belong to
-the confirmed model. Mark only entries supported by that evidence when the
-display list also contains cached options. A synthetic model-switch event can
-update the displayed model. Its copied option IDs supply no evidence.
+Legacy transports can verify individual options from provider evidence. Grok
+can verify a reasoning value accepted by the model setter or supplied by the
+target model's metadata. A fallback used for display supplies no value
+evidence. Mark only verified entries when the list also contains cached options.
 
-Carry the verified entries and completeness through the existing agentctl
-configuration result, setup model state, and `session_models` event. Missing
-evidence from older helpers is unknown. The replay and persistence consumers
-use this contract for every agent.
+Carry verified entries, completeness, and display-only provenance through the
+agentctl setup model state and `session_models` event. Carry correlated setter
+evidence in the configuration result. Missing evidence from older helpers is
+unknown. The replay and persistence consumers use this contract for every agent.
 
 ### Startup replay
 
@@ -100,8 +99,10 @@ policy. Use verified options from the correlated model setter or a newer
 provider report for that model and native session. Read the agentctl client
 before the ordered lifecycle dispatcher. Use the existing bounded wait when
 saved settings need evidence from a delayed report. Reject evidence superseded
-by a report of another active model or session. Use the current setup report
-when startup keeps its model, including options advertised by legacy setup.
+by a report of another active model or session. When startup keeps its model,
+use the current setup report or wait within the same budget for a report that
+supplies the options. A synchronous snapshot of copied display options can
+supply only independently verified entries.
 
 Filter both saved option layers by the verified IDs. Defer unverified options
 when evidence is missing. Keep the order and values of supported writes, the
@@ -123,11 +124,12 @@ ID. The value `"false"` is a reported value. Use the same path when the saved
 model already equals the reported model, including legacy rows cleaned during
 ordinary resume.
 
-A partial report can update an explicitly observed value for its model. Its
-omissions preserve saved values. Copied display options supply no values to
-the saved map. Use current metadata for concurrent model-only writes so they
-preserve the reconciled map. Record the catalog generation after the runtime
-write succeeds. Duplicate events then converge on the same option map.
+A partial report can update an explicitly observed value for its model, even
+when the same event contains copied display options. Only verified entries
+from that report update the saved map. Omissions preserve saved values. Use
+current metadata for concurrent model-only writes so they preserve the
+reconciled map. Record the generation of a sequenced event after the runtime
+write succeeds. Redelivery can retry a failed write at the same generation.
 
 The provider-derived map belongs to `runtime_config`. Profiles,
 `runtime_config_overrides`, the original effective settings, and the baseline

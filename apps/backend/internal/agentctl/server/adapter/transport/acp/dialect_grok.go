@@ -21,7 +21,6 @@ func newGrokACPDialect() acpDialect {
 	return acpDialect{
 		normalizeSessionConfig: grokNormalizeSessionConfig,
 		configAfterModelChange: grokConfigAfterModelChange,
-		modelOptionEvidence:    grokModelOptionEvidence,
 		modelChangeRequest:     grokModelChangeRequest,
 		configChangeRequest:    grokConfigChangeRequest,
 		suppressNotification: func(notification acp.SessionNotification) bool {
@@ -65,16 +64,8 @@ func grokConfigAfterModelChange(
 	config []streams.ConfigOption,
 	models []modelInfo,
 	modelID string,
-) []streams.ConfigOption {
+) ([]streams.ConfigOption, []string) {
 	return acpcompat.ConfigAfterModelChange(grokAgentID, config, toCompatModels(models), modelID)
-}
-
-func grokModelOptionEvidence(config []streams.ConfigOption, models []modelInfo, modelID string) []string {
-	effort := currentGrokEffortFromConfig(config)
-	if _, err := acpcompat.ValidateGrokReasoningEffort(toCompatModels(models), modelID, effort); err != nil {
-		return nil
-	}
-	return []string{configOptionIDReasoningEffort}
 }
 
 func grokModelChangeRequest(change dialectConfigChange) (*dialectRPC, error) {

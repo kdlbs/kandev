@@ -66,21 +66,40 @@ func testRuntimeConfigReconcilesVerifiedCatalog(t *testing.T, agentID string) {
 		require.Empty(t, readRuntimeOptions(t, repo).ConfigOptions)
 	})
 
-	t.Run("new report can retry a runtime write", func(t *testing.T) {
-		repo, svc, _ := newRuntimeOptionsFixture(t, "sonnet")
-		failing := &runtimeOptionsFailingRepo{Repository: repo}
-		svc.repo = failing
-		report := modelOptionReport(t, agentID, 1, true, false)
-		svc.handleSessionModelsEvent(t.Context(), report)
-		require.Contains(t, readRuntimeOptions(t, repo).ConfigOptions, "fast")
-		svc.handleSessionModelsEvent(t.Context(), report)
-		require.NotContains(t, readRuntimeOptions(t, repo).ConfigOptions, "fast")
+	t.Run("redelivery can retry a runtime write", func(t *testing.T) {
+		testRuntimeOptionWriteRetry(t, agentID)
 	})
+}
+
+func testRuntimeOptionWriteRetry(t *testing.T, agentID string) {
+	t.Helper()
+	for _, tc := range []struct {
+		name     string
+		complete bool
+	}{
+		{name: "complete", complete: true},
+		{name: "verified subset"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, svc, _ := newRuntimeOptionsFixture(t, "sonnet")
+			svc.repo = &runtimeOptionsFailingRepo{Repository: repo}
+			report := modelOptionReport(t, agentID, 1, tc.complete, false, "reasoning_effort")
+			svc.handleSessionModelsEvent(t.Context(), report)
+			require.Equal(t, "low", readRuntimeOptions(t, repo).ConfigOptions["reasoning_effort"])
+
+			svc.handleSessionModelsEvent(t.Context(), report)
+			options := readRuntimeOptions(t, repo).ConfigOptions
+			require.Equal(t, "medium", options["reasoning_effort"])
+			_, retained := options["fast"]
+			require.Equal(t, !tc.complete, retained)
+		})
+	}
 }
 
 func TestRuntimeConfigUpdatesOnlyVerifiedPartialOptions(t *testing.T) {
 	repo, svc, _ := newRuntimeOptionsFixture(t, "opus")
 	report := modelOptionReport(t, "generic-acp", 1, false, false, "reasoning_effort")
+	report.Data.Data = map[string]any{streams.ConfigOptionsDisplayOnlyKey: true}
 	svc.handleSessionModelsEvent(t.Context(), report)
 	options := readRuntimeOptions(t, repo).ConfigOptions
 	require.Equal(t, "medium", options["reasoning_effort"])

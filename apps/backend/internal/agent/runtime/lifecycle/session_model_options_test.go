@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -47,6 +48,48 @@ func TestStartupCatalogRetainsSameModelSetup(t *testing.T) {
 	require.Equal(t, setup.ConfigOptions, catalog.ConfigOptions)
 	latest.CurrentModelID = "opus"
 	require.Nil(t, startupCatalogWithoutSwitch(&latest, nil, setup, modelOptionsTestNativeID, "sonnet"))
+	require.Nil(t, startupCatalogWithoutSwitch(&latest, nil, &latest, modelOptionsTestNativeID, "opus"))
+}
+
+func TestStartupCatalogWaitsForCurrentSetupOptions(t *testing.T) {
+	for _, tc := range []struct {
+		name, sessionID, modelID string
+	}{
+		{name: "current session and model", sessionID: modelOptionsTestNativeID, modelID: "sonnet"},
+		{name: "different session", sessionID: "other-session", modelID: "sonnet"},
+		{name: "different model", sessionID: modelOptionsTestNativeID, modelID: "opus"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				setup := &streams.SessionModelState{
+					SessionID: modelOptionsTestNativeID, CurrentModelID: "sonnet", SessionSettingsGeneration: 1,
+				}
+				delayed := &streams.SessionModelState{
+					SessionID: tc.sessionID, CurrentModelID: tc.modelID, SessionSettingsGeneration: 2,
+					ConfigOptionsComplete: true, ConfigOptions: []streams.ConfigOption{{ID: "reasoning_effort"}},
+				}
+				selection := startupModelSelection{
+					beforeSelection: setup, decision: ModelSelectionDecision{EffectiveModel: setup.CurrentModelID},
+				}
+				now := time.Now()
+				catalog := waitForStartupModelCatalog(t.Context(), modelOptionsTestNativeID, selection,
+					func() (*streams.SessionModelState, *streams.SessionModelState) {
+						if time.Since(now) >= freshSessionModelStatePoll {
+							return delayed, delayed
+						}
+						return setup, nil
+					},
+				)
+				if tc.sessionID == setup.SessionID && tc.modelID == setup.CurrentModelID {
+					require.NotNil(t, catalog)
+					require.Equal(t, delayed.ConfigOptions, catalog.ConfigOptions)
+				} else {
+					require.Nil(t, catalog)
+					require.GreaterOrEqual(t, time.Since(now), freshSessionModelStateWait)
+				}
+			})
+		})
+	}
 }
 
 func TestInitializeAndPromptWithLayersModelScopedReplay(t *testing.T) {

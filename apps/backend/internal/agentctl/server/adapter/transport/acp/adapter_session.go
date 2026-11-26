@@ -1279,7 +1279,7 @@ func (a *Adapter) emitSetModelEvent(
 			}
 		}
 	}
-	outConfig = a.dialect.modelConfigAfterChange(outConfig, cachedModels, modelID)
+	outConfig, verified := a.dialect.modelConfigAfterChange(outConfig, cachedModels, modelID)
 	a.mu.Lock()
 	if a.sessionID != sessionID || a.closed ||
 		(len(expectedGeneration) > 0 && a.configGeneration != expectedGeneration[0]) {
@@ -1298,7 +1298,7 @@ func (a *Adapter) emitSetModelEvent(
 		// just-applied model in the convergence event.
 		a.availableConfigOptions = outConfig
 	}
-	a.modelCatalog = modelCatalogEvidence{}
+	a.modelCatalog = modelCatalogEvidence{displayOnly: true}
 	if tracker := a.usageBySession[sessionID]; tracker != nil {
 		tracker.maxSize = 0
 	}
@@ -1313,7 +1313,7 @@ func (a *Adapter) emitSetModelEvent(
 		SessionSettingsGeneration: a.sessionSettingsGeneration,
 		Data:                      map[string]any{streams.ConfigOptionsDisplayOnlyKey: true},
 	}
-	a.recordModelCatalogLocked(&event, a.dialect.verifiedModelOptions(outConfig, cachedModels, modelID), false)
+	a.recordModelCatalogLocked(&event, verified, false)
 	a.mu.Unlock()
 
 	a.logger.Info("emitting session_models convergence event after SetModel",
@@ -2154,7 +2154,7 @@ func (a *Adapter) emitSetConfigOptionEventWithPolicy(
 		return
 	}
 	a.availableConfigOptions = outConfig
-	a.modelCatalog = modelCatalogEvidence{}
+	a.modelCatalog = modelCatalogEvidence{displayOnly: true}
 	a.sessionSettingsGeneration++
 	event := AgentEvent{
 		Type:                      streams.EventTypeSessionModels,

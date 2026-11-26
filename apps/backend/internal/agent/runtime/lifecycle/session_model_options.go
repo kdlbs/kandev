@@ -47,20 +47,27 @@ func startupModelCatalog(ctx context.Context, execution *AgentExecution, session
 	if client == nil {
 		return nil
 	}
+	return waitForStartupModelCatalog(ctx, sessionID, selection, client.GetSessionModelEvidence)
+}
+
+func waitForStartupModelCatalog(
+	ctx context.Context,
+	sessionID string,
+	selection startupModelSelection,
+	readEvidence func() (*streams.SessionModelState, *streams.SessionModelState),
+) *CachedModelState {
 	modelID := selection.decision.EffectiveModel
 	result := selection.configuration
 	if result.Confirmed && result.Effective != "" {
 		modelID = result.Effective
 	}
-	latest, verified := client.GetSessionModelEvidence()
+	latest, verified := readEvidence()
 	if result.Confirmed && matchesStartupCatalog(result.ModelState, latest, sessionID, modelID, selection.previousGeneration) &&
 		(verified == nil || verified.SessionSettingsGeneration <= result.ModelState.SessionSettingsGeneration) {
 		return startupCatalogFromReport(result.ModelState)
 	}
-	if !selection.switchedModel(modelID) {
-		return startupCatalogWithoutSwitch(latest, verified, selection.beforeSelection, sessionID, modelID)
-	}
-	if modelID == "" {
+	switched := selection.switchedModel(modelID)
+	if switched && modelID == "" {
 		return nil
 	}
 
@@ -69,8 +76,11 @@ func startupModelCatalog(ctx context.Context, execution *AgentExecution, session
 	ticker := time.NewTicker(freshSessionModelStatePoll)
 	defer ticker.Stop()
 	for {
-		latest, verified := client.GetSessionModelEvidence()
-		if matchesStartupCatalog(verified, latest, sessionID, modelID, selection.previousGeneration) {
+		if !switched {
+			if catalog := startupCatalogWithoutSwitch(latest, verified, selection.beforeSelection, sessionID, modelID); catalog != nil {
+				return catalog
+			}
+		} else if matchesStartupCatalog(verified, latest, sessionID, modelID, selection.previousGeneration) {
 			return startupCatalogFromReport(verified)
 		}
 		select {
@@ -78,6 +88,7 @@ func startupModelCatalog(ctx context.Context, execution *AgentExecution, session
 			return nil
 		case <-ticker.C:
 		}
+		latest, verified = readEvidence()
 	}
 }
 
@@ -95,11 +106,16 @@ func startupCatalogWithoutSwitch(latest, verified, setup *streams.SessionModelSt
 		(verified == nil || verified.SessionSettingsGeneration <= setup.SessionSettingsGeneration) {
 		latest = setup
 	}
-	if latest == nil || latest.SessionID != sessionID || latest.ConfigOptionsDisplayOnly ||
-		latest.HasConfigOptionEvidence() || (modelID != "" && latest.CurrentModelID != modelID) {
+	return startupCatalogFromLegacySetup(latest, sessionID, modelID)
+}
+
+func startupCatalogFromLegacySetup(state *streams.SessionModelState, sessionID, modelID string) *CachedModelState {
+	if state == nil || state.SessionID != sessionID || state.ConfigOptionsDisplayOnly ||
+		state.HasConfigOptionEvidence() || (modelID != "" && state.CurrentModelID != modelID) ||
+		(len(state.ConfigOptions) == 0 && !state.ConfigOptionsSettled) {
 		return nil
 	}
-	return cachedModelStateFromStream(latest)
+	return cachedModelStateFromStream(state)
 }
 
 func matchesStartupCatalog(report, latest *streams.SessionModelState, sessionID, modelID string, afterGeneration uint64) bool {
