@@ -26,7 +26,7 @@ The Office automation service owns retry policy, durable retry-group identity, a
 - The automation lifecycle worker periodically discovers due automations, obtains a durable run claim, and dispatches the attempt through the existing automation service.
 - Retry admission and task operations persist the intent before creating a task. The operation ledger makes task creation recoverable across process interruption.
 - The WebSocket/API handlers expose retry policy, group controls, and bounded history to the web client.
-- `retry-policy-section.tsx` edits the policy and history mode. The automation editor owns target-aware visibility and resetting; the retry-mode selector shares card-state styles with the other automation radio-card sections.
+- `retry-policy-section.tsx` edits the policy and history mode. The automation editor owns target-aware visibility and resetting; the retry-mode selector uses the shared segmented choice.
 
 ## Frontend editor behavior
 
@@ -43,11 +43,12 @@ editor presents the disabled draft but retains the persisted policy in its
 dirty baseline. The reset therefore remains visibly unsaved until the operator
 saves; loading the editor does not write to the API.
 
-Retry-mode radio cards share the selected primary border/background and
-unselected neutral-border/hover treatment used by Context between runs and Run
-destination. Their RadioGroup semantics remain unchanged. On phones, the cards
-stay full width and at least 44 pixels high; selected styling remains the touch
-feedback, while hover is desktop-only.
+Retry modes use the shared `SegmentedChoice` described in the
+[editor layout design](automations-settings-04.md#segmented-choice), like Task
+for each run and Run destination. Each mode keeps its earlier element ID. On
+phones the modes stack full width and are at least 44 pixels high; the
+selected state remains the touch feedback. Attempt, delay, backoff, and
+history settings render only while the mode is not `disabled`.
 
 This is an editor and payload contract. It adds no API shape or backend
 dispatch change and leaves managed conversation delivery retries unchanged.

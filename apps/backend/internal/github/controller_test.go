@@ -79,6 +79,9 @@ func (s *stubClient) FindPRByBranch(context.Context, string, string, string) (*P
 func (s *stubClient) ListAuthoredPRs(context.Context, string, string) ([]*PR, error) {
 	return nil, nil
 }
+func (s *stubClient) ListOpenPRs(context.Context, string, string) ([]*PR, bool, error) {
+	return nil, true, nil
+}
 func (s *stubClient) SearchPRs(context.Context, string, string) ([]*PR, error) {
 	return nil, nil
 }

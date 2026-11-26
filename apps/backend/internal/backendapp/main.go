@@ -917,6 +917,10 @@ func startAgentInfrastructure(
 		orchestratorSvc.SetAutomationService(services.Automation.Service)
 		services.Automation.Service.SetRunStopper(orchestratorSvc)
 		services.Automation.Service.SetRunLivenessChecker(orchestratorSvc)
+		services.Automation.Service.SetPRTaskController(orchestratorSvc)
+		if services.Task != nil {
+			orchestratorSvc.SetAutomationPRTaskLifecycle(services.Task)
+		}
 	}
 
 	// Wire GitHub service into orchestrator for PR auto-detection on push

@@ -34,12 +34,15 @@ type exportAutomation struct {
 	Enabled            bool                                  `yaml:"enabled"`
 	MaxConcurrentRuns  int                                   `yaml:"max_concurrent_runs"`
 	ContinuationPolicy ContinuationPolicy                    `yaml:"continuation_policy"`
+	PRMergedAction     PREndAction                           `yaml:"pr_merged_action,omitempty"`
+	PRClosedAction     PREndAction                           `yaml:"pr_closed_action,omitempty"`
 	TaskMode           TaskMode                              `yaml:"task_mode"`
 	ManagedDestination *exportManagedConversationDestination `yaml:"managed_destination,omitempty"`
 	RepositoryMode     RepositoryMode                        `yaml:"repository_mode"`
 	RetryPolicy        exportRetryPolicy                     `yaml:"retry_policy"`
 	TaskTitleTemplate  string                                `yaml:"task_title_template,omitempty"`
 	Prompt             *yaml.Node                            `yaml:"prompt,omitempty"`
+	FollowUpPrompt     *yaml.Node                            `yaml:"follow_up_prompt,omitempty"`
 	AgentProfile       *exportAgentProfile                   `yaml:"agent_profile,omitempty"`
 	ExecutorProfile    *exportExecutorProfile                `yaml:"executor_profile,omitempty"`
 	Workflow           *exportWorkflow                       `yaml:"workflow,omitempty"`
@@ -83,8 +86,9 @@ type exportExecutorProfile struct {
 // workflow resolves but the step does not, or when no step was ever referenced
 // (AC-19).
 type exportWorkflow struct {
-	Name string `yaml:"name"`
-	Step string `yaml:"step,omitempty"`
+	Name             string `yaml:"name"`
+	Step             string `yaml:"step,omitempty"`
+	ContinuationStep string `yaml:"continuation_step,omitempty"`
 }
 
 // exportTrigger is a single trigger's exported form. Key order is pinned by AC-40:
