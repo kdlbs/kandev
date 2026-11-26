@@ -5,7 +5,7 @@ import React, { useCallback, useEffect } from "react";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { CanvasHostRoute } from "@/components/settings/canvas-host-route";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
@@ -37,6 +37,7 @@ import { TerminalPanel } from "./terminal-panel";
 import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
 import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
+import { useRemovalChatBlocked } from "./dockview-session-removal-focus";
 import { useTranslation } from "react-i18next";
 
 /** Resolve the chat panel's tab title: the session's agent label when present,
@@ -84,12 +85,16 @@ function ChatContent({
   params: Record<string, unknown>;
   workspaceId?: string | null;
 }) {
+  const appStore = useAppStoreApi();
+  const api = useDockviewStore((state) => state.api);
+  const blocked = useRemovalChatBlocked(api, appStore, panelId);
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = paramSessionId ?? storeSessionId;
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const isVisible = usePanelActive(panelId);
-  const { openFile } = useFileEditors(isVisible);
+  const detailVisible = isVisible && !blocked;
+  const { openFile } = useFileEditors(detailVisible);
   const addDiffViewerPanel = useDockviewStore((state) => state.addDiffViewerPanel);
   const setSelectedDiff = useDockviewStore((state) => state.setSelectedDiff);
   const isPassthrough = useAppStore((state) =>
@@ -104,29 +109,36 @@ function ChatContent({
     [addDiffViewerPanel, setSelectedDiff],
   );
 
-  if (isPassthrough) {
-    return (
-      <PanelRoot>
-        <PanelBody padding={false} scroll={false}>
-          <PassthroughToolbar sessionId={sessionId} taskId={taskId} />
-        </PanelBody>
-      </PanelRoot>
-    );
-  }
   return (
-    <TaskChatPanel
-      sessionId={sessionId}
-      taskId={sessionId ? taskId : null}
-      workspaceId={workspaceId}
-      statusTaskId={taskId}
-      onOpenFile={openFile}
-      onOpenHistoricalDiff={handleOpenHistoricalDiff}
-      onOpenFileAtLine={openFile}
-      hideSessionsDropdown
-      isVisible={isVisible}
-      detailActive={isVisible}
-      panelId={panelId}
-    />
+    <div className={blocked ? "hidden" : "contents"} aria-hidden={blocked || undefined}>
+      {isPassthrough ? (
+        <PanelRoot>
+          <PanelBody padding={false} scroll={false}>
+            <PassthroughToolbar
+              sessionId={sessionId}
+              taskId={taskId}
+              isVisible={detailVisible}
+              detailActive={detailVisible}
+              panelId={panelId}
+            />
+          </PanelBody>
+        </PanelRoot>
+      ) : (
+        <TaskChatPanel
+          sessionId={sessionId}
+          taskId={sessionId ? taskId : null}
+          workspaceId={workspaceId}
+          statusTaskId={taskId}
+          onOpenFile={openFile}
+          onOpenHistoricalDiff={handleOpenHistoricalDiff}
+          onOpenFileAtLine={openFile}
+          hideSessionsDropdown
+          isVisible={detailVisible}
+          detailActive={detailVisible}
+          panelId={panelId}
+        />
+      )}
+    </div>
   );
 }
 

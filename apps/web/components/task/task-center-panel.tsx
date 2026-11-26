@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState, useEffect, useMemo, type RefObject } from "react";
+import { memo, useCallback, useState, useEffect, type RefObject } from "react";
 import { IconCheck, IconChevronDown, IconX } from "@tabler/icons-react";
 import { TabsContent } from "@kandev/ui/tabs";
 import { Button } from "@kandev/ui/button";
@@ -21,17 +21,10 @@ import type { RenameAdapter } from "@/hooks/file-rename-continuity";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { isRenameReserved, treePath } from "@/hooks/file-rename-continuity";
-import { SessionTabs, type SessionTab } from "@/components/session-tabs";
-import { executeApprove } from "@/lib/services/session-approve";
-import { getActiveTabForSession, setActiveTabForSession } from "@/lib/local-storage";
-import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
-import { calculateHash } from "@/lib/utils/file-diff";
+import { SessionTabs } from "@/components/session-tabs";
+import { useTabletSessionTab } from "@/hooks/domains/session/use-tablet-session-tab";
 import { useToast } from "@/components/toast-provider";
 import { useFileSaveDelete } from "./task-center-panel-restoration";
-import { useNormalizedTaskReviews } from "./review-panel-provider";
-import { useReviewItemSelection } from "./review-selection";
 import {
   getFileTabKey,
   upsertOpenFileTab,
@@ -39,6 +32,16 @@ import {
 } from "./task-center-panel-file-tabs";
 import { TaskCenterReviewContent } from "./task-center-review-content";
 import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
+import { tabletSelectionOwner, hasPendingTabletFileOpen } from "@/lib/state/tablet-file-authority";
+import { usePendingTabletFileOpen } from "@/hooks/domains/session/use-tablet-file-admission";
+import {
+  useCenterPanelGitChanges,
+  useCenterPanelTabs,
+  useLiveFileTabs,
+  useSessionApprove,
+  useTabletFileRequest,
+  useTaskReview,
+} from "./task-center-panel-state";
 
 import type { SelectedDiff } from "./task-layout";
 import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
@@ -54,72 +57,82 @@ type TaskCenterPanelProps = {
   renameAdapter?: RefObject<RenameAdapter | null>;
 };
 
-function useSessionApprove(activeSessionId: string | null, activeTaskId: string | null) {
-  const activeSession = useAppStore((state) =>
-    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
-  );
-  const setTaskSession = useAppStore((state) => state.setTaskSession);
-  const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
-  const isPassthroughMode = useMemo(() => isPassthroughSession(activeSession), [activeSession]);
-  const showApproveButton =
-    !!activeSession?.review_status && activeSession.review_status !== "approved" && !isAgentWorking;
-  const handleApprove = useCallback(async () => {
-    if (!activeSessionId || !activeTaskId) return;
-    try {
-      await executeApprove(activeSessionId, activeTaskId, setTaskSession);
-    } catch (error) {
-      console.error("Failed to approve session:", error);
-    }
-  }, [activeSessionId, activeTaskId, setTaskSession]);
-  return { activeSession, isPassthroughMode, showApproveButton, handleApprove };
-}
-
 function useLeftTabState(
   activeSessionId: string | null,
   hasChanges: boolean | undefined,
   onActiveFileChange?: (filePath: string | null) => void,
+  hasReviews?: boolean,
+  reviewsLoading?: boolean,
 ) {
-  const [leftTab, setLeftTab] = useState(() => {
-    if (typeof window !== "undefined" && activeSessionId) {
-      const savedTab = getActiveTabForSession(activeSessionId, "chat");
-      if (savedTab === "chat" || savedTab === "changes") return savedTab;
-    }
-    return "chat";
-  });
+  const [leftTab, setLeftTab] = useTabletSessionTab(activeSessionId);
+  const store = useAppStoreApi();
   const [showRequestChangesTooltip, setShowRequestChangesTooltip] = useState(false);
+  const pendingFile = usePendingTabletFileOpen(activeSessionId);
 
   useEffect(() => {
-    if (leftTab === "changes" && !hasChanges) queueMicrotask(() => setLeftTab("chat"));
-  }, [leftTab, hasChanges]);
+    if (leftTab !== "changes" || hasChanges !== false || !activeSessionId || pendingFile) return;
+    let current = true;
+    const owner = tabletSelectionOwner(store, activeSessionId);
+    queueMicrotask(() => {
+      if (
+        current &&
+        !hasPendingTabletFileOpen(store, activeSessionId) &&
+        store.getState().tabletSession.activeTabBySessionId[activeSessionId] === "changes" &&
+        tabletSelectionOwner(store, activeSessionId) === owner
+      )
+        setLeftTab("chat");
+    });
+    return () => {
+      current = false;
+    };
+  }, [leftTab, hasChanges, setLeftTab, store, activeSessionId, pendingFile]);
+  useEffect(() => {
+    if (
+      leftTab !== "pr" ||
+      reviewsLoading ||
+      hasReviews !== false ||
+      !activeSessionId ||
+      pendingFile
+    )
+      return;
+    let current = true;
+    const owner = tabletSelectionOwner(store, activeSessionId);
+    queueMicrotask(() => {
+      if (
+        current &&
+        !hasPendingTabletFileOpen(store, activeSessionId) &&
+        store.getState().tabletSession.activeTabBySessionId[activeSessionId] === "pr" &&
+        tabletSelectionOwner(store, activeSessionId) === owner
+      )
+        setLeftTab("chat");
+    });
+    return () => {
+      current = false;
+    };
+  }, [leftTab, hasReviews, reviewsLoading, setLeftTab, store, activeSessionId, pendingFile]);
   useEffect(() => {
     const handler = () => {
       if (hasChanges) setLeftTab("changes");
     };
     window.addEventListener("switch-to-changes-tab", handler);
     return () => window.removeEventListener("switch-to-changes-tab", handler);
-  }, [hasChanges]);
+  }, [hasChanges, setLeftTab]);
   useEffect(() => {
     const handler = () => setLeftTab("files");
     window.addEventListener("switch-to-files-tab", handler);
     return () => window.removeEventListener("switch-to-files-tab", handler);
-  }, []);
+  }, [setLeftTab]);
   useEffect(() => {
     if (leftTab.startsWith("file:")) onActiveFileChange?.(leftTab.replace("file:", ""));
     else onActiveFileChange?.(null);
   }, [leftTab, onActiveFileChange]);
 
-  const handleTabChange = useCallback(
-    (tab: string) => {
-      setLeftTab(tab);
-      if (activeSessionId) setActiveTabForSession(activeSessionId, tab);
-    },
-    [activeSessionId],
-  );
+  const handleTabChange = setLeftTab;
   const handleRequestChanges = useCallback(() => {
     setLeftTab("chat");
     setShowRequestChangesTooltip(true);
     setTimeout(() => setShowRequestChangesTooltip(false), 5000);
-  }, []);
+  }, [setLeftTab]);
   return {
     leftTab,
     setLeftTab,
@@ -133,19 +146,23 @@ function useLeftTabState(
 type FileTabOperationsOptions = {
   activeSessionId: string | null;
   openFileTabs: OpenFileTab[];
+  fileTabsRef: RefObject<OpenFileTab[]>;
   setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
   setLeftTab: (tab: string) => void;
   handleTabChange: (tab: string) => void;
   leftTab: string;
+  retireFile: (file: OpenFileTab) => void;
 };
 
 function useFileTabOperations({
   activeSessionId,
   openFileTabs,
+  fileTabsRef,
   setOpenFileTabs,
   setLeftTab,
   handleTabChange,
   leftTab,
+  retireFile,
 }: FileTabOperationsOptions) {
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -161,11 +178,16 @@ function useFileTabOperations({
         return;
       }
       const requestedPath = treePath(fileTab);
-      const existing = openFileTabs.find((tab) => requestedPath && treePath(tab) === requestedPath);
-      setOpenFileTabs((prev) => upsertOpenFileTab(prev, fileTab));
-      setLeftTab(`file:${getFileTabKey(existing ?? fileTab)}`);
+      const next = upsertOpenFileTab(fileTabsRef.current, fileTab);
+      setOpenFileTabs(next);
+      const selected = next.find(
+        (tab) =>
+          getFileTabKey(tab) === getFileTabKey(fileTab) ||
+          (requestedPath !== null && treePath(tab) === requestedPath),
+      );
+      if (selected) setLeftTab(`file:${getFileTabKey(selected)}`);
     },
-    [activeSessionId, store, t, toast, openFileTabs, setOpenFileTabs, setLeftTab],
+    [activeSessionId, store, t, toast, fileTabsRef, setOpenFileTabs, setLeftTab],
   );
 
   const handleOpenFileFromChat = useTaskCenterFileOpen({
@@ -176,6 +198,12 @@ function useFileTabOperations({
 
   const handleCloseFileTab = useCallback(
     (fileKey: string, instanceId?: symbol) => {
+      const closing = openFileTabs.find(
+        (file: FileEditorTab) =>
+          getFileTabKey(file) === fileKey &&
+          (instanceId === undefined || file.instanceId === instanceId),
+      );
+      if (closing) retireFile(closing);
       setOpenFileTabs((prev) =>
         prev.filter(
           (tab: FileEditorTab) =>
@@ -185,7 +213,7 @@ function useFileTabOperations({
       );
       if (leftTab === `file:${fileKey}`) handleTabChange("chat");
     },
-    [leftTab, handleTabChange, setOpenFileTabs],
+    [leftTab, handleTabChange, setOpenFileTabs, openFileTabs, retireFile],
   );
 
   const handleFileChange = useCallback(
@@ -232,64 +260,6 @@ function useFileTabOperations({
   };
 }
 
-function useCenterPanelTabs(
-  openFileTabs: OpenFileTab[],
-  handleCloseFileTab: (fileKey: string) => void,
-  hasChanges: boolean | undefined,
-  reviewLabel: string | null,
-) {
-  const { t } = useTranslation();
-  const tabs: SessionTab[] = useMemo(() => {
-    const staticTabs: SessionTab[] = [
-      ...(hasChanges ? [{ id: "changes", label: t("task:allChanges") }] : []),
-      { id: "chat", label: t("task:chat") },
-      ...(reviewLabel ? [{ id: "pr", label: reviewLabel }] : []),
-    ];
-    const fileTabs: SessionTab[] = openFileTabs.map((tab) => ({
-      id: `file:${getFileTabKey(tab)}`,
-      label: tab.isDirty ? `${tab.name} *` : tab.name,
-      icon: tab.isDirty ? <span className="h-2 w-2 rounded-full bg-yellow-500" /> : undefined,
-      closable: true,
-      onClose: (e: React.MouseEvent) => {
-        e.stopPropagation();
-        handleCloseFileTab(getFileTabKey(tab));
-      },
-      className: "cursor-pointer group gap-1.5 data-[state=active]:bg-muted",
-    }));
-    return [...staticTabs, ...fileTabs];
-  }, [openFileTabs, handleCloseFileTab, hasChanges, reviewLabel, t]);
-  const separatorAfterIndex = useMemo(() => {
-    if (openFileTabs.length === 0) return undefined;
-    const staticCount = (hasChanges ? 1 : 0) + 1 + (reviewLabel ? 1 : 0);
-    return staticCount - 1;
-  }, [openFileTabs.length, hasChanges, reviewLabel]);
-  return { tabs, separatorAfterIndex };
-}
-
-function useTaskReview(taskId: string | null) {
-  const { t } = useTranslation();
-  const reviews = useNormalizedTaskReviews(taskId);
-  const { selectedReview, selectReview } = useReviewItemSelection(taskId, reviews);
-  return {
-    reviews,
-    selectedReview,
-    selectReview,
-    reviewLabel: reviewLabelForReviews(reviews, t),
-  };
-}
-
-function reviewLabelForReviews(
-  reviews: readonly { providerId: string }[],
-  t: (key: string, options?: { count: number }) => string,
-): string | null {
-  if (reviews.length === 0) return null;
-  if (reviews.length > 1) return t("task:reviewsCount", { count: reviews.length });
-  const providerId = reviews[0]?.providerId;
-  if (providerId === "github") return t("task:pullRequest2");
-  if (providerId === "gitlab") return t("task:mergeRequestLabel");
-  return t("task:review");
-}
-
 function useCenterPanelState(props: TaskCenterPanelProps) {
   const {
     selectedDiff: externalSelectedDiff,
@@ -300,18 +270,14 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
   } = props;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const gitStatus = useSessionGitStatus(activeSessionId);
-  const { commits } = useSessionCommits(activeSessionId);
-  const hasChanges = useMemo(() => {
-    const hasUncommittedChanges = gitStatus?.files && Object.keys(gitStatus.files).length > 0;
-    return (hasUncommittedChanges || (commits && commits.length > 0)) as boolean;
-  }, [gitStatus, commits]);
+  const hasChanges = useCenterPanelGitChanges(activeSessionId);
   const { activeSession, isPassthroughMode, showApproveButton, handleApprove } = useSessionApprove(
     activeSessionId,
     activeTaskId,
   );
-  const { reviews, selectedReview, selectReview, reviewLabel } = useTaskReview(activeTaskId);
-  const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
+  const { reviews, reviewsLoading, selectedReview, selectReview, reviewLabel } =
+    useTaskReview(activeTaskId);
+  const [openFileTabs, setOpenFileTabs, fileTabsRef] = useLiveFileTabs();
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const {
     leftTab,
@@ -320,22 +286,31 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     setShowRequestChangesTooltip,
     handleTabChange,
     handleRequestChanges,
-  } = useLeftTabState(activeSessionId, hasChanges, onActiveFileChange);
-  useTabletFileState({
+  } = useLeftTabState(
+    activeSessionId,
+    hasChanges,
+    onActiveFileChange,
+    reviews.length > 0,
+    reviewsLoading,
+  );
+  const { retireFile } = useTabletFileState({
     adapter: props.renameAdapter,
     session: activeSessionId,
     tabs: openFileTabs,
     setTabs: setOpenFileTabs,
+    tabsRef: fileTabsRef,
     selected: leftTab,
     setSelected: setLeftTab,
   });
   const fileTabOps = useFileTabOperations({
     activeSessionId,
     openFileTabs,
+    fileTabsRef,
     setOpenFileTabs,
     setLeftTab,
     handleTabChange,
     leftTab,
+    retireFile,
   });
   const { tabs, separatorAfterIndex } = useCenterPanelTabs(
     openFileTabs,
@@ -354,19 +329,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     }
   }, [externalSelectedDiff, onDiffHandled, setLeftTab]);
 
-  useEffect(() => {
-    if (!openFileRequest) return;
-    queueMicrotask(async () => {
-      const hash = openFileRequest.originalHash || (await calculateHash(openFileRequest.content));
-      fileTabOps.addFileTab({
-        ...openFileRequest,
-        originalContent: openFileRequest.originalContent || openFileRequest.content,
-        originalHash: hash,
-        isDirty: openFileRequest.isDirty ?? false,
-      });
-      onFileOpenHandled();
-    });
-  }, [openFileRequest, onFileOpenHandled, fileTabOps.addFileTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  useTabletFileRequest(openFileRequest, onFileOpenHandled, fileTabOps.addFileTab);
 
   return {
     activeTaskId,

@@ -8,13 +8,12 @@ type SessionTabActivationIntent = {
 
 const sessionTabActivationIntents = new Map<string, SessionTabActivationIntent>();
 
-export function shouldMarkSessionTabUserActivationIntent(args: {
+export function shouldActivateSessionTabFromInput(args: {
   sessionId: string | null | undefined;
   activeSessionId: string | null | undefined;
-  isActive: boolean;
   target: EventTarget | null;
 }): boolean {
-  if (!args.sessionId || args.isActive || args.sessionId === args.activeSessionId) return false;
+  if (!args.sessionId || args.sessionId === args.activeSessionId) return false;
   if (typeof Element === "undefined" || !(args.target instanceof Element)) return true;
   return !args.target.closest(NESTED_INTERACTIVE_SELECTOR);
 }

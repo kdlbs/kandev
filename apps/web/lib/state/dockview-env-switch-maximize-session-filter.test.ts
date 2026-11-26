@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 import type { LayoutState } from "./layout-manager";
 import { performLayoutSwitch, useDockviewStore } from "./dockview-store";
+import {
+  hideSessionPanel,
+  clearHiddenSessionPanel,
+} from "@/components/task/dockview-hidden-session-panels";
 
 vi.mock("@/lib/local-storage", () => ({
   getEnvLayout: vi.fn(() => null),
@@ -483,6 +487,43 @@ function preserveRestoringStateAfterEnvironmentSwitch(): void {
     requestFrame.mockRestore();
   }
 }
+
+it("keeps a visit-local hide made while maximized out of the restored layout", async () => {
+  const original = useDockviewStore.getState();
+  const api = makeMockApi();
+  const layout: LayoutState = {
+    columns: [
+      {
+        id: "center",
+        groups: [
+          {
+            id: CENTER_GROUP_ID,
+            activePanel: "session:a",
+            panels: ["a", "b"].map((id) => ({ id: `session:${id}`, component: "chat", title: id })),
+          },
+        ],
+      },
+    ],
+  };
+  vi.mocked(fromDockviewApi).mockReturnValue(layout);
+  useDockviewStore.setState({ api, preMaximizeLayout: null, currentLayoutEnvId: null });
+  try {
+    useDockviewStore.getState().maximizeGroup(CENTER_GROUP_ID);
+    await flushRaf();
+    hideSessionPanel(api, "b", "task");
+    useDockviewStore.getState().exitMaximizedLayout();
+    await flushRaf();
+    expect(vi.mocked(api.fromJSON).mock.lastCall![0].panels).not.toHaveProperty("session:b");
+    clearHiddenSessionPanel(api, "b");
+    useDockviewStore.getState().maximizeGroup(CENTER_GROUP_ID);
+    await flushRaf();
+    useDockviewStore.getState().exitMaximizedLayout();
+    await flushRaf();
+    expect(vi.mocked(api.fromJSON).mock.lastCall![0].panels).toHaveProperty("session:b");
+  } finally {
+    useDockviewStore.setState(original);
+  }
+});
 
 describe("environment-switch maximize session filtering", () => {
   beforeEach(() => {

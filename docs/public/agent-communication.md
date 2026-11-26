@@ -548,6 +548,7 @@ Kandev normalizes the object, omits empty optional strings, and validates the de
 - `disposition: "deferred"` means the source session is `RUNNING` or `STARTING` and a step change waits for the turn to end. Deferred options persist through the turn boundary, WIP promotion, and backend restart.
 - `disposition: "applied"` means a step change committed immediately, or the task was already at the requested workflow and step with no entry options. In that same-step case, Kandev returns the stored task without retrying or changing its position.
 - Every result includes `task`. An optioned step change also returns `move_id` and the accepted `entry_options`.
+- `workflow_focus_disposition: "none"` means that committed entry planned no session focus: it had no active source and no effective auto-start, including skip-prompt entries without instructions. A deferred launch that can still supply a session keeps this field omitted. It is correlated by `workflow_entry_identity`. Omission leaves recipient resolution unknown; do not infer no recipient from missing route metadata.
 - The top-level `prompt` remains an alias for `entry_options.instructions`. If both are non-empty, validation fails.
 - A prompt or `entry_options` is rejected for a manual destination, such as Waiting, Blocked, or Done, even when the task has a session. A manual step starts no work on entry.
 

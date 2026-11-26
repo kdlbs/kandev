@@ -53,5 +53,7 @@ it("opens the session that contains the conversation match", () => {
       },
     }),
   );
-  expect(mockPush).toHaveBeenLastCalledWith("/t/found?sessionId=matching-session");
+  expect(mockPush).toHaveBeenLastCalledWith("/t/found?sessionId=matching-session", {
+    taskSessionActivation: { taskId: "found", sessionId: "matching-session" },
+  });
 });

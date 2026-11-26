@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OpenFileTab } from "@/lib/types/backend";
-import { upsertOpenFileTab } from "./task-center-panel-file-tabs";
+import { upsertOpenFileTab, mergeRestoredFileTabs } from "./task-center-panel-file-tabs";
 
 const file: OpenFileTab = {
   path: "README.md",
@@ -78,4 +78,14 @@ describe("upsertOpenFileTab", () => {
     expect(result[0]?.path).toBe("file1.md");
     expect(result[3]).toMatchObject(newFile);
   });
+});
+
+it("keeps live editors at capacity when older restoration finishes", () => {
+  const live = Array.from({ length: 4 }, (_, index) => ({
+    ...file,
+    path: `live-${index}`,
+    isDirty: true,
+    instanceId: Symbol(),
+  }));
+  expect(mergeRestoredFileTabs(live, [file])).toBe(live);
 });

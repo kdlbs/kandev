@@ -46,13 +46,12 @@ import {
   type BuiltInLayoutProfileId,
   type CreateLayoutProfileInput,
 } from "@/lib/layout/layout-profiles";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
 import type { SavedLayout } from "@/lib/types/http";
-import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
-import { resolveLayoutApplySessionIds } from "./layout-preset-selector-session-ids";
+import { useApplySavedLayout } from "@/hooks/domains/session/use-apply-saved-layout";
 import { SavedLayoutDeleteConfirmation } from "./saved-layout-delete-confirmation";
 import { useSavedLayoutMutations } from "./use-saved-layout-mutations";
 import { useTranslation } from "react-i18next";
@@ -289,47 +288,6 @@ function BuiltInPresetItems({ onApply }: { onApply: (presetId: BuiltInLayoutProf
       </DropdownMenuItem>
     );
   });
-}
-
-function useApplySavedLayout() {
-  const applyCustomLayout = useDockviewStore((s) => s.applyCustomLayout);
-  const currentLayoutEnvId = useDockviewStore((s) => s.currentLayoutEnvId);
-  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const appStore = useAppStoreApi();
-  const { isLoaded: taskSessionsLoaded, loadSessions } = useTaskSessions(activeTaskId);
-
-  return useCallback(
-    async (layout: SavedLayout) => {
-      const sessionIds = await resolveLayoutApplySessionIds({
-        activeTaskId,
-        activeSessionId,
-        sessionsLoaded: taskSessionsLoaded,
-        loadSessions,
-        getSessionsForTask: (taskId) =>
-          appStore.getState().taskSessionsByTask.itemsByTaskId[taskId] ?? [],
-      });
-      applyCustomLayout(
-        {
-          id: layout.id,
-          name: layout.name,
-          isDefault: layout.is_default,
-          layout: layout.layout,
-          createdAt: layout.created_at,
-        },
-        { activeSessionId, sessionIds, envId: currentLayoutEnvId },
-      );
-    },
-    [
-      activeSessionId,
-      activeTaskId,
-      appStore,
-      applyCustomLayout,
-      currentLayoutEnvId,
-      loadSessions,
-      taskSessionsLoaded,
-    ],
-  );
 }
 
 function useApplyBuiltInLayout(

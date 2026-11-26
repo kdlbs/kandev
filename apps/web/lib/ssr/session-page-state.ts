@@ -386,10 +386,16 @@ function resolveTaskSessionId(
   const requestedSession = requestedSessionId
     ? ownedSessions.find((session) => session.id === requestedSessionId)
     : undefined;
+  const membershipPrimaries = ownedSessions.filter((session) => session.is_primary);
   const primarySession = task.primary_session_id
     ? ownedSessions.find((session) => session.id === task.primary_session_id)
     : undefined;
-  return requestedSession?.id ?? primarySession?.id ?? ownedSessions[0]?.id ?? null;
+  return (
+    requestedSession?.id ??
+    (membershipPrimaries.length === 1 ? membershipPrimaries[0].id : primarySession?.id) ??
+    ownedSessions[0]?.id ??
+    null
+  );
 }
 
 /** Builds task identity and lightweight session state before optional resources settle. */
