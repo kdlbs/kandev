@@ -39,13 +39,23 @@ Compare the rendered views with the [plan previews](plan.md). Verify an unflagge
 
 ## Verification and results
 
-Run from the repository root after implementation:
+The focused commands below passed.
+
+From `apps/backend`:
 
 ```sh
-make -C apps/backend test
-make test-e2e
+go test -trimpath -race ./internal/task/handlers ./internal/backendapp -run 'TestTaskFieldUpdatesRegisteredProtocols|TestMapKanbanTaskStateIncludesTaskLabels' -count=1
+go test -race ./internal/persistence/storeconformance -count=1
 ```
 
-The task now stores and publishes its flag note. Desktop and phone use the same editor and task update path. Both the task and Office table-rebuild migrations preserve existing flags.
+The SQLite and PostgreSQL checks covered flag persistence, upgrade replay, and writes from older task snapshots.
 
-Focused verification passed for the desktop and phone Playwright flows, frontend state propagation, editor error recovery, translations, and TypeScript. The backend checks covered registered HTTP and WebSocket updates, SQLite and PostgreSQL persistence, schema replay, and late writes from an older task snapshot. The two full-suite commands above were not run.
+From `apps/web`, with freshly built E2E artifacts:
+
+```sh
+pnpm e2e:raw --project=chromium --project=mobile-chrome e2e/tests/task/sidebar-task-flags.spec.ts e2e/tests/task/mobile-sidebar-task-flags.spec.ts
+pnpm run typecheck
+pnpm run i18n:check
+```
+
+The local runs exercised the changed paths. The repository-wide backend and E2E suites run in the [PR checks](https://github.com/kdlbs/kandev/pull/5536/checks). Merge requires passing CI.

@@ -53,7 +53,7 @@ export function TaskFlagEditor({
   return (
     <Dialog open onOpenChange={draft.close}>
       <DialogContent
-        className="sm:max-w-sm"
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain sm:max-w-sm"
         aria-describedby={undefined}
         showCloseButton={false}
         enterConfirms={false}
@@ -133,7 +133,9 @@ function TaskFlagForm({
           value={note}
           rows={3}
           maxLength={TASK_FLAG_NOTE_MAX_LENGTH}
-          className={touch ? "resize-none md:text-base" : "resize-none"}
+          className={
+            touch ? "md:text-base" : "max-h-[min(16rem,40dvh)] overflow-y-auto overscroll-contain"
+          }
           readOnly={readOnly || saving}
           onChange={(event) => setNote(event.target.value)}
         />

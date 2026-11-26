@@ -96,7 +96,6 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		{"task_sessions.admitted_execution_grade", `ALTER TABLE task_sessions ADD COLUMN admitted_execution_grade TEXT NOT NULL DEFAULT ''`},
 		{"task_sessions.admitted_execution_grade_known", `ALTER TABLE task_sessions ADD COLUMN admitted_execution_grade_known INTEGER NOT NULL DEFAULT 0`},
 		{"tasks.execution_grade", `ALTER TABLE tasks ADD COLUMN execution_grade TEXT NOT NULL DEFAULT ''`},
-		{"tasks.flag_note", `ALTER TABLE tasks ADD COLUMN flag_note TEXT NOT NULL DEFAULT ''`},
 		{"control_server_records.process_id", `ALTER TABLE control_server_records ADD COLUMN process_id INTEGER NOT NULL DEFAULT 0`},
 		{"control_server_records.process_group_id", `ALTER TABLE control_server_records ADD COLUMN process_group_id INTEGER NOT NULL DEFAULT 0`},
 		{"control_server_records.process_session_id", `ALTER TABLE control_server_records ADD COLUMN process_session_id INTEGER NOT NULL DEFAULT 0`},
@@ -1279,6 +1278,9 @@ func (r *Repository) recreateTableNamed(name, tableName, triggerPhrase string, s
 // migrateTasksRemoveWorkflowFK removes the foreign key constraint on workflow_id
 // to allow ephemeral tasks (quick chat) to have empty workflow_id.
 func (r *Repository) migrateTasksRemoveWorkflowFK() error {
+	if err := r.migrate.Apply("tasks.flag_note", `ALTER TABLE tasks ADD COLUMN flag_note TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	if err := r.migrate.Apply("tasks.executor_actor_user_id", "ALTER TABLE tasks ADD COLUMN executor_actor_user_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
