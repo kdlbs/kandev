@@ -1,6 +1,6 @@
 ---
 created: 2026-11-24
-status: complete
+status: implemented
 requirements:
   - REQ-UI-FIRST-RUN-DIALOG-001
   - REQ-TASKS-TASK-RELATIONSHIP-GRAPH-009

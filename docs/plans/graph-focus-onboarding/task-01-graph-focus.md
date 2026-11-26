@@ -23,13 +23,28 @@ system_design:
 2. Extend the existing sidebar action in `apps/web/e2e/tests/task/task-graph.spec.ts`. Remove the fixture's completion marker after the task page loads. Click Show in graph. Assert the node receives focus, the onboarding dialog stays hidden, and the marker stays absent.
 3. Update the open prop in `apps/web/app/page-client.tsx` to read the current search parameters with the existing graph-focus constant from `apps/web/lib/links.ts`. Keep existing completion handlers and phone routing.
 
-Run each command from the repository root. Run the PageClient test before and after the fix. Build the web bundle, backend binaries, and E2E fixtures before running Playwright with `--no-build`.
+Run the commands from the repository root. In a fresh worktree, install dependencies first. Run the PageClient test before and after the fix. The first Playwright command builds the backend binaries, web bundle, and E2E fixtures. The second command reuses them.
 
 ```sh
+systemd-run --user --scope -p MemoryMax=8G pnpm --dir apps install --frozen-lockfile
 systemd-run --user --scope -p MemoryMax=8G pnpm --dir apps/web exec vitest run app/page-client.test.tsx
-systemd-run --user --scope -p MemoryMax=8G pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project chromium tests/task/task-graph.spec.ts
+systemd-run --user --scope -p MemoryMax=8G pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/task/task-graph.spec.ts
 systemd-run --user --scope -p MemoryMax=8G pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-task-graph.spec.ts tests/office/mobile-onboarding-dialog.spec.ts
+systemd-run --user --scope -p MemoryMax=8G python3 scripts/list-docs.py validate
+systemd-run --user --scope -p MemoryMax=8G python3 scripts/lint-spec-files.py --all
 ```
+
+If the managed build hits the memory cap while compiling the send-now fixture, build the artifacts separately. The graph and onboarding tests do not execute that fixture.
+
+```sh
+systemd-run --user --scope -p MemoryMax=8G make -C apps/backend build build-e2e-delivery-fixture
+GOMAXPROCS=2 GOMEMLIMIT=4GiB systemd-run --user --scope -p MemoryMax=8G make -C apps/backend "GOFLAGS=-p=2 '-gcflags=github.com/kandev/kandev/internal/orchestrator=-N -l'" build-e2e-send-now-fixture
+systemd-run --user --scope -p MemoryMax=8G pnpm --dir apps --filter @kandev/web build:e2e
+systemd-run --user --scope -p MemoryMax=8G make -C apps/backend e2e-plugin-ui e2e-plugin-package
+systemd-run --user --scope -p MemoryMax=8G pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project chromium tests/task/task-graph.spec.ts
+```
+
+After opening the pull request, run `gh pr checks` from its branch and check the `PR documentation coverage` result.
 
 ## ASCII UI preview
 
