@@ -1,8 +1,9 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { BackendContext } from "../../fixtures/backend";
 import type { SeedData } from "../../fixtures/test-base";
 import type { CreateTaskResponse } from "../../lib/types/http";
 import type { ApiClient, QueueSessionIdentityInput } from "../../helpers/api-client";
+import { assertVerticalCentersAligned } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 import { waitForSessionState } from "../workflow/queued-session-ownership-helpers";
 
@@ -14,15 +15,64 @@ export type MessageCapacityFixture = {
   releaseCeiling: () => Promise<void>;
 };
 
+const CAPACITY_NOTICE = "Message queued because the session limit was reached.";
+export const CAPACITY_AUTO_RUN = "It will send automatically when capacity is available.";
+export const CAPACITY_AUTO_RUN_OFF = "Turn on Auto-run to send it automatically.";
+
+export function capacityNotice(session: SessionPage): Locator {
+  return session.activeChat().getByTestId("chat-input-area").getByTestId("queue-capacity-notice");
+}
+
+export async function expectCollapsedCapacityNotice(
+  session: SessionPage,
+  autoRunCopy: typeof CAPACITY_AUTO_RUN | typeof CAPACITY_AUTO_RUN_OFF,
+): Promise<void> {
+  const chat = session.activeChat();
+  await expect(chat.getByTestId("queue-chip")).toBeVisible();
+  await expect(chat.getByTestId("queued-ghost-list")).toBeHidden();
+  const notice = capacityNotice(session);
+  await expect(notice).toHaveCount(1);
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText(CAPACITY_NOTICE);
+  await expect(notice).toContainText("The current session limit is 1.");
+  await expect(notice).toContainText(autoRunCopy);
+  await expect(notice).not.toContainText(
+    autoRunCopy === CAPACITY_AUTO_RUN ? CAPACITY_AUTO_RUN_OFF : CAPACITY_AUTO_RUN,
+  );
+  await expect(chat.getByRole("status").filter({ hasText: CAPACITY_NOTICE })).toHaveCount(1);
+
+  const hasYellowBackground = await notice.evaluate((element) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext("2d")!;
+    context.fillStyle = getComputedStyle(element).backgroundColor;
+    context.fillRect(0, 0, 1, 1);
+    const [red = 0, green = 0, blue = 0, alpha = 0] = context.getImageData(0, 0, 1, 1).data;
+    return alpha > 0 && red >= green && green > blue;
+  });
+  expect(hasYellowBackground, "capacity notice has a yellow background").toBe(true);
+  await assertVerticalCentersAligned(
+    notice.locator("svg"),
+    notice.getByText(CAPACITY_NOTICE),
+    "capacity notice clock and text",
+  );
+}
+
 const TARGET_DESCRIPTION = "/e2e:simple-message";
 
-async function waitForAgentMessage(
+export async function expectOneAgentReply(
   apiClient: ApiClient,
-  sessionId: string,
+  fixture: MessageCapacityFixture,
   marker: string,
-  count = 1,
-  timeout = 60_000,
 ): Promise<void> {
+  const reply = fixture.session
+    .activeChat()
+    .getByTestId("agent-message-highlight")
+    .filter({ hasText: marker });
+  await expect(reply).toHaveCount(1, { timeout: 60_000 });
+  await expect(reply).toBeVisible();
+
+  const sessionId = fixture.target.session_id;
   await expect
     .poll(
       async () => {
@@ -32,11 +82,11 @@ async function waitForAgentMessage(
         ).length;
       },
       {
-        timeout,
-        message: `session ${sessionId} never produced ${count} response(s) for ${marker}`,
+        timeout: 60_000,
+        message: `session ${sessionId} must persist one response for ${marker}`,
       },
     )
-    .toBe(count);
+    .toBe(1);
 }
 
 /**
@@ -133,9 +183,9 @@ export async function cleanupMessageCapacityFixture(
 }
 
 export async function submitFollowUp(
-  page: Page,
   fixture: MessageCapacityFixture,
   marker: string,
+  isMobile: boolean,
 ): Promise<void> {
   const chat = fixture.session.activeChat();
   const editor = chat.getByTestId("chat-input-editor");
@@ -143,8 +193,7 @@ export async function submitFollowUp(
   await expect(editor).toHaveAttribute("contenteditable", "true");
   await editor.fill(`e2e:message("${marker}")`);
   await expect(submit).toBeEnabled();
-  await submit.click();
+  if (isMobile) await submit.tap();
+  else await submit.click();
   await expect(editor).toHaveText("");
 }
-
-export { waitForAgentMessage };

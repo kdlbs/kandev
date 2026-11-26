@@ -16,6 +16,17 @@ export const OPTIONAL_AUTOMATION_PACKAGES = [
   "walkthroughs",
   "diagnostics",
 ] as const;
+/** Open the editor's collapsed Tools row, which holds MCP access and plugin tools. */
+export async function openAutomationTools(page: Page, touch = false) {
+  const toggle = page.getByTestId("automation-agent-tools-toggle");
+  await expect(toggle).toBeVisible({ timeout: 15_000 });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    if (touch) await toggle.tap();
+    else await toggle.click();
+  }
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
+
 /** Choose a package through the same list/detail interaction used by task settings. */
 export async function chooseAutomationPackage(
   page: Page,
@@ -92,6 +103,7 @@ export async function verifyAutomationMCPRepositoryInheritance({
   expect(loaded.repository_ids).toEqual([primary.id, omitted.id]);
   const watcher = watchWs(testPage);
   await testPage.goto(`/settings/workspaces/${workspace.id}/automations/${automation.id}`);
+  await openAutomationTools(testPage, touch);
   const section = testPage.getByTestId("automation-mcp-access");
   const direct = section.getByTestId(`automation-mcp-server-${server.id}`).getByRole("checkbox");
   await expect(section.getByText("Retained repository reports (inherited)")).toBeVisible();
@@ -110,6 +122,7 @@ export async function verifyAutomationMCPRepositoryInheritance({
   expect(saved.repository_ids).toEqual([primary.id]);
   expect(saved.mcp_selection?.definition_ids).toEqual([server.id]);
   await testPage.reload();
+  await openAutomationTools(testPage, touch);
   await expect(direct).toBeChecked();
   expect(
     (await apiClient.getMCPSelections("repository", omitted.id, workspace.id)).definition_ids,
@@ -169,6 +182,7 @@ export async function verifyAutomationMCPRecovery({
   );
   expect(blocked.ok).toBe(true);
   await testPage.goto(`/settings/workspaces/${recovery.workspaceId}/automations/${automation.id}`);
+  await openAutomationTools(testPage);
   const section = testPage.getByTestId("automation-mcp-access");
   const configuration = section.getByTestId("automation-mcp-package-configuration");
   await expect(

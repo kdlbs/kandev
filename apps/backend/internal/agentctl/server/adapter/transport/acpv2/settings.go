@@ -10,16 +10,24 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
+const modelOptionCategory = "model"
+
 func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.session == "" {
 		return nil
 	}
-	model := optionForCategory(a.settings, "model")
+	return a.sessionModelStateLocked()
+}
+
+func (a *Adapter) sessionModelStateLocked() *streams.SessionModelState {
+	model := optionForCategory(a.settings, modelOptionCategory)
 	return &streams.SessionModelState{
+		SessionID: string(a.session), SessionSettingsGeneration: a.revision,
 		CurrentModelID: model.CurrentValue, Models: sessionModels(model),
 		ConfigOptions: slices.Clone(a.settings), ConfigOptionsSettled: true,
+		ConfigOptionsComplete: a.settingsComplete, VerifiedConfigOptionIDs: slices.Clone(a.verifiedOptionIDs),
 	}
 }
 
@@ -38,7 +46,7 @@ func (a *Adapter) SetModel(ctx context.Context, id string) error {
 }
 
 func (a *Adapter) SetModelWithResult(ctx context.Context, id string) (streams.ConfigurationResult, error) {
-	return a.setOption(ctx, "", "model", id)
+	return a.setOption(ctx, "", modelOptionCategory, id)
 }
 
 func (a *Adapter) SetMode(ctx context.Context, id string) (streams.ModeResult, error) {
@@ -77,12 +85,18 @@ func (a *Adapter) setOption(ctx context.Context, id, category, value string) (st
 	var data map[string]any
 	if result.Confirmed {
 		data = map[string]any{
-			streams.ConfigOptionsSourceKey: "provider_response",
-			"config_options_config_id":     result.ConfigID,
+			streams.ConfigOptionsSourceKey:   streams.ConfigOptionsSourceProviderResponse,
+			streams.ConfigOptionsConfigIDKey: result.ConfigID,
 		}
 	}
 	a.project(func(batch *eventBatch) {
 		a.projectSettings(reply.ConfigOptions, streams.SessionSettingsPolicyFromContext(ctx), data, batch)
+		if result.Confirmed && (option.Category == modelOptionCategory || option.ID == modelOptionCategory) {
+			state := a.sessionModelStateLocked()
+			if state.HasConfigOptionEvidence() {
+				result.ModelState = state
+			}
+		}
 	})
 	return result, nil
 }
@@ -131,11 +145,24 @@ func (a *Adapter) projectSettings(
 		}
 	}
 	a.revision++
-	model, mode := optionForCategory(a.settings, "model"), optionForCategory(a.settings, "mode")
+	model, mode := optionForCategory(a.settings, modelOptionCategory), optionForCategory(a.settings, "mode")
+	ids, valid := streams.ModelConfigOptionIDs(model.CurrentValue, a.settings)
+	a.settingsComplete = valid && len(ids) == len(options)
+	a.verifiedOptionIDs = nil
+	if valid && !a.settingsComplete {
+		a.verifiedOptionIDs = ids
+	}
+	if a.settingsComplete {
+		if data == nil {
+			data = make(map[string]any)
+		}
+		data[streams.ConfigOptionsCompleteKey] = true
+	}
 	event := streams.AgentEvent{
 		Type: streams.EventTypeSessionModels, SessionID: string(a.session), SessionSettingsPolicy: policy,
 		SessionSettingsGeneration: a.revision, CurrentModelID: model.CurrentValue, SessionModels: sessionModels(model),
 		ConfigOptions: slices.Clone(a.settings), Data: data,
+		VerifiedConfigOptionIDs: slices.Clone(a.verifiedOptionIDs),
 	}
 	batch.add(event)
 	if mode.ID == "" {
@@ -182,7 +209,7 @@ func appendChoices(options []streams.ConfigOptionValue, choices []wire.ConfigSel
 
 func optionForCategory(options []streams.ConfigOption, category string) streams.ConfigOption {
 	for _, option := range options {
-		if option.Category == category {
+		if option.Category == category || (category == modelOptionCategory && option.ID == category) {
 			return option
 		}
 	}

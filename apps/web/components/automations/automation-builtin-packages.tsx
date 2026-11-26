@@ -113,6 +113,14 @@ export function AutomationBuiltinPackages({
             disabled={disabled}
             blocked={Boolean(blocked)}
           />
+          {item.id === "configuration" && (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="automation-mcp-configuration-grant"
+            >
+              {t("automations:mcpConfigurationGrant")}
+            </p>
+          )}
           <BuiltinPackageInformation item={item} />
         </section>
       ) : (

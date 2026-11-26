@@ -5166,7 +5166,7 @@ func (h *Handlers) publishQueueStatusEvent(
 		"session_incarnation_id": status.SessionIncarnationID,
 		"status_epoch":           status.StatusEpoch,
 		"status_generation":      status.StatusGeneration,
-		"entries":                status.Entries,
+		"entries":                status.ProjectedEntries(),
 		"count":                  status.Count,
 		"max":                    status.Max,
 		"auto_run":               status.AutoRun,

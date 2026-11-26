@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { openAutomationTools } from "../../helpers/automation-mcp";
 import {
   installFixturePlugin,
   PLUGIN_ID,
@@ -44,6 +45,7 @@ test.describe("Mobile automation plugin tools", () => {
       `/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`,
     );
     await expect(testPage.getByTestId("automation-editor")).toBeVisible({ timeout: 15_000 });
+    await openAutomationTools(testPage, true);
 
     const readRow = testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-list_findings`);
     const writeRow = testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-complete_report`);
@@ -59,6 +61,7 @@ test.describe("Mobile automation plugin tools", () => {
     await writeRow.tap();
     await saveChanges(testPage);
     await testPage.reload();
+    await openAutomationTools(testPage, true);
     await expect(
       testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-list_findings`).getByRole("checkbox"),
     ).toBeChecked({ timeout: 15_000 });
@@ -69,6 +72,7 @@ test.describe("Mobile automation plugin tools", () => {
     await testPage.getByTestId(`plugin-tools-clear-${PLUGIN_ID}`).tap();
     await saveChanges(testPage);
     await testPage.reload();
+    await openAutomationTools(testPage, true);
     await expect(
       testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-list_findings`).getByRole("checkbox"),
     ).not.toBeChecked({ timeout: 15_000 });

@@ -6,6 +6,7 @@ import Link from "@/components/routing/app-link";
 import { useWorkspaceAutomations } from "@/components/runs/use-workspace-automations";
 import { useAutomationSummaries } from "@/components/runs/use-automation-summaries";
 import { useLiveRefresh } from "@/components/runs/use-live-refresh";
+import { useAutomationRunRecorded } from "@/components/runs/use-automation-run-recorded";
 import { buildAutomationRows } from "@/components/runs/automation-rows";
 import { AUTOMATIONS_HREF } from "@/components/runs/runs-view";
 import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
@@ -83,6 +84,7 @@ function MobileAutomationRows({
   const list = useWorkspaceAutomations(workspaceId);
   const activity = useAutomationSummaries(workspaceId);
   useLiveRefresh(true, activity.refresh);
+  useAutomationRunRecorded(workspaceId, undefined, activity.refresh);
   const rows = buildAutomationRows(list.automations, activity.summaries);
   const pending = list.loading || activity.loading;
   const error = list.error || activity.error;

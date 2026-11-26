@@ -161,21 +161,40 @@ func (s *Service) resolveWorkflow(ctx context.Context, tx *sqlx.Tx, a *Automatio
 		return nil, "unresolved workflow", nil
 	}
 	result := &exportWorkflow{Name: wf.Name}
-	if a.WorkflowStepID == "" {
-		return result, "", nil
+	warning := ""
+	for _, ref := range []struct {
+		id   string
+		name *string
+	}{{a.WorkflowStepID, &result.Step}, {a.PRContinuationStepID, &result.ContinuationStep}} {
+		name, resolved, err := s.resolveExportStepName(ctx, tx, a.WorkflowID, ref.id)
+		if err != nil {
+			return nil, "", err
+		}
+		if !resolved {
+			warning = warnUnresolvedWorkflowStep
+		}
+		*ref.name = name
+	}
+	return result, warning, nil
+}
+
+// resolveExportStepName returns a step's name. An empty stepID references
+// nothing and resolves silently; a step outside workflowID is unresolved.
+func (s *Service) resolveExportStepName(ctx context.Context, tx *sqlx.Tx, workflowID, stepID string) (string, bool, error) {
+	if stepID == "" {
+		return "", true, nil
 	}
 	if s.exportWorkflowStepLookup == nil {
-		return nil, "", fmt.Errorf("%w: workflow step", ErrExportLookupUnavailable)
+		return "", false, fmt.Errorf("%w: workflow step", ErrExportLookupUnavailable)
 	}
-	step, stepFound, err := s.exportWorkflowStepLookup.GetStepTx(ctx, tx, a.WorkflowStepID)
+	step, stepFound, err := s.exportWorkflowStepLookup.GetStepTx(ctx, tx, stepID)
 	if err != nil {
-		return nil, "", fmt.Errorf("resolve workflow step %q: %w", a.WorkflowStepID, err)
+		return "", false, fmt.Errorf("resolve workflow step %q: %w", stepID, err)
 	}
-	if !stepFound || step == nil || step.WorkflowID != a.WorkflowID {
-		return result, warnUnresolvedWorkflowStep, nil
+	if !stepFound || step == nil || step.WorkflowID != workflowID {
+		return "", false, nil
 	}
-	result.Step = step.Name
-	return result, "", nil
+	return step.Name, true, nil
 }
 
 // resolveRepositories resolves a.RepositoryIDs, dropping unresolved members

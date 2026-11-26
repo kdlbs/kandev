@@ -253,7 +253,7 @@ func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]
 		return nil, err
 	}
 	var raw []patPR
-	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&per_page=100", owner, repo)
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&per_page=100", url.PathEscape(owner), url.PathEscape(repo))
 	if err := c.get(ctx, endpoint, &raw); err != nil {
 		return nil, fmt.Errorf("list PRs: %w", err)
 	}
@@ -264,6 +264,26 @@ func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]
 		}
 	}
 	return result, nil
+}
+
+func (c *PATClient) ListOpenPRs(ctx context.Context, owner, repo string) ([]*PR, bool, error) {
+	var result []*PR
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&per_page=100", url.PathEscape(owner), url.PathEscape(repo))
+	for endpoint != "" {
+		var page []patPR
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			if result == nil {
+				return nil, false, fmt.Errorf("list open PRs: %w", err)
+			}
+			return result, false, nil
+		}
+		for i := range page {
+			result = append(result, convertPatPR(&page[i], owner, repo))
+		}
+		endpoint = next
+	}
+	return result, true, nil
 }
 
 func (c *PATClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, customQuery string) ([]*PR, error) {
@@ -1196,6 +1216,9 @@ type patPR struct {
 		Slug string `json:"slug"`
 		Name string `json:"name"`
 	} `json:"requested_teams"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
 	User struct {
 		Login string `json:"login"`
 	} `json:"user"`
@@ -1330,6 +1353,7 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		MergedByLogin:        mergedByLogin,
 		AutoMergeEnabled:     raw.AutoMerge != nil,
 		RequestedReviewers:   convertPatRequestedReviewers(raw),
+		Labels:               convertPatLabels(raw),
 		CreatedAt:            raw.CreatedAt,
 		UpdatedAt:            raw.UpdatedAt,
 	}
@@ -1408,6 +1432,19 @@ func convertPatIssue(raw *patIssue, owner, repo string) *Issue {
 		issue.ClosedAt = parseTimePtr(*raw.ClosedAt)
 	}
 	return issue
+}
+
+func convertPatLabels(raw *patPR) []string {
+	if len(raw.Labels) == 0 {
+		return nil
+	}
+	labels := make([]string, 0, len(raw.Labels))
+	for _, label := range raw.Labels {
+		if label.Name != "" {
+			labels = append(labels, label.Name)
+		}
+	}
+	return labels
 }
 
 func convertPatRequestedReviewers(raw *patPR) []RequestedReviewer {

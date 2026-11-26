@@ -144,6 +144,7 @@
   "create": "생성",
   "createAgentProfileTitle": "{{name}} 프로필 만들기",
   "installAgents": "에이전트 설치",
+  "reinstallOpenCode": "에이전트 다시 설치",
   "profileCount_one": "프로필 {{count}}개",
   "profileCount_other": "프로필 {{count}}개",
   "createProfileIntro": "이 에이전트의 새 프로필을 만듭니다.",

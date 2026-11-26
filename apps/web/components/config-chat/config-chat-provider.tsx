@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, useContext, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { usePathname } from "@/lib/routing/client-router";
+import { ConfigChatFloatingActionsContext } from "@/components/shared/config-chat-floating-actions-host";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { ConfigChatPanel } from "./config-chat-panel";
@@ -10,14 +11,9 @@ import { ConfigChatPanel } from "./config-chat-panel";
 const emptySubscribe = () => () => {};
 const getClientSnapshot = () => true;
 const getServerSnapshot = () => false;
-const ConfigChatFloatingActionsContext = createContext<HTMLElement | null>(null);
 
 function useIsMounted() {
   return useSyncExternalStore(emptySubscribe, getClientSnapshot, getServerSnapshot);
-}
-
-export function useConfigChatFloatingActionsHost(): HTMLElement | null {
-  return useContext(ConfigChatFloatingActionsContext);
 }
 
 /**

@@ -28,7 +28,7 @@ type acpDialect struct {
 		[]streams.ConfigOption,
 		[]modelInfo,
 		string,
-	) []streams.ConfigOption
+	) ([]streams.ConfigOption, []string)
 	modelChangeRequest   func(dialectConfigChange) (*dialectRPC, error)
 	configChangeRequest  func(dialectConfigChange) (*dialectRPC, error)
 	suppressNotification func(acp.SessionNotification) bool
@@ -129,9 +129,9 @@ func (d acpDialect) modelConfigAfterChange(
 	config []streams.ConfigOption,
 	models []modelInfo,
 	modelID string,
-) []streams.ConfigOption {
+) ([]streams.ConfigOption, []string) {
 	if d.configAfterModelChange == nil {
-		return config
+		return config, nil
 	}
 	return d.configAfterModelChange(config, models, modelID)
 }

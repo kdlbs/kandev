@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import {
   IconArrowsExchange,
   IconChevronDown,
@@ -34,6 +34,8 @@ type PairProps = {
   onSwap: () => void;
   urls: Record<string, string | undefined>;
   stepper?: { position: { index: number; total: number }; onStep: (direction: 1 | -1) => void };
+  /** Popovers render inside the review dialog, which owns pointer events while open. */
+  container?: RefObject<HTMLElement | null>;
 };
 
 /** A and B as one control: pick either, swap them, and step B through candidates. */
@@ -101,7 +103,11 @@ function ImageSlotPicker(props: PairProps & { slot: "a" | "b" }) {
           <IconChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[22.5rem] p-1 data-closed:animate-none!" align="start">
+      <PopoverContent
+        className="w-[22.5rem] p-1 data-closed:animate-none!"
+        align="start"
+        portalContainer={props.container?.current}
+      >
         <ReviewImageOptions
           slot={props.slot}
           images={props.images}
@@ -124,14 +130,15 @@ type ClusterProps = {
   onFit: () => void;
   onScale: (scale: number) => void;
   changes?: { status: ChangesStatus; onClick: () => void };
+  container?: RefObject<HTMLElement | null>;
 };
 
-/** Zoom controls on the image, like a map viewer. */
-export function ZoomCluster({ scale, onZoom, onFit, onScale, changes }: ClusterProps) {
+/** Zoom controls on the image, like a map viewer; `StageBottomRow` places them. */
+export function ZoomCluster({ scale, onZoom, onFit, onScale, changes, container }: ClusterProps) {
   const { t } = useTranslation();
   return (
     <div
-      className="pointer-events-auto absolute right-2 bottom-2 z-10 flex items-center gap-0.5 rounded-full border border-border bg-background/90 p-0.5 shadow-sm"
+      className="flex items-center gap-0.5 rounded-full border border-border bg-background/90 p-0.5 shadow-sm"
       data-testid="question-review-zoom"
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -148,7 +155,7 @@ export function ZoomCluster({ scale, onZoom, onFit, onScale, changes }: ClusterP
       >
         <IconMinus className="h-4 w-4" aria-hidden="true" />
       </Button>
-      <ZoomLevelMenu scale={scale} onFit={onFit} onScale={onScale} />
+      <ZoomLevelMenu scale={scale} onFit={onFit} onScale={onScale} container={container} />
       <Button
         type="button"
         variant="ghost"
@@ -160,7 +167,7 @@ export function ZoomCluster({ scale, onZoom, onFit, onScale, changes }: ClusterP
       >
         <IconPlus className="h-4 w-4" aria-hidden="true" />
       </Button>
-      <ShortcutHelp />
+      <ShortcutHelp container={container} />
     </div>
   );
 }
@@ -169,10 +176,12 @@ function ZoomLevelMenu({
   scale,
   onFit,
   onScale,
+  container,
 }: {
   scale: number;
   onFit: () => void;
   onScale: (scale: number) => void;
+  container?: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -194,7 +203,12 @@ function ZoomLevelMenu({
           <IconChevronDown className="h-3 w-3" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-32 p-1 data-closed:animate-none!" side="top" align="center">
+      <PopoverContent
+        className="w-32 p-1 data-closed:animate-none!"
+        side="top"
+        align="center"
+        portalContainer={container?.current}
+      >
         <MenuItem testId="question-review-fit" onClick={() => choose(onFit)}>
           {t("task:questionImageFit")}
         </MenuItem>
@@ -261,7 +275,7 @@ export function ChangesButton({ status, onClick }: { status: ChangesStatus; onCl
   );
 }
 
-function ShortcutHelp() {
+function ShortcutHelp({ container }: { container?: RefObject<HTMLElement | null> }) {
   const { t } = useTranslation();
   return (
     <Popover>
@@ -281,6 +295,7 @@ function ShortcutHelp() {
         className="w-80 text-xs leading-relaxed data-closed:animate-none!"
         side="top"
         align="end"
+        portalContainer={container?.current}
       >
         {t("task:questionReviewStageHelp")}
       </PopoverContent>

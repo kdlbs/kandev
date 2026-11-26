@@ -275,6 +275,7 @@ type ghPR struct {
 	MergedAt            string                `json:"mergedAt"`
 	ClosedAt            string                `json:"closedAt"`
 	ReviewRequests      []ghRequestedReviewer `json:"reviewRequests"`
+	Labels              []ghLabel             `json:"labels"`
 	MaintainerCanModify bool                  `json:"maintainerCanModify"`
 	HeadRepository      ghRepository          `json:"headRepository"`
 	HeadRepositoryOwner ghRepositoryOwner     `json:"headRepositoryOwner"`
@@ -292,6 +293,10 @@ type ghPR struct {
 	AutoMergeRequest *struct {
 		EnabledAt string `json:"enabledAt"`
 	} `json:"autoMergeRequest"`
+}
+
+type ghLabel struct {
+	Name string `json:"name"`
 }
 
 type ghRepository struct {
@@ -457,6 +462,28 @@ func (c *GHClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*
 		return nil, fmt.Errorf("list authored PRs: %w", err)
 	}
 	return c.parsePRList(out, owner, repo)
+}
+
+// ListOpenPRs reads every page of the REST pulls listing, so the result is
+// complete whenever it succeeds. `gh api --paginate` fails the whole call when
+// a page fails, so a partial listing is never returned.
+func (c *GHClient) ListOpenPRs(ctx context.Context, owner, repo string) ([]*PR, bool, error) {
+	out, err := c.run(ctx, "api", fmt.Sprintf("repos/%s/%s/pulls?state=open&per_page=100", owner, repo),
+		"--paginate", "--slurp")
+	if err != nil {
+		return nil, false, fmt.Errorf("list open PRs: %w", err)
+	}
+	var pages [][]patPR
+	if err := json.Unmarshal([]byte(out), &pages); err != nil {
+		return nil, false, fmt.Errorf("decode open PRs for %s/%s: %w", owner, repo, err)
+	}
+	prs := make([]*PR, 0)
+	for _, page := range pages {
+		for i := range page {
+			prs = append(prs, convertPatPR(&page[i], owner, repo))
+		}
+	}
+	return prs, true, nil
 }
 
 func (c *GHClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, customQuery string) ([]*PR, error) {
@@ -1612,6 +1639,19 @@ func (c *GHClient) parseSearchResults(data string) ([]*PR, error) {
 	return prs, nil
 }
 
+func convertGHLabels(raw []ghLabel) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	labels := make([]string, 0, len(raw))
+	for _, label := range raw {
+		if label.Name != "" {
+			labels = append(labels, label.Name)
+		}
+	}
+	return labels
+}
+
 func convertGHPR(raw *ghPR, owner, repo string) *PR {
 	state := strings.ToLower(raw.State)
 	if raw.MergedAt != "" {
@@ -1649,6 +1689,7 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		MergedByLogin:        raw.MergedBy.Login,
 		AutoMergeEnabled:     raw.AutoMergeRequest != nil,
 		RequestedReviewers:   convertGHRequestedReviewers(raw.ReviewRequests),
+		Labels:               convertGHLabels(raw.Labels),
 		CreatedAt:            raw.CreatedAt,
 		UpdatedAt:            raw.UpdatedAt,
 		MergedAt:             parseTimePtr(raw.MergedAt),

@@ -274,6 +274,7 @@
   "antigravityLoginStatusError": "無法讀取 Google 登入狀態。",
   "antigravityLoginCancelError": "無法取消 Google 登入。",
   "installAgents": "安裝代理程式",
+  "reinstallOpenCode": "重新安裝",
   "installQueued": "已排隊…",
   "installationNotDetected": "未檢測到安裝",
   "installed": "已安裝",
