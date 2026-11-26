@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentLinks } from "@/components/shared/attachment-links";
 import { memo } from "react";
 import type { WalkthroughCommentContextItem } from "@/lib/types/context";
 import { getFileName } from "@/lib/utils/file-path";
@@ -25,6 +26,7 @@ export const WalkthroughCommentItem = memo(function WalkthroughCommentItem({
           </div>
           <div className="line-clamp-2 text-muted-foreground">{comment.stepText}</div>
           <div className="break-words">{comment.text}</div>
+          <AttachmentLinks attachments={comment.attachments} />
           <button
             type="button"
             className="text-muted-foreground hover:text-foreground cursor-pointer"

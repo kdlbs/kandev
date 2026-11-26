@@ -125,9 +125,24 @@ func TestStore_IssueWatch_AddRepositoryColumns_Migration(t *testing.T) {
 	if got.RepositoryID != "" || got.BaseBranch != "" {
 		t.Fatalf("existing row should backfill to unbound, got repo=%q branch=%q", got.RepositoryID, got.BaseBranch)
 	}
+	revision, err := store.issueWatchPollRevision(ctx, id)
+	if err != nil || revision != 1 {
+		t.Fatalf("legacy watch poll revision = %d, err=%v", revision, err)
+	}
+	if applied, err := store.replacePendingIssueIDs(ctx, id, revision, []string{"linear-id-1"}); err != nil || !applied {
+		t.Fatalf("commit pending poll after upgrade: applied=%v err=%v", applied, err)
+	}
 
 	// Idempotent: running initSchema again must not fail on duplicate columns.
 	if err := store.initSchema(); err != nil {
 		t.Fatalf("second initSchema (idempotency): %v", err)
+	}
+	replayedRevision, err := store.issueWatchPollRevision(ctx, id)
+	if err != nil || replayedRevision != revision+1 {
+		t.Fatalf("poll revision after replay = %d, err=%v", replayedRevision, err)
+	}
+	pending, err := store.ListPendingIssueIDs(ctx, id)
+	if err != nil || len(pending) != 1 || pending[0] != "linear-id-1" {
+		t.Fatalf("pending IDs after replay = %v, err=%v", pending, err)
 	}
 }

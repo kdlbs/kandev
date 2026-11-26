@@ -176,6 +176,7 @@ export function buildSidebarItem(
     parkedOnBackgroundWork: task.parkedOnBackgroundWork,
     ...status,
     description: task.description,
+    flagNote: task.flagNote,
     workflowId: task._workflowId,
     workflowName: context.workflowNameById.get(task._workflowId),
     workflowStepId: task.workflowStepId as string | undefined,

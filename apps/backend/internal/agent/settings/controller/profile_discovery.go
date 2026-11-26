@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
@@ -38,7 +39,8 @@ func (c *Controller) FetchProfileDynamicModels(
 		return nil, err
 	}
 	resp := &dto.DynamicModelsResponse{
-		AgentName: agentName, Status: string(hostutility.StatusNotConfigured),
+		AgentName: agentName, RuntimeVariant: c.localRuntimeVariant(ctx, agentName),
+		Status: string(hostutility.StatusNotConfigured),
 		Models: []dto.ModelEntryDTO{}, Modes: []dto.ModeEntryDTO{},
 	}
 	if c.hostUtility == nil {
@@ -58,6 +60,20 @@ func (c *Controller) FetchProfileDynamicModels(
 		return nil, err
 	}
 	caps := result.Capabilities
+	currentVariant := c.localRuntimeVariant(ctx, agentName)
+	if agentName == agents.AntigravityACPAgentID {
+		if currentVariant == "" {
+			resp.RuntimeVariant = ""
+			resp.Status = string(hostutility.StatusNotInstalled)
+			return c.finishDynamicModels(ctx, agentName, resp, req.Refresh), nil
+		}
+		if caps.RuntimeVariant != currentVariant {
+			resp.RuntimeVariant = currentVariant
+			resp.Status = string(hostutility.StatusProbing)
+			return c.finishDynamicModels(ctx, agentName, resp, req.Refresh), nil
+		}
+	}
+	resp.RuntimeVariant = caps.RuntimeVariant
 	resp.Status = string(caps.Status)
 	resp.ContextRevision = result.ContextRevision
 	resp.RuntimeInfo = caps.RuntimeInfo
@@ -278,9 +294,13 @@ func (c *Controller) resolveProfileProbeLaunchSettings(
 	if err := c.validateProfileDiscoverySecrets(ctx, envVars); err != nil {
 		return profileProbeLaunchSettings{}, ErrInvalidProfileDiscovery
 	}
-	cliTokens, err := cliflags.Resolve(cliFlagsFromDTO(cliFlags))
+	profileFlags := normalizeAntigravityCLIFlags(registered.ID(), cliFlagsFromDTO(cliFlags))
+	cliTokens, err := cliflags.Resolve(profileFlags)
 	if err != nil {
 		return profileProbeLaunchSettings{}, ErrInvalidProfileDiscovery
+	}
+	if registered.ID() == agents.AntigravityACPAgentID {
+		cliTokens = antigravityruntime.FilterDangerouslySkipPermissionTokens(cliTokens)
 	}
 	prefixTokens, err := cliflags.Tokenise(commandPrefix)
 	if err != nil {

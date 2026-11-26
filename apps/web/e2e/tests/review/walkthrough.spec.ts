@@ -329,6 +329,42 @@ test.describe("Code walkthrough", () => {
     );
   });
 
+  // @covers AC-UI-WALKTHROUGH-EDITOR-REVEAL-001.1, AC-UI-WALKTHROUGH-EDITOR-REVEAL-001.2
+  test("reveals the first Monaco range on open", async ({ testPage, apiClient, seedData }) => {
+    await seedWalkthroughTask(
+      testPage,
+      apiClient,
+      seedData,
+      "walkthrough-first-range",
+      "walkthrough-first-range complete",
+    );
+    const card = await openWalkthrough(testPage);
+    const editor = testPage.getByTestId("monaco-editor-area").filter({ visible: true });
+    const marker = editor.getByTestId("walkthrough-editor-range");
+    const rangeBoundsInViewport = () =>
+      marker.evaluate((element) => {
+        const rangeBounds = element.getBoundingClientRect();
+        const viewport = element.parentElement!.getBoundingClientRect();
+        return rangeBounds.top >= viewport.top && rangeBounds.bottom <= viewport.bottom;
+      });
+    const expectRangeInViewport = async (range: string) => {
+      await expect(marker).toHaveAttribute("data-line-range", range);
+      await expect.poll(rangeBoundsInViewport).toBe(true);
+    };
+
+    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 2");
+    await expectRangeInViewport("153-154");
+    await card.getByTestId("walkthrough-next").click();
+    await expectRangeInViewport("1-2");
+    await card.getByTestId("walkthrough-prev").click();
+    await expectRangeInViewport("153-154");
+
+    await editor.click({ position: { x: 80, y: 100 } });
+    await testPage.keyboard.press("Control+Home");
+    await expect.poll(rangeBoundsInViewport).toBe(false);
+    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 2");
+  });
+
   test("editor walkthrough shows range marker, connector, and supports dragging", async ({
     testPage,
     apiClient,

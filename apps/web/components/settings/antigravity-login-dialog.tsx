@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCopy, IconExternalLink, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -149,6 +150,7 @@ export function AntigravityLoginDialog({
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const login = useAntigravityLogin({ open, onComplete });
+  const focusReturnRef = useRef<HTMLElement | null>(null);
   const active = isAntigravityLoginActive(login.snapshot);
   const showStart = !active && login.snapshot?.state !== "succeeded";
   const handleCancel = async () => {
@@ -166,7 +168,20 @@ export function AntigravityLoginDialog({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={handleOpenChange}>
-        <DrawerContent className="max-h-[92dvh]" data-testid="antigravity-login-sheet">
+        <DrawerContent
+          className="max-h-[92dvh]"
+          data-testid="antigravity-login-sheet"
+          onOpenAutoFocus={() => {
+            focusReturnRef.current =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const opener = focusReturnRef.current;
+            focusReturnRef.current = null;
+            if (opener?.isConnected) opener.focus({ preventScroll: true });
+          }}
+        >
           <DrawerHeader className="text-left">
             <DrawerTitle>{t("agents:antigravityLoginTitle")}</DrawerTitle>
             <DrawerDescription className="sr-only">

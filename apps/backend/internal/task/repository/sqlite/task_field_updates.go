@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
@@ -64,6 +65,12 @@ func (r *Repository) updateTaskFieldsWithParentAdmission(ctx context.Context, id
 	}
 	if previousWorkflowID != task.WorkflowID || previousStepID != task.WorkflowStepID {
 		if err := r.recordTaskLifecycleReceipt(ctx, tx, task, "active", "move", task.UpdatedAt); err != nil {
+			return nil, err
+		}
+	}
+	if update.FlagNote != nil {
+		task.FlagNote = strings.TrimSpace(*update.FlagNote)
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET flag_note = ? WHERE id = ?`), task.FlagNote, id); err != nil {
 			return nil, err
 		}
 	}

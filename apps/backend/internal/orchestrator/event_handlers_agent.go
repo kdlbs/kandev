@@ -640,12 +640,8 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.Error(err))
 	}
 	markerSnapshot, markerSnapshotKnown := s.interruptedMarkerSnapshotForResumeAttempt(data.SessionID, data.AttemptID)
-	// Every boot-ready callback is a recovery callback for marker purposes. A
-	// missing/finished attempt, empty attempt ID, or failed task snapshot leaves
-	// the marker snapshot unavailable and therefore fails closed in
-	// clearTaskInterruptedMarker.
-	// Ordinary sessions without a marker take the same no-op path; only an
-	// immutable marker captured for this attempt can clear the warning.
+	// The attempt snapshot still gates cleanup of recovery ownership below. Boot
+	// readiness does not resolve the task warning.
 	recoveryResolvedAt := s.markRecoveryResolvedForAttempt(
 		ctx, data.SessionID, session,
 		data.AttemptID,
@@ -1144,7 +1140,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Complete the current turn
 	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
+	s.recordTurnStatusNotice(ctx, data)
 	completionCtx := withWorkflowEffect(ctx, workflowEffectForCompletion(data, turnAtEventFire))
+	if turnAtEventFire != "" {
+		completionCtx = withConfigurationCommandResult(completionCtx, data.ConfigurationCommandResult)
+	}
 	if turnAtEventFire != "" {
 		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, turnAtEventFire)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
@@ -1984,12 +1984,15 @@ func (s *Service) executeQueuedMessageWithReservation(
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	var promptReferenceContext string
 	var preparedPromptContent *string
-	if isQueuedWorkflowAutoStart(queuedMsg) {
+	moveInstructions, _ := queuedMsg.Metadata[metaKeyWorkflowMoveInstructions].(bool)
+	if isQueuedWorkflowAutoStart(queuedMsg) || moveInstructions {
+		passthrough := (s.agentManager != nil && s.agentManager.IsPassthroughSession(promptCtx, queuedMsg.SessionID)) ||
+			s.resolveIsPassthroughForLaunch(promptCtx, queuedMsg.SessionID)
 		// Resolve workflow aliases at the drain boundary, before persistence.
 		// Recovery must carry this exact server-generated context because the
 		// shared saved definition can change while PromptAgent is in flight.
 		promptContent, promptReferenceContext = s.expandPromptReferencesWithContext(
-			promptCtx, promptContent, false,
+			promptCtx, promptContent, passthrough,
 		)
 		preparedPromptContent = &promptContent
 	}
@@ -2134,6 +2137,12 @@ func (s *Service) executeQueuedMessageWithReservation(
 	if isBuiltinIntentError(err) {
 		allowFollowupDrain = false
 	}
+	if deliveryAttempted && err != nil &&
+		s.requeueUndispatchedDelivery(promptCtx, dispatchIdentity, queuedMsg, err) {
+		// A persistent failure waits for the next ready signal instead of spinning.
+		allowFollowupDrain = false
+		return
+	}
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
 		lifecyclePrompt, userMessageRecorded, deliveryAttempted, err,
@@ -2263,6 +2272,7 @@ func (s *Service) finishQueuedMessageExecution(
 ) {
 	exactReservation := reservation != nil && reservation.identity.SessionIncarnationID != ""
 	if deliveryAttempted && err != nil {
+		s.logPossiblyDeliveredAcknowledgement(queuedMsg, err)
 		if exactReservation {
 			s.acknowledgeLifecycleQueueEntryForSession(ctx, reservation.identity, queuedMsg)
 		} else {
@@ -2687,8 +2697,8 @@ func queuedMessageAttachmentsToV1(attachments []messagequeue.MessageAttachment) 
 	converted := make([]v1.MessageAttachment, len(attachments))
 	for index, attachment := range attachments {
 		converted[index] = v1.MessageAttachment{
-			Type:         attachment.Type,
-			AttachmentID: attachment.AttachmentID,
+			Type:      attachment.Type,
+			CommentID: attachment.CommentID, AttachmentID: attachment.AttachmentID,
 			Data:         attachment.Data,
 			MimeType:     attachment.MimeType,
 			Name:         attachment.Name,
@@ -2912,6 +2922,7 @@ func (s *Service) finishAgentCompleted(
 	if !completionFollowUp {
 		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	}
+	s.recordTurnStatusNotice(ctx, data)
 	closingTurnID := s.completedEventClosingTurn(ctx, data)
 	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForCompletion(data, closingTurnID))
 	if data.TurnID != "" {
@@ -4053,16 +4064,9 @@ func (s *Service) markRecoveryResolvedForAttempt(
 	}
 	if session.TaskID != "" {
 		s.dismissRecoveredAgentErrorForAttempt(ctx, session.TaskID, session, errorStamp, resolutionRecorded, resolvedAt)
-		// Boot-ready is the provider-confirmed recovery boundary. Keeping this
-		// out of the STARTING/RUNNING state funnel leaves the durable warning in
-		// place when a launch later fails or is cancelled.
-		if markerSnapshotKnown && markerSnapshot.captured {
-			s.clearTaskInterruptedMarker(ctx, session.TaskID, markerSnapshot.value)
-		}
 	}
-	// A guarded boot callback may clear recovery ownership only when it carries
-	// a valid immutable marker snapshot. A known recovery attempt whose task
-	// read failed keeps its durable settlement so a later sweep can retry it.
+	// A known recovery attempt whose task read failed keeps its durable
+	// settlement so a later sweep can retry it.
 	if !markerSnapshotKnown || markerSnapshot.captured {
 		s.clearRecoveryMetadataAfterBoot(ctx, sessionID, session)
 	}

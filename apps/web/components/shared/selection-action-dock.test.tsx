@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { IconMessage } from "@tabler/icons-react";
-import { SelectionActionDock, SelectionActionDockButton } from "./selection-action-dock";
+import {
+  SelectionActionDock,
+  SelectionActionDockButton,
+  useSelectionDockHost,
+} from "./selection-action-dock";
 
 afterEach(cleanup);
 
@@ -11,6 +15,7 @@ const COMMENT_LABEL = "Comment on selection";
 function renderDock(portalContainer: HTMLElement | null = null) {
   const onActivate = vi.fn();
   const host = document.createElement("div");
+  host.style.paddingBottom = "12px";
   host.getBoundingClientRect = () =>
     ({ left: 20, width: 300, bottom: 600, top: 100, right: 320, height: 500 }) as DOMRect;
   render(
@@ -28,7 +33,7 @@ function renderDock(portalContainer: HTMLElement | null = null) {
       />
     </SelectionActionDock>,
   );
-  return { onActivate };
+  return { onActivate, host };
 }
 
 describe("SelectionActionDock", () => {
@@ -67,7 +72,7 @@ describe("SelectionActionDock", () => {
   });
 
   it("renders an icon-only square action that keeps the current selection", () => {
-    const { onActivate } = renderDock();
+    const { onActivate, host } = renderDock();
     const button = screen.getByRole("button", { name: COMMENT_LABEL });
 
     expect(button.textContent).toBe("");
@@ -79,10 +84,51 @@ describe("SelectionActionDock", () => {
     expect(square.className).toContain("h-8");
     expect(square.className).toContain("w-8");
     expect(square.className).toContain("bg-primary");
+    expect(host.style.paddingBottom).toContain("48px");
 
     expect(fireEvent.pointerDown(button)).toBe(false);
     expect(fireEvent.mouseDown(button)).toBe(false);
     fireEvent.click(button);
     expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores the host's original scroll clearance when the dock unmounts", () => {
+    const { host } = renderDock();
+    cleanup();
+
+    expect(host.style.paddingBottom).toBe("12px");
+  });
+
+  it("moves its position observer when the nearest dock host changes", () => {
+    const firstHost = document.createElement("div");
+    const secondHost = document.createElement("div");
+    const root = document.createElement("div");
+    for (const [host, left, bottom] of [
+      [firstHost, 10, 600],
+      [secondHost, 80, 500],
+    ] as const) {
+      host.setAttribute("data-selection-dock-host", "");
+      host.getBoundingClientRect = () =>
+        ({ left, width: 300, bottom, top: 0, right: left + 300, height: bottom }) as DOMRect;
+    }
+    firstHost.append(root);
+    const rootRef = { current: root };
+    function DockForNearestHost() {
+      const hostRef = useSelectionDockHost(rootRef);
+      return (
+        <SelectionActionDock hostRef={hostRef} label={DOCK_LABEL}>
+          <button type="button">Comment</button>
+        </SelectionActionDock>
+      );
+    }
+
+    const view = render(<DockForNearestHost />);
+    const positioner = screen.getByRole("toolbar", { name: DOCK_LABEL }).parentElement!;
+    expect(positioner.style.left).toBe("10px");
+
+    secondHost.append(root);
+    view.rerender(<DockForNearestHost />);
+
+    expect(positioner.style.left).toBe("80px");
   });
 });

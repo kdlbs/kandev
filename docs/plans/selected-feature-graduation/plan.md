@@ -1,6 +1,6 @@
 ---
 created: 2026-09-25
-status: draft
+status: in_progress
 requirements:
   - REQ-OFFICE-IDENTITY-GRADUATION-001
   - REQ-OFFICE-IDENTITY-GRADUATION-002
@@ -59,13 +59,10 @@ change to the requested final behavior.
 
 | Capability | Current state | Required before retirement |
 | --- | --- | --- |
-| Office session identity | `prod/dev/e2e=true` since v0.94.0; existing retirement criteria are explicit. | Focused Office identity and quorum regressions. |
-| LSP continuity | Merged after v0.95.1, all profiles off. [Base plan](../lsp-browser-continuity/plan.md) is implemented. | One stable default-on release and Local PC/Docker lifecycle proof. |
-| Canvases | All profiles off. [Base plan](../plugin-backed-canvases/plan.md) and [runtime permission fixes](../canvas-runtime-permission-fixes/plan.md) are done; [UX follow-up](../plugin-backed-canvases-ux-follow-up/plan.md) has Task 07 in progress. | Complete Task 07, verify permissions/isolation and real canvas publication, then one default-on release. |
+| Office session identity | The flag retired in v0.97.0. | Complete. |
+| LSP continuity | Stable releases enabled it by default from v0.97.0 through v0.103.1. Task 05 retired its flag. | Complete. |
+| Canvases | The [ACP authoring evaluation](../plugin-backed-canvases-ux-follow-up/task-07-authoring-bundle-and-scaffold.md#results) passed. Task 03 enables all shipped profiles and keeps the off switch. | Ship and exercise a default-on Stable release before Task 06. |
 | Dynamic routing | All profiles off. [Rollout blockers](../dynamic-agent-routing-rollout-blockers/plan.md) are complete, but the [base plan](../dynamic-agent-routing/plan.md) still records unfinished conductor, caller, Office, observability, and E2E work. | Reconcile and complete the base plan, then one default-on release. |
-
-The original plans keep their recorded statuses. Their open work orders are
-dependencies, not silently reclassified as done by this package.
 
 ## Technical approach
 
@@ -188,9 +185,9 @@ worker per guarded shard as documented in `apps/web/e2e/README.md`.
 
 - [x] [Task 01: Retire Office session identity flag](task-01-office-session-identity.md)
 - [x] [Task 02: Promote LSP continuity](task-02-lsp-default-on.md)
-- [ ] [Task 03: Promote canvases](task-03-canvases-default-on.md)
+- [x] [Task 03: Promote canvases](task-03-canvases-default-on.md)
 - [ ] [Task 04: Promote dynamic routing](task-04-dynamic-routing-default-on.md)
-- [ ] [Task 05: Retire LSP continuity flag](task-05-lsp-retirement.md)
+- [x] [Task 05: Retire LSP continuity flag](task-05-lsp-retirement.md)
 - [ ] [Task 06: Retire canvas flag](task-06-canvases-retirement.md)
 - [ ] [Task 07: Retire dynamic routing flag](task-07-dynamic-routing-retirement.md)
 
@@ -208,9 +205,17 @@ switch retained. Focused Go tests, backend lint/build, frontend typecheck/build,
 phone/tablet E2E tests, and 3 Local Docker E2E tests passed. See each work order
 for command details.
 
-Tasks 03 and 04 remain pending behind the canvas authoring follow-up and dynamic
-routing base plan. Tasks 05-07 remain pending until their default-on stable
-release evidence exists.
+Task 03 promoted canvases and kept the restart-required off switch. Its
+work order records the external Codex ACP publication, desktop and phone
+flows, and production-profile opt-out evidence. Task 06 waits for this
+default-on behavior to ship in Stable.
+
+Task 05 retired the LSP continuity toggle after nine default-on Stable releases. Its
+work order records the stale override checks, desktop and tablet reattachment,
+phone viewer behavior, and Local Docker tests.
+
+Task 04 remains pending behind the dynamic-routing base plan. Task 07
+depends on the subsequent default-on Stable release.
 
 ## Risks
 

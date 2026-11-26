@@ -16,7 +16,7 @@ contract under `apps/backend/internal/agent/runtime/lifecycle/`.
 | Requirement | Design boundary |
 | --- | --- |
 | REQ-TASKS-SESSION-TURN-SETTLEMENT-001 | Callback lease, completion flow, and regression coverage below |
-| REQ-TASKS-SESSION-TURN-SETTLEMENT-002 | [Agent-started turn finalization](#agent-started-turn-finalization) |
+| REQ-TASKS-SESSION-TURN-SETTLEMENT-002 | [Agent-started turn finalization](#agent-started-turn-finalization) and [MCP startup reports](#mcp-startup-reports) |
 
 ## Callback lease
 
@@ -60,10 +60,9 @@ disconnect paths retain their leased completion-signal helper.
 
 ## Compatibility and failure behavior
 
-This is a shared lifecycle correction. It adds no provider-specific branch,
-wire field, schema, runtime flag, or new event type. A callback with an obsolete
-startup generation remains rejected before state changes. An unnumbered
-completion cannot bypass `dispatchedPromptPending`.
+The callback lease applies to all providers. It rejects callbacks from obsolete
+startup generations before state changes. The `dispatchedPromptPending` guard
+still governs unnumbered completions.
 
 Ordinary public `MarkReady` and `MarkBootReady` callers retain their lease
 acquisition. Ordinary turn-end publication remains synchronous, as specified
@@ -117,15 +116,33 @@ same evidence as the finalizer: a `tool_update` with an empty `ToolStatus`
 does not flip the execution. Otherwise the backend marks the session busy for a
 turn the finalizer will never close, because the finalizer ignores that update.
 
-The adapter already synthesizes `in_progress` for a status-less update that
-carries a title, input, content, or locations, so an empty status on the wire
-event means metadata only. `ToolStatusMissing` is not serialized and is not
-needed at this boundary. A status-less update still refreshes activity
-timestamps; it only loses the power to start a turn. Prompt-owned turns are
-unaffected, because the flip applies only to a Ready execution.
+The adapter can synthesize `in_progress` for a status-less update that carries
+a title, input, content, or locations. The stream carries `ToolStatusMissing`
+so both consumers can recognize these updates. A status-less update can
+refresh activity timestamps while the execution stays Ready.
+
+### MCP startup reports
+
+Codex ACP can report MCP startup failures after the session RPC succeeds. The
+reporter sends a failed `tool_call` with kind `other`, a reserved `mcp_startup.`
+ID, and a title of the form `mcp__<server>__startup`.
+[Codex ACP 2.8.0 reporter](https://github.com/agentclientprotocol/codex-acp/blob/ad09e0ead18511a65a0761cac832aa3087219b10/src/tool-calls/reporters/McpStartupReporter.ts#L29-L38).
+
+The ACP adapter recognizes that shape for Codex ACP and emits a
+`mcp_startup_warning` with the report ID and sanitized provider text. It does
+this before tracking tool or prompt activity. The lifecycle callback reuses
+the same check for old agentctl events and publishes the warning before its
+activity handler. The warning follows existing ownership and delivery checks
+as session metadata.
+
+The orchestrator uses the existing idempotent session message writer to store
+one status warning for the report in an already-completed `lifecycle_only`
+turn. The shared chat renders the warning. Boot readiness and real turn
+completion drive queued prompt delivery. [Resume prompt queue design](resume-prompt-queue.md).
 
 ## Implementation plans
 
 - [Completion callback lease repair](../../../plans/completion-callback-lease/plan.md).
 - [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md).
 - [Send Now claim loss repair](../../../plans/send-now-claim-loss/plan.md).
+- [Codex ACP MCP startup warning repair](../../../plans/codex-acp-mcp-startup-warning/plan.md).

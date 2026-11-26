@@ -45,15 +45,10 @@ type LspTransportHost = {
 export class LspClientTransport {
   constructor(private readonly host: LspTransportHost) {}
 
-  createSocket(
-    sessionId: string,
-    lspLanguage: string,
-    continuityEnabled: boolean,
-    leaseId: string | null,
-  ): WebSocket {
+  createSocket(sessionId: string, lspLanguage: string, leaseId: string | null): WebSocket {
     const url = `${getWsBaseUrl()}/lsp/${encodeURIComponent(sessionId)}`;
     const query = new URLSearchParams({ language: lspLanguage });
-    if (continuityEnabled && leaseId) query.set("leaseId", leaseId);
+    if (leaseId) query.set("leaseId", leaseId);
     return new WebSocket(`${url}?${query.toString()}`);
   }
 
@@ -64,12 +59,7 @@ export class LspClientTransport {
     ) {
       return;
     }
-    const ws = this.createSocket(
-      conn.sessionId,
-      conn.lspLanguage,
-      conn.continuityEnabled,
-      conn.leaseId,
-    );
+    const ws = this.createSocket(conn.sessionId, conn.lspLanguage, conn.leaseId);
     conn.ws = ws;
     this.bind(conn, ws);
   }
@@ -88,7 +78,6 @@ export class LspClientTransport {
     };
     ws.addEventListener("message", statusHandler);
     ws.onclose = (event) => this.handleClose(conn, ws, event, statusHandler, state);
-    ws.onerror = () => this.handleError(conn, ws, state);
   }
 
   private handleStatus(
@@ -121,7 +110,7 @@ export class LspClientTransport {
     if (data.status !== "ready") return;
     if (state.statusHandler) ws.removeEventListener("message", state.statusHandler);
     state.bridgeStarted = true;
-    if (conn.continuityEnabled && data.leaseId) {
+    if (data.leaseId) {
       conn.leaseId = data.leaseId;
       saveLspLeaseHint(conn.sessionId, conn.lspLanguage, data.leaseId);
       this.host.notifyChange(conn.key);
@@ -147,7 +136,7 @@ export class LspClientTransport {
       uri: data.workspaceUri ?? null,
       repositorySubpaths: data.repoSubpaths ?? [],
     };
-    if (conn.continuityEnabled && data.resumed === true) {
+    if (data.resumed === true) {
       conn.reconnecting = true;
       void this.host.protocol.resume(conn, data, workspace);
       return;
@@ -189,12 +178,12 @@ export class LspClientTransport {
       this.scheduleReconnect(conn);
       return;
     }
-    this.handleTerminalClose(conn, event, state.bridgeStarted);
+    this.handleTerminalClose(conn, event);
   }
 
   private handleStoppingClose(conn: ManagedLspConnection, event: CloseEvent): boolean {
     if (this.host.getStatus(conn.key).state !== "stopping") return false;
-    if (conn.continuityEnabled && conn.releaseAfterConnect === "stop") {
+    if (conn.releaseAfterConnect === "stop") {
       if (isAbnormalClose(event.code)) {
         conn.reconnecting = true;
         this.host.setStatus(conn.key, { state: "reconnecting" });
@@ -202,7 +191,7 @@ export class LspClientTransport {
         return true;
       }
       conn.releaseAfterConnect = null;
-      this.handleTerminalClose(conn, event, true);
+      this.handleTerminalClose(conn, event);
       return true;
     }
     this.host.cleanupConnection(conn);
@@ -213,19 +202,14 @@ export class LspClientTransport {
 
   private shouldReconnect(conn: ManagedLspConnection, event: CloseEvent): boolean {
     return (
-      conn.continuityEnabled &&
       (!conn.explicitlyStopped || conn.releaseAfterConnect === "stop") &&
       isAbnormalClose(event.code)
     );
   }
 
-  private handleTerminalClose(
-    conn: ManagedLspConnection,
-    event: CloseEvent,
-    bridgeStarted: boolean,
-  ): void {
+  private handleTerminalClose(conn: ManagedLspConnection, event: CloseEvent): void {
     const statusFactory = CLOSE_CODE_STATUS[event.code];
-    if (conn.continuityEnabled && (event.code === 4006 || event.code === 4010)) {
+    if (event.code === 4006 || event.code === 4010) {
       clearLspLeaseHint(conn.sessionId, conn.lspLanguage);
       conn.leaseId = null;
     }
@@ -234,19 +218,10 @@ export class LspClientTransport {
       this.host.setStatus(conn.key, statusFactory(event.reason));
       return;
     }
-    const fallbackReason =
-      bridgeStarted && !conn.continuityEnabled
-        ? t("lsp:languageServerExited")
-        : t("lsp:connectionClosed");
-    this.host.setStatus(conn.key, { state: "error", reason: event.reason || fallbackReason });
-  }
-
-  private handleError(conn: ManagedLspConnection, ws: WebSocket, state: LspTransportState): void {
-    if (!this.isCurrentTransport(conn, ws, state) || conn.continuityEnabled) return;
-    const current = this.host.getStatus(conn.key);
-    if (current.state !== "error" && current.state !== "unavailable") {
-      this.host.setStatus(conn.key, { state: "error", reason: t("lsp:webSocketError") });
-    }
+    this.host.setStatus(conn.key, {
+      state: "error",
+      reason: event.reason || t("lsp:connectionClosed"),
+    });
   }
 
   prepareForReconnect(conn: ManagedLspConnection): void {
@@ -316,6 +291,12 @@ export class LspClientTransport {
     }
     clearLspLeaseHint(conn.sessionId, conn.lspLanguage);
     conn.releaseAfterConnect = null;
+    if (reason === "editor_idle" && conn.refCount > 0) {
+      conn.leaseId = null;
+      this.prepareForReconnect(conn);
+      this.open(conn);
+      return;
+    }
     conn.reconnecting = false;
     this.host.cleanupConnection(conn);
     this.host.removeStatus(conn.key);

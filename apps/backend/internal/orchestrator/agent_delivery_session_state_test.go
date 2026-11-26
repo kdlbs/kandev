@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -111,6 +112,15 @@ func requireDeliverySessionState(t *testing.T, repo *tasksqlite.Repository, sess
 	}
 }
 
+func settledCancellationWriterRecoveryPayload(fixture settledSessionStateFixture) lifecycle.AgentctlEventPayload {
+	return lifecycle.AgentctlEventPayload{
+		TaskID: fixture.taskID, SessionID: fixture.sessionID, AgentExecutionID: fixture.executionID,
+		FailureCode: "DURABLE_DELIVERY_UNCERTAIN", DeliveryRecoveryPhase: models.AgentDeliveryRecoveryUncertain,
+		DeliverySubmissionID: fixture.submission, DeliveryStreamID: fixture.streamID,
+		DeliveryIncarnationID: fixture.incarnation, DeliveryHarnessGeneration: 1, PromptGeneration: 1,
+	}
+}
+
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.2
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.3
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
@@ -128,6 +138,81 @@ func TestDeliverySessionStateConvergesAfterSettledCancellation(t *testing.T) {
 }
 
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
+func TestDeliverySessionStateConvergesFromWriterRecovery(t *testing.T) {
+	fixture := seedOrchestratorSettledSessionState(t, "writer-recovery", true)
+	fixture.service.handleAgentctlDeliveryRecovery(
+		context.Background(), settledCancellationWriterRecoveryPayload(fixture),
+	)
+	requireDeliverySessionState(t, fixture.repo, fixture.sessionID, models.TaskSessionStateWaitingForInput)
+	submission, err := fixture.repo.GetAgentDeliverySubmission(context.Background(), fixture.submission)
+	if err != nil || submission.State != models.DeliverySubmissionCancelled || submission.Outcome != "cancelled" {
+		t.Fatalf("settled cancellation changed: %+v, %v", submission, err)
+	}
+	effect, err := fixture.repo.GetAgentDeliveryEffect(
+		context.Background(), "agent_delivery.terminal:"+fixture.streamID+":1",
+	)
+	if err != nil || effect == nil || effect.State != models.DeliveryEffectCompleted {
+		t.Fatalf("terminal effect changed: %+v, %v", effect, err)
+	}
+}
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
+func TestDeliverySessionStateWriterRecoveryLeavesBusyGuardToSettlement(t *testing.T) {
+	fixture := seedOrchestratorSettledSessionState(t, "writer-recovery-busy", true)
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	fixture.service.mu.Lock()
+	fixture.service.recoveryLifecycleCtx = lifecycleCtx
+	fixture.service.mu.Unlock()
+	t.Cleanup(cancel)
+
+	guard := fixture.service.lockCancelInFlightGuard(fixture.sessionID)
+	done := make(chan struct{})
+	go func() {
+		fixture.service.handleAgentctlDeliveryRecovery(
+			context.Background(), settledCancellationWriterRecoveryPayload(fixture),
+		)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		guard.release()
+		<-done
+		t.Fatal("writer recovery waited for the busy session guard")
+	}
+	requireDeliverySessionState(t, fixture.repo, fixture.sessionID, models.TaskSessionStateRunning)
+	guard.release()
+	requireDeliverySessionStateEventually(t, fixture.repo, fixture.sessionID, models.TaskSessionStateWaitingForInput)
+}
+
+func requireDeliverySessionStateEventually(
+	t *testing.T,
+	repo *tasksqlite.Repository,
+	sessionID string,
+	want models.TaskSessionState,
+) {
+	t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
+		session, err := repo.GetTaskSession(context.Background(), sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if session != nil && session.State == want {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-timer.C:
+			t.Fatalf("session state did not converge to %s", want)
+		}
+	}
+}
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
 func TestDeliverySessionStateLeavesLiveSuccessorRunning(t *testing.T) {
 	fixture := seedOrchestratorSettledSessionState(t, "successor", true)
 	if _, err := fixture.repo.PrepareAgentDeliverySubmission(context.Background(), &models.AgentDeliverySubmission{
@@ -138,9 +223,9 @@ func TestDeliverySessionStateLeavesLiveSuccessorRunning(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.service.reconcileAgentDeliverySettlements(context.Background(), fixture.sessionID); err != nil {
-		t.Fatal(err)
-	}
+	fixture.service.handleAgentctlDeliveryRecovery(
+		context.Background(), settledCancellationWriterRecoveryPayload(fixture),
+	)
 	requireDeliverySessionState(t, fixture.repo, fixture.sessionID, models.TaskSessionStateRunning)
 }
 

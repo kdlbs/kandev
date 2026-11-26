@@ -14,6 +14,12 @@ type RateLimitFetcher interface {
 	FetchRateLimit(ctx context.Context) error
 }
 
+// RepoRefSHAResolver exposes ref resolution for operations that need a stable
+// repository snapshot without widening every GitHub client implementation.
+type RepoRefSHAResolver interface {
+	ResolveRepoRefSHA(ctx context.Context, owner, repo, ref string) (string, error)
+}
+
 type MergeOutcome string
 
 const (

@@ -20,7 +20,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 )
 
-func TestProbeCleansUpDescendantProcessOnTimeout(t *testing.T) {
+func TestProbeCleansUpDescendantProcessOnCancellation(t *testing.T) {
 	tmp := t.TempDir()
 	marker := filepath.Join(tmp, "child")
 	installLeakyMockAgent(t, tmp, marker)
@@ -29,32 +29,70 @@ func TestProbeCleansUpDescendantProcessOnTimeout(t *testing.T) {
 
 	wrapper := filepath.Join(tmp, "independent-wrapper")
 	writeExecutable(t, wrapper, "#!/bin/sh\nexec \"$@\"\n")
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
-	defer cancel()
-
-	core, observed := observer.New(zapcore.DebugLevel)
-	executor := NewACPInferenceExecutor(zap.New(core))
-	resp, err := executor.Probe(ctx, &ProbeRequest{
-		AgentID: "mock-agent",
-		InferenceConfig: &InferenceConfigDTO{
-			Command:       []string{"mock-agent"},
-			LaunchWrapper: launchwrapper.Profile([]string{wrapper}),
-			WorkDir:       tmp,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Probe returned error: %v", err)
-	}
-	if resp.Success {
-		t.Fatalf("Probe unexpectedly succeeded")
-	}
-
-	pid := readPID(t, marker+".pid")
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan struct {
+		resp *ProbeResponse
+		err  error
+	}, 1)
+	probeReturned := false
+	var pid int
 	t.Cleanup(func() {
-		if processRunning(pid) {
+		cancel()
+		if !probeReturned {
+			select {
+			case <-result:
+			case <-time.After(3 * time.Second):
+			}
+		}
+		if pid == 0 {
+			if raw, err := os.ReadFile(marker + ".pid"); err == nil {
+				pid, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
+			}
+		}
+		if pid > 0 && processRunning(pid) {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 		}
 	})
+
+	core, observed := observer.New(zapcore.DebugLevel)
+	executor := NewACPInferenceExecutor(zap.New(core))
+	go func() {
+		resp, err := executor.Probe(ctx, &ProbeRequest{
+			AgentID: "mock-agent",
+			InferenceConfig: &InferenceConfigDTO{
+				Command:       []string{"mock-agent"},
+				LaunchWrapper: launchwrapper.Profile([]string{wrapper}),
+				WorkDir:       tmp,
+			},
+		})
+		result <- struct {
+			resp *ProbeResponse
+			err  error
+		}{resp: resp, err: err}
+	}()
+	waitUntil(t, 2*time.Second, func() bool {
+		_, err := os.Stat(marker + ".ready")
+		return err == nil
+	}, "descendant process did not become ready")
+	pid = readPID(t, marker+".pid")
+
+	cancel()
+	var probe struct {
+		resp *ProbeResponse
+		err  error
+	}
+	select {
+	case probe = <-result:
+		probeReturned = true
+	case <-time.After(3 * time.Second):
+		t.Fatal("Probe did not return after cancellation")
+	}
+	if probe.err != nil {
+		t.Fatalf("Probe returned error: %v", probe.err)
+	}
+	if probe.resp.Success {
+		t.Fatalf("Probe unexpectedly succeeded")
+	}
 
 	waitUntil(t, 2*time.Second, func() bool {
 		return !processRunning(pid)

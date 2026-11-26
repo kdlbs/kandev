@@ -1,5 +1,10 @@
 import type { DockviewApi } from "dockview-react";
-import { PANEL_REGISTRY, type ReusablePanelId } from "@/lib/state/layout-manager";
+import {
+  PANEL_REGISTRY,
+  REUSABLE_PANEL_IDS,
+  type ReusablePanelId,
+} from "@/lib/state/layout-manager";
+import { resolvePluginPanelDefinition } from "@/lib/state/layout-manager/plugin-panels";
 
 export type LayoutEditorDirection = "left" | "right" | "above" | "below";
 export type LayoutEditorSizeAxis = "width" | "height";
@@ -16,16 +21,27 @@ function toDockviewPosition(direction: LayoutEditorDirection) {
   return direction;
 }
 
-export function addReusablePanel(
-  api: DockviewApi,
-  panelId: ReusablePanelId,
-  groupId?: string,
-): boolean {
+function isBuiltInReusablePanel(panelId: string): panelId is ReusablePanelId {
+  return (REUSABLE_PANEL_IDS as readonly string[]).includes(panelId);
+}
+
+/**
+ * The definition to add for a built-in reusable panel or a plugin panel that is
+ * registered right now. Resolved at selection time, so an option offered by a
+ * menu that outlived its registration yields nothing.
+ */
+function resolveAddableDefinition(panelId: string) {
+  if (isBuiltInReusablePanel(panelId)) return { id: panelId, ...PANEL_REGISTRY[panelId] };
+  return resolvePluginPanelDefinition(panelId);
+}
+
+export function addReusablePanel(api: DockviewApi, panelId: string, groupId?: string): boolean {
   if (api.getPanel(panelId)) return false;
+  const definition = resolveAddableDefinition(panelId);
+  if (!definition) return false;
   const referenceGroup = groupId ? getGroup(api, groupId) : (api.activeGroup ?? api.groups[0]);
   api.addPanel({
-    id: panelId,
-    ...PANEL_REGISTRY[panelId],
+    ...definition,
     ...(referenceGroup ? { position: { referenceGroup } } : {}),
   });
   return true;

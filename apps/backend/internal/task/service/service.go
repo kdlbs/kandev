@@ -486,6 +486,7 @@ type Service struct {
 	unitReach                       UnitReachResolver
 	userOrgs                        func(ctx context.Context, userID string) (string, error)
 	tasks                           repository.TaskRepository
+	sidebarGroupingResolver         sidebarGroupingResolver
 	taskRepos                       repository.TaskRepoRepository
 	workspaceFolders                repository.TaskWorkspaceFolderRepository
 	workflows                       repository.WorkflowRepository
@@ -523,6 +524,7 @@ type Service struct {
 	agentProfileExecutorValidator   AgentProfileExecutorValidator
 	workspacePolicyAttacher         WorkspacePolicyAttacher
 	projectRepositorySourceReader   ProjectRepositorySourceReader
+	projectWorkspaceReader          ProjectWorkspaceReader
 	autoArchiveCoordinator          AutoArchiveCoordinator
 	workflowTaskArchiveCoordinator  WorkflowTaskArchiveCoordinator
 	taskLifecycleCoordinator        TaskLifecycleCoordinator
@@ -783,6 +785,12 @@ func (s *Service) SetWorkspacePolicyAttacher(attacher WorkspacePolicyAttacher) {
 // lookup used when a root task omits its repository selection.
 func (s *Service) SetProjectRepositorySourceReader(reader ProjectRepositorySourceReader) {
 	s.projectRepositorySourceReader = reader
+}
+
+// SetProjectWorkspaceReader wires Office project membership validation for
+// task creation paths that explicitly select a project.
+func (s *Service) SetProjectWorkspaceReader(reader ProjectWorkspaceReader) {
+	s.projectWorkspaceReader = reader
 }
 
 // SetTaskLifecycleCoordinator installs the canonical destructive task

@@ -26,6 +26,7 @@ type RunsRailProps = {
   onSelect: (run: AutomationRun) => void;
   /** Feeds the run-detail panel's next-firing line. */
   openRuns: number;
+  onEnableSchedule?: (triggerId: string) => Promise<void>;
   width: number;
   resizing: boolean;
   onResizeStart: (event: React.MouseEvent) => void;
@@ -128,6 +129,7 @@ export function RunsRail({
   selectedRunId,
   onSelect,
   openRuns,
+  onEnableSchedule,
   width,
   resizing,
   onResizeStart,
@@ -180,6 +182,7 @@ export function RunsRail({
       <RunDetailDisclosure
         automation={automation}
         openRuns={openRuns}
+        onEnableSchedule={onEnableSchedule}
         className="shrink-0 border-b border-border/60 px-1.5 py-1"
       />
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">

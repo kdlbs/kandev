@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -116,5 +116,24 @@ describe("SettingsPromptEditor", () => {
     render(<SettingsPromptEditor value="Review @" onChange={() => undefined} promptReferences />);
 
     expect(document.body.textContent).toContain("settings:promptEditorPromptReferenceHint");
+  });
+
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-004.3
+  it("marks a read-only editor and dashes its frame so it reads as read-only", () => {
+    const { container } = render(
+      <SettingsPromptEditor value="Repo" onChange={() => undefined} readOnly testId="ro" />,
+    );
+    expect(container.querySelector(".settings-prompt-editor")?.getAttribute("data-read-only")).toBe(
+      "true",
+    );
+    expect(screen.getByTestId("ro").className).toContain("border-dashed");
+    cleanup();
+    const editable = render(
+      <SettingsPromptEditor value="Mine" onChange={() => undefined} testId="rw" />,
+    );
+    expect(
+      editable.container.querySelector(".settings-prompt-editor")?.hasAttribute("data-read-only"),
+    ).toBe(false);
+    expect(screen.getByTestId("rw").className).not.toContain("border-dashed");
   });
 });

@@ -7,6 +7,7 @@ requirements:
   - REQ-AGENTS-ACP-SESSION-EVENTS-003
   - REQ-AGENTS-ACP-SESSION-EVENTS-004
   - REQ-AGENTS-ACP-SESSION-EVENTS-005
+  - REQ-AGENTS-ACP-SESSION-EVENTS-006
 ---
 
 # ACP Session Events System Design
@@ -29,6 +30,7 @@ The [Copilot native design](copilot-native-compaction.md) defines a separate evi
 | `REQ-AGENTS-ACP-SESSION-EVENTS-003` | [Notices as status messages](#notices-as-status-messages) |
 | `REQ-AGENTS-ACP-SESSION-EVENTS-004` | [Capability advertisement](#capability-advertisement) |
 | `REQ-AGENTS-ACP-SESSION-EVENTS-005` | [acpdbg](#acpdbg) |
+| `REQ-AGENTS-ACP-SESSION-EVENTS-006` | [Copilot interrupted-call recovery](#copilot-interrupted-call-recovery) |
 
 ## SDK pin
 
@@ -80,6 +82,9 @@ all seven locales.
 
 ## Notices as status messages
 
+The [standard notice work order](../../../plans/acp-schema-1-28-adoption/task-04-provider-notices.md)
+records the prerequisite for committing a notice with its delivery cursor.
+
 `EventTypeSessionNotice` carries `SessionNotice{Severity, Title, Description}` through
 `AgentStreamEventPayload` to `handleSessionNoticeEvent`. The handler creates one
 `MessageTypeStatus` row with metadata `{variant, notice: true, text}`:
@@ -96,6 +101,75 @@ durable delivery cursor. `agent_delivery_retention_proof.go` classifies the even
 projected state so its row remains recoverable. A test replays one delivered notice
 across a reconnect and asserts one row. If the cursor does not provide that guarantee,
 implementation stops and reports the gap instead of hashing notice text.
+
+## Copilot interrupted-call recovery
+
+### Recognize the ACP sequence
+
+Copilot CLI 1.0.114 replays a pending `tool_call` during `session/load`. On the
+first `session/prompt` it sends a failed `tool_call_update` with
+`rawOutput.code: interrupted`, then an ID-less warning `agent_message_chunk`.
+The [fix plan](../../../plans/copilot-interrupted-tool-notice/plan.md#evidence)
+records the captured order and the qualified warning text.
+
+During load, the ACP notification worker keeps one possible pending question
+ID for the loading session. The exact title is
+`kandev-ask_user_question_kandev` with `kind: other`. Use the existing Core MCP
+delivery evidence to confirm the server. A terminal replay update clears its ID.
+Competing pending IDs make the question identity uncertain. Replay follows the
+normal suppression path.
+
+Use this evidence during the first sent prompt after a successful load, scoped
+to the native session and prompt generation. Match the exact single-chunk
+warning template and a preceding failed update with a call ID and
+`rawOutput.code: interrupted`. Use the clarification classification only if
+the warning covers one call and the single observed failed ID matches the question.
+Use the generic classification for other or uncertain calls. One question ID,
+one failed call ID, and ambiguity flags suffice.
+
+The existing load and prompt boundaries own the lifetime of this state. A
+replacement, failed load, or the end of the first prompt clears it. Unrelated
+session updates do not clear interruption evidence. Assistant content or a new
+tool start closes the matching window. The Copilot dialect owns the literal
+checks. Unrecognized frames follow regular ACP conversion.
+
+### Project the status before the reply
+
+Keep the original warning in `Text` on the existing `message_chunk`. Mark it
+with `AgentEvent.Data.copilot_interruption_notice` set to `clarification` or
+`tool`. Existing stream publication forwards the map. A peer that ignores
+the field still receives the full warning as text.
+
+Use a separate kind in the existing canonical message ID builder so reply
+chunks stay in their own row. The canonical message insert uses
+`MessageTypeStatus` for the marked chunk and copies the same field into
+message metadata. The existing write commits the row and cursor together.
+Resolve the owner from the event's prompt generation. Use the owned prompt turn
+for placement and retain the text fallback if turn ownership is unavailable.
+An unowned notice keeps its original text as a regular message.
+
+Publish the committed row through `publishCanonicalMessageEvent`. For legacy
+streams, use the existing `CreateSessionMessageIdempotent` path with a key
+derived from session, execution, and prompt generation. Route the marked chunk
+before assistant text buffering and activity accounting. Skip and Send follow
+the existing clarification and prompt paths.
+
+### Render the notice inline
+
+`StatusMessage` selects the notice using the stored classification. A localized
+summary uses `text-muted-foreground` at full opacity on the transcript
+background. A labeled inline Details control shows the original warning as
+wrapping plain text.
+The shared row follows the disclosure pattern in `ContextCompactionMessage`.
+One short recovery paragraph fits the existing transcript scroller. The row
+shares disclosure state and localization across viewports. On phone and coarse
+pointers Details has a 44px or larger hit area and wraps below the summary when
+needed. Desktop retains a compact control and a visible keyboard focus state.
+
+Status persistence uses `task_session_messages`. Existing notification tracing
+records the marked event on the same authorized session path. The marker and
+status content carry the fixed warning and classification. Tool inputs, raw ACP
+metadata, and raw provider output stay within the existing transport boundaries.
 
 ## Capability advertisement
 

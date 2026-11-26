@@ -84,3 +84,8 @@ overrides, and preservation of other Go flags at the subprocess boundary.
 `.github/workflows/backend-tests.yml` and `apps/backend/Makefile` continue to
 select `./...`. Cross-package effects remain subject to that broader validation;
 the local optimization is not a replacement for CI.
+
+The hosted lint step uses a 5 GiB soft memory target per Go process, two
+analysis CPUs, and two build workers. The 20-minute lint budget covers cold
+package loading and analysis. The 35-minute static check budget also covers
+the build, SDK checks, conformance tests, and cleanup.

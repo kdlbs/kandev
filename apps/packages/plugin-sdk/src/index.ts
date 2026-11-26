@@ -6,6 +6,22 @@
  * all runtime values during initialize and use these structural types at
  * compile time only.
  */
+
+/** Host-resolved complete grouping, distinct from page-local task-list facets. */
+export type SidebarGroupingReference = `plugin:${string}:${string}`;
+export interface SidebarGroupingProvider {
+  reference: SidebarGroupingReference;
+  label: string;
+  labelKey?: string;
+  generation: string;
+}
+export interface SidebarGroupingSnapshot {
+  version: 1;
+  revision: string;
+  complete: true;
+  groups: Array<{ id: string; label: string; color?: string }>;
+  memberships: Array<{ task_id: string; group_id: string }>;
+}
 export type HostNode = unknown;
 // `any` is deliberate at these two React compatibility seams. Reproducing
 // React's overloaded createElement and recursive ReactNode types would make
@@ -1486,7 +1502,19 @@ export interface IntegrationSettingsActionProps {
   surface: IntegrationSettingsActionSurface;
 }
 
+/** Host-selected, read-only file bytes. The host grants access before mounting. */
+export interface FileViewerProps {
+  file: { name: string; sizeBytes: number; generation: string };
+  readBytes(signal: AbortSignal): Promise<ArrayBuffer>;
+}
+export interface FileViewerRegistration {
+  id: string;
+  Component: Component<FileViewerProps>;
+}
+
 export interface PluginRegistry {
+  /** Register a viewer declared in ui.file_viewers. */
+  registerFileViewer(registration: FileViewerRegistration): void;
   registerTranslations(catalogs: PluginTranslationCatalogs): void;
   registerRoute(path: string, component: Component, options?: PluginRouteOptions): void;
   registerNavItem(item: {

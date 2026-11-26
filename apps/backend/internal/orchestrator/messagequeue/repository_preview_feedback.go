@@ -72,6 +72,9 @@ func (r *sqliteRepository) InsertWithTaskFeedback(
 		return nil, nil, false, err
 	}
 	candidate.Content = previewResolution.Content
+	if err := applyQueuedPlanCommentFiles(ctx, tx, &candidate, planResolution, claim); err != nil {
+		return nil, nil, false, err
+	}
 	if err := r.insertCoalesced(ctx, tx, &candidate, 0); err != nil {
 		return nil, nil, false, err
 	}

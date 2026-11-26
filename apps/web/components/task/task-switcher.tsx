@@ -166,7 +166,7 @@ function buildGroupSectionProps(
   return {
     group,
     grouping: grouped.groupKey,
-    subTasksByParentId: grouped.subTasksByParentId,
+    subTasksByParentId: group.subTasksByParentId ?? grouped.subTasksByParentId,
     getNestHierarchyTasks,
     rowProps,
     pinnedSet,

@@ -305,6 +305,7 @@
   "onboardingExecutorSpritesDescription": "Executa numa sandbox remota do fornecedor. Configure primeiro o fornecedor Sprites e o perfil de executor.",
   "onboardingExecutorSshDescription": "Executa num anfitrião SSH de confiança. Configure e verifique primeiro a ligação e o perfil de executor.",
   "onboardingExecutorWorktreeDescription": "Cria um checkout Git separado para as alterações da tarefa. Partilha a conta do anfitrião e o respetivo acesso.",
+  "onboardingNoInstalledAgents": "Não foram detetados agentes instalados.",
   "onboardingStepAgentsDescription": "Faça a gestão dos agentes descobertos e instale novos.",
   "onboardingStepAgentsTitle": "Agentes de IA",
   "onboardingStepCommandPanelDescription": "Acesso rápido às ações a partir de qualquer sítio com um atalho de teclado.",

@@ -105,6 +105,17 @@ func (r deliveryJournalReleaser) acknowledge(
 	return client.AcknowledgeDelivery(ctx, streamID, sequence)
 }
 
+// AcknowledgeDelivery takes the replay client's lease after the releaser
+// completes the durability barrier.
+func (p recoveredReplayClient) AcknowledgeDelivery(ctx context.Context, streamID string, sequence uint64) error {
+	release, err := p.acquire()
+	if err != nil {
+		return err
+	}
+	defer release()
+	return p.client.AcknowledgeDelivery(ctx, streamID, sequence)
+}
+
 func (r deliveryJournalReleaser) retire(
 	ctx context.Context,
 	client deliveryRetirerClient,

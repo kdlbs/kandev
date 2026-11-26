@@ -288,9 +288,9 @@ func TestStore_RecordSyncFailureRoundtripAndConfigSaveReset(t *testing.T) {
 	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
 	nextAttempt := now.Add(5 * time.Minute)
 	require.NoError(t, store.RecordSyncFailure(ctx, "ws-1", "rate limited", failureDirective{
-		class: string(github.FailureSecondaryRateLimit), consecutive: 3,
-		nextAttemptAt: &nextAttempt,
-		suspended:     true,
+		Class: string(github.FailureSecondaryRateLimit), Consecutive: 3,
+		NextAttemptAt: &nextAttempt,
+		Suspended:     true,
 	}, now))
 
 	cfg, err := store.GetConfigForWorkspace(ctx, "ws-1")

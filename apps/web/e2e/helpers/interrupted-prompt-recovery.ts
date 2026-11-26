@@ -29,6 +29,16 @@ export function withDatabase<T>(tmpDir: string, read: (db: TestDatabase) => T): 
   }
 }
 
+export function seedTaskInterruptedWarning(tmpDir: string, taskId: string, interruptedAt: string) {
+  withDatabase(tmpDir, (db) => {
+    const task = db.prepare("SELECT id FROM tasks WHERE id = ?").get(taskId);
+    if (!task) throw new Error(`Cannot seed interruption warning for missing task ${taskId}`);
+    db.prepare(
+      "UPDATE tasks SET metadata = json_set(COALESCE(metadata, '{}'), '$.interrupted_at', ?) WHERE id = ?",
+    ).run(interruptedAt, taskId);
+  });
+}
+
 export type JournalRecord = {
   id: string;
   session_id: string;

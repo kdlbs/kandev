@@ -34,7 +34,7 @@ import {
   useSidebarSelectionHandler,
 } from "@/components/github/my-github/use-sidebar-selection";
 import { useKnownRepos, resetKnownReposStore } from "@/components/github/my-github/use-known-repos";
-import { useCommittedQuery } from "@/components/github/my-github/use-committed-query";
+import { useCommittedQuery } from "@/hooks/use-committed-query";
 import { ListToolbar } from "@/components/github/my-github/list-toolbar";
 import { ResultsPagination } from "@/components/github/my-github/results-pagination";
 import { SavePresetDialog } from "@/components/github/my-github/save-preset-dialog";

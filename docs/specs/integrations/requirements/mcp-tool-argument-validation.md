@@ -62,6 +62,10 @@ that subset cannot express must still be enforced.
   identity on a replace, an association target that also supplies task-provider
   selection or the reverse, and an `auto_fix_prompt_override` on an association
   target.
+- **AC-INTEGRATIONS-MCP-TOOL-SCHEMA-PORTABILITY-001.5:** Every array node in a
+  built-in Kandev MCP tool schema advertised through `tools/list`, at any depth
+  and on every Kandev-owned MCP surface, declares `items`, so a model provider
+  that rejects an array parameter without an item schema accepts the request.
 
 ## Migrated source detail
 

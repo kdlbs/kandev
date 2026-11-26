@@ -7,7 +7,13 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
+)
+
+const (
+	inheritedWorkspaceRepoStatusFailed  = "failed"
+	inheritedWorkspaceRepoStatusDeleted = "deleted"
 )
 
 // ValidateInheritedWorkspaceRepositorySelection verifies explicit repository
@@ -37,10 +43,32 @@ func (s *Service) ValidateInheritedWorkspaceRepositorySelection(
 	if err != nil {
 		return fmt.Errorf("%w: inspect inherited workspace inventory", models.ErrWorkspaceReuseUnsafe)
 	}
-	for _, repository := range repositories {
-		repository, err = s.resolveExistingInheritedRepository(ctx, target.environment.TaskID, repository)
+	resolved := make([]TaskRepositoryInput, len(repositories))
+	for index, repository := range repositories {
+		resolved[index], err = s.resolveExistingInheritedRepository(ctx, target.environment.TaskID, repository)
 		if err != nil {
 			return err
+		}
+	}
+	var branchPlans []worktree.BranchIdentityPlan
+	if target.environment.ExecutorType == string(models.ExecutorTypeWorktree) {
+		branchPlans, err = inheritedWorkspaceBranchPlans(ctx, s.repoEntities, resolved)
+		if err != nil {
+			return fmt.Errorf("%w: inspect inherited repository defaults", models.ErrWorkspaceReuseUnsafe)
+		}
+	}
+	usedRows := make(map[*models.TaskEnvironmentRepo]struct{}, len(resolved))
+	for index, repository := range resolved {
+		if repository.InheritedWorkspaceSlot && target.environment.ExecutorType == string(models.ExecutorTypeWorktree) {
+			matches := activeInheritedWorktreeMatches(repository, branchPlans[index], target.environment.ID, rows)
+			if len(matches) != 1 {
+				return inheritedWorkspaceRepositoryMismatch(repository)
+			}
+			if _, used := usedRows[matches[0]]; used {
+				return inheritedWorkspaceRepositoryMismatch(repository)
+			}
+			usedRows[matches[0]] = struct{}{}
+			continue
 		}
 		if countActiveInventoryMatches(repository, rows) != 1 {
 			return fmt.Errorf(
@@ -52,6 +80,134 @@ func (s *Service) ValidateInheritedWorkspaceRepositorySelection(
 		}
 	}
 	return nil
+}
+
+func inheritedWorkspaceBranchPlans(
+	ctx context.Context,
+	repositories repository.RepositoryEntityRepository,
+	inputs []TaskRepositoryInput,
+) ([]worktree.BranchIdentityPlan, error) {
+	if repositories == nil {
+		return nil, fmt.Errorf("repository service is unavailable")
+	}
+	branchInputs := make([]worktree.BranchIdentityInput, len(inputs))
+	defaults := make(map[string]string)
+	for index, input := range inputs {
+		defaultBranch, known := defaults[input.RepositoryID]
+		if !known {
+			repository, err := repositories.GetRepository(ctx, input.RepositoryID)
+			if err != nil || repository == nil {
+				return nil, fmt.Errorf("load repository %q", input.RepositoryID)
+			}
+			defaultBranch = repository.DefaultBranch
+			defaults[input.RepositoryID] = defaultBranch
+		}
+		branchInputs[index] = worktree.BranchIdentityInput{
+			RepositoryID: input.RepositoryID, BaseBranch: input.BaseBranch,
+			CheckoutBranch: input.CheckoutBranch, DefaultBranch: defaultBranch,
+			PRNumber: input.PRNumber, Position: input.Position,
+		}
+	}
+	return worktree.BuildBranchIdentityPlans(branchInputs), nil
+}
+
+func activeInheritedWorktreeMatches(
+	repository TaskRepositoryInput,
+	plan worktree.BranchIdentityPlan,
+	environmentID string,
+	rows []*models.TaskEnvironmentRepo,
+) []*models.TaskEnvironmentRepo {
+	identity := worktree.SanitizeBranchSlug(plan.IdentitySlug)
+	canonical := make([]*models.TaskEnvironmentRepo, 0, 1)
+	for _, row := range rows {
+		if !inheritedWorktreeInventoryRowEligible(row, repository, environmentID) {
+			continue
+		}
+		if worktree.SanitizeBranchSlug(row.BranchSlug) == identity {
+			canonical = append(canonical, row)
+		}
+	}
+	if len(canonical) > 0 {
+		return canonical
+	}
+	if !inheritedRepositoryHasBranchScopedRows(repository, environmentID, rows) {
+		legacy := make([]*models.TaskEnvironmentRepo, 0, 1)
+		for _, row := range rows {
+			if inheritedWorktreeInventoryRowEligible(row, repository, environmentID) && row.BranchSlug == "" {
+				legacy = append(legacy, row)
+			}
+		}
+		if len(legacy) > 0 {
+			return legacy
+		}
+	}
+	if repository.CheckoutBranch == "" {
+		return nil
+	}
+	return inheritedWorktreeRowsByExactBranch(repository, environmentID, rows)
+}
+
+func inheritedWorktreeRowsByExactBranch(
+	repository TaskRepositoryInput,
+	environmentID string,
+	rows []*models.TaskEnvironmentRepo,
+) []*models.TaskEnvironmentRepo {
+	matches := make([]*models.TaskEnvironmentRepo, 0, 1)
+	for _, row := range rows {
+		if inheritedWorktreeInventoryRowEligible(row, repository, environmentID) &&
+			row.WorktreeBranch == repository.CheckoutBranch {
+			matches = append(matches, row)
+		}
+	}
+	return matches
+}
+
+func inheritedWorktreeInventoryRowEligible(
+	row *models.TaskEnvironmentRepo,
+	repository TaskRepositoryInput,
+	environmentID string,
+) bool {
+	return inheritedWorktreeInventoryRowLive(row, repository.RepositoryID, environmentID) &&
+		row.WorkspaceRelativePath == repository.WorkspaceRelativePath
+}
+
+func inheritedWorktreeInventoryRowLive(
+	row *models.TaskEnvironmentRepo,
+	repositoryID, environmentID string,
+) bool {
+	return row != nil && row.TaskEnvironmentID == environmentID && row.RepositoryID == repositoryID &&
+		row.WorktreeID != "" && row.DeletedAt == nil && row.Status != inheritedWorkspaceRepoStatusFailed &&
+		row.Status != inheritedWorkspaceRepoStatusDeleted && row.Status != models.TaskEnvironmentRepoStatusDetached
+}
+
+func inheritedRepositoryHasBranchScopedRows(
+	repository TaskRepositoryInput,
+	environmentID string,
+	rows []*models.TaskEnvironmentRepo,
+) bool {
+	for _, row := range rows {
+		if inheritedWorktreeInventoryRowLive(row, repository.RepositoryID, environmentID) &&
+			worktree.SanitizeBranchSlug(row.BranchSlug) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func inheritedWorkspaceRepositoryMismatch(repository TaskRepositoryInput) error {
+	checkout := repository.CheckoutBranch
+	if checkout == "" {
+		checkout = repository.BaseBranch
+	}
+	if checkout == "" {
+		checkout = "default"
+	}
+	return fmt.Errorf(
+		"%w: repository %q checkout %q is not an exact active Worktree match in the inherited workspace; use workspace_mode=new_workspace for a separate checkout",
+		models.ErrWorkspaceReuseUnsafe,
+		repository.RepositoryID,
+		checkout,
+	)
 }
 
 func (s *Service) resolveExistingInheritedRepository(
@@ -125,7 +281,11 @@ func countActiveInventoryMatches(
 	repository TaskRepositoryInput,
 	rows []*models.TaskEnvironmentRepo,
 ) int {
-	expectedBranch := worktree.SanitizeBranchSlug(repository.BaseBranch)
+	branch := repository.CheckoutBranch
+	if branch == "" {
+		branch = repository.BaseBranch
+	}
+	expectedBranch := worktree.SanitizeBranchSlug(branch)
 	hasBranchScopedRow := false
 	for _, row := range rows {
 		if row != nil && row.RepositoryID == repository.RepositoryID &&

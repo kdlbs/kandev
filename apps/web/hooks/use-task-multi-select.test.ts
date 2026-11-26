@@ -2,12 +2,8 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskPriority } from "@/lib/types/http";
 import type { DisplayOrderTask } from "@/lib/kanban/task-order";
-import {
-  multiSelectReducer,
-  INITIAL_STATE,
-  buildPipelineStepIndexOf,
-  filterIdsByPriorityFilter,
-} from "./use-task-multi-select";
+import { buildPipelineStepIndexOf, filterIdsByPriorityFilter } from "./use-task-multi-select";
+import { multiSelectReducer, INITIAL_STATE } from "./task-multi-select-state";
 
 describe("multiSelectReducer", () => {
   it("reset returns initial state", () => {

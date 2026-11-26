@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -120,5 +121,47 @@ func TestAntigravityLoginStartFencesUnfinishedAttempt(t *testing.T) {
 	}
 	if snap.AttemptID != "attempt-1" {
 		t.Fatalf("started a successor before cleanup: %+v", snap)
+	}
+}
+
+func TestAntigravityStandaloneLoginWithCLIDefault(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a POSIX shell fixture")
+	}
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	bin := t.TempDir()
+	cliName, serverName, harnessName := "agy", "agy_acp_server.par", "localharness_external"
+	files := map[string]string{
+		cliName:     hostUtilityAntigravityCLIScript("1.5.15"),
+		serverName:  "server",
+		harnessName: "harness",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+	agent := agents.NewAntigravityACP()
+	current, err := agent.ResolveLocalRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Variant != acpcompat.AntigravityRuntimeCLI {
+		t.Fatalf("default runtime = %q, want CLI", current.Variant)
+	}
+
+	selection, err := resolveAntigravityStandaloneRuntime(context.Background(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Variant != acpcompat.AntigravityRuntimeStandalone {
+		t.Fatalf("login runtime = %q, want standalone", selection.Variant)
+	}
+	if got, want := selection.Command.Args()[0], filepath.Join(bin, serverName); got != want {
+		t.Fatalf("login command = %q, want standalone server %q", got, want)
+	}
+	if got, want := selection.Env[acpcompat.AntigravityHarnessPathEnv], filepath.Join(bin, harnessName); got != want {
+		t.Fatalf("login harness = %q, want %q", got, want)
 	}
 }

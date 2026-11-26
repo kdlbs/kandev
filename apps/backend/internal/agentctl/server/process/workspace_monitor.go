@@ -49,10 +49,10 @@ const maxConsecutiveGitFailures = 5
 func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	defer wt.wg.Done()
 
-	// If no valid git index was found at startup, there's nothing to poll.
-	// Exit immediately to avoid spamming "git diff-files: exit status 128" warnings
-	// every poll cycle until the consecutive failure threshold is reached.
-	if wt.gitIndexPath == "" {
+	// If no valid git index was found at startup, ordinary trackers have
+	// nothing to poll. A manager-built task root still polls its filesystem
+	// listing, but never starts a Git command.
+	if wt.gitIndexPath == "" && !wt.suppressGitPublication {
 		wt.logger.Warn("no valid git repository found, file monitor not polling",
 			zap.String("workDir", wt.workDir))
 		// Close the initialScanDone channel even on early exit so callers
@@ -76,15 +76,19 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	defer timer.Stop()
 
 	// Initial update — done unconditionally so the first focus-grab isn't
-	// stuck waiting for the first tick. Skipped only in fully-paused initial
-	// state? No: even paused workspaces benefit from a one-time scan so
-	// transitioning to slow/fast later finds a populated cache.
+	// stuck waiting for the first tick. Bare roots seed only their own file
+	// snapshot; repository status and file lists belong to child trackers.
 	initialScanStarted := time.Now()
-	wt.updateGitStatusClass(ctx, subproc.GitBackground)
-	wt.updateFiles(ctx)
+	var lastState workspaceState
+	if wt.suppressGitPublication {
+		wt.observeWorkspaceRootFiles(ctx)
+	} else {
+		wt.updateGitStatusClass(ctx, subproc.GitBackground)
+		wt.updateFiles(ctx)
 
-	// Cache the last known state (ignore error on initial fetch)
-	lastState, _ := wt.getWorkspaceState(ctx)
+		// Cache the last known state (ignore error on initial fetch)
+		lastState, _ = wt.getWorkspaceState(ctx)
+	}
 	wt.recordMonitorTick(time.Since(initialScanStarted))
 
 	// Signal that the initial scan is done — tests wait on this instead of
@@ -176,6 +180,10 @@ func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspac
 		default:
 		}
 	}()
+	if wt.suppressGitPublication {
+		wt.observeWorkspaceRootFiles(ctx)
+		return false
+	}
 
 	currentState, err := wt.getWorkspaceState(ctx)
 	if err != nil {

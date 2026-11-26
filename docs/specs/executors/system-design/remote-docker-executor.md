@@ -29,7 +29,7 @@ the agentctl protocol, or the executor enum.
 | `AC-…-001.6` | [Image build](#image-build) |
 | `AC-…-001.7`, `AC-…-001.8`, `AC-…-001.9` | [Removing host coupling](#removing-host-coupling) |
 | `AC-…-001.10`, `AC-…-001.11` | [Endpoint reachability](#endpoint-reachability) |
-| `AC-…-001.12`, `AC-…-001.13` | [Lifecycle, resume, and liveness](#lifecycle-resume-and-liveness) |
+| `AC-…-001.12`, `AC-…-001.13`, `AC-…-001.18` | [Lifecycle, resume, and liveness](#lifecycle-resume-and-liveness) |
 | `AC-…-001.14` | [Failure taxonomy](#failure-taxonomy) |
 | `AC-…-001.15` | [Source rules](#source-rules) |
 
@@ -206,9 +206,13 @@ not distinguish reused compute from a new allocation. Conversation-resume
 state must not supply destructive cleanup authority.
 `StopReasonRecoverableAgentFailure` preserves an established remote container.
 `StopReasonAgentBootstrapFailed` preserves a container reused by that attempt.
-Registered-launch rollback preserves the same retained runtime and inventory.
-An explicit reset, archive, delete, or fresh-allocation rollback retains its
-existing destructive authority and ownership checks.
+Registered-launch rollback and ordinary startup cleanup preserve the retained
+runtime and inventory. For `AC-EXECUTORS-REMOTE-DOCKER-001.18`, check for
+recorded or unresolved remote ownership before the generic startup stop and
+prune path. Keep the container ID, environment binding, and SSH target even
+when the session is failed, completed, cancelled, or missing. Explicit reset,
+archive, delete, and fresh-allocation rollback use their existing ownership
+checks.
 
 Stop the exact failed agent instance with a bounded cleanup context before
 releasing its execution slot. A failed or unconfirmed agent stop must retain
@@ -234,6 +238,8 @@ surfaces as a failure rather than a hung session, satisfying `AC-…-001.13`.
 
 The [recoverable resume package](../../../plans/remote-docker-recoverable-resume/plan.md)
 records implementation and regression evidence for these failure paths.
+The [stopped-agent disposition](../../platform/system-design/durable-restart-reconciliation.md#stopped-agent-in-a-retained-remote-environment)
+allows normal resume when an authenticated agentctl confirms agent termination.
 
 ### Retained multi-repository verification
 

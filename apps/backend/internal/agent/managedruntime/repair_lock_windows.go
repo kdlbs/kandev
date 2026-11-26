@@ -6,9 +6,12 @@ import (
 	"errors"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/kandev/kandev/internal/common/winpath"
 )
 
 func repairLocalUserIdentity() string {
@@ -31,8 +34,18 @@ func validatePrivateRepairOwnership(os.FileInfo) error {
 	return errors.New("managed runtime repair ACL verification is unavailable on Windows")
 }
 
+// openRepairConfigFile reads the config basename after a checked parent walk.
 func openRepairConfigFile(path string) (*os.File, error) {
-	handle, err := openManagedRuntimeReadHandle(0, managedRuntimeWindowsNTPath(path), windows.FILE_NON_DIRECTORY_FILE)
+	directory, err := winpath.OpenDirectoryPath(filepath.Dir(path), winpath.TraverseAccess)
+	if err != nil {
+		if isManagedRuntimeNotFound(err) {
+			return nil, os.ErrNotExist
+		}
+		return nil, err
+	}
+	defer func() { _ = windows.CloseHandle(directory) }()
+
+	handle, err := openManagedRuntimeReadHandle(directory, filepath.Base(path), windows.FILE_NON_DIRECTORY_FILE)
 	if err != nil {
 		if isManagedRuntimeNotFound(err) {
 			return nil, os.ErrNotExist

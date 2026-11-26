@@ -1,7 +1,7 @@
 "use client";
 
-import { memo, useState, type Ref } from "react";
-import { IconCheck, IconChevronDown, IconLoader2 } from "@tabler/icons-react";
+import { memo, useState, type ReactNode, type Ref } from "react";
+import { IconCheck, IconChevronDown, IconLoader2, IconX } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
 import { prioritizeSelectedOption, selectorOptionClassName } from "@/lib/utils/selector-options";
@@ -17,6 +17,14 @@ import {
   CommandSeparator,
 } from "@kandev/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 import { t } from "@/lib/i18n";
@@ -46,6 +54,7 @@ interface ComboboxProps {
   ariaLabel?: string;
   ariaDescribedBy?: string;
   dropdownLabel?: string;
+  drawerTitle?: string;
   placeholder?: string;
   searchPlaceholder?: string;
   emptyMessage?: string;
@@ -178,6 +187,7 @@ function ComboboxTrigger({
   testId,
   triggerId,
   triggerRef,
+  inDrawer,
 }: {
   options: ComboboxOption[];
   value: string;
@@ -193,9 +203,11 @@ function ComboboxTrigger({
   testId?: string;
   triggerId?: string;
   triggerRef?: Ref<HTMLButtonElement>;
+  inDrawer: boolean;
 }) {
+  const Trigger = inDrawer ? DrawerTrigger : PopoverTrigger;
   return (
-    <PopoverTrigger asChild>
+    <Trigger asChild>
       <Button
         ref={triggerRef}
         id={triggerId}
@@ -227,7 +239,7 @@ function ComboboxTrigger({
           <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         )}
       </Button>
-    </PopoverTrigger>
+    </Trigger>
   );
 }
 function handleComboboxOpenChange(
@@ -274,6 +286,73 @@ function ComboboxHeader({
   );
 }
 
+function ComboboxPopup({
+  drawerTitle,
+  open,
+  onOpenChange,
+  trigger,
+  children,
+  className,
+  popoverSide,
+  popoverAlign,
+  popoverPortal,
+}: Pick<
+  ComboboxProps,
+  "className" | "drawerTitle" | "popoverSide" | "popoverAlign" | "popoverPortal"
+> & {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  trigger: ReactNode;
+  children: ReactNode;
+}) {
+  const portalContainer = useTaskCreateDialogPopoverContainer();
+  if (drawerTitle) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        {trigger}
+        <DrawerContent
+          aria-describedby={undefined}
+          className="data-[vaul-drawer-direction=bottom]:max-h-[80dvh] overflow-hidden pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
+        >
+          <DrawerHeader className="flex shrink-0 flex-row items-center justify-between gap-2 text-left">
+            <DrawerTitle>{drawerTitle}</DrawerTitle>
+            <DrawerClose asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={controlSizingClassName("icon")}
+                aria-label={t("common:close")}
+              >
+                <IconX aria-hidden="true" />
+              </Button>
+            </DrawerClose>
+          </DrawerHeader>
+          {children}
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      {trigger}
+      <PopoverContent
+        className={cn(
+          "w-[var(--radix-popover-trigger-width)] min-w-[min(300px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] p-0 max-h-[var(--radix-popover-content-available-height)] pointer-events-auto",
+          className,
+        )}
+        side={popoverSide}
+        align={popoverAlign}
+        portal={popoverPortal}
+        portalContainer={portalContainer}
+        onWheel={(event) => event.stopPropagation()}
+      >
+        {children}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export const Combobox = memo(function Combobox({
   options,
   value,
@@ -281,6 +360,7 @@ export const Combobox = memo(function Combobox({
   ariaLabel,
   ariaDescribedBy,
   dropdownLabel,
+  drawerTitle,
   placeholder = t("common:selectOption"),
   searchPlaceholder = t("common:searchPlaceholder"),
   emptyMessage = t("common:noOptionFound"),
@@ -303,76 +383,75 @@ export const Combobox = memo(function Combobox({
   onOpenChange,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
-  const portalContainer = useTaskCreateDialogPopoverContainer();
   // Keep the selected value highlighted when the popover opens, not the first item.
   const [highlighted, setHighlighted] = useState("");
 
   return (
-    <Popover
+    <ComboboxPopup
       open={open}
+      drawerTitle={drawerTitle}
+      className={className}
+      popoverSide={popoverSide}
+      popoverAlign={popoverAlign}
+      popoverPortal={popoverPortal}
       onOpenChange={(next) =>
         handleComboboxOpenChange(next, value, setOpen, setHighlighted, onOpenChange)
       }
+      trigger={
+        <ComboboxTrigger
+          options={options}
+          value={value}
+          ariaLabel={ariaLabel}
+          ariaDescribedBy={ariaDescribedBy}
+          open={open}
+          disabled={disabled}
+          touchTarget={touchTarget}
+          triggerClassName={triggerClassName}
+          plainTrigger={plainTrigger}
+          placeholder={placeholder}
+          loading={loading}
+          testId={testId}
+          triggerId={triggerId}
+          triggerRef={triggerRef}
+          inDrawer={Boolean(drawerTitle)}
+        />
+      }
     >
-      <ComboboxTrigger
-        options={options}
-        value={value}
-        ariaLabel={ariaLabel}
-        ariaDescribedBy={ariaDescribedBy}
-        open={open}
-        disabled={disabled}
-        touchTarget={touchTarget}
-        triggerClassName={triggerClassName}
-        plainTrigger={plainTrigger}
-        placeholder={placeholder}
-        loading={loading}
-        testId={testId}
-        triggerId={triggerId}
-        triggerRef={triggerRef}
-      />
-      <PopoverContent
-        className={cn(
-          "w-[var(--radix-popover-trigger-width)] min-w-[min(300px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] p-0 max-h-[var(--radix-popover-content-available-height)] pointer-events-auto",
-          className,
-        )}
-        side={popoverSide}
-        align={popoverAlign}
-        portal={popoverPortal}
-        portalContainer={portalContainer}
-        onWheel={(event) => event.stopPropagation()}
+      <Command
+        className={drawerTitle ? "min-h-0" : undefined}
+        value={highlighted}
+        onValueChange={setHighlighted}
+        filter={filter}
+        data-testid={dropdownTestId}
       >
-        <Command
-          value={highlighted}
-          onValueChange={setHighlighted}
-          filter={filter}
-          data-testid={dropdownTestId}
+        <ComboboxHeader dropdownLabel={dropdownLabel} headerAction={headerAction} />
+        {showSearch && (
+          <CommandInput
+            placeholder={searchPlaceholder}
+            className={controlSizingClassName("standard")}
+          />
+        )}
+        <CommandList
+          className={drawerTitle ? "min-h-0 overscroll-contain" : undefined}
+          data-vaul-no-drag={drawerTitle ? true : undefined}
         >
-          <ComboboxHeader dropdownLabel={dropdownLabel} headerAction={headerAction} />
-          {showSearch && (
-            <CommandInput
-              placeholder={searchPlaceholder}
-              className={controlSizingClassName("standard")}
-            />
-          )}
-          <CommandList>
-            <CommandEmpty>{emptyMessage}</CommandEmpty>
-            <OptionsList
-              options={options}
-              value={value}
-              touchTarget={touchTarget}
-              onSelect={(v) =>
-                selectComboboxOption({
-                  selectedValue: v,
-                  currentValue: value,
-                  onValueChange,
-                  setOpen,
-                  onOpenChange,
-                })
-              }
-            />
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+          <CommandEmpty>{emptyMessage}</CommandEmpty>
+          <OptionsList
+            options={options}
+            value={value}
+            touchTarget={touchTarget}
+            onSelect={(v) =>
+              selectComboboxOption({
+                selectedValue: v,
+                currentValue: value,
+                onValueChange,
+                setOpen,
+                onOpenChange,
+              })
+            }
+          />
+        </CommandList>
+      </Command>
+    </ComboboxPopup>
   );
 });

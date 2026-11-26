@@ -2,6 +2,8 @@
 
 import { memo, type ReactNode } from "react";
 import type { StepDef, TaskLinkHandler, TaskSwitcherItem } from "./task-switcher-types";
+import { TaskFlagIndicator } from "./task-flag-indicator";
+import { useOpenTaskFlag } from "./task-flag-editor-provider";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu } from "./task-switcher-context-menu";
 import { dispatchSidebarRowClick } from "./task-switcher-click";
@@ -59,8 +61,8 @@ export type TaskRowProps = {
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
   selectedTaskIds?: Set<string>;
-  onToggleSelectTask?: (taskId: string) => void;
-  onSelectTaskRange?: (taskId: string) => void;
+  onToggleSelectTask?: (taskId: string, occurrenceKey?: string) => void;
+  onSelectTaskRange?: (taskId: string, occurrenceKey?: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
   onBulkDelete?: (taskIds: string[]) => void;
   onBulkPin?: (taskIds: string[]) => void;
@@ -131,7 +133,7 @@ type TaskRowItemProps = Pick<
   | "deletingTaskId"
   | "isPinned"
   | "stepsByWorkflowId"
-> & { isArchived: boolean; archiveConfirmation?: ReactNode };
+> & { isArchived: boolean; archiveConfirmation?: ReactNode; flag?: ReactNode };
 
 /** Applies the dot setting, open-task rule, and post-selection linger. */
 function useTaskRowUnreadDot(
@@ -176,6 +178,7 @@ function TaskRowItem({
   stepsByWorkflowId,
   isArchived,
   archiveConfirmation,
+  flag,
 }: TaskRowItemProps) {
   const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
   const hasUnreadMessages = useTaskRowUnreadDot(
@@ -186,10 +189,10 @@ function TaskRowItem({
     displayedSessionId,
   );
   const stepId = task.workflowStepId;
-  const isDeleting = deletingTaskId === task.id;
 
   return (
     <TaskItem
+      flag={flag}
       isMultiSelected={!isArchived && (selectedTaskIds?.has(task.id) ?? false)}
       onSelect={(e) =>
         dispatchSidebarRowClick(
@@ -249,7 +252,7 @@ function TaskRowItem({
       subtasksCollapsed={subtaskToggle?.subtasksCollapsed}
       onToggleSubtasks={subtaskToggle?.onToggleSubtasks}
       onClick={() => onSelectTask(task.id)}
-      isDeleting={isDeleting}
+      isDeleting={deletingTaskId === task.id}
       isPinned={isArchived ? false : isPinned}
       archiveConfirmation={archiveConfirmation}
     />
@@ -275,6 +278,19 @@ export const TaskRow = memo(function TaskRow({
 const SelectedTaskRow = memo(function SelectedTaskRow(props: SelectedTaskRowProps) {
   const { task, isSubTask, depth, subtaskToggle, workflows, stepsByWorkflowId } = props;
   const isArchived = task.isArchived === true;
+  const openFlag = useOpenTaskFlag();
+  const selected = props.selectedTaskIds;
+  const readOnly =
+    isArchived ||
+    props.deletingTaskId === task.id ||
+    task.isPendingRemoval ||
+    (selected?.has(task.id) && selected.size > 1);
+  const flag = task.flagNote ? (
+    <TaskFlagIndicator
+      note={task.flagNote}
+      onOpen={openFlag && ((invoker) => openFlag(task, invoker, readOnly))}
+    />
+  ) : undefined;
   return (
     <TaskItemWithContextMenu
       task={task}
@@ -286,6 +302,7 @@ const SelectedTaskRow = memo(function SelectedTaskRow(props: SelectedTaskRowProp
       <TaskRowItem
         {...props}
         isArchived={isArchived}
+        flag={flag}
         isSubTask={isSubTask}
         depth={depth}
         subtaskToggle={subtaskToggle}

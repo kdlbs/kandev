@@ -28,7 +28,7 @@ describe("resolveDockedBarPosition", () => {
         barHeight: 48,
         container: { left: 10, width: 300, bottom: 600 },
       }),
-    ).toEqual({ top: 552, left: 10, width: 300 });
+    ).toEqual({ top: 552, left: 10, width: 300, clearance: 48 });
   });
 
   it("docks above the keyboard when it covers the container bottom", () => {
@@ -39,7 +39,7 @@ describe("resolveDockedBarPosition", () => {
         barHeight: 48,
         container: { left: 0, width: 400, bottom: 700 },
       }),
-    ).toEqual({ top: 402, left: 0, width: 400 });
+    ).toEqual({ top: 402, left: 0, width: 400, clearance: 298 });
   });
 
   it("clamps a container that extends below the visible viewport", () => {
@@ -50,16 +50,16 @@ describe("resolveDockedBarPosition", () => {
         barHeight: 48,
         container: { left: 0, width: 400, bottom: 1200 },
       }),
-    ).toEqual({ top: 752, left: 0, width: 400 });
+    ).toEqual({ top: 752, left: 0, width: 400, clearance: 448 });
   });
 
   it("falls back to the visual viewport without a container", () => {
     expect(
       resolveDockedBarPosition({ keyboardOpen: true, viewportBottom: 450, barHeight: 48 }),
-    ).toEqual({ top: 402 });
+    ).toEqual({ top: 402, clearance: 48 });
     expect(
       resolveDockedBarPosition({ keyboardOpen: false, viewportBottom: 800, barHeight: 48 }),
-    ).toEqual({ bottom: "env(safe-area-inset-bottom, 0px)" });
+    ).toEqual({ bottom: "env(safe-area-inset-bottom, 0px)", clearance: 48 });
   });
 });
 
@@ -82,12 +82,27 @@ describe("useDockedBarPosition", () => {
     const container = containerWithBounds({ left: 0, width: 400, bottom: 700 });
     const containerRef = { current: container };
     const { result } = renderHook(() => useDockedBarPosition({ containerRef, barHeight: 48 }));
-    expect(result.current).toEqual({ top: 652, left: 0, width: 400 });
+    expect(result.current).toEqual({ top: 652, left: 0, width: 400, clearance: 48 });
 
     act(() => {
       vv.height = 450;
       vv.dispatchEvent(new Event("resize"));
     });
-    expect(result.current).toEqual({ top: 402, left: 0, width: 400 });
+    expect(result.current).toEqual({ top: 402, left: 0, width: 400, clearance: 298 });
+  });
+
+  it("updates owner clearance when the visual viewport shrinks without layout resizing", () => {
+    const container = containerWithBounds({ left: 0, width: 400, bottom: 700 });
+    const containerRef = { current: container };
+    const { result } = renderHook(() => useDockedBarPosition({ containerRef, barHeight: 48 }));
+    expect(result.current.clearance).toBe(48);
+
+    act(() => {
+      vv.height = 500;
+      vv.dispatchEvent(new Event("resize"));
+    });
+
+    expect(window.innerHeight).toBe(800);
+    expect(result.current).toEqual({ top: 452, left: 0, width: 400, clearance: 248 });
   });
 });

@@ -15,19 +15,24 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // AddTaskToWorkflow adds a task to a workflow with placement. Wrapped in a
 // transaction (it previously ran as a bare ExecContext) so the ledger row
 // commits atomically with the UPDATE.
 func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{taskID}); err != nil {
+		return err
+	}
+	if err := r.lockWorkflowStepsForAdmission(ctx, tx, workflowStepID, ""); err != nil {
+		return err
+	}
 	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, taskID)
 	if err != nil {
 		return err
@@ -35,12 +40,14 @@ func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, 
 	if !found {
 		return tx.Commit()
 	}
-	var currentState v1.TaskState
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM tasks WHERE id = ?`), taskID).Scan(&currentState); err != nil {
+	current, err := r.readTaskCompletionMoveSourceTx(ctx, tx, taskID, fromWorkflowID, fromStepID)
+	if err != nil {
 		return err
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, currentState, currentState,
-		fromWorkflowID, fromStepID, workflowID, workflowStepID); err != nil {
+	candidate := models.Task{
+		ID: taskID, State: current.State, WorkflowID: workflowID, WorkflowStepID: workflowStepID, WIPAdmitted: true,
+	}
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, &current, &candidate); err != nil {
 		return err
 	}
 

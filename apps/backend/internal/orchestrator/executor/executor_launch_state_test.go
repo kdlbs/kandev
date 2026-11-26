@@ -46,3 +46,37 @@ func TestPersistLaunchStateKeepsRunningSessionAndPrepareResult(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "completed", prepareMetadata["status"])
 }
+
+func TestPersistLaunchStatePreservesPreclaimedStartAttempt(t *testing.T) {
+	ctx := context.Background()
+	repo := newMockRepository()
+	repo.sessions["session-1"] = &models.TaskSession{
+		ID:       "session-1",
+		TaskID:   "task-1",
+		State:    models.TaskSessionStateCreated,
+		Metadata: map[string]interface{}{models.SessionMetaKeyAgentStartAttemptID: "attempt-1"},
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	launchSession := &models.TaskSession{
+		ID:       "session-1",
+		TaskID:   "task-1",
+		State:    models.TaskSessionStateCreated,
+		Metadata: map[string]interface{}{models.SessionMetaKeyAgentStartAttemptID: "attempt-1"},
+	}
+
+	err := exec.persistLaunchState(
+		ctx,
+		"task-1",
+		"session-1",
+		launchSession,
+		&LaunchAgentResponse{AgentExecutionID: "execution-1"},
+		true,
+		time.Now(),
+	)
+	require.NoError(t, err)
+
+	updated, err := repo.GetTaskSession(ctx, "session-1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateStarting, updated.State)
+	require.Equal(t, "attempt-1", models.StringFromAny(updated.Metadata[models.SessionMetaKeyAgentStartAttemptID]))
+}

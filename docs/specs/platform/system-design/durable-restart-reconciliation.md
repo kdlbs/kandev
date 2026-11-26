@@ -7,6 +7,7 @@ requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
   - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-001
+  - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002
 ---
 
 # Durable restart reconciliation system design
@@ -31,6 +32,7 @@ admission checks remain required before a restore-only operation.
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005 | Compare-and-set settlement and projection |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006 | Existing restore-only checkpoints and explicit Resume |
 | REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-001 | Automatic inconsistency repair and coherent recovery state |
+| REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002 | Retained cancellation before native resume |
 
 ## Mapping-safe capacity accounting
 
@@ -104,6 +106,98 @@ crash after repair, changed owners, and concurrent Stop. A mixed inventory
 contains an absent owner and an independently live or unknown owner.
 The [remote absence fix package](../../../plans/remote-recovery-absence/plan.md)
 owns this correction. Older recovery results do not verify it.
+
+### Stopped agent in a retained remote environment
+
+For `AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.6`, startup and periodic
+retry can settle a stopped agent in a retained Remote Docker or plugin
+workspace.
+
+1. Require an authenticated `GET /api/v1/agent/session` with
+   `agent_status=stopped`, the exact saved agentctl instance ID, and the exact
+   session ID. Use the recorded Docker agentctl ID or plugin runtime ID,
+   with the existing execution ID fallback for older records. A stopped
+   adapter can omit the native session ID. A reported ID must agree with
+   the saved native ID when one exists. Require the recorded incarnation
+   and positive harness generation to match the peer. For durable delivery,
+   require the journal descriptor to match those values as well.
+2. For durable delivery, validate the stream, submission, and payload
+   identities and replay from the persisted projected cursor through the
+   retained journal's reported high water. Reuse the bounded replay path with
+   lifecycle callbacks suppressed. The durable projector applies any proven
+   terminal outcome. An exact abandoned dispatch with no terminal evidence
+   uses the existing interrupted-unknown result and Resume block. Keep any
+   independent delivery block for live or unverifiable work. A compatible
+   legacy peer can skip replay when its incarnation and generation match
+   SQL and there is no durable work to reconcile. Failed proof, a journal
+   gap, or a replay error keeps the applicable protection.
+3. Re-read the executor row after attachment and replay. Use its current
+   `UpdatedAt` and execution ID in the existing owner-locked repair. Check
+   the exact task, session, environment generation, and resource binding.
+   For plugins this includes the provider, resource handle, and agentctl ID
+   in the current checkpoint. A checkpoint refresh for the same owner can
+   advance the row revision. Stop, cleanup, shutdown, a successor, or an
+   unrelated ownership change fences the write.
+4. Settle the original turn from proven terminal evidence. If its outcome
+   remains unknown, use exact-turn abandonment to close it as interrupted
+   and retain the delivery records. Persist the stopped runtime and move a
+   matching `STARTING` or `RUNNING` session to `WAITING_FOR_INPUT` in the
+   owner-locked repair. Preserve an existing waiting, failed, or Office
+   resting state. After the writes commit, close the attempt transport,
+   release the matching startup guard, and publish the normal
+   `session.state_changed` update for a state transition.
+
+A failed Remote Docker or plugin session without a delivery source can reach
+ordinary Resume after recovery authenticates the exact agentctl instance,
+session, incarnation, and generation as stopped. A tokenless failed Remote
+Docker session also has one safe absence disposition when the executor
+definitively verifies that its exact recorded container exited during the
+outage. This disposition keeps the failed session state and only settles the
+runtime owner row. A missing agentctl instance inside a still-running
+container, an unknown process, or ambiguous provider evidence keeps the guard.
+Plugin sessions require the authenticated stopped association because their
+provider absence does not prove that the exact resource is gone.
+
+Settlement leaves the agent stopped and the queue intact. Ordinary Resume
+reuses the saved workspace and any available native conversation. Verified
+native restoration resolves the matching interrupted-delivery block through
+the existing path. An interrupted instruction is never sent again by recovery.
+
+The [retained remote restart package](../../../plans/retained-remote-restart-recovery/plan.md)
+records the checks for this disposition.
+
+### Retained cancellation before native resume
+
+An open, submission-bound delivery block can outlive a stopped local Worktree
+execution without a recovery snapshot. The startup worker reads the journal
+submission by the block's exact ID. The general journal inventory omits
+cancelled submissions.
+
+Replay requires the block's exact submission ID and matching session,
+incarnation, generation, stream, and payload hash. A blank block stream is
+allowed only when the exact authenticated submission proves the stream; a
+conflicting populated stream is rejected. Settlement records that proven
+stream on the resolved block. Replay also requires verified termination of
+the original owner and a complete inventory with no competing unresolved
+work. The SQL projected cursor must not pass the cancellation. A received
+cursor may be ahead of projection only within the authenticated retained
+range, because replay resumes from projection and accepts duplicate receipts.
+Incomplete evidence keeps the existing block and recovery controls available.
+
+The worker reserves automatic resume capacity and pauses queued work before
+replay. If capacity is unavailable, it leaves the block and cancellation
+pending for another pass. The runtime replays the original stream through
+ordered SQL receipt and projection. Acknowledgement follows committed
+projection. Terminal settlement records the cancellation and resolves the
+matching block through the existing terminal effect. Orchestrator settlement
+then retires the matching queue claim and publishes the cleared recovery
+state. Repeated replay uses the same cursor and effect identity.
+
+After settlement, the worker confirms no independent recovery block remains,
+reloads session and executor state, and uses normal resume admission with the
+saved native conversation required. Resume sends no prompt. If another
+restart interrupts the worker after settlement, the committed cancellation
+and block resolution allow ordinary resume.
 
 ### Existing restore reconciliation
 

@@ -19,6 +19,7 @@ Platform retains [delivery reconciliation](../../platform/system-design/session-
 | .2, .12, .18, .25 | Typed server guidance |
 | .4, .5, .9, .16 | Request guidance lifetime |
 | .6, .14, .15, .17 | Active recovery surface |
+| .4, .14, .15, .16, .17 | Pending feedback |
 
 ## Typed server guidance
 
@@ -118,6 +119,33 @@ Expanded recovery content keeps its existing bounded scroll owner and safe-area 
 Details never acquire a nested scroller.
 Phone and coarse-pointer targets measure at least 44 pixels, including narrow fine-pointer phone widths.
 Ordinary desktop actions retain 28-pixel sizing.
+
+## Pending feedback
+
+`RecoveryActions` owns the shared operation status for `SessionRecoveryCard` and `SessionStoppedBanner`.
+Keep its live status region mounted, with no visible height while idle.
+During checking or recovery, place the status before the recovery buttons, after any existing operation disclosure.
+Use `GridSpinner` inside an `aria-hidden` flex wrapper so the spinner and label share a vertical center without duplicate announcements.
+Use the existing `text-sm`, `font-medium`, and foreground text styles for the label.
+The spinner uses the primary color. The warning header retains its existing color and explanation.
+
+Use `busy` and `busyAction` as the status inputs.
+Reuse `task:resumingSession` for Resume and the existing operation-specific labels for connection retry, restore, fresh start, runtime retry, and history continuation.
+Checking retains its distinct label. Do not invent percentages, deadlines, or internal phases that the current operation does not supply.
+Use one polite status announcement for this shared row, and retain stable accessible names on the buttons.
+
+Keep the buttons visible in their existing order. Equivalent recovery actions stay disabled during the attempt.
+When the existing uncertain-delivery surface offers Stop, it remains available during pending recovery.
+Desktop keeps its wrapping action row. Phone keeps full-width stacked actions and existing touch targets.
+The status text can wrap within the recovery surface, with no document overflow or additional scroll region.
+
+Keep request ownership, authoritative completion, interrupted-prompt uncertainty, draft retention, and workspace progress projection in their existing owners.
+Success and failure replace pending feedback through existing operation state. A failed attempt retains its cause and permits only existing eligible recovery.
+This presentation change adds no backend operation, recovery retry, or prompt dispatch.
+
+The [loading and recovery status package](../../../plans/conversation-loading-alignment/plan.md)
+owns this presentation amendment. The native Resume projection suites hold the outgoing request while they inspect the pending state.
+They then release that same request and retain their real recovery, timeout, duplicate-action, and conversation-continuity checks.
 
 ## Compatibility and verification
 

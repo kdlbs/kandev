@@ -31,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
@@ -107,7 +108,7 @@ func isPriorityOnlyTaskUpdate(req *UpdateTaskRequest) bool {
 	return req != nil &&
 		req.Priority != nil && req.ExecutionGrade == nil &&
 		req.Title == nil &&
-		req.Description == nil &&
+		req.Description == nil && req.FlagNote == nil &&
 		req.State == nil &&
 		req.WorkflowStepID == nil &&
 		req.Repositories == nil &&
@@ -274,6 +275,11 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if found, result, err := s.findTaskByExternalIDIfPresent(ctx, req.WorkspaceID, externalID); found {
 		return result, err
 	}
+	if req.RequireProjectWorkspaceValidation {
+		if err := s.validateProjectWorkspace(ctx, req.WorkspaceID, req.ProjectID); err != nil {
+			return CreateTaskResult{}, newPreAllocationTaskCreateError(err)
+		}
+	}
 	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return CreateTaskResult{}, err
 	}
@@ -297,6 +303,11 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 		return CreateTaskResult{}, newPreAllocationTaskCreateError(err)
 	}
 
+	if req.RequireProjectWorkspaceValidation {
+		ctx = admission.WithProjectWorkspaceValidation(ctx, admission.ProjectWorkspaceExpectation{
+			ProjectID: req.ProjectID, WorkspaceID: req.WorkspaceID,
+		})
+	}
 	ctx = taskrepo.WithTaskCreationParentValidator(ctx, hierarchy.ValidateCreationParent)
 	insertTask := func() error { return s.createTaskWithCapacity(ctx, prepared.task) }
 	var createErr error
@@ -367,6 +378,11 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	// MCP create_task path so UI- and agent-created subtasks behave identically.
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
+	}
+	if req.ValidateInheritedWorkspaceRepositorySelection {
+		if err := s.ValidateInheritedWorkspaceRepositorySelection(ctx, req.ParentID, req.Repositories); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.prepareProjectRepositorySources(ctx, req); err != nil {
 		return nil, err
@@ -1290,11 +1306,12 @@ func buildResolvedTaskRepositoryRow(repositoryID, baseBranch string, index int, 
 		return nil, err
 	}
 	row := &models.TaskRepository{
-		RepositoryID:   repositoryID,
-		BaseBranch:     baseBranch,
-		CheckoutBranch: repoInput.CheckoutBranch,
-		Position:       index,
-		Metadata:       metadata,
+		RepositoryID:          repositoryID,
+		WorkspaceRelativePath: repoInput.WorkspaceRelativePath,
+		BaseBranch:            baseBranch,
+		CheckoutBranch:        repoInput.CheckoutBranch,
+		Position:              index,
+		Metadata:              metadata,
 	}
 	if policy != nil {
 		row.BranchPolicyID = policy.ID
@@ -1386,6 +1403,9 @@ func applyBranchPolicyBaseBranch(
 // buildTaskRepositoryMetadata assembles the row's metadata blob.
 func buildTaskRepositoryMetadata(repoInput TaskRepositoryInput) (map[string]interface{}, error) {
 	metadata := make(map[string]interface{})
+	if repoInput.ReuseOnlyCheckoutBranch {
+		metadata[models.TaskRepositoryInheritedCheckoutReuseOnlyMetadataKey] = true
+	}
 	if err := models.PutRepositoryCheckoutOptions(metadata, repoInput.CheckoutOptions); err != nil {
 		return nil, err
 	}
@@ -2232,6 +2252,9 @@ func (s *Service) validateTaskUpdateInput(ctx context.Context, id string, req *U
 			return err
 		}
 	}
+	if err := validateTaskFlagNote(req.FlagNote); err != nil {
+		return err
+	}
 	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return err
 	}
@@ -2287,7 +2310,7 @@ func (s *Service) writeTaskUpdateFields(
 	update := models.TaskFieldUpdate{
 		Title: req.Title, Description: req.Description, Priority: req.Priority, ExecutionGrade: req.ExecutionGrade,
 		State: req.State, WorkflowStepID: req.WorkflowStepID, Position: req.Position,
-		ParentID: req.ParentID, Metadata: req.Metadata,
+		ParentID: req.ParentID, Metadata: req.Metadata, FlagNote: req.FlagNote,
 	}
 	if req.AssigneeUserID != nil {
 		update.AssigneeUserID = &assignee

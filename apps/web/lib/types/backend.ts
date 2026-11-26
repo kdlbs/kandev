@@ -104,7 +104,7 @@ export type TaskReorderedPayload = {
   tasks: Array<{ id: string; position: number }>;
 };
 
-export type TaskEventPayload = {
+export type TaskEventPayload = Pick<import("./http").Task, "flag_note"> & {
   task_id: string;
   workspace_id?: string;
   workflow_id: string;
@@ -473,7 +473,8 @@ export type CanvasLifecyclePayload = {
 export type BackendMessageMap = SessionBackendMessageMap &
   OfficeBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
-  import("@/lib/types/review").ReviewBackendMessageMap & {
+  import("@/lib/types/review").ReviewBackendMessageMap &
+  import("./plugins").PluginBackendMessageMap & {
     "prompts.changed": BackendMessage<"prompts.changed", Record<string, never>>;
     "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
     "task.reordered": BackendMessage<"task.reordered", TaskReorderedPayload>;
@@ -655,6 +656,7 @@ export type {
   SessionPendingActionChangedPayload,
   TaskSessionNotificationPayload,
   TaskSessionAgentctlPayload,
+  ConfigurationCommandResult,
   TurnEventPayload,
   AvailableCommandPayload,
   AvailableCommandsPayload,

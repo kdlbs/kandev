@@ -165,6 +165,10 @@ func (c *NoopClient) DeleteGist(context.Context, string) error {
 	return ErrNoClient
 }
 
+func (c *NoopClient) ResolveRepoRefSHA(context.Context, string, string, string) (string, error) {
+	return "", ErrNoClient
+}
+
 func (c *NoopClient) ListRepoDirectory(context.Context, string, string, string, string) ([]RepoContentEntry, error) {
 	return nil, ErrNoClient
 }

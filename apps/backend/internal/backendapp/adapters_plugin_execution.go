@@ -34,6 +34,8 @@ type exactExecutionOrchestrator interface {
 	EnsureSession(context.Context, string, ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error)
 	RecoverSession(context.Context, string, string, string, ...string) (*orchestrator.LaunchSessionResponse, error)
 	StopExecution(context.Context, string, string, bool) error
+	ObserveCancelTarget(context.Context, string) (orchestrator.CancelTarget, error)
+	CancelAgentIfTarget(context.Context, string, orchestrator.CancelTarget) error
 }
 
 type pluginsExactExecutionController struct {
@@ -41,6 +43,7 @@ type pluginsExactExecutionController struct {
 	orchestrator exactExecutionOrchestrator
 	lifecycle    agentruntime.SessionExecutionControl
 	queue        *messagequeue.Service
+	steps        exactStepApprovalService
 }
 
 func (a pluginsExactExecutionController) EnsureTaskRun(ctx context.Context, installationID string, in pluginsdk.ExactTaskRunCommand) (pluginsdk.ExactTaskRunResult, error) {
@@ -82,34 +85,84 @@ func (a pluginsExactExecutionController) ensureTaskRun(ctx context.Context, in p
 }
 
 func (a pluginsExactExecutionController) StopTaskRun(ctx context.Context, installationID string, in pluginsdk.ExactTaskExecutionCommand) (bool, error) {
-	var stopped bool
-	err := a.withManagementClaimFence(ctx, installationID, in.TaskID, in.ManagementInstanceKey, in.ExpectedClaimGeneration, func() error {
-		var callErr error
-		stopped, callErr = a.stopTaskRun(ctx, in)
-		return callErr
-	})
-	return stopped, err
+	return a.fencedSessionEffect(ctx, installationID, in, a.stopTaskRun)
 }
 
 func (a pluginsExactExecutionController) stopTaskRun(ctx context.Context, in pluginsdk.ExactTaskExecutionCommand) (bool, error) {
-	session, err := a.sessionInWorkspace(ctx, in.WorkspaceID, in.TaskID, in.SessionID)
-	if err != nil {
+	_, found, err := a.observedSessionExecution(ctx, in)
+	if err != nil || !found {
 		return false, err
-	}
-	if !exactTimeVersion(session.UpdatedAt, in.ExpectedSessionResourceVersion) {
-		return false, status.Error(codes.Aborted, "session version changed")
-	}
-	execution, found := a.lifecycle.GetExecutionBySessionID(in.SessionID)
-	if !found {
-		return false, nil
-	}
-	if execution.ID != in.ExpectedExecutionID {
-		return false, status.Error(codes.Aborted, "execution generation changed")
 	}
 	if err := a.orchestrator.StopExecution(ctx, in.ExpectedExecutionID, "plugin_exact_stop", false); err != nil {
 		return false, normalizeExecutionControlError(err)
 	}
 	return true, nil
+}
+
+// CancelTurn interrupts the observed execution's current turn through the
+// native agent.cancel path, leaving the session promptable.
+func (a pluginsExactExecutionController) CancelTurn(ctx context.Context, installationID string, in pluginsdk.ExactTaskExecutionCommand) (bool, error) {
+	return a.fencedSessionEffect(ctx, installationID, in, a.cancelTurn)
+}
+
+func (a pluginsExactExecutionController) cancelTurn(ctx context.Context, in pluginsdk.ExactTaskExecutionCommand) (bool, error) {
+	session, found, err := a.observedSessionExecution(ctx, in)
+	if err != nil || !found {
+		return false, err
+	}
+	if session.State != taskmodels.TaskSessionStateRunning && session.State != taskmodels.TaskSessionStateStarting {
+		return false, nil
+	}
+	target, err := a.orchestrator.ObserveCancelTarget(ctx, in.SessionID)
+	if err != nil {
+		return false, normalizeExecutionControlError(err)
+	}
+	if target.ExecutionID != in.ExpectedExecutionID {
+		return false, status.Error(codes.Aborted, "execution generation changed")
+	}
+	// The orchestrator compares the same target again under its cancel guard,
+	// so a turn that ended and was replaced after this observation survives.
+	if err := a.orchestrator.CancelAgentIfTarget(ctx, in.SessionID, target); err != nil {
+		if errors.Is(err, orchestrator.ErrCancelTargetChanged) {
+			return false, status.Error(codes.Aborted, "turn changed")
+		}
+		return false, normalizeExecutionControlError(err)
+	}
+	return true, nil
+}
+
+func (a pluginsExactExecutionController) fencedSessionEffect(
+	ctx context.Context, installationID string, in pluginsdk.ExactTaskExecutionCommand,
+	effect func(context.Context, pluginsdk.ExactTaskExecutionCommand) (bool, error),
+) (bool, error) {
+	var changed bool
+	err := a.withManagementClaimFence(ctx, installationID, in.TaskID, in.ManagementInstanceKey, in.ExpectedClaimGeneration, func() error {
+		var callErr error
+		changed, callErr = effect(ctx, in)
+		return callErr
+	})
+	return changed, err
+}
+
+// observedSessionExecution resolves the session at the observed version and
+// reports whether its live execution is the observed one. found is false when
+// the session has no live execution; a replacement execution is Aborted.
+func (a pluginsExactExecutionController) observedSessionExecution(ctx context.Context, in pluginsdk.ExactTaskExecutionCommand) (*taskmodels.TaskSession, bool, error) {
+	session, err := a.sessionInWorkspace(ctx, in.WorkspaceID, in.TaskID, in.SessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !exactTimeVersion(session.UpdatedAt, in.ExpectedSessionResourceVersion) {
+		return nil, false, status.Error(codes.Aborted, "session version changed")
+	}
+	execution, found := a.lifecycle.GetExecutionBySessionID(in.SessionID)
+	if !found {
+		return session, false, nil
+	}
+	if execution.ID != in.ExpectedExecutionID {
+		return nil, false, status.Error(codes.Aborted, "execution generation changed")
+	}
+	return session, true, nil
 }
 
 func (a pluginsExactExecutionController) RecoverSession(ctx context.Context, installationID string, in pluginsdk.ExactSessionRecoveryCommand) (pluginsdk.ExactTaskRunResult, error) {

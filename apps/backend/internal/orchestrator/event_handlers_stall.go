@@ -26,7 +26,9 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 	}
 	lock, release := s.acquireCancelInFlightGuard(payload.SessionID)
 	defer release()
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return
+	}
 	defer lock.Unlock()
 	if s.isCancelInFlight(payload.SessionID) {
 		s.logger.Debug("ignoring agent stall while cancellation is in progress",

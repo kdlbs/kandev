@@ -1,19 +1,19 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { seedTaskInterruptedWarning } from "../../helpers/interrupted-prompt-recovery";
 
 // Interrupted-task indicator: when Kandev dies while a task's session is
-// mid-turn, startup reconciliation marks the task with the `interrupted_at`
-// metadata key and the task list shows a warning triangle until the task is
-// resumed. Seeding `interrupted_at` through the public task-metadata surface
-// is the deterministic stand-in for a real crash; the icon itself must render
-// from that marker alone.
+// mid-turn, startup reconciliation marks the task and the task list shows a
+// warning triangle until the task is resumed. Seed the private marker in the
+// test database because public task metadata cannot create interruption state.
 
 test.describe("Task list — interrupted-task icon", () => {
   test("shows the warning triangle only for marked tasks", async ({
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(90_000);
 
@@ -37,8 +37,8 @@ test.describe("Task list — interrupted-task icon", () => {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
-      metadata: { interrupted_at: "2026-08-02T10:00:00Z" },
     });
+    seedTaskInterruptedWarning(backend.tmpDir, interrupted.id, "2026-08-02T10:00:00Z");
     await apiClient.updateTaskState(interrupted.id, "REVIEW");
 
     const plain = await apiClient.createTask(seedData.workspaceId, "Plain Fixture", {
@@ -53,8 +53,8 @@ test.describe("Task list — interrupted-task icon", () => {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
-      metadata: { interrupted_at: "2026-08-02T10:00:00Z" },
     });
+    seedTaskInterruptedWarning(backend.tmpDir, terminal.id, "2026-08-02T10:00:00Z");
     await apiClient.updateTaskState(terminal.id, "COMPLETED");
 
     const kanban = new KanbanPage(testPage);

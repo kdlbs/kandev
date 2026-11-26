@@ -58,6 +58,7 @@ import (
 	// JIRA integration
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
+	"github.com/kandev/kandev/internal/promptsync"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
 	workflowsyncpkg "github.com/kandev/kandev/internal/workflowsync"
 
@@ -136,6 +137,7 @@ import (
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/workflow/stepevents"
 
 	// Repository cloning
 	"github.com/kandev/kandev/internal/repoclone"
@@ -991,6 +993,11 @@ func startAgentInfrastructure(
 		addRuntimeCleanup(func() error { workflowSyncPoller.Stop(); return nil })
 		log.Info("Workflow sync poller started")
 	}
+	if services.PromptSync != nil {
+		promptSyncPoller := promptsync.NewPoller(services.PromptSync, log)
+		startup.AfterReady(ctx, func() { promptSyncPoller.Start(ctx) })
+		addRuntimeCleanup(func() error { promptSyncPoller.Stop(); return nil })
+	}
 
 	// Start Office config sync poller: periodically pulls agent/skill/
 	// project/routine definition files from each workspace's configured
@@ -1189,7 +1196,6 @@ func startGatewayAndServe(
 		cfg.Notifications,
 		cfg.ResolvedHomeDir(),
 		func(fn func() error) { addCleanup(fn) },
-		cfg.Features.LSPBrowserContinuity,
 		orchestratorSvc.AcquireSessionLifecycleFence,
 		cfg.Notifications.WebhookAllowPrivateNetworks,
 		cfg.Limits.LSPMaxConnections,
@@ -1393,12 +1399,17 @@ func startGatewayAndServe(
 	if e2eRuntimeUpdateHooks != nil {
 		agentSettingsController.SetRuntimeUpdateStatusResolver(e2eRuntimeUpdateHooks.resolveLatestVersion)
 	}
+	if e2eDisablesNativeUpdateChecks() {
+		// E2E backends never run a host agent CLI or reach a real release feed.
+		agentSettingsController.DisableNativeUpdateCheckExecution()
+	}
 	// Build the real router and register all handlers, which wires the real
 	// dispatcher into lifecycleMgr.SetMCPHandler and installs MCP scope handlers
 	// BEFORE lifecycleMgr.Start recovers sessions.
 	builtServer, err := buildHTTPServer(ctx, cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, notificationSvc, msgCreator, agentRegistry, hostUtilityMgr,
-		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
+		addCleanup, restoreWorkerCleanupRegistrar(addCleanup, &restoreCleanups),
+		repoCloner, systemSvc, storageComposition.workspaceRestorer,
 		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, e2eRuntimeUpdateHooks, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
@@ -1419,7 +1430,7 @@ func startGatewayAndServe(
 		if queue := orchestratorSvc.GetMessageQueue(); queue != nil {
 			services.Plugins.SetPendingTaskTransitionSource(pluginsPendingTaskTransitionAdapter{queue: queue})
 			services.Plugins.SetExactExecutionController(pluginsExactExecutionController{
-				tasks: services.Task, orchestrator: orchestratorSvc, lifecycle: lifecycleMgr, queue: queue,
+				tasks: services.Task, orchestrator: orchestratorSvc, lifecycle: lifecycleMgr, queue: queue, steps: services.Task,
 			})
 		}
 	}
@@ -1630,9 +1641,7 @@ func startGatewayAndServe(
 	addCleanup(stopRuntimeUpdatesCleanup)
 	restoreCleanups = append(restoreCleanups, stopRuntimeUpdatesCleanup)
 	gateway.Hub.AddUserSubscriptionListener(func(string) {
-		if err := agentSettingsController.ReplayRuntimeUpdateNotices(ctx); err != nil && ctx.Err() == nil {
-			log.Debug("runtime update replay unavailable")
-		}
+		agentSettingsController.RequestRuntimeUpdateReplay()
 	})
 	startup.AfterReady(ctx, func() { systemSvc.StartBackground(ctx) })
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
@@ -1993,6 +2002,7 @@ func wireOfficeSvcsDependencies(
 	// the Office board (All-Workflows kanban, task views, task/statussummary)
 	// sees the mutation instead of rendering stale state until a refetch.
 	services.OfficeSvcs.Dashboard.SetTaskLifecyclePublisher(services.Task)
+	services.OfficeSvcs.Dashboard.SetTaskStateChangePublisher(services.Task)
 	// Human assignee writes from the office PATCH surface go through the task
 	// service, which authorizes the caller and validates the assignee. That
 	// route carries no :wsId, so it is not covered by the office
@@ -2055,6 +2065,13 @@ func wireOfficeProviderRouting(
 	provider.SetExecutionProfileStore(repos.AgentSettings)
 	services.OfficeSvcs.Dashboard.SetRoutingProvider(provider)
 	services.OfficeSvcs.Dashboard.SetRouteAttemptLister(repos.Office)
+	if services.Workflow != nil {
+		services.Workflow.SetImportExclusionAdvisor(&importExclusionAdvisorAdapter{setup: provider})
+		services.OfficeSvcs.Dashboard.SetSeatAuthorExclusionWriter(&seatExclusionWriterAdapter{
+			workflow:  services.Workflow,
+			publisher: stepevents.NewPublisher(eventBus, "office-routing", logger.Default()),
+		})
+	}
 	services.OfficeSvcs.Agents.SetKnownProvidersFn(func() []routing.ProviderID {
 		return routing.KnownProviders(agentRegistry)
 	})
@@ -2229,6 +2246,7 @@ func startSchedulingRuntime(
 		runsRepo, eventBus, log, nil,
 	)
 	runsSvc.SetLaunchSafetyLimits(safetyLimits.maxCausationDepth, safetyLimits.selfTriggerAllowance, safetyLimits.selfTriggerTotalAllowance)
+	runsSvc.SetTaskStepResolver(repos.Office.GetTaskWorkflowStepID)
 	runProcessorSvc.SetRunsService(runsSvc)
 	// office/scheduler.SchedulerService.QueueRun/QueueRunCtx (approval-resolved
 	// and reactivity wakes) also delegate through the same seam, gaining
@@ -2893,6 +2911,8 @@ func buildOfficeFeatureServices(
 	activity := officeshared.NewActivityLogger(repo, log)
 	if services.Office != nil {
 		services.Office.SetTaskStateWriter(taskRepo)
+		services.Office.SetTaskStateBatchWriter(taskRepo)
+		services.Office.SetTaskStateChangePublisher(services.Task)
 	}
 
 	agentSvc := officeagents.NewAgentService(repo, log, activity)
@@ -3105,6 +3125,7 @@ func buildHTTPServer(
 	agentRegistry *registry.Registry,
 	hostUtilityMgr *hostutility.Manager,
 	addCleanup func(func() error),
+	addRestoreCleanup func(func() error),
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
 	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
@@ -3236,6 +3257,7 @@ func buildHTTPServer(
 		authSvc:                       services.Auth,
 		agentRuntimeAvailability:      agentRuntimeAvailability,
 		addCleanup:                    addCleanup,
+		addRestoreCleanup:             addRestoreCleanup,
 		repoCloner:                    repoCloner,
 		version:                       Version,
 		commit:                        Commit,

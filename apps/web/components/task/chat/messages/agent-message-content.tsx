@@ -6,6 +6,7 @@ import { RichBlocks } from "@/components/task/chat/messages/rich-blocks";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useChatTextMotion } from "../chat-motion";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
+import { agentTaskReferenceComponents } from "./agent-task-reference-components";
 import { MessageCommentSurface } from "./message-comment-surface";
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { cn } from "@/lib/utils";
@@ -56,6 +57,7 @@ export const AgentMessageContent = memo(function AgentMessageContent({
           >
             <div className="markdown-body max-w-none">
               <MemoizedMarkdown
+                components={agentTaskReferenceComponents}
                 animateText={animateText}
                 content={comment.content || t("task:empty")}
                 taskId={comment.task_id}

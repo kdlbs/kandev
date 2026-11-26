@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -230,6 +231,49 @@ func (e *emitter) startClaudeControlTool(id acp.ToolCallId, title, toolName stri
 			acp.WithStartStatus(acp.ToolCallStatusPending),
 			acp.WithStartRawInput(input),
 			withMeta,
+		),
+	})
+}
+
+func (e *emitter) completeClaudeTaskStopTool(id acp.ToolCallId, taskID string) {
+	output := map[string]any{
+		"task_id":   taskID,
+		"task_type": "local_bash",
+		"message":   "Successfully stopped task: " + taskID,
+	}
+	encodedOutput, _ := json.Marshal(output)
+	stopMeta := func(toolResponse any) map[string]any {
+		claudeCode := map[string]any{"toolName": "TaskStop"}
+		if toolResponse != nil {
+			claudeCode["toolResponse"] = toolResponse
+		}
+		return map[string]any{"claudeCode": claudeCode}
+	}
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.UpdateToolCall(id,
+			func(update *acp.SessionToolCallUpdate) {
+				update.Meta = stopMeta(nil)
+				update.RawInput = map[string]any{"task_id": taskID}
+			},
+		),
+	})
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.UpdateToolCall(id,
+			func(update *acp.SessionToolCallUpdate) {
+				update.Meta = stopMeta(output)
+			},
+		),
+	})
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.UpdateToolCall(id,
+			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
+			func(update *acp.SessionToolCallUpdate) {
+				update.Meta = stopMeta(nil)
+				update.RawOutput = string(encodedOutput)
+			},
 		),
 	})
 }

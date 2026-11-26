@@ -121,6 +121,14 @@ A workspace has one active automation connection at a time. Replacing it changes
 
 New workspaces created by an operator or an internal trusted flow start with **Inherit executor Git credentials** for task Git access when the settings write succeeds. When the backend host has an authenticated active `gh` account, the new workspace also snapshots that exact host/login as its named GitHub CLI automation connection; Kandev stores the selection, never the CLI token. If `gh` is unavailable or unauthenticated, creation still succeeds with executor inheritance and no automation connection. If the settings write itself fails, workspace creation remains available but the existing managed compatibility fallback applies until the workspace is configured or retried. Authenticated non-admin members receive the executor default but never the operator's host identity.
 
+### Set repository scope
+
+Open the workspace GitHub settings and find **Repository Scope**. Turn on **All repositories** to include every repository available to the workspace's GitHub connection.
+
+Turn the switch off to select owners, exact repositories, or both. An owner selection includes all repositories owned by that account. An exact selection includes only that `owner/name`. With both lists empty, Kandev uses no repositories for GitHub discovery.
+
+Save the settings to apply the selection to GitHub searches, watches, and background automations. Scope does not change permissions granted by GitHub or the selected connection.
+
 Workspaces migrated from an older Kandev release may temporarily use a compatibility connection
 named `legacy_shared`. It continues using the deployment's existing authenticated `gh` account,
 `GITHUB_TOKEN`/`GH_TOKEN`, or legacy stored PAT for both GitHub API calls and workspace-isolated
@@ -231,6 +239,11 @@ path on desktop hover or focus and in a touch-accessible drawer on mobile.
   through Kandev's task/repository-scoped broker. Kandev provides a short-lived Git helper and `gh`
   shim; stored PATs and App private keys are not exposed to the task. An executor-profile
   `GH_TOKEN` or `GITHUB_TOKEN` takes precedence.
+- Managed leases expire after 12 hours without use. Eligible launches receive a 30-day bearer
+  capability for automatic lease recovery by default. The signer is derived from the installation's
+  `master.key`; configuration, backup, and retained-process recovery guidance is in
+  [Managed GitHub credentials](executors.md#managed-github-credentials). Use **Restart session**
+  when a retained process needs fresh launch credentials.
 - **Inherit executor Git credentials** does not install Kandev's helper or `gh` shim. Local and
   Worktree tasks use host Git credentials. For GitHub HTTPS remotes, Kandev checks the host
   account's `gh` login for each attached GitHub host. When `gh auth token` succeeds, Kandev adds a
@@ -728,13 +741,23 @@ Linear configuration is workspace-specific. Enter a personal API key and optiona
 
 After saving and testing the connection, use `/linear` to search by text, team, or assignee, view issue details, change supported states, and launch tasks. Linear launch uses fixed title/description construction, has no prompt-preset editor, and does not store a durable Linear issue association.
 
+Changing a Linear issue state requires `task.write` on the workspace. A viewer can read issue details but cannot use the saved connection to change an issue state. Kandev checks this permission before it sends the state change to Linear.
+
 Linear watches can filter by team, states, labels, projects, priorities, assignee, creator, estimate range, and free-text query. At least one of those filters is required. Filters combine with AND; within states, labels, or projects, an issue matches any selected value. Pick a team to choose its projects, so one team can route each project to its own repository with a separate watch. Saved projects remain removable even if no team is selected or a project is no longer available. They also define dispatch order, workflow and starting step, optional repository/base branch/profile overrides, prompt, poll interval, and a maximum in-flight count. New watches default to five in-flight tasks and **Priority (high → low)** dispatch. The poll interval defaults to 300 seconds and accepts 60–3,600 seconds; clear the in-flight field for no cap.
+
+Turn on **Only start issues whose blockers are done** to make a watch wait for Linear "blocked by" relations. Blockers in other teams or projects count. A canceled blocker keeps the issue waiting, as does an issue with more than 25 incoming relations.
+
+Waiting issues use no in-flight task slots. When the last blocker completes, the next poll can dispatch the issue in the configured order as slots become available. If task creation fails after dispatch, the watch can retry the issue on a later poll.
+
+Kandev re-checks up to 250 pending issues per watch by ID after they leave the search window. It keeps each ID until the issue gets a task or no longer matches the watch filter. The watch relies on the search window for matches beyond the pending limit.
 
 The watch prompt accepts `{{issue.identifier}}`, `{{issue.title}}`, `{{issue.url}}`, `{{issue.state}}`, `{{issue.priority}}`, `{{issue.team}}`, `{{issue.assignee}}`, `{{issue.creator}}`, and `{{issue.description}}`, plus project placeholders: `{{issue.project.name}}`, `{{issue.project.url}}`, `{{issue.project.summary}}` (the project's short summary), and `{{issue.project.description}}` (the project page content). Project placeholders are empty for an issue without a project. The project description is truncated to 4,000 characters with a notice and is captured when the task is created; later edits do not reach existing tasks. Kandev fetches project descriptions only when `{{issue.project.description}}` appears directly in the watch prompt. Saved-prompt references expand later, so provider placeholders inside referenced prompts are not interpolated. Content is fetched in batches of up to 25 projects, but a large response can still exceed the 4 MB limit and fail the poll. The next poll retries; repeated oversized responses require changing the project content or removing the description placeholder.
 
 Leaving the repository blank creates repo-less tasks. When a repository is selected, a blank branch resolves to its default branch. Test narrow filters before enabling the watch. Deleting a Linear watch retains existing tasks; **Reset** permanently deletes every watch-created task, including archived tasks, clears cursor/deduplication state, and makes current matches eligible for the next poll. Cancelling a watcher dialog does not cancel its submitted save. Its result is still reported while a later dialog keeps its own draft and save state. After changing a create dialog's workspace, an earlier save cannot close it.
 
-Linear polling is also bounded. **Default (Linear order)** reads one page of 50; an explicit dispatch sort reads at most five pages of 50 before sorting locally. Matches outside that window can remain unseen, and reset does not bypass the bound.
+**Default (Linear order)** reads one page of 50 with the blocker setting off. An explicit dispatch sort or the blocker setting reads at most five pages of 50. The same search limit applies after a reset.
+
+With the blocker setting on, default order uses the most recent update first across the search and re-check results.
 
 </details>
 

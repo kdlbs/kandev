@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpurl"
 	"github.com/kandev/kandev/internal/common/netutil"
+	"github.com/kandev/kandev/internal/common/ownershipperiod"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
@@ -319,6 +320,10 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		if _, journalErr := procMgr.DeliveryJournal(); journalErr != nil {
 			return nil, nil, nil, fmt.Errorf("instance %s delivery journal unavailable: %w", id, journalErr)
 		}
+	}
+	if req.OfflineBudget > 0 {
+		procMgr.StartOfflineBudget(req.OfflineBudget)
+		m.warnBudgetExceedsReapers(id, req.OfflineBudget)
 	}
 	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
 	// anything that could reach Start(): this manager satisfies
@@ -837,4 +842,21 @@ func (m *Manager) stopReaperOnce() {
 		close(m.reaperStop)
 	})
 	m.reaperWG.Wait()
+}
+
+// warnBudgetExceedsReapers logs when the offline budget cannot elapse before
+// the unowned or idle reaper ends the instance. The unowned reaper runs only
+// when agent survival is enabled, so the unowned check is gated on it.
+func (m *Manager) warnBudgetExceedsReapers(id string, budget time.Duration) {
+	if m.config.AgentSurvivalEnabled {
+		unowned, _ := ownershipperiod.Resolve(m.config.UnownedPeriod, m.config.IdleTimeout)
+		if budget >= unowned {
+			m.logger.Warn("offline budget is not shorter than the unowned period; the instance may be reaped first",
+				zap.String("instance_id", id), zap.Duration("offline_budget", budget), zap.Duration("unowned_period", unowned))
+		}
+	}
+	if m.config.IdleTimeout > 0 && budget >= m.config.IdleTimeout {
+		m.logger.Warn("offline budget is not shorter than the idle timeout; the instance may be reaped first",
+			zap.String("instance_id", id), zap.Duration("offline_budget", budget), zap.Duration("idle_timeout", m.config.IdleTimeout))
+	}
 }

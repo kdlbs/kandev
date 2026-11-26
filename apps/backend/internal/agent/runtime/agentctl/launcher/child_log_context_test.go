@@ -371,6 +371,62 @@ func TestPipeOutputForwardsAgentFailureContext(t *testing.T) {
 }
 
 // @covers AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.5
+func TestPipeOutputForwardsDeliveryFailureContext(t *testing.T) {
+	for _, reason := range []string{"stream_limit_reached", "event_too_large"} {
+		t.Run(reason, func(t *testing.T) {
+			line := encodeChildLogLine(t, zapcore.ErrorLevel, "durable delivery write failed",
+				zap.String("reason", reason),
+				zap.String("error_class", "event_too_large"),
+				zap.Int64("retained_bytes", 32768),
+				zap.Int64("limit_bytes", 4096),
+				zap.String("error", "private storage error"),
+			)
+
+			observed, _ := forwardChildLogLine(t, line)
+			entries := observed.All()
+			require.Len(t, entries, 1)
+			decoded := decodedChildMessage(t, entries[0].Message)
+			require.Equal(t, reason, decoded["reason"])
+			require.NotContains(t, decoded, "error_class")
+			require.Equal(t, float64(32768), decoded["retained_bytes"])
+			require.Equal(t, float64(4096), decoded["limit_bytes"])
+			require.NotContains(t, entries[0].Message, "private storage error")
+		})
+	}
+}
+
+// @covers AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.5
+func TestPipeOutputRejectsUnsafeDeliveryFailureContext(t *testing.T) {
+	t.Run("unknown reason and invalid measurement", func(t *testing.T) {
+		line := encodeChildLogLine(t, zapcore.ErrorLevel, "durable delivery write failed",
+			zap.String("reason", "filesystem mystery"),
+			zap.Int64("retained_bytes", -1),
+			zap.Int64("limit_bytes", 4096),
+			zap.String("error", "private storage error"),
+		)
+		observed, _ := forwardChildLogLine(t, line)
+		entries := observed.All()
+		require.Len(t, entries, 1)
+		decoded := decodedChildMessage(t, entries[0].Message)
+		require.NotContains(t, decoded, "reason")
+		require.NotContains(t, decoded, "retained_bytes")
+		require.Equal(t, float64(4096), decoded["limit_bytes"])
+		require.NotContains(t, entries[0].Message, "private storage error")
+	})
+
+	t.Run("duplicate reason", func(t *testing.T) {
+		line := encodeChildLogLine(t, zapcore.ErrorLevel, "durable delivery write failed",
+			zap.String("reason", "stream_limit_reached"),
+			zap.String("reason", "stream_limit_reached"),
+		)
+		observed, _ := forwardChildLogLine(t, line)
+		entries := observed.All()
+		require.Len(t, entries, 1)
+		require.NotContains(t, decodedChildMessage(t, entries[0].Message), "reason")
+	})
+}
+
+// @covers AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.5
 func TestPipeOutputRejectsUnsupportedAgentFailureContext(t *testing.T) {
 	for _, tt := range []struct {
 		name string

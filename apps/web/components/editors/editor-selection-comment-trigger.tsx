@@ -22,6 +22,8 @@ export function EditorSelectionCommentTrigger({
   position,
   positioning,
   hostRef,
+  reserveRef,
+  onDockClearanceChange,
   onOpen,
   testId = COMMENT_BUTTON_TEST_ID,
   className,
@@ -30,6 +32,8 @@ export function EditorSelectionCommentTrigger({
   position: { left: number; top: number };
   positioning: "fixed" | "absolute";
   hostRef?: RefObject<HTMLElement | null>;
+  reserveRef?: RefObject<HTMLElement | null> | null;
+  onDockClearanceChange?: (clearance: number) => void;
   onOpen: () => void;
   testId?: string;
   className?: string;
@@ -37,7 +41,12 @@ export function EditorSelectionCommentTrigger({
   const { t } = useTranslation();
   if (touch) {
     return (
-      <SelectionActionDock hostRef={hostRef} label={t("task:selectionActions")}>
+      <SelectionActionDock
+        hostRef={hostRef}
+        reserveRef={reserveRef}
+        onReservationChange={onDockClearanceChange}
+        label={t("task:selectionActions")}
+      >
         <SelectionActionDockButton
           icon={IconMessage}
           label={t("task:commentOnSelection")}

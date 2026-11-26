@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { parse } from "yaml";
 
 const [sourcePath, generatedPath, manifestPath, archivePath, identityPath] = process.argv.slice(2);
 if (!identityPath)
@@ -15,15 +16,20 @@ async function sha256(file) {
     .digest("hex");
 }
 
-const manifest = await readFile(manifestPath, "utf8");
-for (const required of [
-  'id: "kandev-plugin-e2e"',
-  'version: "1.0.0"',
-  'min_kandev_version: "0.91.1"',
+const manifest = parse(await readFile(manifestPath, "utf8"));
+for (const [key, expected] of [
+  ["id", "kandev-plugin-e2e"],
+  ["version", "1.0.0"],
 ]) {
-  if (!manifest.includes(required)) throw new Error(`fixture manifest missing ${required}`);
+  if (manifest[key] !== expected) throw new Error(`fixture manifest has an unexpected ${key}`);
 }
-if (!/api_read:\s*\[[^\]]*"messages"/.test(manifest)) {
+if (typeof manifest.min_kandev_version !== "string" || !manifest.min_kandev_version) {
+  throw new Error("fixture manifest requires a minimum host version");
+}
+if (
+  !Array.isArray(manifest.capabilities?.api_read) ||
+  !manifest.capabilities.api_read.includes("messages")
+) {
   throw new Error('fixture manifest missing api_read resource "messages"');
 }
 const output = await readFile(generatedPath, "utf8");
@@ -41,7 +47,7 @@ const identity = {
   manifestHash: await sha256(manifestPath),
   archiveSha256: await sha256(archivePath),
   manifestCapability: "messages",
-  minKandevVersion: "0.91.1",
+  minKandevVersion: manifest.min_kandev_version,
   panelKey: "prompt-history-plugin",
 };
 await writeFile(identityPath, `${JSON.stringify(identity, null, 2)}\n`);

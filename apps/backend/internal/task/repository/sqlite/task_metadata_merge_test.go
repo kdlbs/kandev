@@ -84,10 +84,15 @@ func testMetadataMergeProtectedDocument(t *testing.T, repo *Repository) {
 	ctx := context.Background()
 	id := "merge-owners"
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: id, WorkspaceID: "merge-ws", Title: "Untouched"}))
-	original := `{"deferred_launch":null,"step_handoff_carry":{"key":"current"},"handoff_source":{"task_id":"source"},"handoffs":[{"task_id":"child"}],"office_carrier_causation_depth":3,"agent_title_pending":true,"agent_title_owner_session_id":"owner","kandev.office_required_subtask_count":3,"ordinary":null}`
+	original := `{"deferred_launch":null,"step_handoff_carry":{"key":"current"},"handoff_source":{"task_id":"source"},"handoffs":[{"task_id":"child"}],"office_carrier_causation_depth":3,"agent_title_pending":true,"agent_title_owner_session_id":"owner","kandev.office_required_subtask_count":3,"interrupted_sessions":{"session-1":{"incarnation_id":"inc-1","interrupted_at":"2026-11-25T10:00:00Z","token":"token-1"},"session-2":{"incarnation_id":"inc-2","interrupted_at":"2026-11-25T11:00:00Z","token":"token-2"}},"interrupted_legacy_at":"2026-11-24T10:00:00Z","ordinary":null}`
 	_, err := repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE tasks SET metadata=? WHERE id=?`), original, id)
 	require.NoError(t, err)
-	patch := map[string]interface{}{"new": "allowed", models.MetaKeyRequiredSubtaskCount: 0}
+	patch := map[string]interface{}{
+		"new": "allowed", models.MetaKeyRequiredSubtaskCount: 0,
+		models.MetaKeyInterruptedAt:       "forged-projection",
+		models.MetaKeyInterruptedSessions: map[string]interface{}{"forged": "marker"},
+		models.MetaKeyLegacyInterruptedAt: "forged-legacy",
+	}
 	for _, key := range []string{models.MetaKeyDeferredLaunch, models.MetaKeyStepHandoffCarry, models.MetaKeyHandoffSource, models.MetaKeyHandoffs, models.MetaKeyOfficeCarrierCausationDepth, models.MetaKeyAgentTitlePending, models.MetaKeyAgentTitleOwnerSessionID} {
 		patch[key] = "forged"
 	}

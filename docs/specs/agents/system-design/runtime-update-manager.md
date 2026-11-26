@@ -51,12 +51,18 @@ Installed cards remain profile-focused and retain their existing card anchors.
 Extract the reusable detail body and footer from `AgentRuntimeUpdateControl`.
 Keep its standalone behavior available for other callers. The manager renders the detail content inside its existing overlay.
 The overview and details never mount separate Dialog or Drawer roots at the same time.
-Preserve existing operation labels, target selection, job output, compatibility notices, and terminal results.
+An ordinary pinned update names the reviewed version in its primary action.
+Keep distinct actions for rollback, repair, the default, and family migration.
+Preserve job output, compatibility notices, and terminal results.
 
 Replace the bottom `AgentRuntimePolicies` disclosure with manager rows and persistent policy contributors.
 The contributor controllers stay mounted outside conditional overlay content while the Agents route remains mounted.
 Their views can mount in details without creating another contributor for the same runtime.
-Keep package and owner information in a compact secondary line or details disclosure.
+Put the reviewed version and one **Change version** action above the automatic-update control.
+Align these sections and the **Runtime details** disclosure with a shared inset.
+**Change version** opens the searchable stable version list and the separate choice to restore the Kandev default.
+**Runtime details** shows package and ownership, with a separate command disclosure and any manual update guidance.
+The completion view shows the result and **Done**, with process output available from **Runtime details**.
 Retained failure and interruption outcomes remain visible from the affected runtime.
 
 The overview groups available actions first, then up-to-date, unknown, external, and unavailable registrations.

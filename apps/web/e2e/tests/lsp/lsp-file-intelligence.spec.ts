@@ -133,12 +133,6 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-test("enables browser continuity in the normal E2E profile", async ({ apiClient }) => {
-  const response = await apiClient.rawRequest("GET", "/api/v1/features");
-  expect(response.ok).toBeTruthy();
-  expect(await response.json()).toMatchObject({ lspBrowserContinuity: true });
-});
-
 test.describe("LSP file intelligence", () => {
   test.describe.configure({ timeout: 90_000 });
 
@@ -353,9 +347,11 @@ test.describe("LSP file intelligence", () => {
     const initialLocation =
       initial.settings.lsp_status_location === "status_bar" ? "status_bar" : "toolbar";
     const initialStatusBarEnabled = initial.settings.app_status_bar_enabled === true;
+    const initialMarkdownPreview = initial.settings.markdown_preview_by_default ?? true;
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       app_status_bar_enabled: true,
       lsp_status_location: "toolbar",
+      markdown_preview_by_default: false,
     });
 
     try {
@@ -451,6 +447,7 @@ test.describe("LSP file intelligence", () => {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         app_status_bar_enabled: initialStatusBarEnabled,
         lsp_status_location: initialLocation,
+        markdown_preview_by_default: initialMarkdownPreview,
       });
     }
   });
@@ -1053,7 +1050,7 @@ test.describe("LSP file intelligence", () => {
     await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
   });
 
-  test("disconnects the browser-owned server on reload when continuity is disabled", async ({
+  test("reattaches on reload with a retired false continuity override", async ({
     testPage,
     apiClient,
     seedData,
@@ -1065,7 +1062,7 @@ test.describe("LSP file intelligence", () => {
     try {
       const featureResponse = await apiClient.rawRequest("GET", "/api/v1/features");
       expect(featureResponse.ok).toBeTruthy();
-      expect(await featureResponse.json()).toMatchObject({ lspBrowserContinuity: false });
+      expect(await featureResponse.json()).not.toHaveProperty("lspBrowserContinuity");
       installFakeKotlinLsp(backend);
       const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
         title: "Kotlin LSP Manual Persistence",
@@ -1081,9 +1078,8 @@ test.describe("LSP file intelligence", () => {
       await openDesktopFile(testPage, task.session, task.filePaths[0]);
       statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
       await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
-      await expect
-        .poll(() => readFakeLspEvents(backend).filter((event) => event.event === "started").length)
-        .toBeGreaterThanOrEqual(2);
+      const starts = readFakeLspEvents(backend).filter((event) => event.event === "started");
+      expect(starts).toHaveLength(1);
 
       await performLspAction(testPage, "stop");
       await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
@@ -1368,9 +1364,6 @@ test.describe("LSP file intelligence", () => {
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
       : [];
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
-    });
     const context = testPage.context();
     const secondPage = await context.newPage();
     const duplicatePage = await context.newPage();
@@ -1438,7 +1431,6 @@ test.describe("LSP file intelligence", () => {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: initialAutoStart,
       });
-      await releaseFeature();
     }
   });
 
@@ -1454,7 +1446,6 @@ test.describe("LSP file intelligence", () => {
       ? (initial.settings.lsp_auto_start_languages as string[])
       : [];
     const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
       KANDEV_LSP_MAX_CONNECTIONS: "1",
     });
     const context = testPage.context();
@@ -1519,42 +1510,35 @@ test.describe("LSP file intelligence", () => {
   }) => {
     test.setTimeout(90_000);
     await testPage.clock.install();
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
+
+    installFakeKotlinLsp(backend);
+    const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+      title: "Idle Kotlin LSP Release",
     });
+    await openDesktopFile(testPage, task.session, task.filePaths[0]);
+    const status = testPage.locator('[data-testid="lsp-status-button"]:visible');
+    await performLspAction(testPage, "start");
+    await expect(status).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+    const started = await expectFakeLspEvent(
+      backend,
+      (event) => event.event === "started",
+      "idle-release task-host process",
+    );
 
-    try {
-      installFakeKotlinLsp(backend);
-      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
-        title: "Idle Kotlin LSP Release",
-      });
-      await openDesktopFile(testPage, task.session, task.filePaths[0]);
-      const status = testPage.locator('[data-testid="lsp-status-button"]:visible');
-      await performLspAction(testPage, "start");
-      await expect(status).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
-      const started = await expectFakeLspEvent(
-        backend,
-        (event) => event.event === "started",
-        "idle-release task-host process",
-      );
-
-      const editorTab = testPage.getByTestId("preview-tab-file-editor");
-      await editorTab.click({ button: "right" });
-      await testPage.getByRole("menuitem", { name: "Close", exact: true }).click();
-      await expect(editorTab).toHaveCount(0);
-      // Advance the browser-owned idle deadline; transport and process shutdown stay real.
-      await testPage.clock.fastForward(125_000);
-      await expect.poll(() => isProcessAlive(started.pid)).toBe(false);
-      await expectFakeLspEvent(
-        backend,
-        (event) =>
-          event.pid === started.pid &&
-          (event.event === "exit" || event.event === "signal" || event.event === "stdin ended"),
-        "idle-release process shutdown",
-      );
-    } finally {
-      await releaseFeature();
-    }
+    const editorTab = testPage.getByTestId("preview-tab-file-editor");
+    await editorTab.click({ button: "right" });
+    await testPage.getByRole("menuitem", { name: "Close", exact: true }).click();
+    await expect(editorTab).toHaveCount(0);
+    // Advance the browser-owned idle deadline; transport and process shutdown stay real.
+    await testPage.clock.fastForward(125_000);
+    await expect.poll(() => isProcessAlive(started.pid)).toBe(false);
+    await expectFakeLspEvent(
+      backend,
+      (event) =>
+        event.pid === started.pid &&
+        (event.event === "exit" || event.event === "signal" || event.event === "stdin ended"),
+      "idle-release process shutdown",
+    );
   });
 
   test("disconnects the old lease and starts fresh analysis after backend restart", async ({
@@ -1568,9 +1552,6 @@ test.describe("LSP file intelligence", () => {
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
       : [];
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
-    });
 
     try {
       installFakeKotlinLsp(backend);
@@ -1644,7 +1625,6 @@ test.describe("LSP file intelligence", () => {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: initialAutoStart,
       });
-      await releaseFeature();
     }
   });
 

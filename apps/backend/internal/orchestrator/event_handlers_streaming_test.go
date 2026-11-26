@@ -2960,8 +2960,7 @@ func TestSetSessionStartingCanDeferTaskInProgress(t *testing.T) {
 	require.Empty(t, taskRepo.stateWrites)
 }
 
-// recordingTaskUpdatedPublisher captures task.updated publishes so tests can
-// assert the interrupted-marker clear republishes the task.
+// recordingTaskUpdatedPublisher captures task.updated publishes for marker tests.
 type recordingTaskUpdatedPublisher struct {
 	updatedTaskIDs []string
 }
@@ -3033,7 +3032,7 @@ func TestSessionStartKeepsInterruptedMarkerUntilRecovery(t *testing.T) {
 			"the launch attempt must not publish a marker-clearing task.updated")
 	})
 
-	t.Run("confirmed boot recovery clears and republishes", func(t *testing.T) {
+	t.Run("confirmed boot recovery retains the marker until prompt acceptance", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		seedInterruptedMarker(t, repo, "t1")
@@ -3053,9 +3052,9 @@ func TestSessionStartKeepsInterruptedMarkerUntilRecovery(t *testing.T) {
 		task, err = repo.GetTask(ctx, "t1")
 		require.NoError(t, err)
 		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
-		require.False(t, marked, "successful boot recovery must clear the marker")
-		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
-			"successful boot recovery must publish the marker-clearing task.updated")
+		require.True(t, marked, "successful boot recovery must retain the marker until a prompt is accepted")
+		require.Empty(t, publisher.updatedTaskIDs,
+			"successful boot recovery must not publish a marker-clearing task.updated")
 	})
 
 	t.Run("stale recovery preserves a newer interruption marker", func(t *testing.T) {

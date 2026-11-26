@@ -158,6 +158,7 @@ type LauncherConfig struct {
 type GitHubCredentialBrokerConfig struct {
 	PublicBaseURL     string `mapstructure:"publicBaseUrl" json:"-"`
 	ReissueSigningKey string `mapstructure:"reissueSigningKey" json:"-"`
+	DisableReissue    bool   `mapstructure:"disableReissue" json:"-"`
 }
 
 func (c GitHubCredentialBrokerConfig) validate() error {
@@ -520,10 +521,6 @@ type FeaturesConfig struct {
 	// IntegratedControl gates the cross-workspace navigation and existing-conversation surface.
 	IntegratedControl bool `mapstructure:"integrated_control" json:"integratedControl"`
 
-	// LSPBrowserContinuity gates runtime-owned language-server leases that stay
-	// connected across browser attachment loss. Off in every embedded profile.
-	LSPBrowserContinuity bool `mapstructure:"lsp_browser_continuity" json:"lspBrowserContinuity"`
-
 	// Office gates the autonomous-agent feature: backend service construction,
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`
@@ -541,8 +538,7 @@ type FeaturesConfig struct {
 	Auth bool `mapstructure:"auth" json:"auth"`
 
 	// Canvases gates agent-authored plugin web applications and their task and
-	// workspace surfaces. It remains off in every shipped profile until the
-	// isolated runtime and lifecycle are ready for opt-in use.
+	// workspace surfaces. The installation can disable the feature during rollout.
 	Canvases bool `mapstructure:"canvases" json:"canvases"`
 
 	// MultiTenancy gates organizations: a tenant boundary above users, where
@@ -612,6 +608,9 @@ type FeaturesConfig struct {
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.
 	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
+
+	// ACPV2 opts qualified local structured sessions into ACP v2.
+	ACPV2 bool `mapstructure:"acp_v2" json:"acpV2"`
 
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.
@@ -906,14 +905,6 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 	// camelCase key, so AutomaticEnv would expose the undocumented
 	// KANDEV_AUTH_COOKIENAME; the canonical override is KANDEV_AUTH_COOKIE_NAME.
 	_ = v.BindEnv("auth.cookieName", "KANDEV_AUTH_COOKIE_NAME")
-	_ = v.BindEnv(
-		"githubCredentialBroker.publicBaseUrl",
-		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
-	)
-	_ = v.BindEnv(
-		"githubCredentialBroker.reissueSigningKey",
-		"KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY",
-	)
 
 	selection, found, err := selectConfigFile(configPath, homeDir)
 	if err != nil {

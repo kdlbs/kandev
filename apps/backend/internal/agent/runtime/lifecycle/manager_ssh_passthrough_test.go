@@ -597,3 +597,29 @@ func TestSSHPassthroughStaleObserverCannotClearReplacement(t *testing.T) {
 	require.Empty(t, execution.remotePassthrough.observerTarget.ProcessID)
 	require.Nil(t, execution.remotePassthrough.observerCancel)
 }
+
+func TestSSHPassthroughInitialPromptUsesMaterializedCommentFiles(t *testing.T) {
+	mgr, _, execution := newPassthroughRunnerManager(t)
+	_, root := sshPassthroughTestController(t, execution)
+	t.Cleanup(func() { _ = mgr.Stop() })
+	execution.setMetadataValue("task_description", "Review\n\n<!-- kandev-comment-files:file -->")
+	prompt := "Review\n\n- \"notes.txt\": \"/remote/project/notes.txt\""
+	pt := agents.PassthroughConfig{IdleTimeout: 20 * time.Millisecond, DisableBracketedPaste: true}
+	command := passthroughCommand{
+		Command:       agents.NewCommand("sh", "-c", "printf ready; cat > written"),
+		initialPrompt: prompt,
+	}
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, pt, nil, command, nil, nil)
+	require.NoError(t, err)
+	execution.PassthroughProcessID = info.ID
+	execution.passthroughInitialPromptProcessID = info.ID
+	mgr.autoInjectInitialPrompt(execution, pt, info.ID, prompt)
+	record := remotePassthroughRecordFor(execution)
+	require.Equal(t, "written", record.InitialPromptState)
+	require.Equal(t, len(agents.PlanPassthroughStdinChunks(prompt, pt)), record.InitialExpectedChunks)
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(filepath.Join(root, "written"))
+		return err == nil && strings.Contains(string(data), "/remote/project/notes.txt") &&
+			!strings.Contains(string(data), "kandev-comment-files")
+	}, time.Second, time.Millisecond)
+}
