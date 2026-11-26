@@ -121,13 +121,17 @@ describe("useSidebarTaskPage quiet recovery", () => {
     expect(hook.result.current.error).toBeNull();
     expect(hook.result.current.requestedPage).toBe(1);
 
-    await act(async () => vi.advanceTimersByTimeAsync(30_000));
-    expect(hook.result.current.error).toBe(QUERY_REFRESH_FAILED);
-    expect(hook.result.current.response?.provisional).toBe(true);
-    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+    await act(async () => vi.advanceTimersByTimeAsync(90_000));
+    expect(hook.result.current.error).toBeNull();
+    expect(querySidebarTasks).toHaveBeenCalledTimes(8);
 
     await act(async () => vi.advanceTimersByTimeAsync(60_000));
-    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+    expect(hook.result.current.error).toBe(QUERY_REFRESH_FAILED);
+    expect(hook.result.current.response?.provisional).toBe(true);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(10);
+
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(querySidebarTasks).toHaveBeenCalledTimes(10);
     expect(hook.result.current.error).toBe(QUERY_REFRESH_FAILED);
     vi.useRealTimers();
   });
@@ -142,9 +146,13 @@ describe("useSidebarTaskPage quiet recovery", () => {
     expect(hook.result.current.response).not.toBeNull();
 
     act(() => hook.result.current.refresh());
-    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    await act(async () => vi.advanceTimersByTimeAsync(90_000));
+    expect(hook.result.current.error).toBeNull();
+    expect(querySidebarTasks).toHaveBeenCalledTimes(8);
+
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
     expect(hook.result.current.error).toBe(QUERY_REFRESH_FAILED);
-    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(10);
 
     const retry = deferred<SidebarTaskPageResponse>();
     vi.mocked(querySidebarTasks).mockReturnValueOnce(retry.promise);
@@ -156,7 +164,7 @@ describe("useSidebarTaskPage quiet recovery", () => {
     await act(async () => retry.resolve(response(1, false, false)));
     expect(hook.result.current.error).toBeNull();
     expect(hook.result.current.requestedPage).toBeNull();
-    expect(querySidebarTasks).toHaveBeenCalledTimes(7);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(11);
     vi.useRealTimers();
   });
 
@@ -172,6 +180,63 @@ describe("useSidebarTaskPage quiet recovery", () => {
     expect(querySidebarTasks).toHaveBeenCalledTimes(5);
     expect(desktop.result.current.error).toBe(PAGE_LOAD_FAILED);
     expect(phone.result.current.error).toBe(PAGE_LOAD_FAILED);
+    vi.useRealTimers();
+  });
+});
+
+describe("useSidebarTaskPage retained-row recovery", () => {
+  it("recovers a displayed page after a ninety-second outage without publishing the warning", async () => {
+    vi.useFakeTimers();
+    vi.mocked(querySidebarTasks)
+      .mockResolvedValueOnce(response(1, false, false))
+      .mockRejectedValueOnce(busy())
+      .mockRejectedValueOnce(busy())
+      .mockRejectedValueOnce(busy())
+      .mockRejectedValueOnce(busy())
+      .mockRejectedValueOnce(busy())
+      .mockRejectedValueOnce(busy())
+      .mockRejectedValueOnce(busy())
+      .mockResolvedValueOnce(response(1, false, false));
+    const hook = renderHook(() => useSidebarTaskPage("ws-1"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    act(() => hook.result.current.refresh());
+
+    await act(async () => vi.advanceTimersByTimeAsync(90_000));
+    expect(hook.result.current.error).toBeNull();
+    expect(querySidebarTasks).toHaveBeenCalledTimes(8);
+    await act(async () => vi.advanceTimersByTimeAsync(17_000));
+    expect(hook.result.current.error).toBeNull();
+    expect(hook.result.current.response).not.toBeNull();
+    expect(querySidebarTasks).toHaveBeenCalledTimes(9);
+    vi.useRealTimers();
+  });
+
+  it("restarts one background cycle after cooldown and clears the warning on success", async () => {
+    vi.useFakeTimers();
+    vi.mocked(querySidebarTasks)
+      .mockResolvedValueOnce(response(1, false, false))
+      .mockRejectedValue(busy());
+    const hook = renderHook(() => useSidebarTaskPage("ws-1"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    act(() => hook.result.current.refresh());
+
+    await act(async () => vi.advanceTimersByTimeAsync(137_000));
+    expect(hook.result.current.error).toBe(QUERY_REFRESH_FAILED);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(10);
+    const exhaustedAt = Date.now();
+
+    vi.setSystemTime(exhaustedAt + 59_999);
+    act(() => hook.result.current.refresh());
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(hook.result.current.error).toBe(QUERY_REFRESH_FAILED);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(10);
+
+    vi.setSystemTime(exhaustedAt + 60_000);
+    vi.mocked(querySidebarTasks).mockResolvedValueOnce(response(1, false, false));
+    act(() => hook.result.current.refresh());
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(querySidebarTasks).toHaveBeenCalledTimes(11);
+    expect(hook.result.current.error).toBeNull();
     vi.useRealTimers();
   });
 });
