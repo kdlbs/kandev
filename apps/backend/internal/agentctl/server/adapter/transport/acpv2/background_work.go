@@ -217,10 +217,9 @@ func projectSubagentObservation(state *projection, key backgroundWorkKey, observ
 			stateObserved = true
 		}
 	}
-	if callID := state.children[childID].toolCallID; callID != "" && observation.SourceCallID == "" {
-		observation.SourceCallID = callID
-	} else if observation.SourceCallID == "" {
-		observation.SourceCallID = entityID(key.session, "subagent:"+key.id)
+	childReference := state.children[childID]
+	if childReference.hasLaunchReference && childReference.toolCallID != "" {
+		observation.SourceCallID = childReference.toolCallID
 	}
 	return stateObserved
 }
@@ -312,8 +311,14 @@ func (p *projection) mergeBackgroundWork(previous map[backgroundWorkKey]backgrou
 		p.backgroundWork = make(map[backgroundWorkKey]backgroundWorkRecord, len(previous))
 	}
 	for key, record := range previous {
-		if _, exists := p.backgroundWork[key]; !exists {
+		current, exists := p.backgroundWork[key]
+		if !exists {
 			p.backgroundWork[key] = record
+			continue
+		}
+		if !current.origin.available() && record.origin.available() {
+			current.origin = record.origin
+			p.backgroundWork[key] = current
 		}
 	}
 }

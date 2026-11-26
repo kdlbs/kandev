@@ -59,7 +59,7 @@ func (a *Adapter) projectTool(
 	state.tools[id] = old
 	for _, item := range content {
 		if item.SessionID != nil {
-			state.bindChild(*item.SessionID, id, promptIdentityFromEvent(event))
+			state.bindChild(*item.SessionID, id, promptIdentityFromEvent(event), true)
 		}
 		if item.TerminalID != nil {
 			state.bindTerminal(session, *item.TerminalID, id, promptIdentityFromEvent(event))
@@ -149,15 +149,16 @@ func toolEventType(known bool) string {
 	return streams.EventTypeToolCall
 }
 
-func (p *projection) bindChild(session wire.SessionID, parent string, origin promptIdentity) {
+func (p *projection) bindChild(session wire.SessionID, parent string, origin promptIdentity, launchReference bool) {
 	if p.children == nil {
 		p.children = make(map[wire.SessionID]childReference)
 	}
 	previous := p.children[session]
-	if previous.toolCallID == "" {
+	if !previous.hasLaunchReference && parent != "" {
 		previous.toolCallID = parent
+		previous.hasLaunchReference = launchReference
 	}
-	if !previous.frozen {
+	if !previous.frozen && origin.available() {
 		previous.origin = origin
 		previous.frozen = true
 	}
@@ -175,7 +176,7 @@ func (p *projection) bindTerminal(
 	if state.sourceCallID == "" {
 		state.sourceCallID = sourceCallID
 	}
-	if !state.originFrozen {
+	if !state.originFrozen && origin.available() {
 		state.origin = origin
 		state.originFrozen = true
 	}
@@ -190,7 +191,12 @@ func (p *projection) projectSubagent(parent wire.SessionID, update *wire.Subagen
 	id := child.toolCallID
 	if !known {
 		id = entityID(parent, "subagent:"+string(update.SessionID))
-		p.bindChild(update.SessionID, id, promptIdentityFromEvent(event))
+		origin := promptIdentityFromEvent(event)
+		key := backgroundWorkKey{session: parent, kind: streams.WorkloadKindSubagent, id: string(update.SessionID)}
+		if _, listedBeforeEntity := p.backgroundWork[key]; listedBeforeEntity {
+			origin = promptIdentity{}
+		}
+		p.bindChild(update.SessionID, id, origin, false)
 	}
 	if p.subagents == nil {
 		p.subagents = make(map[wire.SessionID]subagentProjection)
@@ -243,9 +249,14 @@ func (p *projection) projectTerminal(
 	id := entityID(session, "terminal:"+string(update.TerminalID))
 	old := p.terminals[id]
 	known := old.observed
-	if !old.originFrozen {
-		old.origin = promptIdentityFromEvent(event)
-		old.originFrozen = true
+	if !old.originFrozen && !old.observed && old.sourceCallID == "" {
+		key := backgroundWorkKey{session: session, kind: streams.WorkloadKindShell, id: string(update.TerminalID)}
+		if _, listedBeforeEntity := p.backgroundWork[key]; !listedBeforeEntity {
+			if origin := promptIdentityFromEvent(event); origin.available() {
+				old.origin = origin
+				old.originFrozen = true
+			}
+		}
 	}
 	old.observed = true
 	if update.Cwd.IsSet() {

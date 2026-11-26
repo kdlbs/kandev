@@ -33,9 +33,10 @@ func promptIdentityFromEvent(event *streams.AgentEvent) promptIdentity {
 }
 
 type childReference struct {
-	toolCallID string
-	origin     promptIdentity
-	frozen     bool
+	toolCallID         string
+	origin             promptIdentity
+	hasLaunchReference bool
+	frozen             bool
 }
 
 type subagentProjection struct {
