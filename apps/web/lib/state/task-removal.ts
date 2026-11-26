@@ -23,10 +23,20 @@ export type TaskRemovalOperation = {
   cascade?: boolean;
 };
 
+export type TaskRemovalHandoff = {
+  taskId: string;
+  previousSessionId: string;
+  targetSessionId: string | null;
+  scopeIdentity: string;
+  navigationRevision: number | undefined;
+  workflowFocus?: unknown;
+};
+
 export type TaskRemovalState = {
   navigationRevision: number;
   operationsByToken: Record<string, TaskRemovalOperation>;
   pendingTokenByTaskId: Record<string, string>;
+  removalHandoff?: TaskRemovalHandoff | null;
 };
 
 export type BeginTaskRemovalInput = {
@@ -44,6 +54,7 @@ export function createTaskRemovalState(): TaskRemovalState {
     navigationRevision: 0,
     operationsByToken: {},
     pendingTokenByTaskId: {},
+    removalHandoff: null,
   };
 }
 

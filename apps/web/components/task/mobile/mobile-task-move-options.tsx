@@ -95,6 +95,7 @@ function useMobileWorkflowSessionFocus(activeTaskId: string | null) {
         updatedAt: response.task?.updated_at,
         workflowStepId: response.task?.workflow_step_id,
         entryIdentity: response.workflow_entry_identity,
+        focusDisposition: response.workflow_focus_disposition,
       });
     },
     [bindWorkflowSessionFocus, cancelFocus, reconcileWorkflowSessionFocus],

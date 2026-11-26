@@ -23,6 +23,8 @@ export const FAILURE_GUIDANCE = {
     "Check the public latest dist-tag before any recovery dist-tag write.",
   registry_read:
     "Restore readable public registry access, then retry the same release.",
+  upload_history:
+    "Verify the exact SDK version and retained upload evidence before authorizing another write.",
   identity_conflict:
     "Stop recovery and investigate the existing immutable tag, receipt, and archive evidence.",
   consumer_verification:
@@ -38,9 +40,7 @@ export function collectSecrets(env = process.env) {
   return Object.entries(env)
     .filter(
       ([key, value]) =>
-        SECRET_KEY.test(key) &&
-        typeof value === "string" &&
-        value.length >= 8,
+        SECRET_KEY.test(key) && typeof value === "string" && value.length >= 8,
     )
     .map(([, value]) => value)
     .sort((left, right) => right.length - left.length);
@@ -199,6 +199,7 @@ export class SdkDiagnostics {
     this.failure = null;
     this.observations = [];
     this.commands = [];
+    this.uploadAttempt = null;
   }
   setSdkVersion(version) {
     this.sdkVersion = version;
@@ -212,7 +213,9 @@ export class SdkDiagnostics {
     this.assertPhase(phase);
     this.phases[phase] = status;
     if (this.current === phase && status !== "pending") this.current = null;
-    this.log?.(JSON.stringify({ event: "sdk_release_phase", phase, status, ...details }));
+    this.log?.(
+      JSON.stringify({ event: "sdk_release_phase", phase, status, ...details }),
+    );
   }
   observation(event) {
     const record = { event: "sdk_registry_observation", ...event };
@@ -240,6 +243,14 @@ export class SdkDiagnostics {
   }
   setPublication(state) {
     this.publication = state;
+  }
+  setUploadAttempt(attempt) {
+    this.uploadAttempt = {
+      outcome: attempt.outcome,
+      run_id: attempt.run_id,
+      run_attempt: attempt.run_attempt,
+      observing_prior_write: attempt.observing_prior_write === true,
+    };
   }
   fail(error) {
     const classification = classifyFailure(error, { secrets: this.secrets });
@@ -279,7 +290,9 @@ export class SdkDiagnostics {
     return classification;
   }
   summary({ status = "failed", result = null, failure = null } = {}) {
-    const classification = failure ? this.failure ?? this.fail(failure) : null;
+    const classification = failure
+      ? (this.failure ?? this.fail(failure))
+      : null;
     const lastConfirmedPhase =
       [...PHASES].reverse().find((phase) => this.phases[phase] === "passed") ??
       null;
@@ -310,6 +323,7 @@ export class SdkDiagnostics {
     if (this.observations.length)
       summary.observations = this.observations.slice(-20);
     if (this.commands.length) summary.commands = this.commands;
+    if (this.uploadAttempt) summary.upload_attempt = this.uploadAttempt;
     if (result?.sdk_version) summary.sdk_version = result.sdk_version;
     if (result?.host_release) summary.host_release = result.host_release;
     if (result?.origin) summary.origin = result.origin;

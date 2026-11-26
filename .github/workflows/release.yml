@@ -3367,7 +3367,7 @@ jobs:
         run: bash scripts/release/publish-plugin-sdk.sh --mode prepare --host-tag "$SDK_HOST_TAG"
 
   publish-plugin-sdk:
-    name: Publish and verify public plugin SDK
+    name: Publish and verify public plugin SDK for ${{ needs.prepare.outputs.tag }}
     needs: [prepare, publish-release, prepare-plugin-sdk]
     if: >-
       ${{ !cancelled() && github.event_name == 'workflow_dispatch' &&
@@ -3375,10 +3375,11 @@ jobs:
         needs.prepare.result == 'success' && needs.publish-release.result == 'success' && needs.prepare-plugin-sdk.result == 'success'
       }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     environment: release
     permissions:
       contents: read
+      actions: read
       id-token: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -3386,7 +3387,9 @@ jobs:
       SDK_SCOPE_OWNERSHIP_CONFIRMED: ${{ vars.SDK_SCOPE_OWNERSHIP_CONFIRMED }}
       SDK_FIRST_PUBLISH_OIDC_READY: ${{ vars.SDK_FIRST_PUBLISH_OIDC_READY }}
       SDK_HOST_TAG: ${{ needs.prepare.outputs.tag }}
+      SDK_BACKFILL_TAG: ${{ inputs.backfill_tag }}
       SDK_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      SDK_UPLOAD_ATTEMPT_PROTOCOL: "1"
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -3418,8 +3421,38 @@ jobs:
         with:
           go-version-file: pluginsdk/go.mod
           cache: false
-      - name: Publish exact candidate and verify both public consumers
-        run: bash scripts/release/publish-plugin-sdk.sh --mode publish --host-tag "$SDK_HOST_TAG"
+      - name: Set SDK upload state directory
+        run: echo "SDK_UPLOAD_STATE_DIR=$RUNNER_TEMP/sdk-upload-attempts" >> "$GITHUB_ENV"
+      - name: Authorize SDK upload or resume registry observation
+        id: sdk_authorize
+        run: bash scripts/release/publish-plugin-sdk.sh --mode authorize --host-tag "$SDK_HOST_TAG"
+      - name: Retain SDK upload intent
+        id: retain_sdk_upload_intent
+        if: steps.sdk_authorize.outputs.upload == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sdk-npm-upload-intent-v${{ steps.sdk_tools.outputs.sdk_version }}
+          path: ${{ env.SDK_UPLOAD_STATE_DIR }}/intent.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish exact SDK archive
+        id: publish_sdk_archive
+        if: steps.sdk_authorize.outputs.upload == 'true'
+        env:
+          SDK_UPLOAD_INTENT_ARTIFACT_ID: ${{ steps.retain_sdk_upload_intent.outputs.artifact-id }}
+          SDK_UPLOAD_INTENT_ARTIFACT_DIGEST: ${{ steps.retain_sdk_upload_intent.outputs.artifact-digest }}
+        run: bash scripts/release/publish-plugin-sdk.sh --mode upload --host-tag "$SDK_HOST_TAG"
+      - name: Retain SDK upload result
+        id: retain_sdk_upload_result
+        if: ${{ always() && steps.sdk_authorize.outputs.upload == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sdk-npm-upload-result-v${{ steps.sdk_tools.outputs.sdk_version }}
+          path: ${{ env.SDK_UPLOAD_STATE_DIR }}/result.json
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Complete SDK publication or resume observation
+        run: bash scripts/release/publish-plugin-sdk.sh --mode complete --host-tag "$SDK_HOST_TAG"
 
   stable-complete:
     name: Verify Stable publication completion

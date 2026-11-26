@@ -14,6 +14,8 @@ import {
   deferred,
   identity,
 } from "./task-navigation-reads.test-helpers";
+import { getTaskSessionReads, invalidateTaskSessionMembership } from "./task-session-reads";
+import { buildTaskNavigationShellData } from "@/lib/ssr/session-page-state";
 
 const apiMocks = vi.hoisted(() => ({
   fetchTask: vi.fn(),
@@ -24,44 +26,124 @@ vi.mock("@/lib/api", () => apiMocks);
 
 afterEach(() => {
   vi.useRealTimers();
+  apiMocks.fetchTask.mockReset();
+  apiMocks.listTaskSessions.mockReset();
 });
 
+function makeStore() {
+  return createAppStore({
+    workspaces: { activeId: "workspace", items: [] },
+    tasks: { activeTaskId: ACTIVE_TASK_ID },
+    kanban: {
+      workflowId: "workflow",
+      tasks: [
+        {
+          id: ACTIVE_TASK_ID,
+          workspaceId: "workspace",
+          workflowId: "workflow",
+          workflowStepId: "in-progress",
+          updatedAt: "2026-10-15T10:00:00Z",
+          title: "Original task",
+        },
+      ],
+    },
+  } as never);
+}
+
+function refreshedTask() {
+  return {
+    id: ACTIVE_TASK_ID,
+    workspace_id: "workspace",
+    workflow_id: "workflow",
+    workflow_step_id: "review",
+    updated_at: "2026-10-15T10:01:00Z",
+    title: "Refreshed task",
+  } as TaskNavigationIdentity["task"];
+}
+async function expectReconciledPrimary(
+  scenario: "changed" | "unchanged" | "retired" | "explicit" | "created",
+) {
+  const store = makeStore();
+  const task = deferred<TaskNavigationIdentity["task"]>();
+  const previousPrimary = scenario !== "retired";
+  const old = {
+    sessions: [
+      { id: "previous", task_id: ACTIVE_TASK_ID, is_primary: previousPrimary },
+      { id: "survivor", task_id: ACTIVE_TASK_ID, is_primary: !previousPrimary },
+    ],
+    total: 2,
+  };
+  if (scenario === "created")
+    old.sessions = old.sessions.filter((session) => session.id !== "survivor");
+  old.total = old.sessions.length;
+  const fresh = {
+    sessions: [
+      { id: "previous", task_id: ACTIVE_TASK_ID, is_primary: false },
+      { id: "survivor", task_id: ACTIVE_TASK_ID, is_primary: true },
+    ],
+    total: 2,
+  };
+  apiMocks.fetchTask.mockReturnValue(task.promise);
+  apiMocks.listTaskSessions.mockResolvedValueOnce(old).mockResolvedValue(fresh);
+  const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
+  await vi.waitFor(() => expect(apiMocks.listTaskSessions).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(getTaskSessionReads(store).isReading(ACTIVE_TASK_ID)).toBe(false));
+  const dtoPrimaries = {
+    retired: "removed",
+    unchanged: "previous",
+    changed: "survivor",
+    explicit: "survivor",
+    created: "survivor",
+  };
+  const primary = dtoPrimaries[scenario];
+  task.resolve({ ...refreshedTask(), primary_session_id: primary } as never);
+  const accepted = await read;
+  const requested = scenario === "explicit" ? "previous" : undefined;
+  const shell = buildTaskNavigationShellData(accepted, requested);
+  expect(shell.sessionId).toBe(
+    scenario === "explicit" || scenario === "unchanged" ? "previous" : "survivor",
+  );
+  expect(accepted.allSessionsResponse).toEqual(
+    scenario === "unchanged" || scenario === "retired" ? old : fresh,
+  );
+}
+
 describe("task navigation canonical overview refresh", () => {
-  afterEach(() => {
-    apiMocks.fetchTask.mockReset();
-    apiMocks.listTaskSessions.mockReset();
-  });
-
-  function makeStore() {
-    return createAppStore({
-      workspaces: { activeId: "workspace", items: [] },
-      tasks: { activeTaskId: ACTIVE_TASK_ID },
-      kanban: {
-        workflowId: "workflow",
-        tasks: [
-          {
-            id: ACTIVE_TASK_ID,
-            workspaceId: "workspace",
-            workflowId: "workflow",
-            workflowStepId: "in-progress",
-            updatedAt: "2026-10-15T10:00:00Z",
-            title: "Original task",
-          },
+  it.each(["pending", "fulfilled"] as const)(
+    "replaces %s retired membership while the task DTO is still pending",
+    async (membershipPhase) => {
+      const store = makeStore();
+      const task = deferred<TaskNavigationIdentity["task"]>();
+      const first = deferred<TaskNavigationIdentity["allSessionsResponse"]>();
+      const stale = { sessions: [{ id: "removed", task_id: ACTIVE_TASK_ID }], total: 1 };
+      const fresh = {
+        sessions: [
+          { id: "completed", task_id: ACTIVE_TASK_ID, state: "COMPLETED" },
+          { id: "survivor", task_id: ACTIVE_TASK_ID, is_primary: true },
         ],
-      },
-    } as never);
-  }
+        total: 2,
+      };
+      apiMocks.fetchTask.mockReturnValue(task.promise);
+      apiMocks.listTaskSessions.mockReturnValueOnce(first.promise).mockResolvedValue(fresh);
+      const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
+      await vi.waitFor(() => expect(apiMocks.listTaskSessions).toHaveBeenCalledTimes(1));
+      if (membershipPhase === "fulfilled") {
+        first.resolve(stale as never);
+        await vi.waitFor(() =>
+          expect(getTaskSessionReads(store).isReading(ACTIVE_TASK_ID)).toBe(false),
+        );
+      }
+      invalidateTaskSessionMembership(store, ACTIVE_TASK_ID);
+      first.resolve(stale as never);
+      task.resolve({ ...refreshedTask(), primary_session_id: "removed" } as never);
+      await expect(read).resolves.toMatchObject({ allSessionsResponse: fresh });
+    },
+  );
 
-  function refreshedTask() {
-    return {
-      id: ACTIVE_TASK_ID,
-      workspace_id: "workspace",
-      workflow_id: "workflow",
-      workflow_step_id: "review",
-      updated_at: "2026-10-15T10:01:00Z",
-      title: "Refreshed task",
-    } as TaskNavigationIdentity["task"];
-  }
+  it.each(["changed", "unchanged", "retired", "explicit", "created"] as const)(
+    "reconciles %s primary observations before choosing the first readable session",
+    expectReconciledPrimary,
+  );
 
   it("repairs shared placement after a move missed before websocket connection", async () => {
     const store = makeStore();
@@ -124,6 +206,28 @@ describe("task navigation canonical overview refresh", () => {
     expect(store.getState().taskOverview.byId[ACTIVE_TASK_ID]).toBeUndefined();
     expect(store.getState().taskOverview.reads).toEqual({});
   });
+});
+it("preserves proven explicit membership when only primary reconciliation would fail", async () => {
+  const store = makeStore();
+  const task = deferred<TaskNavigationIdentity["task"]>();
+  const membership = {
+    sessions: [
+      { id: "previous", task_id: ACTIVE_TASK_ID, is_primary: true },
+      { id: "requested", task_id: ACTIVE_TASK_ID, is_primary: false },
+    ],
+    total: 2,
+  };
+  apiMocks.fetchTask.mockReturnValue(task.promise);
+  apiMocks.listTaskSessions.mockResolvedValueOnce(membership).mockRejectedValue(new Error("503"));
+  const context = beginTaskNavigation(store, {}, `${ACTIVE_TASK_ID}\u0000requested`, "requested");
+  const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID, { context });
+  await vi.waitFor(() => expect(apiMocks.listTaskSessions).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(getTaskSessionReads(store).isReading(ACTIVE_TASK_ID)).toBe(false));
+  task.resolve({ ...refreshedTask(), primary_session_id: "newly-created" } as never);
+  const accepted = await read;
+  expect(accepted.sessionListUnavailable).not.toBe(true);
+  expect(buildTaskNavigationShellData(accepted, "requested").sessionId).toBe("requested");
+  expect(accepted.allSessionsResponse).toEqual(membership);
 });
 
 describe("task navigation store scope", () => {

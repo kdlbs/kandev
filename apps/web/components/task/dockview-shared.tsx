@@ -221,7 +221,13 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     return (
       <PanelRoot>
         <PanelBody padding={false} scroll={false}>
-          <PassthroughToolbar sessionId={sessionId} taskId={taskId} />
+          <PassthroughToolbar
+            sessionId={sessionId}
+            taskId={taskId}
+            isVisible={isVisible}
+            detailActive={isVisible}
+            panelId={panelId}
+          />
         </PanelBody>
       </PanelRoot>
     );
