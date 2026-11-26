@@ -63,6 +63,8 @@ The dialog must explain the shared scope before the user starts the upgrade.
   Without a recent supported detection, a transient failure may use the selected runtime's supported stable version only while the caller context remains live. Caller cancellation or deadline expiry shall stop command admission.
   A definite unsupported-major observation shall remain a rejection for that executable path through later transient failures until a fresh supported observation replaces it.
   A missing executable or an unsupported major is a definite answer and shall not be retried. A final failure shall state a timeout and quote a bounded, home-redacted excerpt of the output.
+- **AC-AGENTS-OPENCODE-V2-001.13:** When a managed OpenCode runtime is selected and a reviewed default update advances the pinned version within that family, availability detection shall continue to report OpenCode as installed if at least one cached npm execution tree for the selected family's package is present, so startup capability discovery and launches can materialize the updated pin on demand.
+  An unprepared installation with no cached execution tree for the selected family's package (including caches containing only the other OpenCode family's package, unrelated packages, or broken or symlinked entries) shall continue to report OpenCode as not installed without triggering a download during discovery.
 
 ### REQ-AGENTS-OPENCODE-V2-002: Existing conversation continuity
 

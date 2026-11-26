@@ -32,12 +32,14 @@ func (m *Manager) recordDeliveryWriteFailure(err error, update adapter.AgentEven
 		// storage or size failure.
 		return
 	}
+	if update.Type == adapter.EventTypeError && update.DeliverySubmissionID == "" {
+		update.DeliverySubmissionID = m.submissionForGeneration(update.PromptGeneration)
+	}
 	eventBytes := int64(0)
 	if encoded, marshalErr := json.Marshal(update); marshalErr == nil {
 		eventBytes = int64(len(encoded))
 	}
 	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
-	revision := m.deliveryFailureRevision.Add(1)
 	snapshot := &agenttypes.DeliveryFailureSnapshot{
 		Reason:            classifyDeliveryFailure(err),
 		Storage:           streams.DeliveryStorageDiagnosticFromError(err),
@@ -48,25 +50,73 @@ func (m *Manager) recordDeliveryWriteFailure(err error, update adapter.AgentEven
 		StreamID:          m.DeliveryStreamID(),
 		SubmissionID:      update.DeliverySubmissionID,
 		PromptGeneration:  update.PromptGeneration,
-		Revision:          revision,
 		EventType:         update.Type,
 		EventBytes:        eventBytes,
 		EventLimit:        limit,
 		ObservedAt:        time.Now().UTC(),
 	}
 	m.deliveryActiveMu.Lock()
-	m.deliveryHealth.Failure = snapshot
-	m.deliveryFailedSubmissionID = snapshot.SubmissionID
-	m.deliveryHealth.State = deliveryFailedState
-	m.deliveryBlocked = true
+	if shouldPreserveDeliveryFailure(m.deliveryHealth.Failure, snapshot) {
+		snapshot = m.deliveryHealth.Failure
+	} else {
+		snapshot.Revision = m.deliveryFailureRevision.Add(1)
+		m.deliveryHealth.Failure = snapshot
+		m.deliveryFailedSubmissionID = snapshot.SubmissionID
+		m.deliveryBlocked = true
+		m.deliveryHealth.State = deliveryFailedState
+	}
 	m.deliveryActiveMu.Unlock()
-	m.logger.Error("durable delivery write failed; process liveness unchanged",
-		zap.String("reason", snapshot.Reason),
+	fields := []zap.Field{
+		zap.String("reason", deliveryFailureLogReason(snapshot)),
 		zap.String("event_type", snapshot.EventType),
 		zap.Int64("event_bytes", snapshot.EventBytes),
 		zap.Int64("event_limit", snapshot.EventLimit),
 		zap.String("submission_id", snapshot.SubmissionID),
-		zap.Error(err))
+	}
+	if snapshot.Storage != nil {
+		if snapshot.Storage.RetainedBytes != nil {
+			fields = append(fields, zap.Int64("retained_bytes", *snapshot.Storage.RetainedBytes))
+		}
+		if snapshot.Storage.LimitBytes != nil {
+			fields = append(fields, zap.Int64("limit_bytes", *snapshot.Storage.LimitBytes))
+		}
+	}
+	fields = append(fields, zap.Error(err))
+	m.logger.Error("durable delivery write failed; process liveness unchanged", fields...)
+}
+
+func shouldPreserveDeliveryFailure(previous, next *agenttypes.DeliveryFailureSnapshot) bool {
+	if next == nil || next.Reason == agenttypes.DeliveryFailureStorageCorrupt {
+		return false
+	}
+	if previous == nil || previous.Storage == nil || next.Storage != nil || previous.Revision == 0 {
+		return false
+	}
+	return sameDeliveryFailureProcessOwner(previous, next) && sameDeliveryFailurePromptOwner(previous, next)
+}
+
+func sameDeliveryFailureProcessOwner(previous, next *agenttypes.DeliveryFailureSnapshot) bool {
+	return previous.ProcessGeneration != 0 &&
+		previous.ProcessGeneration == next.ProcessGeneration &&
+		previous.SessionID != "" && previous.SessionID == next.SessionID &&
+		previous.IncarnationID != "" && previous.IncarnationID == next.IncarnationID
+}
+
+func sameDeliveryFailurePromptOwner(previous, next *agenttypes.DeliveryFailureSnapshot) bool {
+	return previous.HarnessGeneration != 0 && previous.HarnessGeneration == next.HarnessGeneration &&
+		previous.StreamID != "" && previous.StreamID == next.StreamID &&
+		previous.SubmissionID != "" && previous.SubmissionID == next.SubmissionID &&
+		previous.PromptGeneration != 0 && previous.PromptGeneration == next.PromptGeneration
+}
+
+func deliveryFailureLogReason(snapshot *agenttypes.DeliveryFailureSnapshot) string {
+	if snapshot != nil && snapshot.Storage != nil {
+		return snapshot.Storage.Reason
+	}
+	if snapshot == nil {
+		return agenttypes.DeliveryFailureWriterFailed
+	}
+	return snapshot.Reason
 }
 
 // deliveryFailureEligible keeps best-effort diagnostic carriers out of the

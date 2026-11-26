@@ -125,15 +125,17 @@ test.describe("mobile: task-specific workflow agent overrides", () => {
       expect(selectorBox.height).toBeGreaterThanOrEqual(44);
 
       await selector.tap();
-      const replacementOption = testPage.getByRole("option", {
+      const picker = testPage.getByRole("dialog", { name: "Implement, PR", exact: true });
+      await expect(picker).toBeVisible();
+      const replacementOption = picker.getByRole("option", {
         name: new RegExp(fixture.profileB.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
       });
       await expect(replacementOption).toBeVisible();
       await replacementOption.tap();
       await expect(selector).toContainText(fixture.profileB.name);
 
-      await dialog.getByTestId("task-create-workflow-agent-overrides-reset").tap();
-      await expect(selector).toContainText("Use workflow profile");
+      await row.getByRole("button", { name: "Use default", exact: true }).tap();
+      await expect(selector).toContainText(`${fixture.profileA.name} (default)`);
       await selector.tap();
       await testPage
         .getByRole("option", {
@@ -354,8 +356,8 @@ test.describe("mobile: task-specific workflow agent overrides", () => {
         .getByRole("option", { name: new RegExp(escapeRegExp(fixture.profileB.name)) })
         .tap();
       await expect(selector).toContainText(fixture.profileB.name);
-      await overrides.getByTestId("task-create-workflow-agent-overrides-reset").tap();
-      await expect(selector).toContainText("Use workflow profile");
+      await row.getByRole("button", { name: "Use default", exact: true }).tap();
+      await expect(selector).toContainText(`${fixture.profileA.name} (default)`);
       await selector.tap();
       await testPage
         .getByRole("option", { name: new RegExp(escapeRegExp(fixture.profileB.name)) })

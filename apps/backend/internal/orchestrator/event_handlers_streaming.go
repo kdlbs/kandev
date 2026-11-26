@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -136,6 +138,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		if eventType != streams.EventTypeUsageObservation {
 			return
 		}
+	}
+	if eventType == streams.EventTypeCopilotInterruptionNotice {
+		s.handleCopilotInterruptionStatus(ctx, payload)
+		return
 	}
 	if eventType == streams.EventTypeMCPStartupWarning {
 		s.handleCodexMCPStartupWarning(ctx, payload, eventExecutionID)
@@ -965,6 +971,52 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 		s.messageCreator.CreateAgentMessageStreaming)
 }
 
+func (s *Service) handleCopilotInterruptionStatus(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if payload == nil || payload.Data == nil || s.messageCreator == nil || payload.TaskID == "" ||
+		payload.SessionID == "" || payload.ExecutionID == "" || payload.Data.Text == "" {
+		return
+	}
+	noticeType := streams.CopilotInterruptionNoticeType(payload.Data.Data)
+	if noticeType == "" {
+		return
+	}
+	turnID := payload.Data.TurnID
+	if turnID == "" {
+		payload.Data.Type = "message_streaming"
+		payload.Data.MessageType = string(v1.MessageTypeMessage)
+		if payload.Data.MessageID == "" {
+			payload.Data.MessageID = copilotInterruptionMessageID(
+				payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration,
+			)
+		}
+		s.handleMessageStreamingEvent(ctx, payload)
+		return
+	}
+	messageID := copilotInterruptionMessageID(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration)
+	metadata := map[string]interface{}{
+		"variant": streams.EventTypeCopilotInterruptionNotice,
+		streams.AgentEventDataCopilotInterruptionNotice: noticeType,
+	}
+	if err := s.messageCreator.CreateSessionMessageIdempotent(
+		ctx, messageID, payload.TaskID, payload.Data.Text, payload.SessionID,
+		string(v1.MessageTypeStatus), turnID, metadata, false,
+	); err != nil {
+		s.logger.Error("failed to persist Copilot interruption status",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+	}
+}
+
+func copilotInterruptionMessageID(sessionID, executionID string, promptGeneration uint64) string {
+	identity := fmt.Sprintf("%s\x00%s\x00%d", sessionID, executionID, promptGeneration)
+	digest := sha256.Sum256([]byte(identity))
+	return "copilot-interruption-" + hex.EncodeToString(digest[:16])
+}
+
 // handleThinkingStreamingEvent handles streaming thinking events for real-time reasoning updates.
 // It creates a new thinking message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleThinkingStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
@@ -1456,9 +1508,8 @@ func (s *Service) updateTaskSessionStateWithHook(
 				zap.Error(err))
 		}
 	}
-	// Entering STARTING/RUNNING only records a recovery attempt. The durable
-	// interruption marker is cleared after the provider confirms boot/readiness,
-	// so failed or cancelled attempts remain visible to the user.
+	// Entering STARTING/RUNNING records a recovery attempt. The durable warning
+	// remains until the session accepts a prompt.
 	if nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning {
 		s.clearTaskAutoStartFailedMarker(ctx, taskID)
 	}
@@ -2684,8 +2735,8 @@ func (s *Service) setSessionStartingWithOptions(
 	}
 
 	// The launch path moves a session to STARTING without going through
-	// updateTaskSessionStateWithHook. It records an attempt only; the
-	// interruption marker is cleared after confirmed provider readiness.
+	// updateTaskSessionStateWithHook. It records an attempt only; the warning
+	// remains until the session accepts a prompt.
 	s.clearTaskAutoStartFailedMarker(ctx, taskID)
 
 	if publishSession != nil {
@@ -2694,65 +2745,10 @@ func (s *Service) setSessionStartingWithOptions(
 	return nil
 }
 
-// clearTaskInterruptedMarker removes the startup interruption marker from a
-// task and republishes task.updated when it was actually present, so open
-// clients drop the warning icon. Callers invoke it only after provider
-// readiness confirms that recovery succeeded. No-op when the marker is absent.
-func (s *Service) clearTaskInterruptedMarker(
-	ctx context.Context,
-	taskID string,
-	expectedMarker string,
-) {
-	if taskID == "" {
-		return
-	}
-	var (
-		removed bool
-		err     error
-	)
-	if strings.TrimSpace(expectedMarker) == "" {
-		// A recovery callback without a valid immutable marker snapshot fails
-		// closed. There is no safe unconditional removal path.
-		return
-	}
-	if remover, ok := s.repo.(interface {
-		RemoveTaskMetadataKeyIfValue(context.Context, string, string, string) (bool, error)
-	}); ok {
-		removed, err = remover.RemoveTaskMetadataKeyIfValue(
-			ctx, taskID, models.MetaKeyInterruptedAt, expectedMarker,
-		)
-	} else {
-		// A read followed by an unconditional legacy removal is not a
-		// compare-and-set. Refuse to clear when the adapter cannot provide the
-		// guarded primitive so a delayed callback cannot erase a newer marker.
-		s.logger.Warn("skipping interrupted-marker clear without compare-and-set support",
-			zap.String("task_id", taskID))
-		return
-	}
-	if err != nil {
-		s.logger.Warn("failed to clear interrupted marker",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return
-	}
-	if !removed {
-		return
-	}
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil {
-		s.logger.Warn("failed to load task for interrupted-clear publish",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return
-	}
-	s.publishTaskUpdated(ctx, task)
-}
-
 // clearTaskAutoStartFailedMarker removes the auto-start-failure marker from a
 // task and republishes task.updated when it was actually present, so open
-// clients drop the failure badge. It shares the session-start funnel with the
-// interruption marker, but remains clear at launch admission because it means
-// the auto-start request itself was accepted.
+// clients drop the failure badge. The interruption warning clears only after
+// prompt acceptance.
 // No-op when the marker is absent.
 func (s *Service) clearTaskAutoStartFailedMarker(ctx context.Context, taskID string) {
 	if taskID == "" {

@@ -1,6 +1,9 @@
 package lifecycle
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type promptStallSnapshot struct {
 	lastActivity   time.Time
@@ -10,9 +13,18 @@ type promptStallSnapshot struct {
 	diagnostic     stallDiagnostic
 }
 
-func (sm *SessionManager) capturePromptStall(execution *AgentExecution, generation uint64) (promptStallSnapshot, bool) {
+func (sm *SessionManager) capturePromptStall(
+	ctx context.Context,
+	execution *AgentExecution,
+	generation uint64,
+) (promptStallSnapshot, bool) {
 	// Lock order: promptLifecycleMu, then executionStore.mu; never the reverse.
-	execution.promptLifecycleMu.Lock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := execution.promptLifecycleMu.LockContext(ctx); err != nil {
+		return promptStallSnapshot{}, false
+	}
 	defer execution.promptLifecycleMu.Unlock()
 	if sm.executionStore != nil {
 		sm.executionStore.mu.RLock()

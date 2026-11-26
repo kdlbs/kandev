@@ -13,7 +13,7 @@ import (
 
 const (
 	mockClaudeMonitorSignalFileEnv = "E2E_MOCK_AGENT_CLAUDE_MONITOR_SIGNAL_FILE"
-	mockClaudeNativeVersion        = "2.1.323"
+	mockClaudeNativeVersion        = "2.1.328"
 )
 
 type mockClaudeMonitor struct {
@@ -33,6 +33,7 @@ func emitClaudeMonitorLifecycleFixture(e *emitter) {
 	}
 	for _, monitor := range monitors {
 		e.startMonitorTool(acp.ToolCallId(monitor.toolCallID), monitor.taskID, monitor.command)
+		state.monitorTools[monitor.taskID] = acp.ToolCallId(monitor.toolCallID)
 	}
 	e.text("Two Claude Monitors are watching.")
 
@@ -48,19 +49,72 @@ func emitClaudeMonitorLifecycleFixture(e *emitter) {
 	go func() {
 		defer release()
 		defer cancel()
-		for _, monitor := range monitors {
-			signal := "complete-first"
-			if monitor.taskID == "monitor-task-second" {
-				signal = "complete-second"
-			}
-			if !waitClaudeMonitorLifecycleSignal(ctx, signalFile, signal) {
-				return
-			}
-			if err := appendClaudeMonitorNativeCompletion(string(e.sid), monitor); err != nil {
+		firstAction := waitClaudeMonitorFirstAction(ctx, signalFile)
+		if firstAction == "" {
+			return
+		}
+		if firstAction == "complete-first" {
+			if err := appendClaudeMonitorNativeCompletion(string(e.sid), monitors[0]); err != nil {
 				return
 			}
 		}
+		if !waitClaudeMonitorLifecycleSignal(ctx, signalFile, "complete-second") {
+			return
+		}
+		if err := appendClaudeMonitorNativeCompletion(string(e.sid), monitors[1]); err != nil {
+			return
+		}
 	}()
+}
+
+func emitClaudeMonitorTaskStopFirst(e *emitter) {
+	const taskID = "monitor-task-first"
+	_, ok := state.monitorTools[taskID]
+	if !ok {
+		e.text("Script error: TaskStop for unknown Monitor taskId " + taskID)
+		return
+	}
+	delete(state.monitorTools, taskID)
+	taskStopToolCallID := nextToolID()
+	e.startClaudeControlTool(taskStopToolCallID, "TaskStop", "TaskStop", map[string]any{})
+	e.completeClaudeTaskStopTool(taskStopToolCallID, taskID)
+	e.text("The first Monitor was stopped.")
+
+	signalFile := strings.TrimSpace(os.Getenv(mockClaudeMonitorSignalFileEnv))
+	if signalFile == "" {
+		return
+	}
+	file, err := os.OpenFile(signalFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		e.text("Script error: could not signal the Monitor fixture")
+		return
+	}
+	_, writeErr := file.WriteString("taskstop-first\n")
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		e.text("Script error: could not signal the Monitor fixture")
+	}
+}
+
+func waitClaudeMonitorFirstAction(ctx context.Context, path string) string {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if content, err := os.ReadFile(path); err == nil {
+			text := string(content)
+			if strings.Contains(text, "taskstop-first") {
+				return "taskstop-first"
+			}
+			if strings.Contains(text, "complete-first") {
+				return "complete-first"
+			}
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return ""
+		}
+	}
 }
 
 func waitClaudeMonitorLifecycleSignal(ctx context.Context, path, want string) bool {

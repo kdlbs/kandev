@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
@@ -60,6 +61,12 @@ func (r *Repository) updateTaskFieldsWithParentAdmission(ctx context.Context, id
 	entry, marker, err := r.updateTaskTx(updateCtx, tx, task, "", preservePosition, preservePosition, nil, admission)
 	if err != nil {
 		return nil, err
+	}
+	if update.FlagNote != nil {
+		task.FlagNote = strings.TrimSpace(*update.FlagNote)
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET flag_note = ? WHERE id = ?`), task.FlagNote, id); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

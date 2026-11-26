@@ -23,13 +23,22 @@ func (s *Service) focusTaskSession(
 	if err != nil {
 		return nil, result.session, false, err
 	}
+	if result.resumeSuspended {
+		// Resume takes the route and lifecycle locks, which come before queue
+		// admission; it rechecks suspension provenance under those locks.
+		result, err = s.resumeFocusedIdleSuspension(ctx, taskID, sessionID, result.session)
+		if err != nil {
+			return nil, result.session, false, err
+		}
+	}
 	return result.execution, result.session, result.resumed, nil
 }
 
 type focusTaskSessionResult struct {
-	execution *executor.TaskExecution
-	session   *models.TaskSession
-	resumed   bool
+	execution       *executor.TaskExecution
+	session         *models.TaskSession
+	resumed         bool
+	resumeSuspended bool
 }
 
 func (s *Service) focusTaskSessionAdmitted(
@@ -60,7 +69,8 @@ func (s *Service) focusTaskSessionAdmitted(
 		return result, nil
 	}
 	if running.IdleSuspensionState == models.ExecutorIdleSuspensionSuspended {
-		return s.resumeFocusedIdleSuspension(ctx, taskID, sessionID, current)
+		result.resumeSuspended = true
+		return result, nil
 	}
 	if running.IdleSuspensionState != models.ExecutorIdleSuspensionNone {
 		return result, nil
@@ -100,9 +110,14 @@ func (s *Service) resumeFocusedIdleSuspension(
 	return focusTaskSessionResult{execution: execution, session: session, resumed: execution != nil}, nil
 }
 
+// refreshFocusedLiveSession runs under queue admission, which also serializes
+// idle-suspension revalidation. A busy lifecycle lock means a lifecycle
+// operation owns the session: focus restarts only the in-memory idle interval,
+// and the persisted focus record waits for a settled execution.
 func (s *Service) refreshFocusedLiveSession(ctx context.Context, taskID, sessionID string) {
 	releaseLifecycleLock, acquired := s.tryAcquireSessionLifecycleLock(sessionID)
 	if !acquired {
+		s.resetIdleParkingCandidates(sessionID)
 		return
 	}
 	defer releaseLifecycleLock()

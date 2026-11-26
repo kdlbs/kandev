@@ -203,6 +203,9 @@ func (a *OpenCodeACP) detectManagedRuntime(
 }
 
 func openCodeManagedRuntimeCached(ctx context.Context, spec ManagedNPMRuntimeSpec, version string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if _, err := exec.LookPath("npm"); err != nil {
 		return false, nil
 	}
@@ -215,6 +218,9 @@ func openCodeManagedRuntimeCached(ctx context.Context, spec ManagedNPMRuntimeSpe
 		}
 		return false, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	cacheRoot := strings.TrimSpace(string(output))
 	if cacheRoot == "" || !filepath.IsAbs(cacheRoot) {
 		return false, nil
@@ -222,13 +228,56 @@ func openCodeManagedRuntimeCached(ctx context.Context, spec ManagedNPMRuntimeSpe
 	packageSpec := spec.PackageSpec(version)
 	cacheTree := filepath.Join(cacheRoot, "_npx", managedruntime.NpxExecutionCacheKey(packageSpec))
 	info, err := os.Lstat(cacheTree)
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return openCodePackageCachedInNpx(ctx, filepath.Join(cacheRoot, "_npx"), spec.Package)
+		}
+		return false, err
+	}
+	return info.IsDir() && info.Mode()&os.ModeSymlink == 0, nil
+}
+
+func openCodePackageCachedInNpx(ctx context.Context, npxDir, packageName string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	npxInfo, err := os.Lstat(npxDir)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
 		return false, err
 	}
-	return info.IsDir() && info.Mode()&os.ModeSymlink == 0, nil
+	if !npxInfo.IsDir() || npxInfo.Mode()&os.ModeSymlink != 0 {
+		return false, nil
+	}
+	entries, err := os.ReadDir(npxDir)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		return false, err
+	}
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		manifest := filepath.Join(npxDir, entry.Name(), "node_modules", filepath.FromSlash(packageName), "package.json")
+		info, err := os.Lstat(manifest)
+		if err == nil && info.Mode().IsRegular() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // NativeBinaryName returns the standalone opencode CLI name probed for in the

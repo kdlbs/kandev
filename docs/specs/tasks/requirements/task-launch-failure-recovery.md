@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-11-08
+updated: 2026-11-25
 owners:
   - cfl12
 ---
@@ -188,6 +188,11 @@ Terms used below:
   shall join the current reservation or elect one when none exists. Failed
   materialization shall retain its failed reservation; ready publication shall
   continue requiring the existing complete repository inventory.
+
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.12:** When a workspace-only
+  request reports that a `creating` environment is unavailable, the
+  materialization owner shall continue its authorized launch. The workspace
+  request shall leave claim settlement to the launch.
 
 ## Out of scope
 

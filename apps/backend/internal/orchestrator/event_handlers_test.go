@@ -300,6 +300,7 @@ type mockAgentManager struct {
 	promptErr                       error
 	promptResult                    *executor.PromptResult
 	promptAcceptedOnError           bool
+	promptAcceptedBeforeResult      bool // acceptance precedes the result, as for a full-turn prompt
 	promptAgentFunc                 func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
 	launchAgentFunc                 func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
 	initialPromptDispatchCallback   func()
@@ -559,6 +560,10 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, 
 }
 
 func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	if m.promptAcceptedBeforeResult && onDispatched != nil {
+		onDispatched()
+		onDispatched = nil
+	}
 	result, err := m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
 	if (err == nil || m.promptAcceptedOnError) && onDispatched != nil {
 		onDispatched()

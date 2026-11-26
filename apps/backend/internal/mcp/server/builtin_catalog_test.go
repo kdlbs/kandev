@@ -27,6 +27,14 @@ func TestBuiltinCatalogRequiresExplicitMembership(t *testing.T) {
 	}
 }
 
+func TestBuiltinCatalogUsesRegisteredCoreToolsForLegacyProfile(t *testing.T) {
+	legacyProfile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, nil)
+	s := NewWithProfile(&testBackend{}, "session", "task", 10005, newTestLogger(t), "", false, legacyProfile)
+	t.Cleanup(func() { require.NoError(t, s.Close(context.Background())) })
+
+	require.Contains(t, s.BuiltinCatalog()[mcpprofile.PackageCore], "step_complete_kandev")
+}
+
 func TestBuiltinRebuildRetainsGrantedPluginTools(t *testing.T) {
 	s := NewWithProfile(&testBackend{}, "session", "task", 10005, newTestLogger(t), "", false, packageTestProfile(mcpprofile.PackageCore))
 	t.Cleanup(func() { require.NoError(t, s.Close(context.Background())) })

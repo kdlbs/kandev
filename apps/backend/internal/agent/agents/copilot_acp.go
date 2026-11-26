@@ -149,6 +149,15 @@ func (a *CopilotACP) PermissionSettings() map[string]PermissionSetting {
 // (see acp-debug captures) shows it does not suppress session/request_permission
 // frames. Only `--allow-all-tools` and the other `--allow-all-*` flags do.
 var copilotPermSettings = map[string]PermissionSetting{
+	"long_context": {
+		Supported:    true,
+		Default:      false,
+		Label:        "Long context",
+		Description:  "Request a larger context window for new sessions on supported models. May use more AI credits.",
+		ApplyMethod:  PermissionApplyMethodCLIFlag,
+		CLIFlag:      "--context",
+		CLIFlagValue: "long_context",
+	},
 	"allow_all_tools": {
 		Supported: true,
 		// Enabled by default so autonomous runs don't stall on per-tool-call

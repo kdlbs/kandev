@@ -67,11 +67,9 @@ restoration. Honor auto-start prevention and all existing launch ownership guard
 
 ## Interruption marker
 
-Set or preserve `interrupted_at` for lost mid-turn work. Idle reconciliation
-must not clear it. Successful correlated provider recovery clears the marker;
-STARTING entry alone does not. Follow the
-[warning design](interrupted-task-indicator.md) for publication, stale callbacks,
-and the shared sidebar/card renderer.
+Startup and periodic reconciliation record the interruption for the affected
+session. The [warning design](interrupted-task-indicator.md) owns persistence,
+continuation evidence, and publication to the shared sidebar and card renderer.
 
 ## Interrupted automatic starts
 

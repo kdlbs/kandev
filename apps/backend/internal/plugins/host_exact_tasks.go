@@ -570,28 +570,15 @@ func (h *pluginHost) CreateTaskExact(ctx context.Context, input pluginsdk.ExactT
 		return result, nil, nil
 	}
 	defer admission.unlock()
-	if admission.record.Receipt.State == exactReceiptStateCompleted {
-		return commandResultFromRecord(admission.record), h.exactTaskReplayValue(ctx, admission.record.Receipt.TargetID), nil
+	if result, task, handled := h.replayCompletedExactTaskCreate(ctx, admission); handled {
+		return result, task, nil
 	}
 	prepared, launch, err := (taskReader{host: h}).prepareCreate(ctx, input.Task)
 	if err != nil {
 		return completeExactTaskCreateValidationFailure(ctx, admission, input.ExternalID, err)
 	}
-	existing, found, err := admission.writer.FindTaskByExternalID(ctx, input.WorkspaceID, input.ExternalID)
-	if err != nil {
-		return &pluginsdk.CommandResult{Status: exactTaskUpdateErrorStatus(err), Reason: "task_create_lookup_unavailable"}, nil, nil
-	}
-	if found {
-		if existing == nil || existing.ID == "" {
-			return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "task_create_lookup_result_unavailable"}, nil, nil
-		}
-		dto := taskModelToDTO(existing)
-		completed, completeErr := admission.store.Complete(ctx, admission.record.Intent.OperationID,
-			string(pluginsdk.CommandAlreadyApplied), "", existing.ID, dto.ResourceVersion)
-		if completeErr != nil {
-			return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, &dto, nil
-		}
-		return commandResultFromRecord(completed), &dto, nil
+	if result, task, handled := completeExactTaskCreateForExistingTarget(ctx, admission, input.WorkspaceID, input.ExternalID); handled {
+		return result, task, nil
 	}
 	if err := h.validateTaskLaunch(ctx, launch); err != nil {
 		return completeExactTaskCreateValidationFailure(ctx, admission, input.ExternalID, err)
@@ -602,7 +589,11 @@ func (h *pluginHost) CreateTaskExact(ctx context.Context, input pluginsdk.ExactT
 		OperationID: admission.record.Intent.OperationID, PayloadDigest: digest,
 	})
 	if err != nil {
-		return &pluginsdk.CommandResult{Status: exactTaskUpdateErrorStatus(err), Reason: "task_create_unavailable"}, nil, nil
+		resultStatus := exactTaskUpdateErrorStatus(err)
+		if resultStatus == pluginsdk.CommandInvalid || resultStatus == pluginsdk.CommandConflict {
+			return completeExactTaskCreateRefusal(ctx, admission, input.ExternalID, resultStatus)
+		}
+		return &pluginsdk.CommandResult{Status: resultStatus, Reason: "task_create_unavailable"}, nil, nil
 	}
 	if created == nil || created.ID == "" {
 		return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "task_create_result_unavailable"}, nil, nil
@@ -618,9 +609,48 @@ func (h *pluginHost) CreateTaskExact(ctx context.Context, input pluginsdk.ExactT
 	completed, err := admission.store.Complete(ctx, admission.record.Intent.OperationID,
 		string(resultStatus), "", created.ID, dto.ResourceVersion)
 	if err != nil {
-		return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, &dto, nil
+		return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, nil, nil
 	}
 	return commandResultFromRecord(completed), &dto, nil
+}
+
+func (h *pluginHost) replayCompletedExactTaskCreate(
+	ctx context.Context,
+	admission *exactTaskCreateAdmission,
+) (*pluginsdk.CommandResult, *pluginsdk.Task, bool) {
+	if admission.record.Receipt.State != exactReceiptStateCompleted {
+		return nil, nil, false
+	}
+	result := commandResultFromRecord(admission.record)
+	if result.Status != pluginsdk.CommandApplied && result.Status != pluginsdk.CommandAlreadyApplied {
+		return result, nil, true
+	}
+	return result, h.exactTaskReplayValue(ctx, admission.record.Receipt.TargetID), true
+}
+
+func completeExactTaskCreateForExistingTarget(
+	ctx context.Context,
+	admission *exactTaskCreateAdmission,
+	workspaceID string,
+	externalID string,
+) (*pluginsdk.CommandResult, *pluginsdk.Task, bool) {
+	existing, found, err := admission.writer.FindTaskByExternalID(ctx, workspaceID, externalID)
+	if err != nil {
+		return &pluginsdk.CommandResult{Status: exactTaskUpdateErrorStatus(err), Reason: "task_create_lookup_unavailable"}, nil, true
+	}
+	if !found {
+		return nil, nil, false
+	}
+	if existing == nil || existing.ID == "" {
+		return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "task_create_lookup_result_unavailable"}, nil, true
+	}
+	dto := taskModelToDTO(existing)
+	completed, err := admission.store.Complete(ctx, admission.record.Intent.OperationID,
+		string(pluginsdk.CommandAlreadyApplied), "", existing.ID, dto.ResourceVersion)
+	if err != nil {
+		return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, nil, true
+	}
+	return commandResultFromRecord(completed), &dto, true
 }
 
 func completeExactTaskCreateValidationFailure(
@@ -633,6 +663,15 @@ func completeExactTaskCreateValidationFailure(
 	if resultStatus == pluginsdk.CommandUnavailable {
 		return &pluginsdk.CommandResult{Status: resultStatus, Reason: "task_create_validation_unavailable"}, nil, nil
 	}
+	return completeExactTaskCreateRefusal(ctx, admission, externalID, resultStatus)
+}
+
+func completeExactTaskCreateRefusal(
+	ctx context.Context,
+	admission *exactTaskCreateAdmission,
+	externalID string,
+	resultStatus pluginsdk.CommandStatus,
+) (*pluginsdk.CommandResult, *pluginsdk.Task, error) {
 	completed, err := admission.store.Complete(ctx, admission.record.Intent.OperationID,
 		string(resultStatus), string(resultStatus), externalID, "")
 	if err != nil {

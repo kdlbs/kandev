@@ -205,7 +205,23 @@ func (c *Controller) installFromRequest(ctx *gin.Context) (*store.Record, error)
 	if err := ctx.ShouldBindJSON(&req); err != nil || req.URL == "" {
 		return nil, errBadRequest("invalid payload: url required (or a multipart \"package\" upload)")
 	}
-	return c.svc.InstallFromURL(ctx.Request.Context(), req.URL)
+	return c.installFromURL(ctx, req.URL)
+}
+
+func (c *Controller) installFromURL(ctx *gin.Context, url string) (*store.Record, error) {
+	server, ok := ctx.Request.Context().Value(http.ServerContextKey).(*http.Server)
+	if !ok || server.WriteTimeout <= 0 {
+		return c.svc.InstallFromURL(ctx.Request.Context(), url)
+	}
+
+	response := http.NewResponseController(ctx.Writer)
+	if err := response.SetWriteDeadline(time.Time{}); err != nil {
+		return nil, fmt.Errorf("plugins: clear write deadline for URL install: %w", err)
+	}
+	defer func() {
+		_ = response.SetWriteDeadline(time.Now().Add(server.WriteTimeout))
+	}()
+	return c.svc.InstallFromURL(ctx.Request.Context(), url)
 }
 
 // errBadRequest is a sentinel-ish wrapper writeInstallError recognizes to

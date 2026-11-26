@@ -38,6 +38,19 @@ var (
 
 const antigravityCLILoginVariant = "antigravity-cli"
 
+const antigravitySkipPermissionsFlag = "--dangerously-skip-permissions"
+
+var antigravityACPPermSettings = map[string]PermissionSetting{
+	PermissionKeyAntigravitySkipPermissions: {
+		Supported:   true,
+		Default:     false,
+		Label:       "Skip Antigravity CLI tool prompts",
+		Description: "Antigravity automatically approves all tool requests when this flag applies to a supported CLI launch.",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
+		CLIFlag:     antigravitySkipPermissionsFlag,
+	},
+}
+
 // AntigravityACP implements Agent for Google's standalone Antigravity ACP
 // server (registry entry "antigravity-acp"), a signed native binary distinct
 // from the `agy` CLI. Discovery, launch argv, config root, and remote-auth
@@ -176,10 +189,11 @@ func (a *AntigravityACP) ResolveLoginCommand(
 func antigravitySelection(selected *antigravityruntime.LocalRuntime) LocalRuntimeSelection {
 	policy := acpcompat.AntigravityAuthPolicyForRuntime(selected.Variant, selected.Version, false)
 	selection := LocalRuntimeSelection{
-		Command:        NewCommand(selected.Args...),
-		Variant:        selected.Variant,
-		Version:        selected.Version,
-		AdapterVersion: policy.AdapterVersion,
+		Command:                            NewCommand(selected.Args...),
+		Variant:                            selected.Variant,
+		Version:                            selected.Version,
+		AdapterVersion:                     policy.AdapterVersion,
+		SupportsDangerouslySkipPermissions: selected.SupportsDangerouslySkipPermissions,
 	}
 	if selected.Bundle != nil {
 		selection.Env = map[string]string{acpcompat.AntigravityHarnessPathEnv: selected.Bundle.HarnessPath}
@@ -247,7 +261,7 @@ func (a *AntigravityACP) InstallScript() string {
 }
 
 func (a *AntigravityACP) PermissionSettings() map[string]PermissionSetting {
-	return emptyPermSettings
+	return antigravityACPPermSettings
 }
 
 func (a *AntigravityACP) InferenceConfig() *InferenceConfig {

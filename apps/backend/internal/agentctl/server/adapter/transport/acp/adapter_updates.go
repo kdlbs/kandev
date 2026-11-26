@@ -196,6 +196,7 @@ func (a *Adapter) handleACPUpdate(
 	startupWarningOwned := !a.closed &&
 		((isLoading && a.loadingSessionID == sessionID) || (!isLoading && a.sessionID == sessionID))
 	a.mu.Unlock()
+	copilotNotice := a.observeCopilotInterruptionUpdate(sessionID, n.Update, promptGeneration)
 	if isStartupWarning && !startupWarningOwned {
 		startupWarning = nil
 		if !isLoading {
@@ -273,10 +274,21 @@ func (a *Adapter) handleACPUpdate(
 	}
 	suppressed := a.dialect.suppresses(n)
 	handled := suppressed
+	var cursorWatchEvent *AgentEvent
+	if !suppressed {
+		cursorWatchEvent = a.observeCursorShellWatch(sessionID, n.Update, promptGeneration)
+		handled = handled || cursorWatchEvent != nil
+	}
 	var event, leadingEvent *AgentEvent
 	var claudeResumeUpdate *AgentEvent
 	if !suppressed {
 		event = a.convertNotificationForGeneration(n, promptGeneration)
+		if copilotNotice != "" && event != nil {
+			if event.Data == nil {
+				event.Data = make(map[string]any)
+			}
+			event.Data[streams.AgentEventDataCopilotInterruptionNotice] = copilotNotice
+		}
 		if a.copilotNativeActive.Load() && n.Update.UsageUpdate != nil &&
 			event != nil && event.Type == streams.EventTypeContextWindow {
 			// The native usage_info stream owns the Copilot gauge. The ordinary
@@ -343,6 +355,12 @@ func (a *Adapter) handleACPUpdate(
 		a.stampUpdateTurnIdentity(claudeResumeUpdate, promptGeneration)
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, claudeResumeUpdate)
 		a.sendUpdate(*claudeResumeUpdate)
+	}
+	if cursorWatchEvent != nil {
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, cursorWatchEvent)
+		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
+			cursorWatchEvent.Type, rawData, cursorWatchEvent)
+		a.sendUpdate(*cursorWatchEvent)
 	}
 	if leadingEvent != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, leadingEvent)

@@ -2470,6 +2470,7 @@ message CreateTaskRequest {
   google.protobuf.Struct metadata = 10; // plugin namespace only; host reserves source.
   // One of critical, high, medium, or low; empty defaults to medium.
   string priority = 11;
+  optional string project_id = 12;
 }
 message PluginTaskRepository {
   string repository_id = 1; // existing Kandev repository, or empty with remote below

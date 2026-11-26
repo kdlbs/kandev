@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-10-27
-updated: 2026-11-16
+updated: 2026-11-25
 owners:
   - kandev
 ---
@@ -41,6 +41,7 @@ It does not change cleanup policy or infer why disk usage grew.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001.4:** Unknown measurements shall remain unknown. Malformed values, unsupported fields, and old error text shall not establish low disk capacity or a specific limit.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001.5:** A terminal storage cause shall retain its failure snapshot across reload and reconnect. A later capacity sample shall not rewrite that historical cause.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001.6:** Diagnostics shall exclude prompts, tool output, credentials, raw provider errors, and arbitrary paths. Existing ownership and permission restrictions shall apply.
+- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001.7:** When a recorded write failure blocks delivery, live health shall retain its validated reason and measurements. An untyped secondary error shall preserve the diagnosed cause of the same unresolved failure.
 
 ### REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002: Storage pressure visibility
 
@@ -82,6 +83,7 @@ It does not change cleanup policy or infer why disk usage grew.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003.8:** All new copy and measurement formatting shall use the selected locale. Every shipped real locale shall include the new copy.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003.9:** The 90% advisory shall show usage and available capacity when known. It shall not claim that work paused or offer Resume without a separate recovery cause.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003.10:** Each visible chat composer shall show at most one advisory row with vertical padding. Extra guidance and measurements shall remain available through explicit disclosure.
+- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003.11:** A blocked-output headline shall lead with the established cause or report delivery blocked when the cause is unknown. Free-space guidance and disk usage in that headline require evidence of low disk space. When another cause owns the headline, a concurrent high-usage advisory shall expose its measurements in Details with its own label.
 
 ### REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004: Composer notice dismissal
 

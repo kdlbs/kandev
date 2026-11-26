@@ -107,6 +107,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         workflowAgentOverrides: task.workflow_agent_overrides,
         title: task.title,
         description: task.description ?? undefined,
+        ...(task.flag_note === undefined ? {} : { flagNote: task.flag_note }),
         autopilot: task.autopilot ?? false,
         position: task.position ?? 0,
         state: task.state,

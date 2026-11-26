@@ -42,6 +42,7 @@ test.describe("Desktop task-row menu grouping", () => {
       "Priority",
       "Edit",
       "Rename",
+      "Add flag",
       "Duplicate",
       "Show in graph",
       "Create Subtask",

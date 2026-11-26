@@ -1,11 +1,13 @@
 import { expect, test } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { seedTaskInterruptedWarning } from "../../helpers/interrupted-prompt-recovery";
 
 test.describe("Mobile kanban - interrupted-task icon", () => {
   test("shows the warning triangle for an interrupted task", async ({
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     const interrupted = await apiClient.createTask(
       seedData.workspaceId,
@@ -13,9 +15,9 @@ test.describe("Mobile kanban - interrupted-task icon", () => {
       {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
-        metadata: { interrupted_at: "2026-08-02T10:00:00Z" },
       },
     );
+    seedTaskInterruptedWarning(backend.tmpDir, interrupted.id, "2026-08-02T10:00:00Z");
     await apiClient.updateTaskState(interrupted.id, "REVIEW");
 
     const plain = await apiClient.createTask(seedData.workspaceId, "Mobile plain fixture", {

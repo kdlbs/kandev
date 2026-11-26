@@ -265,7 +265,7 @@ func laterInterruptedIncidentBlockMatches(
 	block models.SessionRecoveryBlock,
 ) bool {
 	return block.IncarnationID == proof.IncarnationID && block.ExpectedGeneration == row.HarnessGeneration &&
-		(block.DeliverySubmissionID == "" || block.DeliverySubmissionID == row.ID) &&
+		block.DeliverySubmissionID == row.ID &&
 		(block.DeliveryStreamID == "" || block.DeliveryStreamID == row.StreamID)
 }
 

@@ -320,6 +320,7 @@ func TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers(t *testing.T) {
 				t.Fatalf("NewFromZap: %v", err)
 			}
 			health := NewHealth(tracker, pool, log)
+			health.SetConfirmationDelay(10 * time.Millisecond)
 			if err := health.Check(context.Background()); err != nil {
 				t.Fatalf("initial Check: %v", err)
 			}

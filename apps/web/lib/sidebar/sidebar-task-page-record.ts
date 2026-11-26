@@ -13,6 +13,7 @@ export type RecoveryRecord = {
   cacheKey: string;
   consumers: number;
   exhausted: boolean;
+  exhaustedAt?: number;
   lastError?: unknown;
   promise?: Promise<SidebarTaskPageResponse>;
   cycle?: SidebarPageRecoveryCycle<SidebarTaskPageResponse>;

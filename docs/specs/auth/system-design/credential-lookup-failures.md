@@ -16,7 +16,7 @@ It does not change Postgres pool policy, password verification, or capability-on
 
 The implementation before this design collapsed storage errors into `false`.
 [Issue #5001](https://github.com/kdlbs/kandev/issues/5001) reports the resulting challenges under concurrent Postgres load.
-The design below is implemented and covered by the linked fix package.
+The linked credential lookup fix implements storage-error handling.
 
 ## Requirement mapping
 
@@ -90,6 +90,22 @@ A public or self-authenticating request that supplies an unreadable session/PAT 
 Credentialless health/readiness probes remain available.
 This conditional change must be explicit in public reference documentation and middleware tests.
 
+### Office bearer authentication
+
+The Office route group receives the identity that `httpmw.Middleware` puts in the request context.
+`AgentAuthMiddleware` uses `auth.IsPATFormat` with the same whitespace handling as `httpmw.BearerToken` to classify PAT bearers.
+With authentication enabled, a PAT bearer passes a verified user identity from `authn.FromGin` to `officeWorkspaceScopeMiddleware`.
+A valid session cookie can supply that identity because `httpmw.ResolveRequest` gives the cookie precedence.
+If authentication is enabled and the request has no identity, the Office middleware returns HTTP 401 with `invalid token`.
+When authentication is disabled, global auth supplies a synthetic identity and the Office middleware treats a PAT-shaped bearer as if no bearer was sent.
+
+The workspace guard applies user authorization to session and PAT callers when authentication is enabled.
+The agent JWT path validates the signature and supplies the agent claims for workspace authorization.
+Office runtime callbacks also verify their own agent JWT in `contextFromRequest`.
+
+This path implements `AC-AUTH-AUTH-001.4` and `.7` for user-facing Office routes.
+The HTTP authentication cases in `AC-AUTH-AUTH-001.11`, `.12`, `.13`, and `.16` apply to the handoff to Office.
+
 ## Gateway query tokens
 
 Change `websocket.AuthPolicy.ResolveToken` in `internal/gateway/websocket/access.go` to return the same three results.
@@ -130,7 +146,8 @@ No new layout, navigation control, copy, or viewport composition is required.
 
 - [Opt-in authentication decision](../../../decisions/2026-07-24-opt-in-authentication.md).
 - [Integration challenge classification](../../../plans/integration-provider-auth-errors/plan.md), a completed companion record that remains unchanged.
-- [Fix package](../../../plans/auth-credential-store-errors/plan.md).
+- [Credential lookup fix package](../../../plans/auth-credential-store-errors/plan.md).
+- [Office PAT fix package](../../../plans/office-pat-authentication/plan.md).
 
 The design and regression matrix preserve the rationale for this local error-classification repair.
 No separate ADR is needed because the existing fail-closed trust boundary remains intact.

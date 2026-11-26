@@ -55,6 +55,12 @@ describe("toSheetItem repository projection", () => {
     expect(item.priority).toBe("critical");
   });
 
+  it("carries a saved flag note into the phone task drawer row", () => {
+    const item = toSheetItem(task({ flagNote: "Look at the build" }), emptyCtx());
+
+    expect(item.flagNote).toBe("Look at the build");
+  });
+
   it("marks active rows covered by a pending archive", () => {
     const item = toSheetItem(task(), {
       ...emptyCtx(),

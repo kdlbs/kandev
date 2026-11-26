@@ -112,6 +112,9 @@ type AgentExecution struct {
 	// LocalRuntimeSelection pins host-local command provenance across later promotion.
 	LocalRuntimeSelection *agents.LocalRuntimeSelection
 	LocalRuntimeEnv       map[string]string
+	// McpProfile preserves the launch permission surface when a context reset
+	// rebuilds the provider command without a new LaunchRequest.
+	McpProfile *mcpprofile.Context
 	// CopilotNativeSessionEvents reports whether this launch requested the
 	// Copilot native event stream from a capable agentctl peer.
 	CopilotNativeSessionEvents bool
@@ -272,10 +275,10 @@ type AgentExecution struct {
 	agentctlSourceMu          sync.RWMutex
 	remoteInstanceLifecycleMu ctxmutex.Mutex
 	// contextResetMu owns the reset attempt boundary. While a session reset is
-	// in flight, fresh-session setup events are retained until the lifecycle
-	// manager has committed the new ACP session. A timed-out attempt discards
-	// those events and fences all later provider use until an explicit restart
-	// succeeds.
+	// in flight, bounded setup events and all retired-watch projections are
+	// retained until the lifecycle manager commits the new ACP session. A
+	// timed-out attempt discards those events and fences later provider use until
+	// an explicit restart succeeds.
 	// contextResetAdmissionMu is the shared operation lease: ordinary provider
 	// operations hold a read lease, while a reset holds the write lease through
 	// session replacement, configuration restoration, and ready publication.
@@ -286,6 +289,7 @@ type AgentExecution struct {
 	contextResetFenceReason      string
 	contextResetRecoveryInFlight bool
 	contextResetEvents           []agentctl.AgentEvent
+	contextResetSetupEventCount  int
 	// agentctlReady records the successful health check independently of the
 	// agent process and workspace stream lifecycles. Prepared sessions have a
 	// healthy agentctl before either of those is started or attached.

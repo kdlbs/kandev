@@ -3,6 +3,7 @@ import { handleHttp, handleSocketRequest } from "./worker";
 import type { DemoWorkerResponse } from "./protocol";
 import { createDemoState, DEMO_IDS } from "./scenario";
 
+const CHECKOUT_TASK = "demo-task-checkout";
 const CHECKOUT_SESSION = "demo-session-checkout";
 const README_PATH = "README.md";
 let posted: DemoWorkerResponse[];
@@ -57,20 +58,73 @@ it("answers the seeded clarification and publishes the resolved message", async 
   ).toBe(true);
 });
 
+it("publishes flag changes and restores the note in the demo sidebar after reload", async () => {
+  const path = `/api/v1/tasks/${CHECKOUT_TASK}`;
+  const note = "Check the build";
+  expect(await http(path, { flag_note: `  ${note}  ` }, "PATCH")).toMatchObject({
+    status: 200,
+    body: { flag_note: note },
+  });
+  const saved = posted.findLast((message) => message.kind === "persist");
+  expect(saved).toBeDefined();
+  if (!saved) return;
+  expect(
+    posted.flatMap((message) =>
+      message.kind === "ws-event" && message.data ? [JSON.parse(message.data)] : [],
+    ),
+  ).toContainEqual(
+    expect.objectContaining({
+      action: "task.updated",
+      payload: expect.objectContaining({ task_id: CHECKOUT_TASK, flag_note: note }),
+    }),
+  );
+  initialize(saved.state);
+  expect((await http("/api/v1/app-state", {}, "GET")).body).toMatchObject({
+    initialState: {
+      kanban: {
+        tasks: expect.arrayContaining([
+          expect.objectContaining({ id: CHECKOUT_TASK, flagNote: note }),
+        ]),
+      },
+    },
+  });
+  expect(await http(path, { flag_note: "" }, "PATCH")).toMatchObject({
+    status: 200,
+    body: { flag_note: "" },
+  });
+});
+
+it("rejects an oversized flag update before mutating the demo task", async () => {
+  const path = `/api/v1/tasks/${CHECKOUT_TASK}`;
+  const note = "🙂".repeat(512);
+  expect(await http(path, { flag_note: `  ${note}  ` }, "PATCH")).toMatchObject({
+    status: 200,
+    body: { flag_note: note },
+  });
+  expect(
+    await http(path, { flag_note: note + "x", title: "Must not change" }, "PATCH"),
+  ).toMatchObject({
+    status: 400,
+  });
+  const { body } = await http(path, {}, "GET");
+  expect(body).toMatchObject({ flag_note: note });
+  expect(body).not.toMatchObject({ title: "Must not change" });
+});
+
 it("preserves file and plan edits in the tab snapshot", () => {
   socket("workspace.file.update", {
     session_id: CHECKOUT_SESSION,
     path: README_PATH,
     desired_content: "saved file",
   });
-  socket("task.plan.create", { task_id: "demo-task-checkout", content: "saved plan" });
+  socket("task.plan.create", { task_id: CHECKOUT_TASK, content: "saved plan" });
   const saved = posted.filter((m) => m.kind === "persist").at(-1) as { state: string };
   expect(saved).toBeDefined();
   initialize(saved?.state);
   expect(
     socket("workspace.file.get", { session_id: CHECKOUT_SESSION, path: README_PATH }).payload,
   ).toMatchObject({ content: "saved file" });
-  expect(socket("task.plan.get", { task_id: "demo-task-checkout" }).payload).toMatchObject({
+  expect(socket("task.plan.get", { task_id: CHECKOUT_TASK }).payload).toMatchObject({
     content: "saved plan",
   });
 });
@@ -86,7 +140,7 @@ it("isolates task workspaces and selects the API repository for a single-reposit
       .content,
   ).not.toBe("checkout only");
   const state = createDemoState();
-  const task = state.tasks.find((t) => t.id === "demo-task-checkout")!;
+  const task = state.tasks.find((t) => t.id === CHECKOUT_TASK)!;
   task.repositories = [
     {
       ...task.repositories![0],

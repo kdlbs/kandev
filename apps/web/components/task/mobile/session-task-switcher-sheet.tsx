@@ -33,6 +33,7 @@ import {
   TaskSwitcherDialogs,
   type MobileSubtaskTarget,
 } from "./session-task-switcher-sheet-dialogs";
+import { TaskFlagEditorProvider } from "../task-flag-editor-provider";
 import { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
 export { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
 type SessionTaskSwitcherSheetProps = {
@@ -415,6 +416,31 @@ function useMobileSubtaskTarget(
   return { subtaskTarget, setSubtaskTarget, handleCreateSubtask };
 }
 
+function flagFallbackSelector(inline: boolean) {
+  return inline ? '[data-testid="app-nav-trigger"]' : '[data-testid="mobile-task-picker-trigger"]';
+}
+
+function useFlagDrawerHandoff(
+  setPickerOpen: (open: boolean) => void,
+  onCloseAutoFocus?: (event: Event) => void,
+) {
+  const handoffActive = useRef(false);
+  const onHandoff = useCallback(
+    (active: boolean) => {
+      handoffActive.current = active;
+      if (active) setPickerOpen(false);
+    },
+    [setPickerOpen],
+  );
+  return {
+    onHandoff,
+    onPickerCloseAutoFocus: (event: Event) => {
+      if (handoffActive.current) event.preventDefault();
+      else onCloseAutoFocus?.(event);
+    },
+  };
+}
+
 export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   open,
   onOpenChange,
@@ -438,6 +464,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     (nextOpen: boolean) => handleTaskSheetOpenChange(selectionController, nextOpen, onOpenChange),
     [onOpenChange, selectionController],
   );
+  const flagDrawer = useFlagDrawerHandoff(handleOpenChange, onCloseAutoFocus);
   const actions = useSheetActions(
     workspaceId,
     handleOpenChange,
@@ -486,7 +513,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
       workspaceId={workspaceId}
       open={open}
       onOpenChange={handleOpenChange}
-      onCloseAutoFocus={onCloseAutoFocus}
+      onCloseAutoFocus={flagDrawer.onPickerCloseAutoFocus}
       restoreFocusOnClose={!dialogOpen}
     >
       {surfaceContent}
@@ -494,7 +521,11 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   );
 
   return (
-    <>
+    <TaskFlagEditorProvider
+      onHandoff={flagDrawer.onHandoff}
+      focusFallback={opener}
+      fallbackSelector={flagFallbackSelector(Boolean(renderInline))}
+    >
       {surface}
       <TaskSwitcherDialogs
         focusReturnRef={presentation === "drawer" && !autoFocusNewTasks ? opener : undefined}
@@ -510,6 +541,6 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         subtaskTarget={subtaskTarget}
         onSubtaskTargetChange={setSubtaskTarget}
       />
-    </>
+    </TaskFlagEditorProvider>
   );
 });

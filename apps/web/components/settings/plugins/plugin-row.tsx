@@ -120,7 +120,7 @@ export function PluginRow({
   return (
     <div
       data-testid={`plugin-row-${plugin.id}`}
-      className="group relative min-w-0 py-4 transition-colors hover:bg-muted/40"
+      className="group relative min-w-0 px-3 py-4 transition-colors hover:bg-muted/40"
     >
       <PluginRowContent
         plugin={plugin}

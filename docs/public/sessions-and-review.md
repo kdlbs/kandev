@@ -15,6 +15,11 @@ A session is one agent conversation on a task. Use it to direct work, inspect ch
 
 ## Answer clarification questions
 
+After Copilot resumes a session with an interrupted tool call, Kandev adds a
+status row to the transcript. Select **Details** to read Copilot's warning.
+If the call was the pending Kandev question, skip it and send a prompt. For
+another or uncertain call, check its effects before retrying.
+
 Questions support links, bold, italic, strikethrough, inline code, paragraphs, and simple lists.
 Select an HTTP or HTTPS reference in question text to open it in another tab.
 Links inside answer choices select the choice.
@@ -392,6 +397,16 @@ healthy delivery status clears the blocked-output headline without another
 prompt. A disk warning can remain after that headline clears. An older backend
 that does not report pressure freshness continues to show **Last reported**
 instead of treating capacity time as pressure time.
+
+Delivery pressure shows the cause when the runtime reports one. **Details**
+gives guidance for that cause. If the cause is unknown, the row says **Delivery
+is blocked**. Open **Details** for guidance to inspect runtime logs or use
+session recovery. The pressure headline shows disk usage only for a low-space
+guard. When the delivery cause is not a low-space guard, storage health is in
+the warning state, and a usage value is available, **Details** labels that
+usage as a separate high-usage sample. It can appear below 90%, such as at 88%,
+while the warning remains active. Its free and total values come from the
+capacity sample, not the failed write.
 
 A session that stops because storage is full shows **Session interrupted by low
 disk space**. Free space on the executor filesystem, then use **Resume
