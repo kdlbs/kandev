@@ -44,9 +44,11 @@ export function useWipeGrip(
   const height = `max(2.75rem, calc(${Math.max(a.length, b.length)} * 1em + 1rem))`;
   const round = useContext(WipeLiftContext);
   const [bottom, setBottom] = useState(round?.value ?? LIFT_DEFAULT_PX);
+  const latestBottom = useRef(bottom);
   const drag = useRef<{ x: number; y: number; bottom: number; max: number } | null>(null);
   const end = () => {
-    if (drag.current) round?.set(bottom);
+    if (!drag.current) return;
+    round?.set(latestBottom.current);
     drag.current = null;
     reveal.hold("handle", false);
   };
@@ -57,12 +59,14 @@ export function useWipeGrip(
     } satisfies CSSProperties,
     "data-active": reveal.shown,
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
+      if (event.button > 0) return;
       event.stopPropagation();
       const handle = event.currentTarget;
       handle.setPointerCapture?.(event.pointerId);
       const stageHeight = handle.parentElement?.clientHeight ?? 0;
       const max = Math.max(LIFT_EDGE_PX, stageHeight - handle.offsetHeight - LIFT_EDGE_PX);
       drag.current = { x: event.clientX, y: event.clientY, bottom: Math.min(bottom, max), max };
+      latestBottom.current = drag.current.bottom;
       reveal.hold("handle", true);
     },
     onPointerMove: (event: PointerEvent<HTMLElement>) => {
@@ -70,8 +74,12 @@ export function useWipeGrip(
       if (!start || !event.currentTarget.hasPointerCapture?.(event.pointerId)) return;
       event.stopPropagation();
       onDrag?.(event, event.clientX - start.x);
-      const next = start.bottom + start.y - event.clientY;
-      setBottom(Math.min(start.max, Math.max(LIFT_EDGE_PX, next)));
+      const next = Math.min(
+        start.max,
+        Math.max(LIFT_EDGE_PX, start.bottom + start.y - event.clientY),
+      );
+      latestBottom.current = next;
+      setBottom(next);
     },
     onPointerUp: end,
     onPointerCancel: end,

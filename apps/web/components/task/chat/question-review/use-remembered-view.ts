@@ -16,6 +16,7 @@ export function useRememberedView(
   image: Size,
 ) {
   const recalled = useRef(false);
+  const restoring = useRef(false);
   const { width, height } = image;
   const measured = width > 0 && height > 0;
   const { view, atFit, restore } = viewport;
@@ -23,10 +24,17 @@ export function useRememberedView(
     if (recalled.current || !measured || !carry) return;
     recalled.current = true;
     const kept = carry.recallView(key, { width, height });
-    if (kept) restore(kept);
+    if (kept) {
+      restoring.current = true;
+      restore(kept);
+    }
   }, [measured, carry, key, width, height, restore]);
   useEffect(() => {
     if (!recalled.current || !carry || !measured) return;
+    if (restoring.current) {
+      restoring.current = false;
+      return;
+    }
     carry.rememberView(key, { width, height }, atFit ? null : view);
   }, [carry, key, width, height, measured, atFit, view]);
 }

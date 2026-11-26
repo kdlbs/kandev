@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
+  type ClarificationAnswer,
   type ClarificationQuestion,
   type Message,
 } from "@/lib/types/http";
@@ -80,6 +81,7 @@ type LateOutcome = "sent" | "queued";
 function renderLateForm(
   messages: Message[],
   onLateAnswer: () => Promise<LateOutcome> = vi.fn().mockResolvedValue("sent"),
+  initialAnswers?: readonly ClarificationAnswer[],
 ) {
   const scopeRef = createRef<HTMLDivElement>();
   const onDismiss = vi.fn();
@@ -93,6 +95,7 @@ function renderLateForm(
           onResolved={vi.fn()}
           onDismiss={onDismiss}
           shortcutScopeRef={scopeRef}
+          initialAnswers={initialAnswers}
         />
       </div>
     </ClarificationDraftProvider>,
@@ -186,5 +189,35 @@ describe("question image review in the late-answer form", () => {
     fireEvent.click(within(dialog).getByTestId("clarification-retry"));
     await waitFor(() => expect(onLateAnswer).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByTestId(DIALOG)).toBeNull());
+  });
+
+  it("restores late-answer annotations on initial load or retry", async () => {
+    const onLateAnswer = vi.fn().mockResolvedValue("sent");
+    const testAnnotation = {
+      image_id: "before",
+      x: 10,
+      y: 20,
+      width: 30,
+      height: 40,
+      image_width: 100,
+      image_height: 100,
+      comment: "Fix this area",
+    };
+    renderLateForm([expiredMessage({ images: [before, after] })], onLateAnswer, [
+      { question_id: "q1", selected_options: ["o1"], annotations: [testAnnotation] },
+    ]);
+
+    fireEvent.click(screen.getByTestId(OPEN));
+    const dialog = screen.getByTestId(DIALOG);
+    fireEvent.click(within(dialog).getByTestId(SUBMIT));
+
+    await waitFor(() => expect(onLateAnswer).toHaveBeenCalledTimes(1));
+    expect(onLateAnswer.mock.calls[0][0].answers).toEqual([
+      {
+        question_id: "q1",
+        selected_options: ["o1"],
+        annotations: [testAnnotation],
+      },
+    ]);
   });
 });

@@ -18,6 +18,8 @@ export type WipeNamesReveal = {
 
 export function useWipeNamesReveal(): WipeNamesReveal {
   const [held, setHeld] = useState<ReadonlySet<string>>(() => new Set());
+  const heldRef = useRef(held);
+  heldRef.current = held;
   const [lingering, setLingering] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -28,19 +30,20 @@ export function useWipeNamesReveal(): WipeNamesReveal {
   }, []);
   const hold = useCallback(
     (source: string, on: boolean) => {
-      setHeld((current) => {
-        if (current.has(source) === on) return current;
-        const next = new Set(current);
-        if (on) next.add(source);
-        else next.delete(source);
-        return next;
-      });
-      if (!on) pulse();
+      const wasHeld = heldRef.current.has(source);
+      if (wasHeld === on) return;
+      const next = new Set(heldRef.current);
+      if (on) next.add(source);
+      else next.delete(source);
+      heldRef.current = next;
+      setHeld(next);
+      if (!on && wasHeld) pulse();
     },
     [pulse],
   );
   const clear = useCallback(() => {
     clearTimeout(timer.current);
+    heldRef.current = new Set();
     setHeld((current) => (current.size === 0 ? current : new Set()));
     setLingering(false);
   }, []);

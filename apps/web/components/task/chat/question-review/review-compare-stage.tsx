@@ -113,6 +113,7 @@ function PhoneBottomBar({ model }: { model: CompareStageModel }) {
   const { t } = useTranslation();
   const { state, compare } = model;
   const stepping = state.mode === "toggle" || state.mode === "side";
+  const hasActions = !model.pair || state.mode !== "side";
   return (
     <>
       <ItemNavRow items={model.items} />
@@ -128,37 +129,39 @@ function PhoneBottomBar({ model }: { model: CompareStageModel }) {
           />
         )}
       </BackToGalleryRow>
-      <ReviewBottomBar>
-        {!model.pair && <SwapButton model={model} />}
-        {state.mode === "toggle" && (
-          <Button
-            type="button"
-            className={cn(reviewControlSize, "min-w-0 flex-1")}
-            aria-pressed={state.showB}
-            data-testid="question-review-flip"
-            aria-label={t("task:questionReviewFlip")}
-            onClick={() => compare.dispatch({ type: "flip" })}
-          >
-            <span className="truncate">{t("task:questionReviewFlipShort")}</span>
-          </Button>
-        )}
-        {!stepping && (
-          <div className="min-w-0 flex-1">
-            <ModeControls compare={compare} wipe={model.wipe} />
+      {hasActions && (
+        <ReviewBottomBar>
+          {!model.pair && <SwapButton model={model} />}
+          {state.mode === "toggle" && (
+            <Button
+              type="button"
+              className={cn(reviewControlSize, "min-w-0 flex-1")}
+              aria-pressed={state.showB}
+              data-testid="question-review-flip"
+              aria-label={t("task:questionReviewFlip")}
+              onClick={() => compare.dispatch({ type: "flip" })}
+            >
+              <span className="truncate">{t("task:questionReviewFlipShort")}</span>
+            </Button>
+          )}
+          {!stepping && (
+            <div className="min-w-0 flex-1">
+              <ModeControls compare={compare} wipe={model.wipe} />
+            </div>
+          )}
+          <div className={cn(state.mode === "side" && "ml-auto", model.pair && "hidden")}>
+            <ImagePickerSheetButton
+              images={model.compareImages}
+              urls={model.urls}
+              aId={state.aId}
+              bId={state.bId}
+              compact={!stepping}
+              onPick={(slot, id) => compare.dispatch({ type: "pick", slot, id })}
+              onSwap={() => compare.dispatch({ type: "swap" })}
+            />
           </div>
-        )}
-        <div className={cn(state.mode === "side" && "ml-auto", model.pair && "hidden")}>
-          <ImagePickerSheetButton
-            images={model.compareImages}
-            urls={model.urls}
-            aId={state.aId}
-            bId={state.bId}
-            compact={!stepping}
-            onPick={(slot, id) => compare.dispatch({ type: "pick", slot, id })}
-            onSwap={() => compare.dispatch({ type: "swap" })}
-          />
-        </div>
-      </ReviewBottomBar>
+        </ReviewBottomBar>
+      )}
     </>
   );
 }

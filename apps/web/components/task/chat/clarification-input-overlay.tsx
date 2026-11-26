@@ -868,7 +868,18 @@ export function ClarificationInputOverlay({
       }
       return changed ? next : current;
     });
-  }, [group.recordAnswer, initialAnswersKey, lateMode, restoredAnswers]);
+    setAnnotations((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const answer of restoredAnswers) {
+        if (!answer.annotations?.length) continue;
+        if (!lateMode && Object.hasOwn(current, answer.question_id)) continue;
+        next[answer.question_id] = answer.annotations;
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [group.recordAnswer, initialAnswersKey, lateMode, restoredAnswers, setAnnotations]);
   // Clamp the active index to the current bundle size so late-arriving
   // messages or shrunk bundles never put us out of range.
   const total = sortedMessages.length;

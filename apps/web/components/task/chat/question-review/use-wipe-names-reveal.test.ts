@@ -42,6 +42,14 @@ describe("useWipeNamesReveal", () => {
     act(() => result.current.clear());
     expect(result.current.shown).toBe(false);
   });
+
+  it("does not pulse when releasing an unheld source", () => {
+    const { result } = renderHook(() => useWipeNamesReveal());
+    act(() => result.current.hold("handle", false));
+    expect(result.current.shown).toBe(false);
+    act(() => vi.advanceTimersByTime(2000));
+    expect(result.current.shown).toBe(false);
+  });
 });
 
 describe("usePulseOnSplitMove", () => {

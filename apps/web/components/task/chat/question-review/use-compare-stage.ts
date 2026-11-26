@@ -290,7 +290,16 @@ function useStageWipe(
   const value = pinned ? viewport.pinnedFraction : compare.state.wipe;
   const reveal = useWipeNamesReveal();
   const { view } = viewport;
-  usePulseOnSplitMove(reveal, wiping, `${value}:${view.x}:${view.y}:${view.scale}`);
+  const wasPinned = useRef(pinned);
+  const enteringPinned = pinned && !wasPinned.current;
+  useEffect(() => {
+    wasPinned.current = pinned;
+  }, [pinned]);
+  usePulseOnSplitMove(
+    reveal,
+    wiping && !enteringPinned,
+    `${value}:${view.x}:${view.y}:${view.scale}`,
+  );
   return {
     value,
     onChange: (next: number) =>
@@ -314,8 +323,17 @@ function useCarryPinnedSplit(args: {
   dispatch: Dispatch<CompareAction>;
 }) {
   const { pinned, measured, fraction, wipe, dispatch } = args;
+  const wasPinned = useRef(false);
   useEffect(() => {
-    if (pinned && measured && Math.abs(fraction - wipe) > 0.001) {
+    if (!pinned) {
+      wasPinned.current = false;
+      return;
+    }
+    if (!wasPinned.current) {
+      wasPinned.current = true;
+      return;
+    }
+    if (measured && Math.abs(fraction - wipe) > 0.001) {
       dispatch({ type: "wipe", value: fraction });
     }
   }, [pinned, measured, fraction, wipe, dispatch]);
