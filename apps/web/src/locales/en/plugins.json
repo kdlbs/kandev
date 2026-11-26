@@ -310,5 +310,19 @@
   "viewerExtensionFilter": "File type: {{extension}} (clear)",
   "viewerTextFailed": "Cannot open as text. The file must be text and no larger than 10 MiB.",
   "viewerTooLarge": "This file exceeds the 64 MiB preview limit.",
-  "viewerDenied": "Preview access was denied. Check the external file setting and your file permissions."
+  "viewerDenied": "Preview access was denied. Check the external file setting and your file permissions.",
+  "themes": "Themes",
+  "themeImport": "Import theme",
+  "themeImportDescription": "Review a theme package or VS Code JSON file before installing.",
+  "themeFile": "Theme file (.tar.gz, .json, .jsonc)",
+  "themeBase": "Base appearance (automatic when declared)",
+  "themeReview": "Review theme",
+  "themeInstall": "Install themes",
+  "themeInstalled": "Installed. Choose a theme in Appearance to apply it.",
+  "themeDataOnly": "This package contains color data only and has no runtime permissions.",
+  "themeReport": "Mapped: {{mapped}}. Approximated: {{approximated}}. Ignored: {{ignored}}. Fallback roles: {{fallback}}.",
+  "themeCompatibility": "Unsupported colors use the selected base palette. Syntax can differ between viewers. Review contrast before saving.",
+  "themeEmpty": "No themes found. Import a theme file or add a marketplace source.",
+  "themeUnavailable": "Saved theme unavailable. Using the base appearance.",
+  "themeBrowse": "Browse themes"
 }

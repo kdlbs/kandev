@@ -66,6 +66,15 @@ func (s *Service) DisableWithResult(id string) (DisableResult, error) {
 	if err != nil {
 		return result, err
 	}
+	if rec.IsThemeDistribution() {
+		if rec.Status != StatusDisabled {
+			if err := s.setStatus(id, StatusDisabled); err != nil {
+				return result, err
+			}
+		}
+		result.Disabled = true
+		return result, nil
+	}
 	result.RemoteResourcesMayRemain = len(rec.ExecutorProviders) > 0
 	if len(rec.ExecutorProviders) > 0 {
 		s.closeExecutorProviderAdmission(id)
@@ -139,6 +148,9 @@ const activateStartTimeout = 30 * time.Second
 // to StatusActive. If the spawn fails, it records the failure and transitions
 // the record to StatusError before returning the spawn error.
 func (s *Service) activate(rec *store.Record) error {
+	if rec.IsThemeDistribution() {
+		return s.activateTheme(rec)
+	}
 	s.ownershipMu.Lock()
 	defer s.ownershipMu.Unlock()
 	if err := s.ensureOwnershipAvailable(&rec.Manifest); err != nil {
@@ -254,6 +266,12 @@ func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error
 		return err
 	}
 	committed = true
+	if updated.IsThemeDistribution() {
+		if status != StatusActive {
+			s.publishThemes(id, nil)
+		}
+		return nil
+	}
 	if status != StatusActive {
 		grants.revokeInstallation(updated.InstallationID)
 		s.closeExecutorProviderAdmission(id)
@@ -380,6 +398,7 @@ func (s *Service) recordRestartCount(id string) {
 // StatusError rather than aborting the rest of the boot sequence.
 func (s *Service) StartActivePlugins(ctx context.Context) {
 	s.logBootScanResult(s.bootScan(ctx))
+	s.restoreThemes()
 
 	if s.runtime == nil {
 		return

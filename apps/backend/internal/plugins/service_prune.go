@@ -51,7 +51,9 @@ func (s *Service) pruneSupersededVersions(id, activeVersion, rollbackVersion str
 	if s.pluginsDir == "" || id == "" || activeVersion == "" {
 		return
 	}
-	if s.runtime == nil || !s.runtime.Running(id) {
+	rec, ok := s.registry.Get(id)
+	themeActive := ok && rec.IsThemeDistribution() && rec.Status == StatusActive
+	if !themeActive && (s.runtime == nil || !s.runtime.Running(id)) {
 		return
 	}
 

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "base": "light",
+  "ui": {
+    "background": "#faf8f0",
+    "foreground": "#383830",
+    "sidebar": "#efede4",
+    "card": "#fffdf5",
+    "popover": "#fffdf5"
+  },
+  "editor": {
+    "background": "#faf8f0",
+    "foreground": "#383830"
+  },
+  "syntax": {
+    "keyword": {
+      "foreground": "#a11256"
+    },
+    "string": {
+      "foreground": "#596b00"
+    },
+    "comment": {
+      "foreground": "#6b6b61"
+    }
+  }
+}

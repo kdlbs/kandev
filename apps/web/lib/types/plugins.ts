@@ -9,6 +9,10 @@
 import type { BackendMessage } from "./backend-message";
 
 export type PluginBackendMessageMap = {
+  "plugin.themes_changed": BackendMessage<
+    "plugin.themes_changed",
+    { boot_id: string; revision: number }
+  >;
   "plugin.sidebar-grouping.updated": BackendMessage<
     "plugin.sidebar-grouping.updated",
     {
@@ -97,6 +101,7 @@ export interface PluginUISection {
  * /api/plugins/{id}/bundle regardless of that path.
  */
 export interface PluginRecord {
+  distribution?: { schema_version: number; kind: "theme" | "canvas" };
   id: string;
   api_version: number;
   version: string;
@@ -256,7 +261,7 @@ export interface MarketplacePermissions {
 export interface MarketplaceEntry {
   file_extensions?: string[];
   id: string;
-  kind?: "plugin" | "canvas";
+  kind?: "plugin" | "canvas" | "theme";
   name: string;
   description: string;
   author: string;
@@ -302,6 +307,7 @@ export interface MarketplaceSource {
 export interface MarketplaceCatalog {
   plugins: MarketplaceEntry[];
   canvases?: MarketplaceEntry[];
+  themes?: MarketplaceEntry[];
   sources: MarketplaceSource[];
 }
 

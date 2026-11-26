@@ -1,7 +1,10 @@
+import type { EffectiveTheme } from "@/lib/theme/theme-types";
+import { monacoThemeData } from "@/lib/theme/theme-adapters";
 import type { Monaco } from "@monaco-editor/react";
 import type { editor as monacoEditor, Uri, IRange, IPosition } from "monaco-editor";
 import { KANDEV_MONACO_DARK, KANDEV_MONACO_LIGHT } from "@/lib/theme/editor-theme";
 
+let activeColorTheme: EffectiveTheme | null = null;
 let initialized = false;
 let monacoInstance: Monaco | null = null;
 let monacoReadyPromise: Promise<Monaco> | null = null;
@@ -17,6 +20,10 @@ export function initMonacoThemes() {
 
     monaco.editor.defineTheme("kandev-dark", KANDEV_MONACO_DARK);
     monaco.editor.defineTheme("kandev-light", KANDEV_MONACO_LIGHT);
+    monaco.editor.defineTheme(
+      "kandev-custom",
+      activeColorTheme ? monacoThemeData(activeColorTheme) : KANDEV_MONACO_DARK,
+    );
 
     // Disable Monaco's built-in TS/JS diagnostics — they can't resolve project-level
     // path aliases (@/, tsconfig paths). LSP diagnostics are applied separately via
@@ -110,4 +117,11 @@ export function setMonacoDiagnostics(enabled: boolean) {
   };
   tsDefaults.setDiagnosticsOptions(diagOptions);
   jsDefaults.setDiagnosticsOptions(diagOptions);
+}
+
+export function setMonacoColorTheme(theme: EffectiveTheme) {
+  activeColorTheme = theme;
+  if (!monacoInstance) return;
+  monacoInstance.editor.defineTheme("kandev-custom", monacoThemeData(theme));
+  monacoInstance.editor.setTheme(theme.definition ? "kandev-custom" : `kandev-${theme.base}`);
 }

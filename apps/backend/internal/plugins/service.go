@@ -50,6 +50,8 @@ type userStateCleanupStore interface {
 //     (e.g. proxies checking a plugin's manifest/capabilities without
 //     going through Service's error-wrapping Get).
 type Service struct {
+	themes                                themeState
+	themeReviews                          themeReviewStore
 	filePreviewWorkspaceAuthorizer        func(context.Context, string) error
 	filePreviewPolicies                   *filePreviewPolicies
 	filePreviewBackend                    func(context.Context, string, string, string) (*FilePreviewSource, error)
@@ -245,6 +247,7 @@ type ReferenceIdentity struct {
 // directly for tests that want a fake store.Store/PluginRuntime.
 func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventBus, log *logger.Logger) *Service {
 	service := &Service{
+		themes:                          themeState{bootID: uuid.NewString(), entries: map[string][]themeEntry{}},
 		store:                           pluginStore,
 		registry:                        registry,
 		eventBus:                        eventBus,

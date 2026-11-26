@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import CodeMirror from "@uiw/react-codemirror";
-import { vscodeDark } from "@uiw/codemirror-theme-vscode";
+import { useTheme } from "@/components/theme/app-theme";
+import { codeMirrorTheme } from "@/lib/theme/codemirror-theme";
 import { EditorView } from "@codemirror/view";
 import type { Extension } from "@codemirror/state";
 import { getCodeMirrorExtensionFromPath } from "@/lib/languages";
@@ -29,6 +30,8 @@ export function FileViewerContent({
   sessionId,
   className,
 }: FileViewerContentProps) {
+  const { effectiveTheme } = useTheme();
+  const theme = useMemo(() => codeMirrorTheme(effectiveTheme), [effectiveTheme]);
   const langExt = getCodeMirrorExtensionFromPath(path);
   const extensions: Extension[] = [
     EditorView.lineWrapping,
@@ -84,7 +87,7 @@ export function FileViewerContent({
       <CodeMirror
         value={content}
         height="100%"
-        theme={vscodeDark}
+        theme={theme}
         extensions={extensions}
         readOnly
         onCreateEditor={handleCreateEditor}

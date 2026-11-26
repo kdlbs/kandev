@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useTheme } from "@/components/theme/app-theme";
 import { IconCheck, IconCopy } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
@@ -16,21 +16,27 @@ type ShikiCodeBlockProps = {
 export function ShikiCodeBlock({ children, className }: ShikiCodeBlockProps) {
   const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
-  const { theme, systemTheme } = useTheme();
-  const effectiveTheme = theme === "system" ? systemTheme : theme;
-  const isDark = effectiveTheme === "dark";
+  const { resolvedTheme, effectiveTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
 
   const code = String(children).replace(/\n$/, "");
   const lang = className?.replace("language-", "").toLowerCase() ?? "";
   const [html, setHtml] = useState<string | null>(null);
-  const prevKeyRef = useRef("");
 
   useEffect(() => {
-    const key = `${lang}:${isDark}:${code}`;
-    if (key === prevKeyRef.current) return;
-    prevKeyRef.current = key;
-    highlightCode(code, lang, isDark).then(setHtml);
-  }, [code, lang, isDark]);
+    let current = true;
+    setHtml(null);
+    void highlightCode(code, lang, isDark, effectiveTheme)
+      .then((result) => {
+        if (current) setHtml(result);
+      })
+      .catch(() => {
+        if (current) setHtml(null);
+      });
+    return () => {
+      current = false;
+    };
+  }, [code, lang, isDark, effectiveTheme]);
 
   return (
     <div className="relative group/code-block my-4 max-w-full">

@@ -7,6 +7,7 @@ import type { DefaultState } from "./default-state";
 // eslint-disable-next-line max-lines-per-function -- this explicit projection documents the state merge boundary
 export function buildStateOverrides(m: DefaultState) {
   return {
+    themeInventory: m.themeInventory,
     kanban: m.kanban,
     kanbanMulti: m.kanbanMulti,
     workflows: m.workflows,

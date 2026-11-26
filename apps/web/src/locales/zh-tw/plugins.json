@@ -310,5 +310,19 @@
   "viewerExtensionFilter": "檔案型別：{{extension}}（清除）",
   "viewerTextFailed": "無法作為文字開啟。檔案必須是文字且不超過 10 MiB。",
   "viewerTooLarge": "此檔案超出 64 MiB 的預覽限制。",
-  "viewerDenied": "預覽存取被拒絕。請檢查外部檔案設定及檔案權限。"
+  "viewerDenied": "預覽存取被拒絕。請檢查外部檔案設定及檔案權限。",
+  "themes": "主題",
+  "themeImport": "匯入主題",
+  "themeImportDescription": "安裝前檢查主題包或 VS Code JSON 檔案。",
+  "themeFile": "主題檔案（.tar.gz、.json、.jsonc）",
+  "themeBase": "基礎外觀（已宣告時自動選擇）",
+  "themeReview": "檢查主題",
+  "themeInstall": "安裝主題",
+  "themeInstalled": "已安裝。請在外觀設定中選擇主題以應用。",
+  "themeDataOnly": "此包僅包含顏色資料，沒有執行時權限。",
+  "themeReport": "已對映：{{mapped}}。近似轉換：{{approximated}}。已忽略：{{ignored}}。使用基礎顏色的角色：{{fallback}}。",
+  "themeCompatibility": "不支援的顏色使用所選基礎調色盤。不同檢視器中的語法顏色可能不同。儲存前請檢查對比度。",
+  "themeEmpty": "未找到主題。請匯入主題檔案或新增市場來源。",
+  "themeUnavailable": "已儲存的主題不可用。正在使用基礎外觀。",
+  "themeBrowse": "瀏覽主題"
 }

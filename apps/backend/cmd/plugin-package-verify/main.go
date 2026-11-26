@@ -15,6 +15,8 @@ import (
 )
 
 type output struct {
+	License        string   `json:"license,omitempty"`
+	Kind           string   `json:"kind"`
 	FileExtensions []string `json:"file_extensions,omitempty"`
 	ID             string   `json:"id"`
 	Version        string   `json:"version"`
@@ -26,6 +28,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("plugin-package-verify", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	archivePath := flags.String("archive", "", "path to the plugin package")
+	expectedKind := flags.String("expected-kind", "", "expected package kind: plugin, theme")
 	expectedID := flags.String("expected-id", "", "curated plugin ID")
 	expectedVersion := flags.String("expected-version", "", "normalized release version")
 	if err := flags.Parse(args); err != nil {
@@ -63,12 +66,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	kind := "plugin"
+	if verified.Manifest.IsThemeDistribution() {
+		kind = "theme"
+	}
+	if *expectedKind != "" && *expectedKind != kind {
+		writeError(stderr, "package kind %s, expected %s\n", kind, *expectedKind)
+		return 1
+	}
 	digest, err := fileSHA256(*archivePath)
 	if err != nil {
 		writeError(stderr, "hash package: %v\n", err)
 		return 1
 	}
 	if err := json.NewEncoder(stdout).Encode(output{
+		Kind:           kind,
+		License:        packageLicense(verified.Manifest),
 		ID:             verified.Manifest.ID,
 		Version:        verified.Manifest.Version,
 		SHA256:         digest,
@@ -79,6 +92,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func packageLicense(m *manifest.Manifest) string {
+	if m.Distribution != nil {
+		return m.Distribution.License
+	}
+	return ""
 }
 
 func writeError(stderr io.Writer, format string, args ...any) {

@@ -41,11 +41,25 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector(storeMocks.state),
   useAppStoreApi: () => ({ getState: () => storeMocks.state }),
+  useOptionalAppStoreApi: () => ({ getState: () => storeMocks.state }),
 }));
 
 vi.mock("@/components/theme/app-theme", () => ({
   useTheme: () => ({
+    theme: "system",
     savedTheme: "system",
+    resolvedTheme: "light",
+    systemTheme: "light",
+    effectiveTheme: {
+      reference: "system",
+      base: "light",
+      digest: "builtin-light",
+      status: "ready",
+    },
+    themeInventory: { boot_id: "test", revision: 0, themes: [] },
+    themeError: null,
+    refreshThemes: vi.fn(),
+    setTheme: themeMocks.commitTheme,
     previewTheme: themeMocks.previewTheme,
     commitTheme: themeMocks.commitTheme,
     restoreTheme: themeMocks.restoreTheme,
@@ -257,6 +271,7 @@ beforeEach(() => {
   storeMocks.restoreRichOutputAnimations.mockReset();
   storeMocks.restoreChatAnimations.mockReset();
   storeMocks.state = {
+    auth: { mode: "enabled", user: { id: "test-admin", role: "admin" } },
     userSettings: {
       ...defaultSettingsState.userSettings,
       appStatusBarEnabled: true,

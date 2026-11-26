@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
-import { vscodeDark } from "@uiw/codemirror-theme-vscode";
+import { useTheme } from "@/components/theme/app-theme";
+import { codeMirrorTheme } from "@/lib/theme/codemirror-theme";
 import { SelectionCommentSurface } from "@/components/shared/selection-comment/selection-comment-surface";
 import { lineRangeLabel } from "@/components/shared/selection-comment/line-range-label";
 import { CommentViewPopover } from "@/components/task/comment-view-popover";
@@ -197,6 +198,8 @@ function CodeMirrorEditorToolbar({
 }
 
 export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
+  const { effectiveTheme } = useTheme();
+  const colorTheme = useMemo(() => codeMirrorTheme(effectiveTheme), [effectiveTheme]);
   const { content, readOnly } = props;
   const {
     wrapperRef,
@@ -220,7 +223,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
           ref={editorRef}
           value={content}
           height="100%"
-          theme={vscodeDark}
+          theme={colorTheme}
           readOnly={readOnly}
           extensions={[...state.extensions, codeMirrorCursorFlashExtension]}
           onChange={state.handleChange}

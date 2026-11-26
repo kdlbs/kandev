@@ -121,6 +121,7 @@ type SourceStatus struct {
 type CatalogResult struct {
 	Plugins  []CatalogEntry `json:"plugins"`
 	Canvases []CatalogEntry `json:"canvases"`
+	Themes   []CatalogEntry `json:"themes"`
 	Sources  []SourceStatus `json:"sources"`
 }
 

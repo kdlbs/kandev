@@ -1,3 +1,4 @@
+import type { ThemeInventory } from "@/lib/theme/theme-types";
 import { mapSidebarWorkspaces } from "./slices/ui/sidebar-workspace-state";
 import {
   defaultKanbanState,
@@ -54,6 +55,7 @@ function mergeHydratedAgentProfiles(initialState: HydrationState): DefaultState[
 }
 
 export const defaultState = {
+  themeInventory: null as ThemeInventory | null,
   kanban: defaultKanbanState.kanban,
   kanbanMulti: defaultKanbanState.kanbanMulti,
   sidebarArchivedTasks: defaultKanbanState.sidebarArchivedTasks,

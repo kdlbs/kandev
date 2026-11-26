@@ -327,3 +327,19 @@ func assertState(t *testing.T, entries []CatalogEntry, id string, want InstallSt
 		t.Fatalf("entry %q: want state %q, got %q", id, want, e.InstallState)
 	}
 }
+
+func TestThemeCatalogRequiresLicenseAndDigest(t *testing.T) {
+	for _, license := range []string{"MIT", ""} {
+		doc := &IndexDocument{SchemaVersion: 1, Plugins: []IndexEntry{{ID: "theme", Kind: "theme", License: license, PackageSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}
+		if err := validateIndexDocument(doc); err != nil {
+			t.Fatal(err)
+		}
+		want := 0
+		if license != "" {
+			want = 1
+		}
+		if len(doc.Plugins) != want {
+			t.Fatalf("license=%q: got %d entries, want %d", license, len(doc.Plugins), want)
+		}
+	}
+}

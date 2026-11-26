@@ -191,7 +191,7 @@ func (s *Service) registerSideload(id, version string) error {
 	if err := m.Validate(); err != nil {
 		return fmt.Errorf("invalid %s: %w", manifestFileName, err)
 	}
-	if !m.IsManaged() {
+	if !m.IsManaged() && !m.IsThemeDistribution() {
 		return fmt.Errorf("%s is not runtime-managed (runtime.type must be \"binary\")", manifestFileName)
 	}
 	if m.ID != id {

@@ -1071,3 +1071,13 @@ test("file extensions come from the verified package",async()=>{
  const {record,error}=await buildEntry({id:"foo",repo:"acme/foo"},{verifyPackage:async()=>verifiedPackage({file_extensions:["stl"]})});
  assert.equal(error,undefined);assert.deepEqual(record.file_extensions,["stl"]);assert.ok(record.categories.includes("File viewers"));
 });
+
+test("theme curation verifies kind and license from the archive", async () => {
+ stubGitHub({release:{tag_name:"v1.2.0",assets:[{name:"foo-1.2.0.tar.gz",browser_download_url:"https://example.com/foo.tar.gz"}]},manifestText:"display_name: Theme",repoMeta:{}});
+ const spec={id:"foo",repo:"acme/foo",kind:"theme"};
+ for(const [kind,license,valid] of [["theme","MIT",true],["plugin","MIT",false],["theme","",false]]) {
+  const result=await buildEntry(spec,{verifyPackage:async()=>verifiedPackage({kind,license})});
+  assert.equal(Boolean(result.error),!valid,JSON.stringify(result));
+  if(valid) assert.equal(result.record.license,"MIT");
+ }
+});

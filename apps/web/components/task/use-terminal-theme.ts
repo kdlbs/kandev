@@ -1,6 +1,6 @@
 import { useEffect, type RefObject } from "react";
 import type { Terminal } from "@xterm/xterm";
-import type { ResolvedTheme } from "@/components/theme/app-theme";
+import { useTheme, type ResolvedTheme } from "@/components/theme/app-theme";
 import { getTerminalTheme } from "@/lib/theme/terminal-theme";
 
 type UseTerminalThemeOptions = {
@@ -17,6 +17,7 @@ export function useTerminalTheme({
   isTerminalReady,
   resolvedTheme,
 }: UseTerminalThemeOptions): void {
+  const { effectiveTheme } = useTheme();
   useEffect(() => {
     if (!isTerminalReady) return;
 
@@ -41,5 +42,5 @@ export function useTerminalTheme({
       cancelAnimationFrame(firstFrame);
       if (secondFrame !== null) cancelAnimationFrame(secondFrame);
     };
-  }, [containerRef, isTerminalReady, resolvedTheme, terminalRef]);
+  }, [containerRef, isTerminalReady, resolvedTheme, terminalRef, effectiveTheme?.digest]);
 }

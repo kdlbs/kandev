@@ -1,4 +1,4 @@
-export type Theme = "system" | "light" | "dark";
+export type { ThemeSelection as Theme } from "@/lib/theme/theme-types";
 
 export type KeyValue = {
   id: string;

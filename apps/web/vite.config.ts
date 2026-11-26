@@ -1,3 +1,4 @@
+import { bootstrapTheme } from "./lib/theme/theme-bootstrap";
 import fs from "node:fs";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
@@ -37,7 +38,19 @@ function escapeRegExp(value: string): string {
 
 export default defineConfig({
   base: process.env.VITE_KANDEV_BASE_PATH || "/",
-  plugins: [react(), pseudoLocaleBundling(), serviceWorkerPlugin()],
+  plugins: [
+    react(),
+    pseudoLocaleBundling(),
+    serviceWorkerPlugin(),
+    {
+      name: "theme-bootstrap",
+      transformIndexHtml() {
+        return [
+          { tag: "script", children: `(${bootstrapTheme.toString()})()`, injectTo: "head-prepend" },
+        ];
+      },
+    },
+  ],
   server: {
     port: readPort(process.env.PORT),
     strictPort: Boolean(process.env.PORT),

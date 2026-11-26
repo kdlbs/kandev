@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "base": "dark",
+  "ui": {
+    "background": "#272822",
+    "foreground": "#f8f8f2",
+    "card": "#2e2f28",
+    "card-foreground": "#f8f8f2",
+    "popover": "#2e2f28",
+    "popover-foreground": "#f8f8f2",
+    "sidebar": "#20211c",
+    "sidebar-foreground": "#f8f8f2",
+    "sidebar-primary": "#a6e22e",
+    "sidebar-primary-foreground": "#272822",
+    "sidebar-accent": "#3e3d32",
+    "sidebar-accent-foreground": "#f8f8f2",
+    "sidebar-border": "#49483e",
+    "border": "#49483e",
+    "input": "#49483e",
+    "muted": "#3e3d32",
+    "muted-foreground": "#b4b4a5",
+    "primary": "#a6e22e",
+    "primary-foreground": "#272822",
+    "secondary": "#3e3d32",
+    "secondary-foreground": "#f8f8f2",
+    "accent": "#3e3d32",
+    "accent-foreground": "#f8f8f2",
+    "ring": "#a6e22e"
+  },
+  "editor": {
+    "background": "#272822",
+    "foreground": "#f8f8f2",
+    "cursor": "#f8f8f2",
+    "selection": "#49483e",
+    "line-highlight": "#3e3d32",
+    "diff-added-line": "#a6e22e22",
+    "diff-removed-line": "#f9267222"
+  },
+  "syntax": {
+    "keyword": {
+      "foreground": "#f92672"
+    },
+    "string": {
+      "foreground": "#e6db74"
+    },
+    "number": {
+      "foreground": "#ae81ff"
+    },
+    "comment": {
+      "foreground": "#9c9c85"
+    },
+    "function": {
+      "foreground": "#a6e22e"
+    },
+    "type": {
+      "foreground": "#66d9ef"
+    },
+    "variable": {
+      "foreground": "#f8f8f2"
+    },
+    "operator": {
+      "foreground": "#f92672"
+    }
+  },
+  "terminal": {
+    "background": "#272822",
+    "foreground": "#f8f8f2",
+    "green": "#a6e22e",
+    "red": "#f92672",
+    "yellow": "#e6db74",
+    "blue": "#66d9ef",
+    "magenta": "#ae81ff",
+    "brightGreen": "#a6e22e"
+  }
+}

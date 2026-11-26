@@ -8,9 +8,7 @@ import type { MarketplaceEntry } from "@/lib/types/plugins";
  * Owns the manual "Update" button's busy/error state machine, independent of
  * the auto-updater. `runUpdate` clears any previous failure for that plugin
  * first (so a retry doesn't show a stale error while it's pending), installs
- * the newer package via the shared `marketplaceInstall` (same path
- * install/enable use — never disagrees with the auto-updater's own
- * `install_state` comparison), and always re-checks the catalog afterward so
+ * the newer package via `marketplaceUpdate` with its selected release identity, and always re-checks the catalog afterward so
  * a resolved update's row converges within one round-trip whether the
  * install succeeded or failed. A successful install also marks the catalog
  * entry current before that re-check, so a failed catalog request cannot leave
@@ -23,7 +21,7 @@ import type { MarketplaceEntry } from "@/lib/types/plugins";
  * copy's error on the new, perfectly healthy row.
  */
 export function usePluginUpdateAction(
-  marketplaceInstall: (url: string) => Promise<{ ok: boolean; error?: string }>,
+  marketplaceUpdate: (entry: MarketplaceEntry) => Promise<{ ok: boolean; error?: string }>,
   reloadUpdates: () => Promise<void>,
   installedIds: ReadonlySet<string>,
   markUpdated?: (pluginId: string) => void,
@@ -60,7 +58,7 @@ export function usePluginUpdateAction(
       clearError(entry.id);
       setUpdatingIds((prev) => new Set(prev).add(entry.id));
       try {
-        const result = await marketplaceInstall(entry.package_url);
+        const result = await marketplaceUpdate(entry);
         if (!result.ok) {
           const message = result.error ?? t("plugins:failedToUpdatePlugin", { name: entry.name });
           setErrorsById((prev) => new Map(prev).set(entry.id, message));
@@ -80,7 +78,7 @@ export function usePluginUpdateAction(
         }
       }
     },
-    [marketplaceInstall, reloadUpdates, clearError, markUpdated],
+    [marketplaceUpdate, reloadUpdates, clearError, markUpdated],
   );
 
   return { updatingIds, errorsById, runUpdate };

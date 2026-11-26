@@ -1,3 +1,5 @@
+import type { EffectiveTheme } from "@/lib/theme/theme-types";
+import { textmateThemeData } from "@/lib/theme/theme-adapters";
 import { createHighlighter, type Highlighter } from "shiki";
 let highlighterPromise: Promise<Highlighter> | null = null;
 const loadedLanguages = new Set<string>();
@@ -26,11 +28,22 @@ async function ensureLanguage(highlighter: Highlighter, lang: string): Promise<b
   }
 }
 
-export async function highlightCode(code: string, lang: string, isDark: boolean): Promise<string> {
+export async function highlightCode(
+  code: string,
+  lang: string,
+  isDark: boolean,
+  custom?: EffectiveTheme,
+): Promise<string> {
   const highlighter = await getHighlighter();
   const hasLang = await ensureLanguage(highlighter, lang);
+  let themeName = isDark ? DARK_THEME : LIGHT_THEME;
+  if (custom?.definition) {
+    const theme = textmateThemeData(custom, highlighter.getTheme(themeName));
+    themeName = theme.name!;
+    if (!highlighter.getLoadedThemes().includes(themeName)) await highlighter.loadTheme(theme);
+  }
   return highlighter.codeToHtml(code, {
     lang: hasLang ? lang : "text",
-    theme: isDark ? DARK_THEME : LIGHT_THEME,
+    theme: themeName,
   });
 }

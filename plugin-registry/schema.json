@@ -39,7 +39,7 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["plugin", "canvas"],
+            "enum": ["plugin", "canvas", "theme"],
             "default": "plugin",
             "description": "Omitted kind means plugin. Canvas entries are validated as portable canvas packages."
           },

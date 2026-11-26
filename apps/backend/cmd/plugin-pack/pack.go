@@ -12,6 +12,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/fs"
@@ -21,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"gopkg.in/yaml.v3"
 )
@@ -57,6 +59,9 @@ func Pack(dir string, w io.Writer, opts PackOptions) error {
 	}
 	if _, ok := files[manifestFileName]; !ok {
 		return fmt.Errorf("plugin-pack: %s not found under %s", manifestFileName, dir)
+	}
+	if err := verifyThemePackage(files); err != nil {
+		return err
 	}
 	if err := pkgtartest.WritePackage(w, files); err != nil {
 		return fmt.Errorf("plugin-pack: writing package: %w", err)
@@ -188,4 +193,20 @@ func packToFile(dir, out string, platformOnly bool) error {
 		return err
 	}
 	return f.Close()
+}
+
+func verifyThemePackage(files map[string][]byte) error {
+	m, err := manifest.Parse(files[manifestFileName])
+	if err != nil {
+		return err
+	}
+	if !m.IsThemeDistribution() {
+		return nil
+	}
+	var archive bytes.Buffer
+	if err = pkgtartest.WritePackage(&archive, files); err != nil {
+		return err
+	}
+	_, err = pkgtar.Verify(&archive)
+	return err
 }

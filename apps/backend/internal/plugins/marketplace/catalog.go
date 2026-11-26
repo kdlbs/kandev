@@ -37,6 +37,7 @@ const defaultCacheTTL = 5 * time.Minute
 const (
 	marketplaceKindPlugin = "plugin"
 	marketplaceKindCanvas = "canvas"
+	marketplaceKindTheme  = "theme"
 )
 
 // Service fetches, caches, and merges catalog documents across the configured
@@ -127,7 +128,7 @@ func (s *Service) Catalog(ctx context.Context, installed []InstalledPlugin) (*Ca
 	// Merge sequentially in source order so first-source-wins dedup is stable,
 	// even though the fetches above ran concurrently.
 	installedByID := indexInstalled(installed)
-	result := &CatalogResult{Plugins: []CatalogEntry{}, Canvases: []CatalogEntry{}, Sources: []SourceStatus{}}
+	result := &CatalogResult{Plugins: []CatalogEntry{}, Canvases: []CatalogEntry{}, Themes: []CatalogEntry{}, Sources: []SourceStatus{}}
 	seen := map[string]bool{}
 	for i, src := range sources {
 		status := statusFor(src)
@@ -146,6 +147,10 @@ func (s *Service) Catalog(ctx context.Context, installed []InstalledPlugin) (*Ca
 			status.Error = fetched[i].doc.warning
 		}
 		for _, entry := range mergeEntries(fetched[i].doc, src, installedByID, seen) {
+			if entry.Kind == marketplaceKindTheme {
+				result.Themes = append(result.Themes, entry)
+				continue
+			}
 			if entry.Kind == marketplaceKindCanvas {
 				result.Canvases = append(result.Canvases, entry)
 				continue
@@ -360,7 +365,7 @@ func validateIndexDocument(doc *IndexDocument) error {
 			continue
 		}
 		seen[entry.ID] = struct{}{}
-		if kind != marketplaceKindPlugin && kind != marketplaceKindCanvas {
+		if kind != marketplaceKindPlugin && kind != marketplaceKindCanvas && kind != marketplaceKindTheme {
 			warnings = append(warnings, "entry "+entry.ID+" has an unsupported kind")
 			continue
 		}
@@ -370,6 +375,10 @@ func validateIndexDocument(doc *IndexDocument) error {
 		}
 		if kind == marketplaceKindCanvas && !validSHA256(entry.PackageSHA256) {
 			warnings = append(warnings, "entry "+entry.ID+": canvas package digest is missing or invalid")
+			continue
+		}
+		if kind == marketplaceKindTheme && (!validSHA256(entry.PackageSHA256) || strings.TrimSpace(entry.License) == "") {
+			warnings = append(warnings, "entry "+entry.ID+": theme requires a license and package digest")
 			continue
 		}
 		entry.Kind = kind

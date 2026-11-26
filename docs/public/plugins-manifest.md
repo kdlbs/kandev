@@ -889,3 +889,9 @@ guesses, and duplicate values are rejected. A UI bundle is required.
 Runtime `registerFileViewer({ id, Component })` must match a declaration. The host
 owns selection, byte delivery, external-file consent, and lifecycle cleanup.
 See [File viewer plugins](plugins-authoring.md#file-viewer-plugins).
+
+## Data-only themes
+
+Theme packages use `distribution.kind: theme` and declare palette variants,
+without a runtime or executable contributions. See [Theme package reference](themes-authoring.md)
+and [Appearance and themes](appearance.md) for the format and import flow.

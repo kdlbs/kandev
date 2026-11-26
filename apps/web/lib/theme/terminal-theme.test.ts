@@ -99,3 +99,23 @@ describe("getTerminalTheme", () => {
     expect(TERMINAL_MINIMUM_CONTRAST_RATIO).toBe(4.5);
   });
 });
+
+it("uses contributed terminal colors while retaining unspecified ANSI colors", () => {
+  const container = createThemeContainer();
+  container.style.setProperty("--theme-terminal-background", "#272822");
+  container.style.setProperty("--theme-terminal-green", "#a6e22e");
+  const theme = getTerminalTheme(container, "dark");
+  expect(theme.background).toBe("#272822");
+  expect(theme.green).toBe("#a6e22e");
+  expect(theme.red).toBe(getFixedDarkTerminalTheme().red);
+});
+
+it("maps contributed selection and bright ANSI roles", () => {
+  const container = createThemeContainer();
+  container.style.setProperty("--theme-terminal-selection", "#49483e");
+  container.style.setProperty("--theme-terminal-brightGreen", "#a6e22e");
+  expect(getTerminalTheme(container, "dark")).toMatchObject({
+    selectionBackground: "#49483e",
+    brightGreen: "#a6e22e",
+  });
+});

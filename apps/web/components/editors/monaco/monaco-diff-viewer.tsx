@@ -38,6 +38,7 @@ import {
 initMonacoThemes();
 
 function getMonacoTheme(resolvedTheme: string | undefined): string {
+  if (resolvedTheme === "kandev-custom") return resolvedTheme;
   return resolvedTheme === "dark" ? "kandev-dark" : "kandev-light";
 }
 
@@ -260,7 +261,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     editable,
     onRevert,
   } = props;
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, effectiveTheme } = useTheme();
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
   const [foldUnchanged, setFoldUnchanged] = useGlobalFolding();
   const [wordWrapLocal, setWordWrap] = useState(false);
@@ -338,7 +339,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     editorHeight,
     cancelPendingViewStateRestore,
     hasDiff: !!(oldContent || newContent || diff),
-    monacoTheme: getMonacoTheme(resolvedTheme),
+    monacoTheme: getMonacoTheme(effectiveTheme?.definition ? "kandev-custom" : resolvedTheme),
     options: buildDiffEditorOptions({
       compact,
       wordWrap,

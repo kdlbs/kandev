@@ -56,7 +56,8 @@ function parsePatchToSides(diff: string): { original: string; modified: string }
 }
 
 export function MonacoInlineDiff({ data, className }: MonacoInlineDiffProps) {
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, effectiveTheme } = useTheme();
+  const monacoColorTheme = effectiveTheme?.definition ? "kandev-custom" : resolvedTheme;
   const language = getMonacoLanguage(data.filePath);
   const diffEditorRef = useRef<monacoEditor.IStandaloneDiffEditor | null>(null);
 
@@ -92,7 +93,7 @@ export function MonacoInlineDiff({ data, className }: MonacoInlineDiffProps) {
         language={language}
         original={original}
         modified={modified}
-        theme={resolvedTheme === "dark" ? "kandev-dark" : "kandev-light"}
+        theme={monacoColorTheme === "kandev-custom" ? monacoColorTheme : `kandev-${resolvedTheme}`}
         onMount={handleMount}
         options={{
           readOnly: true,

@@ -49,6 +49,7 @@ type MonacoCodeEditorProps = {
 };
 
 function getMonacoTheme(resolvedTheme: string | undefined): string {
+  if (resolvedTheme === "kandev-custom") return resolvedTheme;
   return resolvedTheme === "dark" ? "kandev-dark" : "kandev-light";
 }
 
@@ -389,7 +390,8 @@ function MonacoEditorView({
 export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
   const { path, repo } = props;
   const { wrapperRef, language, state, lsp, diffStats, options } = useMonacoCodeEditorSetup(props);
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, effectiveTheme } = useTheme();
+  const monacoColorTheme = effectiveTheme?.definition ? "kandev-custom" : resolvedTheme;
   const lspStatusPlacement = useLspStatusPlacement();
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const walkthroughRange = useMonacoWalkthroughRange({
@@ -409,7 +411,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
       lsp={lsp}
       diffStats={diffStats}
       options={options}
-      resolvedTheme={resolvedTheme}
+      resolvedTheme={monacoColorTheme}
       showLspStatus={lspStatusPlacement === "toolbar"}
       walkthroughRange={walkthroughRange}
     />

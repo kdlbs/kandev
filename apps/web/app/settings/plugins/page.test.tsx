@@ -20,6 +20,7 @@ const {
   installPluginFromUrlSpy,
   installPluginUploadSpy,
   listPluginsSpy,
+  getPluginSpy,
   syncPluginsSpy,
   getMarketplaceCatalogSpy,
   refreshMarketplaceSpy,
@@ -30,6 +31,7 @@ const {
   installPluginFromUrlSpy: vi.fn(),
   installPluginUploadSpy: vi.fn(),
   listPluginsSpy: vi.fn(),
+  getPluginSpy: vi.fn(),
   syncPluginsSpy: vi.fn(),
   getMarketplaceCatalogSpy: vi.fn(),
   refreshMarketplaceSpy: vi.fn(),
@@ -51,6 +53,7 @@ vi.mock("@/lib/api/domains/plugins-api", () => ({
   uninstallPlugin: (...args: [string]) => {
     return uninstallPluginSpy(...args);
   },
+  getPlugin: (...args: unknown[]) => getPluginSpy(...args),
   installPluginFromUrl: (...args: [string]) => installPluginFromUrlSpy(...args),
   installPluginUpload: (...args: [File]) => installPluginUploadSpy(...args),
   syncPlugins: (...args: unknown[]) => syncPluginsSpy(...args),
@@ -185,6 +188,7 @@ function catalogEntry(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  getPluginSpy.mockResolvedValue(activePlugin());
   uninstallPluginSpy.mockResolvedValue({ deleted: true });
   installPluginFromUrlSpy.mockResolvedValue({ plugin: installedPlugin() });
   installPluginUploadSpy.mockResolvedValue({ plugin: installedPlugin() });
