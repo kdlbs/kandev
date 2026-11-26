@@ -360,6 +360,13 @@ func testMigrateTasksRebuildAddsInitialWorkspaceLayout(t *testing.T, grade strin
 	if storedGrade != grade {
 		t.Fatalf("rebuilt task execution grade = %q, want %q", storedGrade, grade)
 	}
+	var flagNote string
+	if err := repo.db.GetContext(ctx, &flagNote, `SELECT flag_note FROM tasks WHERE id = ?`, "task-workspace-placement-rebuild"); err != nil {
+		t.Fatal(err)
+	}
+	if flagNote != "" {
+		t.Fatalf("rebuilt task flag note = %q, want empty", flagNote)
+	}
 }
 
 func TestMigrateTaskRepositoriesRebuildAddsWorkspaceRelativePath(t *testing.T) {

@@ -99,7 +99,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	if report := e.checkExecutionUsage(ctx, req, env); report != nil && (report.Limited || report.BindingChanged) {
 		return &PromptResponse{Error: "native provider usage admission refused", Usage: report}, nil
 	}
-	args, prepareErr := prepareACPLaunch(cfg, resolvedCmd, args, env)
+	args, prepareErr := prepareACPLaunch(cfg, req.AgentID, resolvedCmd, args, env)
 	if prepareErr != nil {
 		return &PromptResponse{Success: false, Error: prepareErr.Error()}, nil
 	}
@@ -619,7 +619,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 			return &ProbeResponse{Success: false, Error: "private managed runtime command validation failed"}, nil
 		}
 	}
-	args, prepareErr := prepareACPLaunch(cfg, resolvedCmd, args, env)
+	args, prepareErr := prepareACPLaunch(cfg, req.AgentID, resolvedCmd, args, env)
 	if prepareErr != nil {
 		return &ProbeResponse{Success: false, Error: prepareErr.Error(), FailureCode: ProbeFailureUnsupportedContext}, nil
 	}
@@ -824,7 +824,7 @@ func probeOpenCodeModels(
 		cfg = configs[0]
 	}
 	env := sanitizeEnvForAgent(cfg)
-	argv, err := prepareACPLaunch(cfg, resolvedCmd, append([]string{resolvedCmd}, args...), env)
+	argv, err := prepareACPLaunch(cfg, "", resolvedCmd, append([]string{resolvedCmd}, args...), env)
 	if err != nil {
 		return nil, err
 	}

@@ -2,12 +2,11 @@ package acp
 
 import "github.com/kandev/kandev/internal/agentctl/types/streams"
 
-func (a *Adapter) beginContinuationPermission(sessionID, toolCallID string, options []PermissionOption) func(*PermissionResponse, error) {
+func (a *Adapter) beginContinuationPermission(turn *promptTurnState, sessionID, toolCallID string, options []PermissionOption) func(*PermissionResponse, error) {
 	a.mu.RLock()
 	eligible := sessionID == a.sessionID && !a.isLoadingSession
 	support := a.dialect.continuationSupport
 	a.mu.RUnlock()
-	turn := a.currentPromptTurn()
 	if !eligible || turn == nil || turn.promptGeneration == 0 {
 		return nil
 	}

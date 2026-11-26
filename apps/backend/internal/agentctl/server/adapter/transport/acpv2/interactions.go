@@ -48,7 +48,7 @@ func (a *Adapter) interactionTurn(session wire.SessionID) *promptTurn {
 	if turn == nil || a.blocked || turn.terminal || a.ctx.Err() != nil {
 		return nil
 	}
-	if session == turn.session || a.state.children[session] != "" {
+	if session == turn.session || a.state.children[session].toolCallID != "" {
 		return turn
 	}
 	return nil

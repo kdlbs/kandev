@@ -7,7 +7,7 @@ requirements:
   - REQ-PLATFORM-DIAGNOSTIC-SIGNAL-003
   - REQ-PLATFORM-DIAGNOSTIC-SIGNAL-004
 created: 2026-10-05
-updated: 2026-11-04
+updated: 2026-11-25
 owners:
   - kandev
 ---
@@ -61,7 +61,8 @@ Use fixed key dispatch and typed validation, without recursive object forwarding
 | `component` | `process-manager`, `workspace-tracker`, `instance-manager`, `control-server`, `api-server`, `process-runner`, `interactive-runner`, `shell`, `shell-manager`, `git-operator`, `status-tracker`, `workspace-preview`, `vscode-manager`, `wakeup-scheduler` |
 | `task_id`, `session_id`, `instance_id`, `execution_id`, `submission_id`, `request_id` | Canonical lowercase UUID strings, exactly 36 bytes |
 | `state` | `healthy`, `pressure`, `guarded`, `cancelling`, `interrupted`, `cancellation_failed`, `storage_error`, `delivery_failed` |
-| `error_class`, `reason` | `permission_denied`, `not_found`, `context_canceled`, `deadline_exceeded`, `git_start_failed`, `git_command_failed`, `repository_context_unavailable`, `io_error`, `unknown`, `agent_running`, `managed_runtime_npm_resolution`, `managed_runtime_npm_policy`, `unsupported_profile_context`, `authentication_required`, `evidence_changed` |
+| `error_class` | `permission_denied`, `not_found`, `context_canceled`, `deadline_exceeded`, `git_start_failed`, `git_command_failed`, `repository_context_unavailable`, `io_error`, `unknown`, `agent_running`, `managed_runtime_npm_resolution`, `managed_runtime_npm_policy`, `unsupported_profile_context`, `authentication_required`, `evidence_changed` |
+| `reason` | The existing error classes, known `journal.StorageReason` values, and the closed `DeliveryFailureSnapshot.Reason` codes |
 | `operation` | `read_directory`, `read_file`, `stat`, `git_inspection`, `submodule_discovery`, `agent_configure`, `agent_probe` |
 | `trigger` | `manual_refresh`, `user_select`, `turn_complete`, `startup_grace`, `poll` |
 | `runtime` | `desktop`, `server` |
@@ -93,6 +94,9 @@ defines producer and forwarding verification.
 
 `refreshDeliveryPressure` emits info for transitions to `healthy` and retains warnings for every other transition.
 It keeps its existing transition-only emission, state machine, limits, and cancellation decisions.
+The failed-write record uses the validated storage reason when present and the writer failure code otherwise.
+It includes `retained_bytes` and `limit_bytes` from that rejection when the source measured them.
+The relay forwards these fields through the same bounded envelope.
 
 ## Shutdown attribution
 

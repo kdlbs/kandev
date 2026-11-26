@@ -14,6 +14,7 @@ import { usesSavedSidebarDisclosure } from "./sidebar-disclosure-query";
 const MAX_PAGES = 5;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_AGE_MS = 5 * 60 * 1000;
+const BACKGROUND_RECOVERY_COOLDOWN_MS = 60_000;
 const EMPTY_REPOSITORIES: NonNullable<AppState["repositories"]["itemsByWorkspaceId"][string]> = [];
 
 type SidebarRankingInputs = {
@@ -34,6 +35,7 @@ type PageSnapshot = {
   groupingIdentity: string;
 };
 type SidebarPageRequestOptions = {
+  hasRetainedRows?: boolean;
   manualRetry?: boolean;
   foregroundRecoveryEpisode?: object;
 };
@@ -385,22 +387,26 @@ export class SidebarTaskPageCache {
     }
     const newEpisode = Boolean(episode && episode !== record.lastForegroundEpisode);
     if (episode) record.lastForegroundEpisode = episode;
-    if (
-      record.exhausted &&
-      !options.manualRetry &&
-      (!newEpisode || record.lastError instanceof SidebarDisclosureSyncError)
-    ) {
-      return Promise.reject(record.lastError ?? new Error("Sidebar page recovery exhausted"));
+    if (record.exhausted && !options.manualRetry) {
+      const disclosureSyncFailed = record.lastError instanceof SidebarDisclosureSyncError;
+      const cooldownPassed =
+        record.exhaustedAt !== undefined &&
+        Date.now() - record.exhaustedAt >= BACKGROUND_RECOVERY_COOLDOWN_MS;
+      if (disclosureSyncFailed || (!newEpisode && !cooldownPassed)) {
+        return Promise.reject(record.lastError ?? new Error("Sidebar page recovery exhausted"));
+      }
     }
-    return this.startCycle(record, read);
+    return this.startCycle(record, read, options.hasRetainedRows);
   }
 
   private startCycle(
     record: RecoveryRecord,
     read: SidebarPageRead,
+    hasRetainedRows = false,
   ): Promise<SidebarTaskPageResponse> {
     const cycle = startSidebarPageRecoveryCycle<SidebarTaskPageResponse>({
       attempt: (signal) => this.runAttempt(read, signal),
+      hasRetainedRows,
       onAttemptFailed: (error) => {
         record.lastError = error;
       },
@@ -421,6 +427,7 @@ export class SidebarTaskPageCache {
       .then(
         (page) => {
           record.exhausted = false;
+          record.exhaustedAt = undefined;
           record.lastError = undefined;
           return page;
         },
@@ -428,6 +435,7 @@ export class SidebarTaskPageCache {
           if (!isReadAbort(error)) {
             record.exhausted =
               isTemporaryReadError(error) || error instanceof SidebarDisclosureSyncError;
+            record.exhaustedAt = record.exhausted ? Date.now() : undefined;
             record.lastError = error;
           }
           throw error;

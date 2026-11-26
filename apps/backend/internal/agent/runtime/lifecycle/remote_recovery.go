@@ -417,6 +417,7 @@ func (m *Manager) prepareRemoteExecution(
 		WorkspacePath:         workspacePath,
 		OriginalWorkspacePath: originalWorkspacePath,
 		RuntimeName:           record.Runtime,
+		McpProfile:            restoreMcpProfileContext(metadata),
 		Status:                v1.AgentStatusRunning,
 		StartedAt:             time.Now(),
 		metadata:              metadata,

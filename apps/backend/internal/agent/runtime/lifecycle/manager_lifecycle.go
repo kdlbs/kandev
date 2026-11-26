@@ -324,6 +324,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				WorkspacePath:         ri.WorkspacePath,
 				OriginalWorkspacePath: originalWorkspacePath,
 				RuntimeName:           ri.RuntimeName,
+				McpProfile:            restoreMcpProfileContext(ri.Metadata),
 				Status:                v1.AgentStatusRunning,
 				StartedAt:             time.Now(),
 				metadata:              ri.Metadata,

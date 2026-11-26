@@ -213,6 +213,7 @@ type TaskDTO struct {
 	WorkflowAgentOverrides      *models.WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
 	Title                       string                         `json:"title"`
 	Description                 string                         `json:"description"`
+	FlagNote                    string                         `json:"flag_note"`
 	State                       v1.TaskState                   `json:"state"`
 	Priority                    string                         `json:"priority"`
 	WIPAdmitted                 bool                           `json:"wip_admitted"`
@@ -1214,6 +1215,7 @@ func FromTaskWithSessionInfo(
 		WorkflowAgentOverrides:      workflowAgentOverrides,
 		Title:                       task.Title,
 		Description:                 task.Description,
+		FlagNote:                    task.FlagNote,
 		State:                       task.State,
 		Priority:                    task.Priority,
 		ExecutionGrade:              task.ExecutionGrade,

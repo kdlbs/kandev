@@ -16,9 +16,14 @@ const ReservedMetadataKeyPrefixCoordinator = models.ReservedMetadataKeyPrefixCoo
 // reserved key without AllowReservedMetadata.
 var ErrReservedMetadata = errors.New("task metadata key is reserved")
 
-// refuseReservedMetadata returns ErrReservedMetadata when metadata carries a
-// key with the reserved prefix and the caller is not the coordinator service.
+// refuseReservedMetadata rejects interruption state from every caller and
+// other reserved keys from callers without trusted service authority.
 func refuseReservedMetadata(metadata map[string]interface{}, allowed bool) error {
+	for key := range metadata {
+		if key == models.MetaKeyInterruptedSessions || key == models.MetaKeyLegacyInterruptedAt {
+			return fmt.Errorf("%w: %s", ErrReservedMetadata, key)
+		}
+	}
 	if allowed {
 		return nil
 	}
