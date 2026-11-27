@@ -125,7 +125,7 @@ func (m *Manager) resolveAgentProfileEnvVarsWithPartial(
 				}
 				return nil, profileSecretError(key)
 			}
-			value, err := m.revealGlobalSecret(ctx, ev.SecretID)
+			value, err := m.revealAgentProfileSecret(ctx, ev.SecretID, ev.SharedByUserID)
 			if err != nil {
 				// Preserve caller cancellation identity. The sanitized sentinel is
 				// for secret failures only; callers use context errors to stop work
@@ -138,7 +138,7 @@ func (m *Manager) resolveAgentProfileEnvVarsWithPartial(
 						zap.String("env_key", key), zap.Error(err))
 					continue
 				}
-				return nil, profileSecretError(key)
+				return nil, profileSecretErrorWithHint(key, err)
 			}
 			resolved[key] = value
 			continue
@@ -152,6 +152,13 @@ func (m *Manager) resolveAgentProfileEnvVarsWithPartial(
 
 func profileSecretError(key string) error {
 	return fmt.Errorf("%w: env key %q unavailable", ErrProfileSecretUnavailable, key)
+}
+
+func profileSecretErrorWithHint(key string, cause error) error {
+	if hint := sharedProfileSecretHint(cause); hint != "" {
+		return fmt.Errorf("%w: env key %q unavailable (%s)", ErrProfileSecretUnavailable, key, hint)
+	}
+	return profileSecretError(key)
 }
 
 func (m *Manager) revealGlobalSecret(ctx context.Context, secretID string) (string, error) {

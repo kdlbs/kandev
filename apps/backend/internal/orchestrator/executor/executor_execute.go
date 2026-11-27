@@ -2133,6 +2133,9 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 				return nil, err
 			}
 		}
+		if err := requirePreparedLaunchActor(ctx, opts); err != nil {
+			return nil, err
+		}
 		sessionOwned = true
 		if strings.TrimSpace(agentProfileID) == "" {
 			agentProfileID = strings.TrimSpace(session.ExecutionProfileID)
