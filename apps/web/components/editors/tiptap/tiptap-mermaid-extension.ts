@@ -7,14 +7,15 @@
 import type { Node as PmNode } from "@tiptap/pm/model";
 import type { NodeView } from "@tiptap/pm/view";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
+import { bindMermaidFrameResize } from "@/components/shared/mermaid-frame-resize";
+import { bindMermaidPinch } from "@/components/shared/mermaid-pinch";
 import mermaid from "mermaid";
 // Resolved inside the node view, which is a ProseMirror callback with no hook scope.
 import { t } from "@/lib/i18n";
 import {
   DEFAULT_SCALE,
   SCALE_STEP,
-  MIN_SCALE,
-  MAX_SCALE,
+  clampScale,
   getSvgDimensions,
   sanitizeMermaidCode,
   cleanupMermaidOrphans,
@@ -115,6 +116,10 @@ class MermaidNodeView implements NodeView {
   private zoomOutBtn: HTMLButtonElement;
   private zoomInBtn: HTMLButtonElement;
   private separator: HTMLElement;
+  private readonly grip = document.createElement("div");
+  private readonly unbindResize: () => void;
+  private readonly scrollWrapper = document.createElement("div");
+  private readonly unbindPinch: () => void;
   private scale = DEFAULT_SCALE;
   private node: PmNode;
   private showingCode = false;
@@ -132,22 +137,39 @@ class MermaidNodeView implements NodeView {
 
     // --- Diagram view ---
     this.diagramView = document.createElement("div");
-    this.diagramView.style.display = "inline-block";
-    this.diagramView.style.position = "relative";
+    this.diagramView.style.display = "block";
+    this.diagramView.style.maxWidth = "100%";
 
     this.svgContainer = document.createElement("div");
     this.svgContainer.style.transformOrigin = "top left";
     this.svgContainer.style.transform = `scale(${this.scale})`;
 
     this.sizeWrapper = document.createElement("div");
+    this.sizeWrapper.style.marginInline = "auto";
     this.sizeWrapper.style.overflow = "hidden";
     this.sizeWrapper.appendChild(this.svgContainer);
 
-    const scrollWrapper = document.createElement("div");
-    scrollWrapper.style.overflowX = "auto";
+    const scrollWrapper = this.scrollWrapper;
+    scrollWrapper.style.overflow = "auto";
+
     scrollWrapper.style.padding = "0.5rem";
+    this.unbindPinch = bindMermaidPinch(scrollWrapper, (factor) =>
+      this.setScale(this.scale * factor),
+    );
     scrollWrapper.appendChild(this.sizeWrapper);
-    this.diagramView.appendChild(scrollWrapper);
+    this.grip.className = "mermaid-frame-grip";
+    this.grip.hidden = true;
+    this.grip.tabIndex = 0;
+    this.grip.setAttribute("role", "separator");
+    this.grip.setAttribute("aria-orientation", "horizontal");
+    this.grip.setAttribute("aria-label", t("editors:diagramHeight"));
+    const resetButton = document.createElement("button");
+    resetButton.type = "button";
+    resetButton.hidden = true;
+    resetButton.className = "mermaid-frame-reset";
+    resetButton.textContent = t("common:reset");
+    this.diagramView.append(scrollWrapper, this.grip, resetButton);
+    this.unbindResize = bindMermaidFrameResize(this.grip, scrollWrapper, resetButton);
 
     // --- Code view (hidden by default) ---
     this.codeView = document.createElement("pre");
@@ -216,7 +238,7 @@ class MermaidNodeView implements NodeView {
       this.zoomInBtn.style.display = "none";
       this.separator.style.display = "none";
     } else {
-      this.diagramView.style.display = "inline-block";
+      this.diagramView.style.display = "block";
       this.codeView.style.display = "none";
       this.zoomOutBtn.style.display = "";
       this.zoomLabel.style.display = "";
@@ -226,7 +248,7 @@ class MermaidNodeView implements NodeView {
   }
 
   private setScale(value: number) {
-    this.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, value));
+    this.scale = clampScale(value);
     this.svgContainer.style.transform = `scale(${this.scale})`;
     this.updateSizeWrapper();
     this.updateZoomLabel();
@@ -235,6 +257,7 @@ class MermaidNodeView implements NodeView {
   private updateSizeWrapper() {
     const dims = getSvgDimensions(this.svgContainer);
     if (dims) {
+      this.scrollWrapper.style.height = `var(--mermaid-frame-height, min(calc(${dims.h * DEFAULT_SCALE}px + 1rem), 50dvh))`;
       this.svgContainer.style.width = `${dims.w}px`;
       this.svgContainer.style.height = `${dims.h}px`;
       this.sizeWrapper.style.width = `${dims.w * this.scale}px`;
@@ -258,6 +281,7 @@ class MermaidNodeView implements NodeView {
         cleanupMermaidOrphans(id);
         if (id !== this.latestRenderId) return;
         this.svgContainer.innerHTML = svg;
+        this.grip.hidden = false;
         this.updateSizeWrapper();
       })
       .catch((err: Error) => {
@@ -265,6 +289,8 @@ class MermaidNodeView implements NodeView {
         if (id !== this.latestRenderId) return;
         reportMermaidRenderFailure(err, code, sanitizedCode);
         this.svgContainer.innerHTML = "";
+        this.grip.hidden = true;
+        this.scrollWrapper.style.height = "";
         const pre = document.createElement("pre");
         pre.className = "mermaid-error";
         pre.textContent = `Error rendering diagram: ${err.message}`;
@@ -283,6 +309,11 @@ class MermaidNodeView implements NodeView {
       if (codeEl) codeEl.innerHTML = highlightMermaid(node.textContent);
     }
     return true;
+  }
+
+  destroy() {
+    this.unbindResize();
+    this.unbindPinch();
   }
 
   ignoreMutation() {

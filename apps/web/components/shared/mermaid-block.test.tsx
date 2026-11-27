@@ -17,7 +17,7 @@ describe("MermaidBlock", () => {
 
     expect(html).toContain("mermaid-block");
     expect(html).toContain("block w-full max-w-full min-w-0");
-    expect(html).toContain("mermaid-scroll-region w-full overflow-x-auto overflow-y-hidden");
+    expect(html).toContain("mermaid-scroll-region w-full overflow-auto");
     expect(html).not.toContain("inline-block");
   });
 });

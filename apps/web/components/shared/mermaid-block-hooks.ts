@@ -2,6 +2,7 @@
 
 import { useCallback, useLayoutEffect, useState } from "react";
 import {
+  clampScale,
   DEFAULT_SCALE,
   SCALE_STEP,
   MIN_SCALE,
@@ -49,6 +50,10 @@ export function useMermaidScale(svgSize: { w: number; h: number } | null, viewpo
     }
   }, [fitScale, manualScale]);
 
+  const zoomBy = useCallback((factor: number) => {
+    setManualScale(true);
+    setScale((current) => clampScale(current * factor));
+  }, []);
   const zoomIn = useCallback(() => {
     setManualScale(true);
     setScale((s) => Math.min(s + SCALE_STEP, MAX_SCALE));
@@ -63,5 +68,5 @@ export function useMermaidScale(svgSize: { w: number; h: number } | null, viewpo
   }, [fitScale]);
   const resetAutoScale = useCallback(() => setManualScale(false), []);
 
-  return { scale, zoomIn, zoomOut, zoomReset, resetAutoScale };
+  return { scale, fitScale, zoomBy, zoomIn, zoomOut, zoomReset, resetAutoScale };
 }
