@@ -3043,7 +3043,7 @@ jobs:
           set -euo pipefail
           report=dist/release-assets/runtime-size-report.md
           if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
-            bash scripts/release/write-runtime-size-report.sh dist/release-assets "$report" "$WINDOWS_HELPER"
+            bash scripts/release/write-runtime-size-report.sh dist/release-assets "$report"
           else
             {
               printf '# Runtime asset sizes\n\n'
