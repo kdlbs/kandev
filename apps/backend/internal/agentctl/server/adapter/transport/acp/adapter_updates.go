@@ -196,7 +196,14 @@ func (a *Adapter) handleACPUpdate(
 	startupWarningOwned := !a.closed &&
 		((isLoading && a.loadingSessionID == sessionID) || (!isLoading && a.sessionID == sessionID))
 	a.mu.Unlock()
-	copilotNotice := a.observeCopilotInterruptionUpdate(sessionID, n.Update, promptGeneration)
+	suppressed := a.dialect.suppresses(n)
+	var copilotNotice string
+	if !suppressed {
+		copilotNotice = a.observeCopilotInterruptionUpdate(sessionID, n.Update, promptGeneration)
+	} else if !isLoading && a.agentID == copilotAgentID {
+		a.logger.Debug("suppressed Copilot organization plugin notice",
+			zap.String("session_id", sessionID), zap.String("notice", n.Update.AgentMessageChunk.Content.Text.Text))
+	}
 	if isStartupWarning && !startupWarningOwned {
 		startupWarning = nil
 		if !isLoading {
@@ -272,7 +279,6 @@ func (a *Adapter) handleACPUpdate(
 	if n.Update.CurrentModeUpdate != nil {
 		a.observeConfigurationCommandMode(sessionID, promptGeneration, string(n.Update.CurrentModeUpdate.CurrentModeId))
 	}
-	suppressed := a.dialect.suppresses(n)
 	handled := suppressed
 	var cursorWatchEvent *AgentEvent
 	if !suppressed {
