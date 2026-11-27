@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -85,13 +86,50 @@ func probeExecStreamingTransport(
 	if err != nil {
 		return fmt.Errorf("pods/exec stream setup failed: %w", err)
 	}
-	var echoed bytes.Buffer
-	if err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdin: bytes.NewReader(payload), Stdout: &limitedProbeWriter{buffer: &echoed, limit: len(payload) + 1},
-	}); err != nil {
+	return runExecEchoProbe(ctx, executor, payload, streamingProbeEchoWait)
+}
+
+// streamingProbeEchoWait bounds how long the probe keeps stdin open while it
+// waits for the full echo.
+const streamingProbeEchoWait = 10 * time.Second
+
+// runExecEchoProbe writes payload to the stream's stdin and keeps stdin open
+// until the whole echo has arrived, or echoWait passes, before closing it.
+// Some sandboxed runtimes (seen with Kata Containers) drop stdout that is
+// still in flight when stdin reaches EOF; closing stdin right after the
+// payload made the probe report a short echo on a working data path.
+func runExecEchoProbe(
+	ctx context.Context,
+	executor remotecommand.Executor,
+	payload []byte,
+	echoWait time.Duration,
+) error {
+	stdin, stdinWriter := io.Pipe()
+	echoed := &limitedProbeWriter{
+		buffer: &bytes.Buffer{}, limit: len(payload) + 1, want: len(payload), full: make(chan struct{}),
+	}
+	streamDone := make(chan struct{})
+	go func() {
+		if _, err := stdinWriter.Write(payload); err != nil {
+			return
+		}
+		timer := time.NewTimer(echoWait)
+		defer timer.Stop()
+		select {
+		case <-echoed.full:
+		case <-timer.C:
+		case <-streamDone:
+		case <-ctx.Done():
+		}
+		_ = stdinWriter.Close()
+	}()
+	err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{Stdin: stdin, Stdout: echoed})
+	close(streamDone)
+	_ = stdin.Close()
+	if err != nil {
 		return fmt.Errorf("pods/exec byte stream failed: %w", err)
 	}
-	return verifyStreamingProbeEcho(payload, echoed.Bytes())
+	return verifyStreamingProbeEcho(payload, echoed.received())
 }
 
 func verifyStreamingProbeEcho(sent, received []byte) error {
@@ -101,12 +139,20 @@ func verifyStreamingProbeEcho(sent, received []byte) error {
 	return nil
 }
 
+// limitedProbeWriter keeps at most limit bytes of the echo. When full is set,
+// it is closed once want bytes have arrived.
 type limitedProbeWriter struct {
+	mu     sync.Mutex
 	buffer *bytes.Buffer
 	limit  int
+	want   int
+	full   chan struct{}
+	closed bool
 }
 
 func (w *limitedProbeWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if remaining := w.limit - w.buffer.Len(); remaining > 0 {
 		if len(p) > remaining {
 			w.buffer.Write(p[:remaining])
@@ -114,7 +160,17 @@ func (w *limitedProbeWriter) Write(p []byte) (int, error) {
 			w.buffer.Write(p)
 		}
 	}
+	if w.full != nil && !w.closed && w.buffer.Len() >= w.want {
+		w.closed = true
+		close(w.full)
+	}
 	return len(p), nil
+}
+
+func (w *limitedProbeWriter) received() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]byte(nil), w.buffer.Bytes()...)
 }
 
 func newStreamingProbeExecutor(

@@ -67,6 +67,10 @@ requests stay unchanged.
   metadata tests (EXEC-001.1, 001.3).
 - `internal/kubernetes/streaming_transport_test.go`: the exec data-path probe
   and its permissions (EXEC-004.1).
+  `streaming_echo_probe_test.go`:
+  `TestExecEchoProbeKeepsStdinOpenUntilTheEchoArrives` uses a fake stream that
+  drops in-flight stdout at stdin EOF, and
+  `TestExecEchoProbeClosesStdinAfterTheWaitAndReportsShortEcho` (EXEC-004.1).
 
 ## E2E tests
 

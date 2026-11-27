@@ -82,7 +82,9 @@ bytes.
 
 - **AC-EXECUTORS-K8S-EXEC-004.1:** With `exec`, the streaming step shall check
   only the exec permissions and shall pass only after random bytes sent
-  through an exec stream in the probe Pod return unchanged.
+  through an exec stream in the probe Pod return unchanged. The probe shall
+  keep stdin open until the echo is complete or a bounded wait passes, so a
+  runtime that drops in-flight stdout at stdin EOF does not fail a working path.
 - **AC-EXECUTORS-K8S-EXEC-004.2:** Public executor documentation shall describe
   the setting, its default, when to use it, its per-connection cost, and that
   the settings form does not show it yet.
