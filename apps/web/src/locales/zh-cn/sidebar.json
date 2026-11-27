@@ -1,4 +1,11 @@
 {
+  "addFlag": "添加标记",
+  "changeFlag": "更改标记",
+  "editFlag": "编辑标记",
+  "flag": "标记",
+  "flagNote": "标记备注",
+  "removeFlag": "移除标记",
+  "flagSaveFailed": "无法更新标记。请重试。",
   "pluginGroupingSection": "插件分组",
   "pluginGroupingUnavailable": "此插件分组不可用或不完整。请重试、启用插件或选择其他视图。",
   "pluginGroupingUnavailableLabel": "{{name}}（不可用）",

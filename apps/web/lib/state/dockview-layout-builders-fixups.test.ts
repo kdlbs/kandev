@@ -100,6 +100,15 @@ describe("applyLayoutFixups — pinned target capture", () => {
     vi.mocked(getPinnedWidth).mockReturnValue(350);
   });
 
+  it("does not constrain a verified maximized terminal as the ordinary right column", () => {
+    mockSplitview([350, 1120]);
+    const api = makeApi([SIDEBAR_GROUP, RIGHT_BOTTOM_GROUP]);
+    const ids = applyLayoutFixups(api, undefined, 300, undefined, RIGHT_BOTTOM_GROUP);
+    expect(mockResizeView).not.toHaveBeenCalledWith(1, expect.anything());
+    expect(ids.centerGroupId).toBe(RIGHT_BOTTOM_GROUP);
+    expect(setPinnedTarget).not.toHaveBeenCalledWith("right", expect.anything());
+  });
+
   it("does NOT record a right target in the 2-column fallback (center is last)", () => {
     // Regression: global-fallback restore strips env-scoped right panels,
     // leaving [sidebar, center]. The last splitview child is the CENTER

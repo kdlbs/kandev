@@ -250,13 +250,43 @@ using isolated caches. A local archive/proxy smoke test proves packaging only.
 
 ### Registry propagation and diagnostics
 
-After one SDK upload or dist-tag mutation, the release observes the public registry for up to five minutes. It probes immediately and then waits 10, 20, and at most 30 seconds between reads. It never repeats the write. A version that appears after 30 seconds remains recoverable within that window. A version or channel update that is still absent at the deadline leaves the run incomplete but preserves the signed candidate and version.
+After one SDK upload or dist-tag mutation, the release observes the public registry for up to ten minutes. It probes immediately and then waits 10, 20, and at most 30 seconds between reads. It retries network timeouts, connection failures, HTTP 429 responses, and HTTP 5xx responses. The release makes a final probe at the deadline. A probe that finishes at or after the deadline serves as that final probe. The release never repeats the write. A version that appears after 309 seconds remains recoverable within this window. A version or channel update that is still absent at the deadline leaves the run incomplete but preserves the signed candidate and version.
 
 Logs and the job summary identify the package, SDK version, phase, observation attempt, elapsed time, and next wait. A visibility timeout after a successful upload or dist-tag command states which write npm accepted. An uncertain command stays uncertain until a registry read confirms the immutable identity. Failures distinguish authentication or authorization, registry read, visibility timeout, identity conflict, and public consumer verification. Captured npm output is sanitized and limited to 64 KiB before it reaches logs or summaries.
 
 If the immutable version is already confirmed, a later dist-tag failure leaves publication confirmed and reports the channel write and promotion state separately. Follow the channel-specific recovery guidance instead of treating the release as an unpublished upload.
 
-If npm accepted the upload but the version is not visible, check the package on npmjs.com and rerun the failed job in the same release. Do not publish again. If the command response was uncertain, inspect the exact public version before any recovery write. An expired or rejected trusted publisher must be reconfigured for that package, then reuse the same release and signed candidate. Never rebuild or replace the SDK bytes to recover a visibility delay.
+### Recover an SDK upload
+
+The protected SDK job stores an upload intent before it runs `npm publish`.
+It stores the command result in a separate artifact. GitHub retains both
+artifacts for 90 days.
+
+An npm `E403` response can mean the version already exists while public
+registry reads are still catching up. It does not prove that npm refused the
+write. Treat it as uncertain and resume observation; a new backfill requires a
+recorded rejection or proof that the upload never started.
+
+- For an accepted, uncertain, or interrupted attempt, rerun the failed SDK job
+  in the same workflow run. The job reads the attempt history and observes the
+  same signed version. It does not upload again.
+- For a confirmed npm authentication rejection or a proven skipped upload, fix
+  the trusted publisher if needed. Then dispatch a new Stable backfill with the
+  same `backfill_tag`. The job requires a new run before it can authorize an
+  upload.
+- If the attempt history is missing, expired, conflicting, or unreadable, do
+  not publish. Keep the attempt artifacts and producer runs. Reconcile the
+  exact public version and signed receipt before allowing another upload.
+- The job also checks authenticated workflow-run and job-attempt records. If
+  those records show that intent retention succeeded but the intent artifact is
+  missing, the release is unresolved. Do not treat an empty artifact lookup as
+  proof that no upload was attempted.
+
+A release from before attempt recording can finish without attempt artifacts
+when the public npm archive matches its signed receipt. A release with recorded
+publisher attempts requires complete history even when its archive is public.
+An absent version without trusted history requires reconciliation. Never
+rebuild or replace the signed SDK archive.
 
 ### First-package bootstrap
 

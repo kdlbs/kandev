@@ -164,8 +164,14 @@ test.describe("Improve Kandev dialog", () => {
     await titleInput.fill(title);
     await descriptionInput.fill(description);
     await failedStatusRead;
-    await expect(createDialog.getByText("Temporary bootstrap failure")).toBeVisible();
-    await expect(testPage.getByText("Could not prepare Improve Kandev")).toBeHidden();
+    await expect(
+      createDialog.getByTestId("task-create-form-body").getByText("Temporary bootstrap failure"),
+    ).toBeVisible();
+    await expect(
+      createDialog
+        .getByTestId("toast-message")
+        .filter({ hasText: "Could not prepare Improve Kandev" }),
+    ).toBeVisible();
     await prCapture.screenshot("desktop-bootstrap-retry", {
       caption: "Desktop Improve Kandev form with its draft preserved and inline Retry",
     });

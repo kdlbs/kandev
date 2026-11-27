@@ -2,8 +2,8 @@ package acp
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	p "github.com/kandev/kandev/internal/mcp/profile"
@@ -18,23 +18,7 @@ const projectMCPDeliveryReasonCode = "project_config_materialized"
 // This is a universal condition over selected packages: Core delivery never
 // authorizes a missing optional package.
 func requireBuiltinMCPDelivery(requested, selected []types.McpServer, delivery *types.ProjectMCPDelivery) error {
-	delivered := make(map[p.PackageID]bool, len(selected))
-	for _, server := range selected {
-		if server.IsInjectedBuiltin() && server.BuiltinPackage != "" {
-			delivered[server.BuiltinPackage] = true
-		}
-	}
-	projectDelivered := validProjectMCPDelivery(delivery)
-	for _, server := range requested {
-		if !server.IsInjectedBuiltin() {
-			continue
-		}
-		if delivered[server.BuiltinPackage] || projectDelivered.Delivers(server.BuiltinPackage) {
-			continue
-		}
-		return fmt.Errorf("selected built-in MCP server %q is unsupported by this agent; use an agent with HTTP or SSE MCP support", server.Name)
-	}
-	return nil
+	return shared.RequireBuiltinMCPDelivery(requested, selected, delivery)
 }
 
 // validProjectMCPDelivery returns the record only when its structural contract

@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +13,11 @@ import {
   workflowId,
   workspaceId,
 } from "@/lib/types/ids";
+import { useRenderedTaskSession } from "./task-page-session-ownership";
+import { prepareSessionRemoval } from "@/lib/ws/handlers/task-primary-focus";
+import { withSiblings, membership } from "@/lib/ws/handlers/task-primary-focus.test-helpers";
+import type { TaskSessionsResponse } from "@/lib/types/http";
+import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
 
 const PARENT_TASK_ID = "parent-task";
 const PARENT_SESSION_ID = "parent-session";
@@ -50,6 +55,11 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return { ...actual, listTaskSessions: mocks.listTaskSessions };
 });
+
+vi.mock("@/lib/api/domains/session-api", async (original) => ({
+  ...(await original<typeof import("@/lib/api/domains/session-api")>()),
+  listTaskSessions: (...args: unknown[]) => mocks.listTaskSessions(...args),
+}));
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => mocks.socket,
@@ -493,3 +503,137 @@ describe("mounted task page session ownership", () => {
     expect(statusPairs()).toHaveLength(0);
   });
 });
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.11
+it.each(["proof", "explicit", "zero-primary", "navigation"] as const)(
+  "keeps route fallback out of an owned removal slot (settlement: %s)",
+  async (settlement) => {
+    const seed = withSiblings("FAILED").getState();
+    const initialState = {
+      kanban: seed.kanban,
+      tasks: seed.tasks,
+      taskSessions: seed.taskSessions,
+      taskSessionsByTask: seed.taskSessionsByTask,
+    };
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <StateProvider initialState={initialState}>{children}</StateProvider>
+    );
+    const { result } = renderHook(
+      () => ({
+        store: useAppStoreApi(),
+        rendered: useRenderedTaskSession("t1", "next", null),
+      }),
+      { wrapper },
+    );
+    expect(result.current.rendered.sessionId).toBe("old");
+    const proof = Promise.withResolvers<TaskSessionsResponse>();
+    mocks.listTaskSessions.mockReturnValue(proof.promise);
+    act(() => {
+      prepareSessionRemoval(result.current.store, "old", "t1")();
+    });
+    expect(result.current.store.getState().tasks.activeSessionId).toBeNull();
+    expect(result.current.rendered).toEqual({ sessionId: null, routeSessionUnresolved: true });
+    if (settlement === "explicit")
+      act(() => result.current.store.getState().setActiveSession("t1", "next"));
+    if (settlement === "navigation")
+      act(() => {
+        result.current.store.getState().setActiveTask("other-task");
+        result.current.store.getState().setActiveTask("t1");
+      });
+    await act(async () => {
+      const rows = membership("latest", "next");
+      if (settlement === "zero-primary")
+        rows.sessions = rows.sessions.map((row) => ({ ...row, is_primary: false }));
+      proof.resolve(rows);
+      await proof.promise;
+    });
+    const expected = {
+      proof: "latest",
+      explicit: "next",
+      "zero-primary": null,
+      navigation: "next",
+    }[settlement];
+    await waitFor(() => expect(result.current.rendered.sessionId).toBe(expected));
+  },
+);
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.11
+it.each(["cancel", "commit", "explicit"] as const)(
+  "keeps a retired phone route empty until actual workflow selection: %s",
+  async (settlement) => {
+    const seed = withSiblings("FAILED").getState();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <StateProvider
+        initialState={{
+          kanban: seed.kanban,
+          tasks: seed.tasks,
+          taskSessions: seed.taskSessions,
+          taskSessionsByTask: seed.taskSessionsByTask,
+        }}
+      >
+        {children}
+      </StateProvider>
+    );
+    const { result } = renderHook(
+      () => ({
+        store: useAppStoreApi(),
+        rendered: useRenderedTaskSession("t1", "next", null),
+      }),
+      { wrapper },
+    );
+    const store = result.current.store;
+    const proof = Promise.withResolvers<TaskSessionsResponse>();
+    mocks.listTaskSessions.mockReturnValue(proof.promise);
+    let requestId: number | null = null;
+    act(() => {
+      requestId = store.getState().beginWorkflowSessionFocus({
+        taskId: "t1",
+        workflowId: "wf1",
+        destinationStepId: "review",
+        presentationToken: 1,
+        navigationRevision: store.getState().taskRemoval.navigationRevision,
+      });
+      registerTaskSessionHandlers(store)["session.removed"]!({
+        id: "remote-during-workflow",
+        type: "notification",
+        action: "session.removed",
+        payload: { task_id: "t1", session_id: "old" },
+      });
+    });
+    await act(async () => {
+      proof.resolve(membership("latest", "next"));
+      await proof.promise;
+    });
+    expect(store.getState().taskSessions.items.old).toBeUndefined();
+    expect(result.current.rendered.sessionId).toBeNull();
+    act(() => {
+      if (settlement === "commit") {
+        store.getState().bindWorkflowSessionFocus({
+          requestId: requestId!,
+          presentationToken: 1,
+          entryIdentity: "committed-entry",
+        });
+        store.getState().reconcileWorkflowSessionFocus("t1", {
+          metadata: {
+            workflow_session_route: {
+              operation_id: "move",
+              destination_step_id: "review",
+              entry_identity: "committed-entry",
+              destination_session_id: "latest",
+              phase: "committed",
+            },
+          },
+          workflowStepId: "review",
+          entryIdentity: "committed-entry",
+          updatedAt: "2026-11-20T00:00:00Z",
+        });
+      } else {
+        store.getState().cancelWorkflowSessionFocus({ requestId: requestId! });
+        if (settlement === "explicit") store.getState().setActiveSession("t1", "next");
+      }
+    });
+    expect(result.current.rendered.sessionId).toBe(
+      { cancel: null, commit: "latest", explicit: "next" }[settlement],
+    );
+  },
+);

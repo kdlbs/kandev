@@ -205,6 +205,7 @@ type TaskDTO struct {
 	WorkflowAgentOverrides      *models.WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
 	Title                       string                         `json:"title"`
 	Description                 string                         `json:"description"`
+	FlagNote                    string                         `json:"flag_note"`
 	State                       v1.TaskState                   `json:"state"`
 	Priority                    string                         `json:"priority"`
 	WIPAdmitted                 bool                           `json:"wip_admitted"`
@@ -1198,6 +1199,7 @@ func FromTaskWithSessionInfo(
 		WorkflowAgentOverrides:      workflowAgentOverrides,
 		Title:                       task.Title,
 		Description:                 task.Description,
+		FlagNote:                    task.FlagNote,
 		State:                       task.State,
 		Priority:                    task.Priority,
 		ExecutionGrade:              task.ExecutionGrade,
@@ -1516,11 +1518,12 @@ type StepActionDTO struct {
 
 // MoveTaskResponse includes the task and the target workflow step info
 type MoveTaskResponse struct {
-	Task                  TaskDTO                    `json:"task"`
-	WorkflowStep          WorkflowStepDTO            `json:"workflow_step"`
-	WorkflowEntryIdentity string                     `json:"workflow_entry_identity,omitempty"`
-	MoveID                string                     `json:"move_id,omitempty"`
-	EntryOptions          *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+	Task                     TaskDTO                    `json:"task"`
+	WorkflowStep             WorkflowStepDTO            `json:"workflow_step"`
+	WorkflowEntryIdentity    string                     `json:"workflow_entry_identity,omitempty"`
+	WorkflowFocusDisposition string                     `json:"workflow_focus_disposition,omitempty"`
+	MoveID                   string                     `json:"move_id,omitempty"`
+	EntryOptions             *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 	// Disposition reports how an MCP move_task call was resolved: "applied" when
 	// the move committed immediately, or "deferred" when it was recorded to run
 	// at the source session's turn-end. It lets an agent distinguish deferred

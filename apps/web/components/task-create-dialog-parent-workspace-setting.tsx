@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { cn } from "@/lib/utils";
 import type { InitialWorkspaceLayout } from "@/lib/types/http";
 import type { InitialWorkspaceLayoutMode } from "@/components/task-create-dialog-types";
 
@@ -79,7 +80,8 @@ export function TaskCreateParentWorkspaceSetting({
   initialWorkspaceLayout,
   onInitialWorkspaceLayoutChange,
   initialWorkspaceLayoutMode,
-}: TaskCreateParentWorkspaceSettingProps) {
+  className,
+}: TaskCreateParentWorkspaceSettingProps & { className?: string }) {
   const { t } = useTranslation();
   const layoutForcedByMultipleRepositories = useRef(false);
 
@@ -113,7 +115,11 @@ export function TaskCreateParentWorkspaceSetting({
   const info = t("task:initialWorkspaceLayoutInfo");
   return (
     <div
-      className="flex min-h-11 min-w-0 items-center gap-1 text-xs text-muted-foreground md:min-h-6"
+      className={cn(
+        "flex min-w-0 items-center gap-2 text-xs",
+        controlSizingClassName("standard"),
+        className,
+      )}
       data-testid="task-create-initial-workspace-layout-setting"
     >
       {initialWorkspaceLayoutMode === "multiple-repositories" ? (
@@ -128,7 +134,7 @@ export function TaskCreateParentWorkspaceSetting({
             onCheckedChange={(checked) =>
               onInitialWorkspaceLayoutChange(checked === true ? "task_root" : "repository")
             }
-            className="[@media(pointer:coarse)]:size-5"
+            className="border-muted-foreground/45 [@media(pointer:coarse)]:size-5"
             data-testid="task-create-initial-workspace-layout-checkbox"
           />
           <label htmlFor="task-create-initial-workspace-layout" className="cursor-pointer">

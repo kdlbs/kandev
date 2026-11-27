@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/task/archivecascade"
 	"github.com/kandev/kandev/internal/task/models"
@@ -557,26 +559,26 @@ func (s *Service) clearRecoverySettlement(ctx context.Context, session *models.T
 	return err
 }
 
-type interruptedTaskMetadataSetter interface {
-	SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
+type interruptedTaskSessionSetter interface {
+	SetTaskInterruptedSessionIfNotArchived(
+		ctx context.Context,
+		taskID, sessionID string,
+		marker models.InterruptedSessionMarker,
+	) (bool, error)
 }
 
-type interruptedTaskMetadataAbsentSetter interface {
-	SetTaskMetadataKeyIfAbsentNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
-}
-
-// interruptedTaskMetadataRecoverySetter adds the session recovery generation
+// interruptedTaskSessionRecoverySetter adds the session recovery generation
 // to the marker write. The task row is updated only while the recovered
 // session still owns its WAITING_FOR_INPUT generation and its settlement token
 // is present. This closes the gap between the in-memory ownership check and
 // the task metadata write when a successor starts concurrently.
-type interruptedTaskMetadataRecoverySetter interface {
-	SetTaskMetadataKeyIfRecoveryCurrent(
+type interruptedTaskSessionRecoverySetter interface {
+	SetTaskInterruptedSessionIfRecoveryCurrent(
 		ctx context.Context,
 		taskID, sessionID string,
 		expectedSessionUpdatedAt time.Time,
-		expectedRecoveryToken, key string,
-		value interface{},
+		expectedRecoveryToken string,
+		marker models.InterruptedSessionMarker,
 	) (bool, error)
 }
 
@@ -585,40 +587,42 @@ func (s *Service) markTaskInterrupted(ctx context.Context, recovered *models.Tas
 		return false, nil
 	}
 	settlement, hasSettlement := models.LoadInterruptedRecoverySettlement(recovered.Metadata)
-	// The concrete SQLite task repository owns the archive-atomic metadata CAS.
-	// Keep this optional so focused task-service users and test repositories
-	// without the newer marker primitive remain compatible.
-	_, ok := s.tasks.(interruptedTaskMetadataSetter)
+	setter, ok := s.tasks.(interruptedTaskSessionSetter)
 	if !ok {
 		return false, errors.New("task repository does not support recovery interruption markers")
 	}
-	value := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC()
+	token := uuid.NewString()
 	expectedUpdatedAt := recovered.UpdatedAt
 	if hasSettlement && !settlement.RecoveredUpdatedAt.IsZero() {
 		expectedUpdatedAt = settlement.RecoveredUpdatedAt
 	}
+	if hasSettlement && settlement.Token != "" {
+		token = settlement.Token
+	}
+	marker := models.InterruptedSessionMarker{
+		IncarnationID: recovered.QueueIncarnationID,
+		InterruptedAt: now.Format(time.RFC3339Nano),
+		Token:         token,
+	}
+	if marker.IncarnationID == "" {
+		return false, errors.New("recovered session has no interruption incarnation")
+	}
 	var changed bool
 	var err error
-	if recoverySetter, supported := s.tasks.(interruptedTaskMetadataRecoverySetter); supported && hasSettlement {
-		changed, err = recoverySetter.SetTaskMetadataKeyIfRecoveryCurrent(
+	if recoverySetter, supported := s.tasks.(interruptedTaskSessionRecoverySetter); supported && hasSettlement {
+		changed, err = recoverySetter.SetTaskInterruptedSessionIfRecoveryCurrent(
 			ctx,
 			recovered.TaskID,
 			recovered.ID,
 			expectedUpdatedAt,
 			settlement.Token,
-			models.MetaKeyInterruptedAt,
-			value,
+			marker,
 		)
-	} else if absentSetter, supported := s.tasks.(interruptedTaskMetadataAbsentSetter); supported {
-		changed, err = absentSetter.SetTaskMetadataKeyIfAbsentNotArchived(ctx, recovered.TaskID, models.MetaKeyInterruptedAt, value)
 	} else {
-		// A plain archive guard does not protect a recovery marker from a
-		// newer interruption arriving between the ownership check and this write.
-		// Fail closed when the adapter lacks either generation-safe primitive.
-		s.logger.Warn("skipping recovery interruption marker without generation-safe setter",
-			zap.String("task_id", recovered.TaskID),
-			zap.String("session_id", recovered.ID))
-		return false, errors.New("task repository does not support generation-safe recovery interruption markers")
+		changed, err = setter.SetTaskInterruptedSessionIfNotArchived(
+			ctx, recovered.TaskID, recovered.ID, marker,
+		)
 	}
 	if err != nil {
 		return false, err

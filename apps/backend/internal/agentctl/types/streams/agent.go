@@ -135,6 +135,30 @@ const (
 	EventTypeBackgroundWorkOutput = "background_work_output"
 )
 
+const (
+	AgentEventDataCopilotInterruptionNotice = "copilot_interruption_notice"
+	CopilotInterruptionClarification        = "clarification"
+	CopilotInterruptionTool                 = "tool"
+	EventTypeCopilotInterruptionNotice      = "copilot_interruption_notice"
+)
+
+// CopilotInterruptionNoticeType returns the supported classification carried by
+// an assistant event, or an empty string when the marker is absent or invalid.
+func CopilotInterruptionNoticeType(raw any) string {
+	data, ok := raw.(map[string]any)
+	if !ok {
+		return ""
+	}
+	switch data[AgentEventDataCopilotInterruptionNotice] {
+	case CopilotInterruptionClarification:
+		return CopilotInterruptionClarification
+	case CopilotInterruptionTool:
+		return CopilotInterruptionTool
+	default:
+		return ""
+	}
+}
+
 // PromptFailureDisposition identifies a host-validated outcome for a failed
 // prompt. Unknown values are invalid and must retain conservative terminal
 // failure behavior.
@@ -311,6 +335,9 @@ type AgentEvent struct {
 	// ProtocolMessageID identifies the source-protocol message this chunk belongs to.
 	// It is distinct from the Kandev message record ID used by downstream streaming.
 	ProtocolMessageID string `json:"protocol_message_id,omitempty"`
+
+	// ReplaceMessageContent applies this snapshot to the same protocol message.
+	ReplaceMessageContent bool `json:"replace_message_content,omitempty"`
 
 	// RetractedMessageIDs identifies Kandev transcript records owned by an
 	// abandoned response attempt. It is populated only on response-attempt resets.
@@ -566,6 +593,10 @@ type AgentEvent struct {
 	// ConfigOptions lists session configuration options from ACP _meta.
 	ConfigOptions []ConfigOption `json:"config_options,omitempty"`
 
+	// VerifiedConfigOptionIDs identifies options reported for CurrentModelID
+	// when only part of the displayed catalog is verified.
+	VerifiedConfigOptionIDs []string `json:"verified_config_option_ids,omitempty"`
+
 	// ConfigBaselineCandidate carries an authoritative response snapshot for
 	// lifecycle settlement without replacing the event's newer live options.
 	ConfigBaselineCandidate []ConfigOption `json:"config_baseline_candidate,omitempty"`
@@ -738,12 +769,18 @@ type SessionModelInfo struct {
 // created or loaded session. It lets lifecycle callers apply a saved model
 // before the asynchronous session_models stream event is dispatched.
 type SessionModelState struct {
-	CurrentModelID string             `json:"current_model_id,omitempty"`
-	Models         []SessionModelInfo `json:"models,omitempty"`
-	ConfigOptions  []ConfigOption     `json:"config_options,omitempty"`
+	SessionID                 string             `json:"session_id,omitempty"`
+	CurrentModelID            string             `json:"current_model_id,omitempty"`
+	Models                    []SessionModelInfo `json:"models,omitempty"`
+	ConfigOptions             []ConfigOption     `json:"config_options,omitempty"`
+	SessionSettingsGeneration uint64             `json:"session_settings_generation,omitempty"`
+	// ConfigOptionsComplete means the report accounts for every option for CurrentModelID.
+	ConfigOptionsComplete   bool     `json:"config_options_complete,omitempty"`
+	VerifiedConfigOptionIDs []string `json:"verified_config_option_ids,omitempty"`
 	// ConfigOptionsSettled distinguishes a complete empty provider snapshot
 	// from the transient empty state sent before startup settles.
-	ConfigOptionsSettled bool `json:"config_options_settled,omitempty"`
+	ConfigOptionsSettled     bool `json:"config_options_settled,omitempty"`
+	ConfigOptionsDisplayOnly bool `json:"config_options_display_only,omitempty"`
 }
 
 // AuthMethodInfo represents an authentication method from ACP initialize.

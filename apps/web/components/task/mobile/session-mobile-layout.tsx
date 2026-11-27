@@ -31,7 +31,8 @@ import { MobileReviewPanel } from "./mobile-review-panel";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { hasTaskRouteFocus, consumeTaskRouteFocus } from "@/lib/state/task-navigation-focus";
 import { useNormalizedTaskReviewsState } from "../review-panel-provider";
 import type {
   PluginOpenMessageResult,
@@ -201,6 +202,8 @@ function MobileChatPanelContent({
             key={effectiveSessionId}
             sessionId={effectiveSessionId}
             taskId={activeTaskId}
+            isVisible={isVisible}
+            detailActive={isVisible}
           />
         </div>
       ) : (
@@ -884,6 +887,28 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handlePanelChangeAndClearSheet("chat");
     acknowledgeWorkflowSessionFocus(workflowFocusRequest.requestId);
   }, [acknowledgeWorkflowSessionFocus, handlePanelChangeAndClearSheet, workflowFocusRequest]);
+  const appStore = useAppStoreApi();
+  const navigationRevision = useAppStore((state) => state.taskRemoval.navigationRevision);
+  useEffect(() => {
+    if (!effectiveSessionId || !hasTaskRouteFocus(appStore, activeTaskId, effectiveSessionId))
+      return;
+    handlePanelChangeAndClearSheet("chat");
+    const state = appStore.getState();
+    consumeTaskRouteFocus(
+      appStore,
+      activeTaskId,
+      effectiveSessionId,
+      state.environmentIdBySessionId[effectiveSessionId] ??
+        state.taskSessions.items[effectiveSessionId]?.task_environment_id ??
+        null,
+    );
+  }, [
+    appStore,
+    activeTaskId,
+    effectiveSessionId,
+    navigationRevision,
+    handlePanelChangeAndClearSheet,
+  ]);
   const [mobileScrollTarget, setMobileScrollTarget] = useState<PendingMessageScrollTarget | null>(
     null,
   );

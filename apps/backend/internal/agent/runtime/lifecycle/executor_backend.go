@@ -688,6 +688,8 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
+	PreferACPV2 bool
+
 	InstanceID    string
 	CausingRunID  string
 	IsPassthrough bool

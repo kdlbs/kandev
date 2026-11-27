@@ -11,6 +11,8 @@
  * the mobile device automatically.
  */
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
+import { readDialogRenderingMetrics } from "../../helpers/dialog-webkit-metrics";
 import { SessionPage } from "../../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import {
@@ -21,6 +23,18 @@ import {
 } from "./quick-chat-helpers";
 
 const TASK_LISTING_VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
+
+async function readDynamicViewportBounds(page: Page) {
+  return page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.style.cssText =
+      "position:fixed;inset:0;width:100vw;height:100dvh;visibility:hidden;pointer-events:none";
+    document.body.appendChild(probe);
+    const bounds = probe.getBoundingClientRect();
+    probe.remove();
+    return { width: bounds.width, height: bounds.height };
+  });
+}
 
 test.describe("Quick Chat entry points on mobile", () => {
   test("keeps clarification shortcuts usable after tapping a message", async ({ testPage }) => {
@@ -106,6 +120,91 @@ test.describe("Quick Chat entry points on mobile", () => {
     expect(mobileBackdropStyles.backdropFilter).toBe("none");
     await assertNoDocumentHorizontalOverflow(testPage);
 
+    await dialog.getByTestId("quick-chat-close").tap();
+    await expect(dialog).not.toBeVisible();
+    await expect(testPage.getByTestId("app-nav-trigger")).toBeFocused();
+  });
+
+  // @covers AC-UI-QUICK-CHAT-ELEVATION-001.4 AC-UI-QUICK-CHAT-ELEVATION-001.7
+  test("keeps the WebKit Quick Chat dialog full-screen below the desktop breakpoint", async ({
+    testPage,
+  }) => {
+    await testPage.goto("/");
+    await testPage.waitForLoadState("networkidle");
+    await testPage.locator("html").evaluate((root) => {
+      root.setAttribute("data-rendering-engine", "webkit");
+    });
+
+    await testPage.getByTestId("app-nav-trigger").tap();
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
+
+    const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
+
+    const expectPhoneBounds = async (width: number) => {
+      await testPage.setViewportSize({ width, height: 851 });
+      await expect
+        .poll(async () => {
+          const [dialogBounds, viewportBounds] = await Promise.all([
+            dialog.boundingBox(),
+            readDynamicViewportBounds(testPage),
+          ]);
+          if (!dialogBounds) return Number.POSITIVE_INFINITY;
+          return Math.max(
+            Math.abs(dialogBounds.width - viewportBounds.width),
+            Math.abs(dialogBounds.height - viewportBounds.height),
+          );
+        })
+        .toBeLessThan(3);
+      const box = await dialog.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeCloseTo(0, 0);
+      expect(box!.y).toBeCloseTo(0, 0);
+      expect(box!.width).toBeCloseTo((await readDynamicViewportBounds(testPage)).width, 0);
+      expect(await testPage.evaluate(() => window.matchMedia("(min-width: 640px)").matches)).toBe(
+        false,
+      );
+      await assertNoDocumentHorizontalOverflow(testPage, `Quick Chat at ${width}px`);
+    };
+
+    const firstMetrics = await readDialogRenderingMetrics(dialog);
+    expect(firstMetrics.animationName).toBe("kandev-dialog-webkit-enter");
+    expect(firstMetrics.transform).toBe("none");
+    expect(firstMetrics.translate).toBe("none");
+    await expectPhoneBounds(testPage.viewportSize()!.width);
+    await expectPhoneBounds(639);
+
+    await testPage.setViewportSize({ width: 640, height: 851 });
+    await expect
+      .poll(async () => {
+        const [dialogBounds, viewportBounds] = await Promise.all([
+          dialog.boundingBox(),
+          readDynamicViewportBounds(testPage),
+        ]);
+        if (!dialogBounds) return Number.POSITIVE_INFINITY;
+        return Math.max(
+          Math.abs(dialogBounds.height - viewportBounds.height * 0.85),
+          Math.abs(dialogBounds.x + dialogBounds.width / 2 - viewportBounds.width / 2),
+        );
+      })
+      .toBeLessThan(3);
+    const desktopMetrics = await readDialogRenderingMetrics(dialog);
+    const desktopBox = await dialog.boundingBox();
+    expect(desktopBox).not.toBeNull();
+    expect(desktopMetrics.animationName).toBe("kandev-dialog-webkit-enter");
+    expect(desktopMetrics.transform).toBe("none");
+    expect(desktopMetrics.translate).toBe("none");
+    expect(desktopMetrics.width).toBeLessThan(640);
+    expect(desktopMetrics.centerX).toBeCloseTo(
+      (await readDynamicViewportBounds(testPage)).width / 2,
+      0,
+    );
+    expect(await testPage.evaluate(() => window.matchMedia("(min-width: 640px)").matches)).toBe(
+      true,
+    );
+    await assertNoDocumentHorizontalOverflow(testPage, "Quick Chat at 640px");
+
+    await testPage.setViewportSize({ width: 393, height: 851 });
     await dialog.getByTestId("quick-chat-close").tap();
     await expect(dialog).not.toBeVisible();
     await expect(testPage.getByTestId("app-nav-trigger")).toBeFocused();

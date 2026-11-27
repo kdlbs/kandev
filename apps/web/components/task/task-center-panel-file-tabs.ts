@@ -2,6 +2,7 @@ import { treePath } from "@/hooks/file-rename-continuity";
 import type { OpenFileTab } from "@/lib/types/backend";
 
 export type FileEditorTab = OpenFileTab & { instanceId?: symbol };
+const MAX_FILE_TABS = 4;
 
 export function installFileEditorTab(tab: OpenFileTab): FileEditorTab {
   return { ...tab, instanceId: Symbol() };
@@ -56,7 +57,21 @@ export function upsertOpenFileTab(prev: FileEditorTab[], fileTab: OpenFileTab): 
     if (areOpenFileTabsEqual(existing, refreshed)) return prev;
     return prev.map((tab, index) => (index === existingIndex ? refreshed : tab));
   }
-  const maxTabs = 4;
   const installed = installFileEditorTab(fileTab);
-  return prev.length >= maxTabs ? [...prev.slice(1), installed] : [...prev, installed];
+  return prev.length >= MAX_FILE_TABS ? [...prev.slice(1), installed] : [...prev, installed];
+}
+
+/** Restoration fills unused slots without replacing live editors or drafts. */
+export function mergeRestoredFileTabs(
+  live: FileEditorTab[],
+  restored: OpenFileTab[],
+): FileEditorTab[] {
+  const capacity = Math.max(0, MAX_FILE_TABS - live.length);
+  if (!capacity) return live;
+  const missing = restored.filter((file) => {
+    const key = getFileTabKey(file);
+    const path = treePath(file);
+    return !live.some((tab) => getFileTabKey(tab) === key || (!!path && treePath(tab) === path));
+  });
+  return missing.length ? [...live, ...missing.slice(0, capacity)] : live;
 }

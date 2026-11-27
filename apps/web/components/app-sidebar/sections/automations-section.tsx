@@ -9,6 +9,7 @@ import { automationRunPresentation } from "@/components/runs/automation-run-pres
 import type { AutomationRow } from "@/components/runs/automation-rows";
 import { useAutomationSummaries } from "@/components/runs/use-automation-summaries";
 import { useLiveRefresh } from "@/components/runs/use-live-refresh";
+import { useAutomationRunRecorded } from "@/components/runs/use-automation-run-recorded";
 import { useWorkspaceAutomations } from "@/components/runs/use-workspace-automations";
 import { AUTOMATIONS_HREF } from "@/components/runs/runs-view";
 import { usePathname } from "@/lib/routing/client-router";
@@ -147,6 +148,7 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   useForegroundRefresh(refreshDefinitions, canRefreshDefinitions, listScope);
   const { summaries, refresh } = useAutomationSummaries(summaryScope);
   useLiveRefresh(showing, refresh);
+  useAutomationRunRecorded(summaryScope, undefined, refresh);
   const rows = buildAutomationRows(automations, summaries);
 
   return (

@@ -1,4 +1,11 @@
 {
+  "addFlag": "Àďď ƒĺàĝ",
+  "changeFlag": "Ćĥàńĝē ƒĺàĝ",
+  "editFlag": "Ēďĩţ ƒĺàĝ",
+  "flag": "Ƒĺàĝ",
+  "flagNote": "Ƒĺàĝ ńōţē",
+  "removeFlag": "Ŕēḿōvē ƒĺàĝ",
+  "flagSaveFailed": "Ćōũĺď ńōţ ũƥďàţē ţĥē ƒĺàĝ. Ţŕŷ àĝàĩń.",
   "pluginGroupingSection": "Ƥĺũĝĩń ĝŕōũƥĩńĝś",
   "pluginGroupingUnavailable": "Ţĥĩś ƥĺũĝĩń ĝŕōũƥĩńĝ ĩś ũńàvàĩĺàƀĺē ōŕ ĩńćōḿƥĺēţē. Ŕēţŕŷ, ēńàƀĺē ţĥē ƥĺũĝĩń, ōŕ ćĥōōśē àńōţĥēŕ vĩēŵ.",
   "pluginGroupingUnavailableLabel": "{{name}} (ũńàvàĩĺàƀĺē)",

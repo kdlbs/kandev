@@ -187,6 +187,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	} else if err := validatePassthroughOnlyCLIFlags(agentConfig, req.CLIFlags, req.CLIPassthrough); err != nil {
 		return nil, err
 	}
+	cliFlags = normalizeAntigravityCLIFlags(agentConfig.ID(), cliFlags)
 	if err := validateProfileEnvVarDTOs(req.EnvVars); err != nil {
 		return nil, err
 	}
@@ -673,6 +674,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	// value at this point.
 	if req.CLIFlags != nil || req.CLIPassthrough != nil {
 		if agentConfig, ok := c.agentConfigForProfile(ctx, profile); ok {
+			profile.CLIFlags = normalizeAntigravityCLIFlags(agentConfig.ID(), profile.CLIFlags)
 			if err := validatePassthroughOnlyCLIFlags(
 				agentConfig, cliFlagsToDTO(profile.CLIFlags), profile.CLIPassthrough,
 			); err != nil {

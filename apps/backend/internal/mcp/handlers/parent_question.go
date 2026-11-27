@@ -52,18 +52,13 @@ type parentQuestionTarget struct {
 
 func parentQuestionRequestFromMessage(msg *ws.Message) (parentQuestionRequest, *parentQuestionError) {
 	var req parentQuestionRequest
+	// Checked before the typed decode, so a malformed image field gets the same
+	// answer as a well-formed one instead of a generic payload error.
+	if parentQuestionsHaveImages(msg.Payload) {
+		return req, &parentQuestionError{ws.ErrorCodeValidation, "parent questions do not support images"}
+	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return req, &parentQuestionError{ws.ErrorCodeBadRequest, "Invalid payload: " + err.Error()}
-	}
-	for _, q := range req.Questions {
-		if q.Images != nil {
-			return req, &parentQuestionError{ws.ErrorCodeValidation, "parent questions do not support images"}
-		}
-		for _, option := range q.Options {
-			if option.Images != nil {
-				return req, &parentQuestionError{ws.ErrorCodeValidation, "parent questions do not support images"}
-			}
-		}
 	}
 	if req.SessionID == "" {
 		return req, &parentQuestionError{ws.ErrorCodeValidation, "session_id is required"}
@@ -72,6 +67,34 @@ func parentQuestionRequestFromMessage(msg *ws.Message) (parentQuestionRequest, *
 		return req, &parentQuestionError{ws.ErrorCodeValidation, errMsg}
 	}
 	return req, nil
+}
+
+// parentQuestionsHaveImages reports whether any question or choice in the raw
+// payload names an image field, whatever its value.
+func parentQuestionsHaveImages(payload json.RawMessage) bool {
+	var raw struct {
+		Questions []struct {
+			Images      json.RawMessage `json:"images"`
+			ImageGroups json.RawMessage `json:"image_groups"`
+			Options     []struct {
+				Images json.RawMessage `json:"images"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	if json.Unmarshal(payload, &raw) != nil {
+		return false
+	}
+	for _, q := range raw.Questions {
+		if q.Images != nil || q.ImageGroups != nil {
+			return true
+		}
+		for _, option := range q.Options {
+			if option.Images != nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (h *Handlers) loadParentQuestionTarget(ctx context.Context, req parentQuestionRequest) (*parentQuestionTarget, *parentQuestionError) {

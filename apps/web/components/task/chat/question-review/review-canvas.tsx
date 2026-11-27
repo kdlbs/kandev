@@ -28,6 +28,8 @@ type Props = {
  * Focusable stage canvas. Every key pressed here stays here: the answer form's
  * window-level shortcuts never see it, so stage keys cannot pick an option,
  * change the question, or submit. Tab and Escape keep their normal meaning.
+ * Stage shortcuts run only while the canvas itself has focus, so a control on
+ * the image (zoom, the Wipe handle, a popover) keeps Space, Enter, and arrows.
  */
 export function ReviewCanvas(props: Props) {
   const { t } = useTranslation();
@@ -35,7 +37,7 @@ export function ReviewCanvas(props: Props) {
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Tab" || event.key === "Escape") return;
     event.stopPropagation();
-    if (event.metaKey || event.ctrlKey) return;
+    if (event.target !== event.currentTarget || event.metaKey || event.ctrlKey) return;
     if (props.onStageKey(event)) event.preventDefault();
   };
   return (
@@ -54,6 +56,7 @@ export function ReviewCanvas(props: Props) {
         props.onDoubleClick();
       }}
       onKeyUp={(event) => {
+        if (event.target !== event.currentTarget) return;
         if (props.onStageKeyUp?.(event)) event.preventDefault();
       }}
       {...props.pointerHandlers}

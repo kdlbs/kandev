@@ -18,6 +18,7 @@ import { RunFeedItem } from "./run-feed-item";
 import { AUTOMATIONS_HREF, RUNS_FEED_HREF } from "./runs-view";
 import { useAutomationSummaries } from "./use-automation-summaries";
 import { useLiveRefresh } from "./use-live-refresh";
+import { useAutomationRunRecorded } from "./use-automation-run-recorded";
 import { useWorkspaceAutomations } from "./use-workspace-automations";
 import { useWorkspaceRuns } from "./use-workspace-runs";
 
@@ -203,6 +204,7 @@ export function RunsListPage({ workspaceId }: { workspaceId?: string }) {
     rows.some((row) => row.state === "running"),
     refresh,
   );
+  useAutomationRunRecorded(effectiveWorkspaceId, undefined, refresh);
 
   const error = automationsState.error ?? summariesState.error ?? runsState.error;
   const empty = rows.length === 0 && !loading;

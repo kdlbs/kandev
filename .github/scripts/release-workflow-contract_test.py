@@ -751,53 +751,42 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 with self.subTest(asset=name):
                     self.assertIn(f"`{name}`", contents)
 
-    def test_runtime_size_report_backfill_skips_the_windows_helper(self) -> None:
-        # A tag cut before the Windows helper shipped has no helper asset.
-        helpers = (
-            "agentctl-linux-amd64.gz",
-            "agentctl-linux-arm64.gz",
-            "agentctl-darwin-amd64.gz",
-            "agentctl-darwin-arm64.gz",
-        )
-        archives = []
-        for platform in ("linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64"):
-            for suffix in ("", "-full"):
-                archives.append(f"kandev-{platform}{suffix}.tar.gz")
-        archives.extend(("kandev-windows-x64.zip", "kandev-windows-x64-full.zip"))
+    def test_runtime_size_report_omits_windows_helper_for_pre_windows_tags(self) -> None:
+        report_step = step_block("Record runtime asset sizes")
+        self.assertIn("WINDOWS_HELPER: ${{ needs.prepare.outputs.windows_helper }}", report_step)
+
         with tempfile.TemporaryDirectory() as temp_dir:
-            assets_dir = Path(temp_dir) / "assets"
-            assets_dir.mkdir()
-            for name in (*archives, *helpers):
-                (assets_dir / name).write_bytes(b"data")
+            assets_dir = Path(temp_dir)
+            for platform in ("linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64"):
+                for suffix in ("", "-full"):
+                    (assets_dir / f"kandev-{platform}{suffix}.tar.gz").write_bytes(b"data")
+            for suffix in ("", "-full"):
+                (assets_dir / f"kandev-windows-x64{suffix}.zip").write_bytes(b"data")
+            for helper in CANONICAL_HELPERS[:-1]:
+                (assets_dir / f"{helper}.gz").write_bytes(b"data")
 
             output = assets_dir / "runtime-size-report.md"
-            result = subprocess.run(
-                [
-                    "bash",
-                    str(RUNTIME_SIZE_REPORT_SCRIPT_PATH),
-                    str(assets_dir),
-                    str(output),
-                    "false",
-                ],
+            command = ["bash", str(RUNTIME_SIZE_REPORT_SCRIPT_PATH), str(assets_dir), str(output)]
+            legacy = subprocess.run(
+                command,
+                env={**os.environ, "WINDOWS_HELPER": "false"},
                 check=False,
                 capture_output=True,
                 text=True,
             )
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(legacy.returncode, 0, legacy.stderr)
             contents = output.read_text()
-            for name in helpers:
-                with self.subTest(asset=name):
-                    self.assertIn(f"`{name}`", contents)
+            self.assertIn("`agentctl-darwin-arm64.gz`", contents)
             self.assertNotIn("agentctl-windows-amd64.exe.gz", contents)
 
-            # The default still requires the Windows helper.
-            result = subprocess.run(
-                ["bash", str(RUNTIME_SIZE_REPORT_SCRIPT_PATH), str(assets_dir), str(output)],
+            current = subprocess.run(
+                command,
+                env={**os.environ, "WINDOWS_HELPER": "true"},
                 check=False,
                 capture_output=True,
                 text=True,
             )
-            self.assertNotEqual(result.returncode, 0)
+            self.assertNotEqual(current.returncode, 0)
 
     def test_homebrew_formula_requires_the_stable_remote_helper_manifest(self) -> None:
         formula = HOMEBREW_FORMULA_PATH.read_text()
@@ -1958,8 +1947,13 @@ class PluginSDKReleaseTests(unittest.TestCase):
         self.assertNotIn("id-token: write", prepare)
         self.assertNotIn("gh auth setup-git", prepare)
         self.assertIn("id-token: write", publish)
+        self.assertIn(
+            "name: Publish and verify public plugin SDK for ${{ needs.prepare.outputs.tag }}",
+            publish,
+        )
         self.assertIn("contents: read", publish)
         self.assertNotIn("RELEASE_GPG_PRIVATE_KEY", publish)
+        self.assertIn("timeout-minutes: 30", publish)
         for name in ("prepare-plugin-sdk", "publish-plugin-sdk"):
             block = job_block(name)
             self.assertIn("runs-on: ubuntu-latest", block)
@@ -1974,6 +1968,72 @@ class PluginSDKReleaseTests(unittest.TestCase):
             self.assertIn("steps.sdk_tools.outputs.npm", block)
             self.assertNotIn("NODE_AUTH_TOKEN", block)
             self.assertNotIn("NPM_TOKEN", block)
+
+    def test_sdk_upload_is_gated_by_retained_intent_and_stable_completion(self):
+        publish = job_block("publish-plugin-sdk")
+        self.assertIn("environment: release", publish)
+        self.assertIn("actions: read", publish)
+        self.assertIn("id-token: write", publish)
+        self.assertIn('SDK_UPLOAD_ATTEMPT_PROTOCOL: "1"', publish)
+        self.assertNotIn("SDK_UPLOAD_STATE_DIR: ${{ runner.temp }}", publish)
+        self.assertIn("SDK_BACKFILL_TAG: ${{ inputs.backfill_tag }}", publish)
+        self.assertNotIn("contents: write", publish)
+        self.assertNotIn("NODE_AUTH_TOKEN", publish)
+        self.assertNotIn("NPM_TOKEN", publish)
+
+        steps = (
+            "Set SDK upload state directory",
+            "Authorize SDK upload or resume registry observation",
+            "Retain SDK upload intent",
+            "Publish exact SDK archive",
+            "Retain SDK upload result",
+            "Complete SDK publication or resume observation",
+        )
+        positions = [publish.index(f"- name: {name}") for name in steps]
+        self.assertEqual(positions, sorted(positions))
+
+        state_directory = job_step_block(
+            "publish-plugin-sdk", "Set SDK upload state directory"
+        )
+        self.assertIn(
+            "SDK_UPLOAD_STATE_DIR=$RUNNER_TEMP/sdk-upload-attempts",
+            state_directory,
+        )
+        self.assertIn('"$GITHUB_ENV"', state_directory)
+
+        intent = job_step_block("publish-plugin-sdk", "Retain SDK upload intent")
+        self.assertIn("actions/upload-artifact@", intent)
+        self.assertIn("steps.sdk_authorize.outputs.upload == 'true'", intent)
+        self.assertIn(
+            "sdk-npm-upload-intent-v${{ steps.sdk_tools.outputs.sdk_version }}",
+            intent,
+        )
+        self.assertIn("retention-days: 90", intent)
+
+        upload = job_step_block("publish-plugin-sdk", "Publish exact SDK archive")
+        self.assertIn("steps.sdk_authorize.outputs.upload == 'true'", upload)
+        self.assertIn("SDK_UPLOAD_INTENT_ARTIFACT_ID", upload)
+        self.assertIn("SDK_UPLOAD_INTENT_ARTIFACT_DIGEST", upload)
+        self.assertIn("--mode upload", upload)
+
+        result = job_step_block("publish-plugin-sdk", "Retain SDK upload result")
+        self.assertIn("always()", result)
+        self.assertIn("steps.sdk_authorize.outputs.upload == 'true'", result)
+        self.assertIn(
+            "sdk-npm-upload-result-v${{ steps.sdk_tools.outputs.sdk_version }}",
+            result,
+        )
+        self.assertIn("retention-days: 90", result)
+
+        completion = job_block("stable-complete")
+        self.assertIn(
+            "publish-plugin-sdk",
+            completion.split("needs:", 1)[1].split("\n", 1)[0],
+        )
+        self.assertIn("needs.publish-plugin-sdk.result == 'success'", completion)
+        self.assertIn("group: release-npm-publication", WORKFLOW)
+        self.assertIn("cancel-in-progress: false", WORKFLOW)
+
     def test_sdk_failure_blocks_completion_and_notices_but_not_sibling_channels(self):
         for name in ("stable-complete", "notify-contributors", "announce-discord", "discord-recovery-notice"):
             self.assertIn("needs.publish-plugin-sdk.result == 'success'", job_block(name))

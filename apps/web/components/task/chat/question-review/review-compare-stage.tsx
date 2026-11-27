@@ -3,10 +3,12 @@
 import { IconArrowsExchange } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
+import { wipeLabelSides, wipeNameMaxLetters } from "@/lib/question-review/identity";
 import { cn } from "@/lib/utils";
 import { ReviewCanvas, ReviewImage } from "./review-canvas";
 import { CandidateStepper, PinnedWipeLine } from "./review-compare-controls";
-import { ChangesButton, StageOverlayControl, ZoomCluster } from "./review-desktop-controls";
+import { ChangesButton, StageOverlayControl } from "./review-desktop-controls";
+import { StageZoom } from "./review-stage-zoom";
 import { CompareLayers, WipeHandle, type LoadedReviewImage } from "./review-compare-layers";
 import { ReviewCompareStatus } from "./review-compare-status";
 import { ModeControls, ReviewCompareToolbar } from "./review-compare-toolbar";
@@ -16,21 +18,22 @@ import {
   ModeSheetButton,
   MoreSheetButton,
   StatusChips,
-  ZoomChip,
 } from "./review-phone-controls";
+import { IdentityBadges } from "./review-identity-badges";
 import { RegionsButton } from "./review-region-panel";
-import { ImageState, stopStageKeys } from "./review-stage-shared";
-import { ReviewZoomControls, reviewControlSize } from "./review-zoom-controls";
+import { BackToGalleryButton, BackToGalleryRow, ItemNav, ItemNavRow } from "./review-item-nav";
+import { ImageState, StageBottomRow, stopStageKeys } from "./review-stage-shared";
+import { reviewControlSize } from "./review-zoom-controls";
 import {
   useCompareStage,
+  type CompareItemProps,
   type CompareStageModel,
-  type CompareStageProps,
 } from "./use-compare-stage";
 
 export { unionSize } from "./use-compare-stage";
 
 /** Compares a baseline (A) with a candidate (B) on bytes already loaded for the segment. */
-export function ReviewCompareStage(props: CompareStageProps) {
+export function ReviewCompareStage(props: CompareItemProps) {
   const { t } = useTranslation();
   const model = useCompareStage(props);
   return (
@@ -51,9 +54,18 @@ function DesktopToolbar({ model }: { model: CompareStageModel }) {
   return (
     <ReviewCompareToolbar
       compare={model.compare}
-      images={model.segment.images}
+      images={model.compareImages}
       wipe={model.wipe}
       urls={model.urls}
+      pair={model.pair}
+      container={model.popoverContainer}
+      leading={
+        model.items.compare ? (
+          <BackToGalleryButton items={model.items} aId={model.state.aId} />
+        ) : (
+          <ItemNav items={model.items} />
+        )
+      }
     />
   );
 }
@@ -73,17 +85,7 @@ function PhoneTopRow({ model }: { model: CompareStageModel }) {
           <RegionsButton controller={model.annotations} questionId={model.segment.questionId} />
         )}
         <MoreSheetButton>
-          {(close) => (
-            <>
-              <ReviewZoomControls
-                scale={model.viewport.view.scale}
-                onZoom={model.viewport.zoomStep}
-                onFit={model.viewport.fit}
-                onActual={model.viewport.actual}
-              />
-              <div onClickCapture={close}>{model.regions.button}</div>
-            </>
-          )}
+          {(close) => <div onClickCapture={close}>{model.regions.button}</div>}
         </MoreSheetButton>
       </div>
     </div>
@@ -111,47 +113,56 @@ function PhoneBottomBar({ model }: { model: CompareStageModel }) {
   const { t } = useTranslation();
   const { state, compare } = model;
   const stepping = state.mode === "toggle" || state.mode === "side";
+  const hasActions = !model.pair || state.mode !== "side";
   return (
-    <ReviewBottomBar>
-      <SwapButton model={model} />
-      {stepping && model.canStep && (
-        <CandidateStepper
-          images={model.segment.images}
-          bId={state.bId}
-          position={compare.position}
-          onStep={compare.step}
-          compact
-        />
+    <>
+      <ItemNavRow items={model.items} />
+      <BackToGalleryRow items={model.items} aId={state.aId}>
+        {stepping && model.canStep && (
+          <CandidateStepper
+            images={model.compareImages}
+            bId={state.bId}
+            position={compare.position}
+            onStep={compare.step}
+            compact
+            countOnly
+          />
+        )}
+      </BackToGalleryRow>
+      {hasActions && (
+        <ReviewBottomBar>
+          {!model.pair && <SwapButton model={model} />}
+          {state.mode === "toggle" && (
+            <Button
+              type="button"
+              className={cn(reviewControlSize, "min-w-0 flex-1")}
+              aria-pressed={state.showB}
+              data-testid="question-review-flip"
+              aria-label={t("task:questionReviewFlip")}
+              onClick={() => compare.dispatch({ type: "flip" })}
+            >
+              <span className="truncate">{t("task:questionReviewFlipShort")}</span>
+            </Button>
+          )}
+          {!stepping && (
+            <div className="min-w-0 flex-1">
+              <ModeControls compare={compare} wipe={model.wipe} />
+            </div>
+          )}
+          <div className={cn(state.mode === "side" && "ml-auto", model.pair && "hidden")}>
+            <ImagePickerSheetButton
+              images={model.compareImages}
+              urls={model.urls}
+              aId={state.aId}
+              bId={state.bId}
+              compact={!stepping}
+              onPick={(slot, id) => compare.dispatch({ type: "pick", slot, id })}
+              onSwap={() => compare.dispatch({ type: "swap" })}
+            />
+          </div>
+        </ReviewBottomBar>
       )}
-      {state.mode === "toggle" && (
-        <Button
-          type="button"
-          className={cn(reviewControlSize, "min-w-0 flex-1")}
-          aria-pressed={state.showB}
-          data-testid="question-review-flip"
-          aria-label={t("task:questionReviewFlip")}
-          onClick={() => compare.dispatch({ type: "flip" })}
-        >
-          <span className="truncate">{t("task:questionReviewFlipShort")}</span>
-        </Button>
-      )}
-      {!stepping && (
-        <div className="min-w-0 flex-1">
-          <ModeControls compare={compare} wipe={model.wipe} />
-        </div>
-      )}
-      <div className={cn(state.mode === "side" && "ml-auto")}>
-        <ImagePickerSheetButton
-          images={model.segment.images}
-          urls={model.urls}
-          aId={state.aId}
-          bId={state.bId}
-          compact={!stepping}
-          onPick={(slot, id) => compare.dispatch({ type: "pick", slot, id })}
-          onSwap={() => compare.dispatch({ type: "swap" })}
-        />
-      </div>
-    </ReviewBottomBar>
+    </>
   );
 }
 
@@ -252,59 +263,74 @@ function combinePane(model: CompareStageModel) {
 
 function PaneOverlay({ model, pane }: { model: CompareStageModel; pane: "a" | "b" | "both" }) {
   const primary = pane !== "b";
+  // Side by side keeps zoom at the stage's far corner, under the second pane.
+  const zoomHere = pane === (model.effective.mode === "side" ? "b" : "both");
   return (
     <>
       {pane === "both" && <WipeOverlay model={model} />}
       {primary && model.regions.hint}
       {model.pending !== null && <ImageState state={model.pending} onRetry={model.images.retry} />}
-      {primary && <ViewOverlays model={model} />}
+      <StageBottomRow
+        start={
+          <>
+            <IdentityBadges model={model} pane={pane} />
+            {primary && <StageStatus model={model} />}
+          </>
+        }
+        end={
+          zoomHere && (
+            <StageZoom
+              viewport={model.viewport}
+              phone={model.layout.phone}
+              container={model.popoverContainer}
+              changes={
+                model.a && model.b
+                  ? { status: model.changes.status, onClick: model.changes.trigger }
+                  : undefined
+              }
+            />
+          )
+        }
+      />
+      {primary && !model.layout.phone && (
+        <StageOverlayControl>{model.regions.button}</StageOverlayControl>
+      )}
     </>
   );
 }
 
 function WipeOverlay({ model }: { model: CompareStageModel }) {
   if (model.effective.mode !== "wipe" || !model.a || !model.b) return null;
-  return model.pinned ? (
-    <PinnedWipeLine value={model.wipe.value} onChange={model.wipe.onChange} />
-  ) : (
-    <WipeHandle value={model.wipe.value} onChange={model.wipe.onChange} />
+  const { stage } = model.viewport;
+  const fits = wipeLabelSides(model.pinned ? 0.5 : model.wipe.value, stage.width);
+  const names = {
+    a: fits.a ? model.names.a : undefined,
+    b: fits.b ? model.names.b : undefined,
+    maxLetters: wipeNameMaxLetters(stage.height),
+  };
+  const Handle = model.pinned ? PinnedWipeLine : WipeHandle;
+  return (
+    <Handle
+      value={model.wipe.value}
+      onChange={model.wipe.onChange}
+      names={names}
+      reveal={model.wipe.reveal}
+    />
   );
 }
 
-/** Zoom, Mark area, and status on the image: a chip on phones, a cluster on desktop. */
-function ViewOverlays({ model }: { model: CompareStageModel }) {
-  const { viewport } = model;
-  const toggleZoom = viewport.atFit ? viewport.actual : viewport.fit;
+function StageStatus({ model }: { model: CompareStageModel }) {
   return (
-    <>
-      {model.layout.phone ? (
-        <ZoomChip scale={viewport.view.scale} onToggle={toggleZoom} />
-      ) : (
-        <>
-          <ZoomCluster
-            scale={viewport.view.scale}
-            onZoom={viewport.zoomStep}
-            onFit={viewport.fit}
-            onScale={viewport.zoomTo}
-            changes={
-              model.a && model.b
-                ? { status: model.changes.status, onClick: model.changes.trigger }
-                : undefined
-            }
-          />
-          <StageOverlayControl>{model.regions.button}</StageOverlayControl>
-        </>
-      )}
-      <StatusChips>
-        <ReviewCompareStatus
-          state={model.effective}
-          a={model.aRef}
-          b={model.bRef}
-          sizes={model.images.sizes}
-          diff={model.diff}
-          chips
-        />
-      </StatusChips>
-    </>
+    <StatusChips>
+      <ReviewCompareStatus
+        state={model.effective}
+        a={model.aRef}
+        b={model.bRef}
+        sizes={model.images.sizes}
+        diff={model.diff}
+        names={model.names}
+        chips
+      />
+    </StatusChips>
   );
 }

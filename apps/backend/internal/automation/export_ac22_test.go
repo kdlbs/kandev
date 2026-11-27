@@ -54,6 +54,7 @@ var automationFieldDispositions = map[string]fieldDisposition{
 	"PluginToolsJSON":                  {exported: false}, // persisted JSON representation of the approval
 	"AutomationRevision":               {exported: false}, // configuration revision
 	"ContinuationTaskID":               {exported: false}, // runtime pointer to the reused task
+	"PRContinuationSettings":           {exported: true, yamlKey: "follow_up_prompt, pr_merged_action, pr_closed_action, workflow.continuation_step"},
 
 	"WebhookSecret":   {exported: false}, // secret
 	"ID":              {exported: false}, // instance identity

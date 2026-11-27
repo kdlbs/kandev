@@ -238,7 +238,8 @@ type Adapter struct {
 	// During load, we capture the last Plan so we can re-emit it after load completes.
 	// AvailableCommandsUpdate is NOT suppressed — it may arrive after the replay as a
 	// "ready" signal, and the last one always wins in the frontend.
-	isLoadingSession bool
+	isLoadingSession    bool
+	copilotInterruption copilotInterruptionState
 	// Session creation buffers startup reports until the provider's returned ID is bound.
 	sessionCreationPending        bool
 	pendingSessionStartupWarnings []AgentEvent
@@ -257,8 +258,9 @@ type Adapter struct {
 
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
-	activeToolCalls    map[string]*streams.NormalizedPayload
-	contextCompactions map[string]*streams.NormalizedPayload
+	activeToolCalls                map[string]*streams.NormalizedPayload
+	antigravityPermissionToolNames map[permissionToolNameKey]permissionToolName
+	contextCompactions             map[string]*streams.NormalizedPayload
 	// cursorTaskMetaBySession stores Cursor's non-standard `cursor/task`
 	// metadata until the matching subagent tool_call appears, keyed by session
 	// then wire tool-call ID. An entry is drained either when its tool_call
@@ -266,6 +268,7 @@ type Adapter struct {
 	// on turn end / reset (clearCursorTaskMetaLocked), so it never outlives the
 	// turn that produced it.
 	cursorTaskMetaBySession map[string]map[string]cursorTaskMeta
+	cursorShellWatches      map[string]cursorShellWatch
 	// toolCallParents preserves nested tool lineage while a handed-off
 	// predecessor continues streaming beside its human successor.
 	toolCallParents map[string]string
@@ -377,6 +380,7 @@ type Adapter struct {
 	// event emitted after SetModel succeeds so the frontend doesn't lose
 	// the options list when the model is changed.
 	availableConfigOptions []streams.ConfigOption
+	modelCatalog           modelCatalogEvidence
 
 	// sessionSettingsPolicy is host-selected provenance for unsolicited
 	// settings reports from the currently loaded session. Explicit setter
@@ -602,9 +606,11 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:                         make(chan AgentEvent, 100),
 		notifQueue:                        make(chan notifWork, notifQueueCapacity),
 		activeToolCalls:                   make(map[string]*streams.NormalizedPayload),
+		antigravityPermissionToolNames:    make(map[permissionToolNameKey]permissionToolName),
 		contextCompactions:                make(map[string]*streams.NormalizedPayload),
 		openCodePluginClaims:              make(map[string]opencodeplugin.Claim),
 		cursorTaskMetaBySession:           make(map[string]map[string]cursorTaskMeta),
+		cursorShellWatches:                make(map[string]cursorShellWatch),
 		toolCallParents:                   make(map[string]string),
 		handoffProtectedToolCalls:         make(map[string]struct{}),
 		activeMonitors:                    make(map[string]map[string]string),
@@ -857,14 +863,24 @@ func (a *Adapter) GetSessionID() string {
 func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	if len(a.availableModels) == 0 && len(a.availableConfigOptions) == 0 {
+	if len(a.availableModels) == 0 && len(a.availableConfigOptions) == 0 && a.modelCatalog.generation == 0 {
 		return nil
 	}
-	return &streams.SessionModelState{
-		CurrentModelID: currentModelFromConfig(a.availableConfigOptions),
-		Models:         cloneSessionModels(convertSessionModels(a.availableModels)),
-		ConfigOptions:  cloneConfigOptions(a.availableConfigOptions),
+	state := &streams.SessionModelState{
+		SessionID:                 a.sessionID,
+		CurrentModelID:            currentModelFromConfig(a.availableConfigOptions),
+		Models:                    cloneSessionModels(convertSessionModels(a.availableModels)),
+		ConfigOptions:             cloneConfigOptions(a.availableConfigOptions),
+		SessionSettingsGeneration: a.sessionSettingsGeneration,
+		ConfigOptionsDisplayOnly:  a.modelCatalog.displayOnly,
 	}
+	if a.modelCatalog.generation != 0 {
+		state.CurrentModelID = a.modelCatalog.modelID
+		state.SessionSettingsGeneration = a.modelCatalog.generation
+		state.ConfigOptionsComplete = a.modelCatalog.complete
+		state.VerifiedConfigOptionIDs = append([]string(nil), a.modelCatalog.verified...)
+	}
+	return state
 }
 
 // ProviderErrorContext implements adapter.ProviderErrorContextProvider.
@@ -1005,6 +1021,8 @@ func (a *Adapter) Close() error {
 		return nil
 	}
 	a.closed = true
+	clear(a.cursorShellWatches)
+	a.clearCopilotInterruptionLocked()
 	if a.closedCh != nil {
 		close(a.closedCh)
 	}

@@ -30,6 +30,9 @@ test("mobile plugin row: whole card opens settings, controls still act", async (
     await installFixturePlugin(testPage);
     const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
     await expect(pluginRow).toBeVisible({ timeout: 30_000 });
+    await expect(pluginRow).toHaveCSS("padding-inline-start", "12px");
+    await expect(pluginRow).toHaveCSS("padding-inline-end", "12px");
+    expect(await pluginRow.evaluate((row) => row.scrollWidth <= row.clientWidth)).toBe(true);
 
     // The fixture declares a required api_token nobody has filled in, so the row
     // advertises the page it wants opened. It has to survive the phone's badge

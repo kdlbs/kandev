@@ -50,6 +50,7 @@ import { registerOfficeHandlers } from "@/lib/ws/handlers/office";
 import { registerRunHandlers } from "@/lib/ws/handlers/run";
 import { registerCanvasesHandlers } from "@/lib/ws/handlers/canvases";
 import { registerSidebarGroupingHandlers } from "@/lib/ws/handlers/sidebar-grouping";
+import { registerAutomationRunHandlers } from "@/lib/ws/handlers/automation-runs";
 
 export function registerWsHandlers(store: StoreApi<AppState>) {
   const messages = createMessagesHandlerRegistration(store);
@@ -104,6 +105,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerRunHandlers(),
     ...registerCanvasesHandlers(store),
     ...registerSidebarGroupingHandlers(store),
+    ...registerAutomationRunHandlers(store),
   };
   return { handlers, dispose: messages.dispose };
 }

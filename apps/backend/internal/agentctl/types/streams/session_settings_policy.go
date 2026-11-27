@@ -11,6 +11,17 @@ const (
 	SessionSettingsPolicyProviderRestored SessionSettingsPolicy = "provider_restored"
 )
 
+const (
+	ConfigOptionsSourceKey      = "config_options_source"
+	ConfigOptionsCompleteKey    = "config_options_complete"
+	ConfigOptionsDisplayOnlyKey = "config_options_display_only"
+	ConfigOptionsConfigIDKey    = "config_options_config_id"
+	// ConfigOptionsSourceSessionSetup identifies a snapshot from a session setup response.
+	ConfigOptionsSourceSessionSetup     = "session_setup"
+	ConfigOptionsSourceProviderResponse = "provider_response"
+	ConfigOptionsSourceProviderUpdate   = "provider_update"
+)
+
 type sessionSettingsPolicyContextKey struct{}
 
 // WithSessionSettingsPolicy carries a host-selected policy through a session

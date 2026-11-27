@@ -140,6 +140,11 @@ For a keyboard move, press `Cmd/Ctrl+K`, search for **Move to**, and select a de
 
 Moves keep the normal reachability, authorization, WIP, archive, workspace, and active-session rules. A move waits for a running agent to finish, and its options survive queueing and backend restarts. Instructions require an active target session or a destination that auto-starts an agent. Pull-request draft and review status use the PR step's automation. For the agent tool contract, see [Automation and MCP](automation-and-mcp.md#task-mcp).
 
+Moving an all-ended task into a step without agent auto-start does not select a
+new conversation. A conversation search you opened while that move was pending
+can finish after the move succeeds. A move with an actual session recipient
+keeps its explicit destination-focus behavior.
+
 ## Change a task's workflow
 
 Choose **Change workflow...** from a single task's card, sidebar, task actions,
@@ -432,17 +437,16 @@ External MCP calls have no verified creating session. With **Creating session pr
 
 ### Choose task-specific workflow profiles
 
-When a workflow has fixed agent profiles on its steps, expand **Advanced
-settings** while creating a task to replace one or more of them for that task.
-Kandev groups steps that use the same fixed profile into one row and lists the
-affected steps. Select an enabled profile from the replacement picker, or
-choose **Use workflow profile** to keep the workflow choice.
+When you create a task, open **Advanced settings** to find **Workflow agents**.
+Each row lists the steps that share a fixed profile. The picker shows the
+workflow's default profile until you choose a replacement.
 
-These replacements belong to the task only. They do not change the workflow,
-the profile definitions, or another task in the same workflow. Kandev also
-keeps the choices out of recently used task settings. Use **Reset** to remove
-all replacements. Closing and reopening **Advanced settings** keeps the current
-choices, while changing the workflow or starting a new task clears them.
+Select an enabled profile to use for those steps. To restore the profile for
+one row, select **Use default** beside its picker. If several rows have
+replacements, select **Reset** to restore all defaults.
+
+Replacements apply only to this task. Kandev keeps them out of recently used task settings.
+Closing **Advanced settings** keeps your choices. Changing the workflow or opening a new task clears them.
 
 Explicit **Initial agent session** and earlier-step session targets keep their
 existing conversation selection. A replacement applies when a fixed step
@@ -694,6 +698,12 @@ Selecting a job opens its own tab in the central area on desktop, or a
 full-height detail view on a phone. **View all work** opens the Background Work
 overview. Closing a tab or view does not stop the job.
 
+Cursor shell watches also appear as Monitor entries. An explicit ACP failure
+appears as Failed. A cancelled prompt interrupts only its watches that are still
+running, and a replaced native session leaves unresolved watches as Unknown.
+These states describe the watch, not the shell process. Cursor does not provide
+shell output, controls, or an exit status in this view.
+
 The overview has two tabs. **Active** lists running and waiting jobs. **History**
 lists completed, failed, interrupted, ended, and unknown jobs. Each tab shows its
 count before you search, and search filters the selected tab. Long commands
@@ -802,9 +812,10 @@ Choosing **Start agent** (or a workflow step transition) always starts the
 agent as usual, and a failed or interrupted session still shows its recovery
 actions. Other clients and direct API calls do not enforce this web preference.
 
-An interrupted task keeps a warning indicator until the agent confirms
-recovery. Opening the task or starting a recovery attempt does not clear the
-indicator; a failed attempt keeps it visible with the existing retry actions.
+An interrupted task keeps its warning until the affected session accepts a new
+prompt. Restoring the conversation does not clear the warning. A prompt that is
+rejected, remains queued, or has an unknown delivery result also keeps it. If
+another session on the task is still interrupted, the task keeps the warning.
 
 ## Use agent commands in the composer
 
@@ -1130,6 +1141,12 @@ On desktop, open **Sort** from the sidebar filter button. On a phone, open **Tas
 When tasks are grouped, expand **Group by** and use **Indent grouped tasks** to align the rows with the normal sidebar inset. It is enabled by default. Turning it off removes only the group inset; headings, counts, collapse controls, and subtask nesting remain.
 
 Expand **Task row** in sidebar filters to choose the details shown below each title and the value on the right. Choose **Nothing** on the right to hide change-request status icons; pull request numbers remain available as a separate detail. The task actions menu remains available.
+
+To flag a task, right-click its sidebar row and choose **Add flag**. Enter a note and choose **Save**. A red flag appears beside the title. Anyone who can see the task can read the note. The limit is 1,024 UTF-16 code units. Most characters count as one unit, and many emoji count as two or more.
+
+To read a saved note, hover over the flag or focus it with the keyboard on desktop. On a phone, tap the flag. Both previews are read-only.
+
+To edit a note, right-click the row on desktop or open **Task actions** on a phone. Choose **Change flag** → **Edit flag**, then **Save** or **Cancel**. To clear the flag immediately, choose **Change flag** → **Remove flag**. For an unflagged task, the phone’s **Task actions** menu offers **Add flag**.
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 

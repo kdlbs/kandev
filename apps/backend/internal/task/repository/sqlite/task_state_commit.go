@@ -33,10 +33,7 @@ func (r *Repository) CommitTaskState(
 		return models.TaskStateChange{}, nil
 	}
 	if currentState != write.State {
-		if err := r.guardTaskCompletionTransitionTx(
-			ctx, tx, taskID, currentState, write.State,
-			workflowID, stepID, workflowID, stepID,
-		); err != nil {
+		if err := r.guardTaskCompletionStateTx(ctx, tx, taskID, currentState, write.State, workflowID, stepID); err != nil {
 			return models.TaskStateChange{}, err
 		}
 		if err := r.writeTaskStateCommit(ctx, tx, taskID, rawState, stepID, write); err != nil {

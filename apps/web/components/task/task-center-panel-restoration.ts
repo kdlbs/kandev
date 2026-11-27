@@ -13,7 +13,12 @@ import {
   trackRenameOpen,
   waitForRenameRelease,
 } from "@/hooks/file-rename-continuity";
-import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
+import { treePath } from "@/hooks/file-rename-continuity";
+import {
+  tabletSelectionOwner,
+  subscribeTabletFileDeletion,
+} from "@/lib/state/tablet-file-authority";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import {
@@ -29,10 +34,12 @@ import { t } from "@/lib/i18n";
 import {
   getFileTabKey,
   installFileEditorTab,
+  mergeRestoredFileTabs,
   type FileEditorTab,
 } from "./task-center-panel-file-tabs";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
 import { getFilePreviewKind } from "@/lib/utils/file-types";
+import { matchesTabletFileDeletion, retireDeletedTabletFile } from "./tablet-file-deletion";
 
 export type FileTabRestorationOptions = {
   store?: StoreApi<AppState>;
@@ -40,6 +47,8 @@ export type FileTabRestorationOptions = {
   leftTab: string;
   setLeftTab: (tab: string) => void;
   setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
+  openFileTabs?: FileEditorTab[];
+  currentTabs: React.RefObject<OpenFileTab[]>;
 };
 
 export type FileSaveDeleteOptions = {
@@ -98,45 +107,127 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
 type RestoreLoadedTabsParams = {
   loadedTabs: OpenFileTab[];
   savedActiveTab: string;
-  restoredTabsRef: React.MutableRefObject<string | null>;
-  restorationInProgressRef: React.MutableRefObject<boolean>;
+  isCurrent: () => boolean;
+  onRestored: () => void;
   setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
   setLeftTab: (tab: string) => void;
+  store?: StoreApi<AppState>;
+  sessionId: string;
+  visit: RestorationVisit;
 };
 
 function restoreLoadedTabs({
   loadedTabs,
   savedActiveTab,
-  restorationInProgressRef,
+  isCurrent,
+  onRestored,
   setOpenFileTabs,
   setLeftTab,
+  store,
+  sessionId,
+  visit,
 }: RestoreLoadedTabsParams) {
-  if (loadedTabs.length > 0) {
-    setOpenFileTabs(loadedTabs);
-    if (savedActiveTab.startsWith("file:")) {
-      const savedFileKey = savedActiveTab.slice("file:".length);
-      // Existing sessions may have stored the old path-only tab value. Prefer
-      // the repo-aware key, while keeping that persisted state restorable.
-      const activeTab = loadedTabs.find(
-        (tab) => getFileTabKey(tab) === savedFileKey || tab.path === savedFileKey,
-      );
-      if (activeTab) {
-        setTimeout(() => {
-          setLeftTab(`file:${getFileTabKey(activeTab)}`);
-          restorationInProgressRef.current = false;
-        }, 0);
-      } else {
-        setLeftTab("chat");
-        restorationInProgressRef.current = false;
-      }
-    } else {
-      setLeftTab(savedActiveTab);
-      restorationInProgressRef.current = false;
+  if (!isCurrent()) return;
+  loadedTabs = loadedTabs.filter((file) => !isRetiredFile(visit, file));
+  if (loadedTabs.length > 0) setOpenFileTabs((live) => mergeRestoredFileTabs(live, loadedTabs));
+  const select = () => {
+    if (!isCurrent()) return;
+    const current = store?.getState().tabletSession.activeTabBySessionId[sessionId];
+    const newer =
+      current !== undefined &&
+      (current !== visit.initial ||
+        (store && tabletSelectionOwner(store, sessionId) !== visit.owner));
+    if (newer) {
+      onRestored();
+      return;
     }
-  } else {
-    setLeftTab(toPrimaryTab(savedActiveTab));
-    restorationInProgressRef.current = false;
-  }
+    let selected =
+      current ?? (loadedTabs.length > 0 ? savedActiveTab : toPrimaryTab(savedActiveTab));
+    if (selected.startsWith("file:")) {
+      const key = selected.slice("file:".length);
+      // Old path-only preferences resolve to the current repo-aware file key.
+      const file = [...visit.live, ...loadedTabs].find(
+        (tab) => getFileTabKey(tab) === key || tab.path === key,
+      );
+      if (file) selected = `file:${getFileTabKey(file)}`;
+      else if (!newer) selected = "chat";
+    }
+    setLeftTab(selected);
+    onRestored();
+  };
+  if (loadedTabs.length > 0 && savedActiveTab.startsWith("file:")) setTimeout(select, 0);
+  else select();
+}
+
+type RestorationVisit = {
+  initial: string;
+  owner: symbol | undefined;
+  live: FileEditorTab[];
+  closed: Set<string>;
+  deleted: Set<string>;
+  retire: (file: OpenFileTab) => void;
+};
+
+function isRetiredFile(visit: RestorationVisit, file: OpenFileTab): boolean {
+  const path = treePath(file);
+  if (visit.closed.has(getFileTabKey(file)) || visit.closed.has(`path:${path}`)) return true;
+  for (const deleted of visit.deleted) if (matchesTabletFileDeletion(file, deleted)) return true;
+  return false;
+}
+function useRestorationVisit(
+  store: FileTabRestorationOptions["store"],
+  activeSessionId: string | null,
+  openFileTabs: FileEditorTab[] | undefined,
+) {
+  const visit = useMemo<RestorationVisit>(() => {
+    const closed = new Set<string>();
+    return {
+      initial: activeSessionId
+        ? (store?.getState().tabletSession.activeTabBySessionId[activeSessionId] ??
+          getActiveTabForSession(activeSessionId, "chat"))
+        : "chat",
+      owner: store && activeSessionId ? tabletSelectionOwner(store, activeSessionId) : undefined,
+      live: [],
+      closed,
+      deleted: new Set(),
+      retire(file) {
+        closed.add(getFileTabKey(file));
+        const path = treePath(file);
+        if (path) closed.add(`path:${path}`);
+      },
+    };
+  }, [store, activeSessionId]);
+  useLayoutEffect(() => {
+    if (!openFileTabs) return;
+    visit.live = openFileTabs;
+  }, [openFileTabs, visit]);
+  return visit;
+}
+function useLegacyTabPreference(
+  store: FileTabRestorationOptions["store"],
+  activeSessionId: string | null,
+  leftTab: string,
+  restoring: React.MutableRefObject<boolean>,
+) {
+  useEffect(
+    () => () => {
+      if (
+        activeSessionId &&
+        store?.getState().tabletSession.activeTabBySessionId[activeSessionId] === undefined
+      )
+        setActiveTabForSession(activeSessionId, leftTab);
+    },
+    [activeSessionId, leftTab, store],
+  );
+  useEffect(() => {
+    if (
+      !activeSessionId ||
+      restoring.current ||
+      store?.getState().tabletSession.activeTabBySessionId[activeSessionId] !== undefined
+    )
+      return;
+    setActiveTabForSession(activeSessionId, leftTab);
+  }, [activeSessionId, leftTab, store, restoring]);
 }
 
 export function useFileTabRestoration({
@@ -145,87 +236,94 @@ export function useFileTabRestoration({
   leftTab,
   setLeftTab,
   setOpenFileTabs,
+  openFileTabs,
+  currentTabs,
 }: FileTabRestorationOptions) {
-  const restoredTabsRef = useRef<string | null>(null);
   const restorationInProgressRef = useRef<boolean>(false);
-  const prevSessionRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (prevSessionRef.current && leftTab)
-        setActiveTabForSession(prevSessionRef.current, leftTab);
-    };
-  }, [leftTab]);
+  const [restoredSessionId, setRestoredSessionId] = useState<string | null>(null);
+  const visit = useRestorationVisit(store, activeSessionId, openFileTabs);
+  useLayoutEffect(() => {
+    if (!store || !activeSessionId) return;
+    return subscribeTabletFileDeletion(store, activeSessionId, (path) => {
+      visit.deleted.add(path);
+      setOpenFileTabs(retireDeletedTabletFile(store, activeSessionId, path, currentTabs.current));
+    });
+  }, [store, activeSessionId, visit, setOpenFileTabs, currentTabs]);
 
   useEffect(() => {
     if (!activeSessionId) return;
-    if (restoredTabsRef.current !== activeSessionId) {
-      if (prevSessionRef.current && prevSessionRef.current !== activeSessionId)
-        setActiveTabForSession(prevSessionRef.current, leftTab);
-      restoredTabsRef.current = activeSessionId;
-      prevSessionRef.current = activeSessionId;
+    setRestoredSessionId(null);
+    const onRestored = () => {
       restorationInProgressRef.current = false;
-      setOpenFileTabs([]);
-    } else if (restorationInProgressRef.current || restoredTabsRef.current === activeSessionId) {
-      return;
-    }
+      setRestoredSessionId(activeSessionId);
+    };
+    let current = true;
+    const release = () => {
+      current = false;
+    };
+    restorationInProgressRef.current = false;
+    setOpenFileTabs([]);
     const savedTabs = getOpenFileTabs(activeSessionId);
     const savedActiveTab = getActiveTabForSession(activeSessionId, "chat");
     if (savedTabs.length === 0) {
-      setLeftTab(toPrimaryTab(savedActiveTab));
-      return;
+      const currentTab = store?.getState().tabletSession.activeTabBySessionId[activeSessionId];
+      if (
+        currentTab === undefined ||
+        (currentTab === visit.initial &&
+          (!store || tabletSelectionOwner(store, activeSessionId) === visit.owner))
+      )
+        setLeftTab(
+          currentTab?.startsWith("file:") ? "chat" : (currentTab ?? toPrimaryTab(savedActiveTab)),
+        );
+      onRestored();
+      return release;
     }
     restorationInProgressRef.current = true;
     const loadTabs = async (retryCount = 0): Promise<void> => {
+      if (!current) return;
       if (store) {
         while (
+          current &&
           savedTabs.some((tab) => isRenameReserved(store, activeSessionId, tab.path, tab.repo))
-        ) {
+        )
           await waitForRenameRelease(store, activeSessionId, savedTabs);
-        }
       }
-      if (restoredTabsRef.current !== activeSessionId) return;
+      if (!current) return;
       const pending = store
         ? savedTabs.map((tab) => trackRenameOpen(store, activeSessionId, tab.path, tab.repo))
         : [];
       const loadedTabs = await loadSavedFileTabs(activeSessionId, savedTabs);
       const invalid = pending.some((entry) => !entry.current());
       pending.forEach((entry) => entry.dispose());
+      if (!current) return;
       if (invalid) {
         void loadTabs(retryCount);
         return;
       }
       if (!loadedTabs) {
-        if (retryCount < 5) {
-          setTimeout(() => loadTabs(retryCount + 1), 200);
-          return;
-        }
-        restorationInProgressRef.current = false;
-        return;
-      }
-      if (restoredTabsRef.current !== activeSessionId) {
-        restorationInProgressRef.current = false;
+        if (retryCount < 5) setTimeout(() => loadTabs(retryCount + 1), 200);
+        else onRestored();
         return;
       }
       restoreLoadedTabs({
         loadedTabs,
         savedActiveTab,
-        restoredTabsRef,
-        restorationInProgressRef,
+        isCurrent: () => current,
+        onRestored,
         setOpenFileTabs,
         setLeftTab,
+        store,
+        sessionId: activeSessionId,
+        visit,
       });
     };
     void loadTabs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- leftTab is intentionally excluded to prevent re-running on tab changes
+    return release;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Tab changes do not start another restoration visit.
   }, [activeSessionId]);
+  useLegacyTabPreference(store, activeSessionId, leftTab, restorationInProgressRef);
 
-  useEffect(() => {
-    if (!activeSessionId || restorationInProgressRef.current) return;
-    setActiveTabForSession(activeSessionId, leftTab);
-  }, [activeSessionId, leftTab]);
-
-  return { restorationInProgressRef };
+  return { restorationInProgressRef, restoredSessionId, retireFile: visit.retire };
 }
 
 function updateTabsAfterSave(

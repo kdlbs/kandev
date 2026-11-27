@@ -12,6 +12,20 @@ import type {
   TaskSessionCancellationChangedPayload,
   TaskSessionStateChangedPayload,
 } from "@/lib/types/backend";
+import { fetchTaskSession } from "@/lib/api/domains/session-api";
+import type * as SessionApi from "@/lib/api/domains/session-api";
+import {
+  flushFocusWork,
+  notifySibling,
+  notifyState,
+  response,
+  withSiblings,
+} from "./task-primary-focus.test-helpers";
+
+vi.mock("@/lib/api/domains/session-api", async (original) => ({
+  ...(await original<typeof SessionApi>()),
+  fetchTaskSession: vi.fn(),
+}));
 const QUEUE_STATUS_ACTION = `message.queue.status_changed`;
 const AGENTCTL_READY_ACTION = "session.agentctl_ready";
 const CURRENT_INCARNATION = `incarnation-2`;
@@ -1259,28 +1273,16 @@ describe("session.state_changed → active session switching with pins", () => {
     vi.clearAllMocks();
   });
 
-  it("adopts the replacement when the pinned active session is already terminal", () => {
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: "s-old",
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "COMPLETED" } },
-      },
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-new", new_state: "STARTING" },
-    });
-
-    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
+  it("adopts the replacement when the pinned active session is already terminal", async () => {
+    const store = withSiblings("COMPLETED");
+    store.getState().removeTaskSession("t1", "latest");
+    store.getState().setActiveSession("t1", "old");
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifySibling(store);
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("latest");
+    expect(store.getState().tasks.pinnedSessionId).toBeNull();
   });
 
   it("does not adopt another session when a non-terminal pin was orphaned by active-session drift", () => {
@@ -1315,44 +1317,16 @@ describe("session.state_changed during restart", () => {
   // @covers AC-TASKS-SESSION-TAB-RESTART-001.2, AC-TASKS-SESSION-TAB-RESTART-001.6
   it.each([true, false])(
     "preserves only the restarting selection and pin (target pending: %s)",
-    (restartingTarget) => {
-      const old = { id: "s-old", task_id: "t-1", state: "RUNNING" };
-      const sibling = {
-        id: "s-new",
-        task_id: "t-1",
-        state: "WAITING_FOR_INPUT",
-        started_at: "2026-10-19T12:00:00Z",
-      };
-      const store = makeStore({
-        tasks: {
-          activeTaskId: "t-1",
-          activeSessionId: old.id,
-          pinnedSessionId: old.id,
-          lastSessionByTaskId: {},
-        },
-        taskSessions: { items: { [old.id]: old, [sibling.id]: sibling } },
-        taskSessionsByTask: { itemsByTaskId: { "t-1": [old, sibling] } },
-      });
-      getSessionRestartStore(store).setState(
-        new Set([restartingTarget ? old.id : "s-other"]),
-        true,
-      );
-      const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-      handler({
-        id: "restart-cancelled",
-        type: "notification",
-        action: STATE_CHANGED_EVENT,
-        payload: { task_id: "t-1", session_id: old.id, new_state: "CANCELLED" },
-      });
-
-      if (restartingTarget) {
-        expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
-        expect(store.setState).not.toHaveBeenCalled();
-      } else {
-        expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", sibling.id);
-        expect(store.setState).toHaveBeenCalled();
-      }
+    async (restartingTarget) => {
+      const store = withSiblings("RUNNING");
+      store.getState().removeTaskSession("t1", "latest");
+      store.getState().setActiveSession("t1", "old");
+      getSessionRestartStore(store).setState(new Set([restartingTarget ? "old" : "other"]), true);
+      vi.mocked(fetchTaskSession).mockResolvedValue(response("CANCELLED"));
+      notifyState(store, "CANCELLED", "2026-11-19T12:00:00Z");
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe(restartingTarget ? "old" : "next");
+      expect(store.getState().tasks.pinnedSessionId).toBe(restartingTarget ? "old" : null);
     },
   );
 });
@@ -1362,90 +1336,94 @@ describe("session.state_changed → active session handoff on terminal", () => {
     vi.clearAllMocks();
   });
 
-  it("hands off when the current active session transitions to terminal", () => {
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: null,
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-            { id: "s-new", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
+  it("hands off after confirming completion, inheriting readiness before focus", async () => {
+    const store = withSiblings("RUNNING");
+    store.getState().removeTaskSession("t1", "latest");
+    store
+      .getState()
+      .setTaskSession({ ...store.getState().taskSessions.items.next, state: "STARTING" });
+    store.setState({ sessionAgentctl: { itemsBySessionId: {} } });
+    store.getState().setSessionAgentctlStatus("old", {
+      status: "ready",
+      agentExecutionId: "old-execution",
+      updatedAt: "2026-11-19T12:00:00Z",
     });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:00Z");
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().sessionAgentctl.itemsBySessionId.next).toBeUndefined();
+    let readyAtSelection: boolean | undefined;
+    const stop = store.subscribe((state) => {
+      if (state.tasks.activeSessionId === "next" && readyAtSelection === undefined)
+        readyAtSelection = state.sessionAgentctl.itemsBySessionId.next?.status === "ready";
     });
-
-    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
-    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+    try {
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe("next");
+      expect(readyAtSelection).toBe(true);
+      expect(
+        store.getState().sessionAgentctl.itemsBySessionId.next?.agentExecutionId,
+      ).toBeUndefined();
+    } finally {
+      stop();
+    }
   });
 
-  // The per-task list here still shows s-old as RUNNING (pre-event state), so
-  // pickReplacementSessionId returns s-old itself. This exercises the
-  // `replacement !== sessionId` guard — without it, we'd set activeSessionId
-  // to the same session that just became terminal.
-  it("does not hand off when the only candidate is the terminating session itself", () => {
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: null,
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
-    });
-
-    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+  it("keeps the completed conversation when it is the only stored session", async () => {
+    const store = withSiblings("RUNNING");
+    store.getState().removeTaskSession("t1", "next");
+    store.getState().removeTaskSession("t1", "latest");
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:01Z");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().taskSessions.items.old.state).toBe("COMPLETED");
   });
 
-  it("does not hand off when all other sessions for the task are terminal", () => {
+  it("keeps the completed conversation when all siblings are terminal", async () => {
+    const store = withSiblings("RUNNING");
+    store
+      .getState()
+      .setTaskSession({ ...store.getState().taskSessions.items.next, state: "CANCELLED" });
+    store
+      .getState()
+      .setTaskSession({ ...store.getState().taskSessions.items.latest, state: "FAILED" });
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:01Z");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().taskSessions.items.next.state).toBe("CANCELLED");
+    expect(store.getState().taskSessions.items.latest.state).toBe("FAILED");
+  });
+});
+
+describe("session.state_changed → failed start keeps focus", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("keeps the active session when it fails to start or resume", () => {
     const store = makeStore({
       tasks: {
         activeTaskId: "t-1",
-        activeSessionId: "s-old",
+        activeSessionId: "s-resume",
         pinnedSessionId: null,
         lastSessionByTaskId: {},
       },
       taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
+        items: { "s-resume": { id: "s-resume", task_id: "t-1", state: "STARTING" } },
       },
       taskSessionsByTask: {
         itemsByTaskId: {
           "t-1": [
-            { id: "s-done", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+            { id: "s-resume", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
+            {
+              id: "s-waiting",
+              task_id: "t-1",
+              state: "WAITING_FOR_INPUT",
+              started_at: "",
+              updated_at: "",
+            },
           ],
         },
       },
@@ -1456,7 +1434,7 @@ describe("session.state_changed → active session handoff on terminal", () => {
       id: "m",
       type: "notification",
       action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
+      payload: { task_id: "t-1", session_id: "s-resume", new_state: "FAILED" },
     });
 
     expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
@@ -1468,79 +1446,31 @@ describe("session.state_changed → respects user-pinned session", () => {
     vi.clearAllMocks();
   });
 
-  it("hands off when the pinned active session reaches a terminal state", () => {
-    // Genuine RUNNING→COMPLETED transition: previousState is non-terminal,
-    // so the workflow handoff should still fire even though the session
-    // is pinned.
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: "s-old",
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-            { id: "s-new", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
-    });
-
-    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
-    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+  it("hands off when the pinned active session reaches a terminal state", async () => {
+    const store = withSiblings("RUNNING");
+    store.getState().removeTaskSession("t1", "latest");
+    store.getState().setActiveSession("t1", "old");
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:00Z");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
+    expect(store.getState().tasks.pinnedSessionId).toBeNull();
   });
 
-  it("hands off to the promoted primary when the new session is not yet in the per-task list", () => {
-    // Race that produced the reported bug: a workflow step switch to a step
-    // with a different agent profile promotes the new primary via task.updated
-    // (reflected on the kanban task) BEFORE the old session's terminal
-    // state_changed arrives, so s-new is not yet present in taskSessionsByTask.
-    // pickReplacementSessionId finds no in-list successor, so focus must follow
-    // the switch by falling back to the task's authoritative primary session.
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: "s-old",
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
+  it("hands off to a promoted primary missing from the per-task list", async () => {
+    const store = withSiblings("RUNNING");
+    store.getState().setActiveSession("t1", "old");
+    store.setState(({ kanban, taskSessions, taskSessionsByTask }) => ({
+      kanban: { ...kanban, tasks: [{ ...kanban.tasks[0], primarySessionId: "next" }] },
       taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
-          ],
-        },
+        ...taskSessionsByTask,
+        itemsByTaskId: { t1: [taskSessions.items.old] },
       },
-      kanban: { tasks: [{ id: "t-1", primarySessionId: "s-new" }] },
-      kanbanMulti: { snapshots: {} },
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
-    });
-
-    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
+    }));
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:00Z");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
   });
 
   it("does not hand off when a pinned terminal session receives a replay state_changed", () => {

@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"go.uber.org/zap"
 )
 
@@ -219,7 +221,8 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 	// launch path does the same via cliflags.Resolve; mirroring it here
 	// keeps the preview faithful to what the agent subprocess will see.
 	// Tolerate malformed entries silently — the preview is informational.
-	cliFlagTokens, _ := cliflags.Resolve(cliFlagsFromDTO(req.CLIFlags))
+	profileFlags := normalizeAntigravityCLIFlags(agentName, cliFlagsFromDTO(req.CLIFlags))
+	cliFlagTokens, _ := cliflags.Resolve(profileFlags)
 
 	copilotPlugins, err := previewCopilotPlugins(agentName, req.CopilotSelectedPlugins)
 	if err != nil {
@@ -242,6 +245,8 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 	// ACP: mirror lifecycle.CommandBuilder.BuildCommand by appending CLIFlagTokens
 	// after the agent's BuildCommand.
 	var cmd agents.Command
+	requiresAntigravityWorkerMode := false
+	antigravitySkipPermissionsSupported := false
 	if ptAgent, ok := agentConfig.(agents.PassthroughAgent); ok && req.CLIPassthrough {
 		cmd = ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 			Model:            req.Model,
@@ -278,9 +283,21 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 			if err != nil {
 				return nil, err
 			}
+			requiresAntigravityWorkerMode = agentName == agents.AntigravityACPAgentID &&
+				selection.Variant == acpcompat.AntigravityRuntimeCLI
+			antigravitySkipPermissionsSupported = agentName == agents.AntigravityACPAgentID &&
+				selection.Variant == acpcompat.AntigravityRuntimeCLI && selection.SupportsDangerouslySkipPermissions
 		}
 		if len(cliFlagTokens) > 0 {
 			cmd = cmd.With().Flag(cliFlagTokens...).Build()
+		}
+		if requiresAntigravityWorkerMode {
+			cmd = agents.NewCommand(antigravityruntime.RequireWorkerMode(cmd.Args())...)
+		}
+		if agentName == agents.AntigravityACPAgentID {
+			cmd = agents.NewCommand(antigravityruntime.FilterDangerouslySkipPermissions(
+				cmd.Args(), antigravitySkipPermissionsSupported,
+			)...)
 		}
 		// Prepend the launcher prefix last, mirroring
 		// lifecycle.CommandBuilder.BuildCommand. Prefixes were validated above;

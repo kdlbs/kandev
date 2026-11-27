@@ -842,19 +842,16 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 
 func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		questions, errResult := parseQuestions(req)
+		raw, errResult := decodeQuestionsArg(req)
 		if errResult != nil {
 			return errResult, nil
 		}
-		for _, q := range questions {
-			if _, ok := q["images"]; ok {
-				return mcp.NewToolResultError("parent questions do not support images"), nil
-			}
-			for _, option := range q[optionsArg].([]map[string]interface{}) {
-				if _, ok := option["images"]; ok {
-					return mcp.NewToolResultError("parent questions do not support images"), nil
-				}
-			}
+		if parentQuestionsCarryImages(raw) {
+			return mcp.NewToolResultError("parent questions do not support images"), nil
+		}
+		questions, errResult := parseQuestions(req)
+		if errResult != nil {
+			return errResult, nil
 		}
 		payload := map[string]interface{}{
 			"task_id":    s.taskID,
@@ -903,6 +900,28 @@ func emitKeepAlivePings(ctx context.Context, stop <-chan struct{}, interval time
 			send()
 		}
 	}
+}
+
+// parentQuestionsCarryImages reports image fields on raw parent questions,
+// before validation, so parents get one clear rejection for any image field.
+func parentQuestionsCarryImages(questions []map[string]interface{}) bool {
+	for _, q := range questions {
+		if _, ok := q["images"]; ok {
+			return true
+		}
+		if _, ok := q["image_groups"]; ok {
+			return true
+		}
+		options, _ := q[optionsArg].([]interface{})
+		for _, option := range options {
+			if fields, ok := option.(map[string]interface{}); ok {
+				if _, has := fields["images"]; has {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // parseQuestions extracts and validates the "questions" array from the request.

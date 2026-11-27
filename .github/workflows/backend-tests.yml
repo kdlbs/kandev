@@ -228,8 +228,8 @@ jobs:
     # Checkout receives the short-lived job token. Keep this credential-bearing
     # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
-    # Include cold builds, SDK consumers, the 15-minute lint budget, and cache cleanup.
-    timeout-minutes: 30
+    # Include cold builds, SDK consumers, the 20-minute lint budget, and cache cleanup.
+    timeout-minutes: 35
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
     # Skips the per-run setup-go / golangci-lint download steps below.
@@ -371,14 +371,14 @@ jobs:
           fi
 
       - name: Run golangci-lint
-        # Bound analysis and child Go compilation; the memory target is per process.
+        # Allow for cold package loads within the per-process memory target.
         shell: bash
         env:
           GOMAXPROCS: '2'
-          GOMEMLIMIT: 3GiB
+          GOMEMLIMIT: 5GiB
         run: |
           export GOFLAGS="${GOFLAGS:+$GOFLAGS }-p=${GOMAXPROCS}"
-          golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=15m --concurrency="${GOMAXPROCS}"
+          golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=20m --concurrency="${GOMAXPROCS}"
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/4)

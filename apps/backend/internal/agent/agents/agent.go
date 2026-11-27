@@ -83,11 +83,12 @@ type LocalInstallAgent interface {
 // LocalRuntimeSelection contains the command, environment, and trusted
 // identity resolved for one host-local operation.
 type LocalRuntimeSelection struct {
-	Command        Command
-	Env            map[string]string
-	Variant        string
-	Version        string
-	AdapterVersion string
+	Command                            Command
+	Env                                map[string]string
+	Variant                            string
+	Version                            string
+	AdapterVersion                     string
+	SupportsDangerouslySkipPermissions bool
 }
 
 // LocalRuntimeAgent resolves a complete local runtime selection. It is only
@@ -440,6 +441,10 @@ const PermissionKeyAutoApprove = "auto_approve"
 // PermissionKeyCursorForce is the Cursor-specific CLI --force toggle (unsandboxed
 // run-everything). Separate from PermissionKeyAutoApprove (agentctl ACP approval).
 const PermissionKeyCursorForce = "cursor_force"
+
+// PermissionKeyAntigravitySkipPermissions is the Antigravity CLI's opt-in
+// all-tool approval flag. It stays separate from the legacy profile boolean.
+const PermissionKeyAntigravitySkipPermissions = "antigravity_skip_permissions"
 
 // PermissionKeyDangerouslySkipPermissions is wired to the profile's
 // DangerouslySkipPermissions column (a dedicated bool, not the cli_flags list).

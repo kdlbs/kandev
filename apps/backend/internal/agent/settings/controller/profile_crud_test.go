@@ -12,7 +12,7 @@ import (
 )
 
 // TestSeedCLIFlags_FromCopilot verifies that a fresh Copilot profile gets
-// the four curated CLI-flag suggestions seeded with the expected default
+// the curated CLI-flag suggestions seeded with the expected default
 // state. `--allow-all-tools` is on by default so autonomous runs don't
 // stall on per-tool-call permission prompts; the other --allow-all-* and
 // --no-ask-user flags stay off as safe defaults until users opt in.
@@ -21,10 +21,11 @@ func TestSeedCLIFlags_FromCopilot(t *testing.T) {
 	flags := seedCLIFlags(ag)
 
 	wantFlags := map[string]bool{
-		"--allow-all-tools": true,
-		"--allow-all-paths": false,
-		"--allow-all-urls":  false,
-		"--no-ask-user":     false,
+		"--allow-all-tools":      true,
+		"--allow-all-paths":      false,
+		"--allow-all-urls":       false,
+		"--context long_context": false,
+		"--no-ask-user":          false,
 	}
 	if len(flags) != len(wantFlags) {
 		t.Fatalf("expected %d seeded flags, got %d: %+v", len(wantFlags), len(flags), flags)
@@ -68,6 +69,16 @@ func TestSeedCLIFlags_EmptyForCodexACP(t *testing.T) {
 	flags := seedCLIFlags(agents.NewCodexACP())
 	if len(flags) != 0 {
 		t.Fatalf("expected no seeded flags for codex-acp, got %+v", flags)
+	}
+}
+
+func TestSeedCLIFlags_AntigravitySkipPermissionsOffByDefault(t *testing.T) {
+	flags := seedCLIFlags(agents.NewAntigravityACP())
+	if len(flags) != 1 || flags[0].Flag != "--dangerously-skip-permissions" || flags[0].Enabled {
+		t.Fatalf("Antigravity CLI flags = %+v, want one disabled --dangerously-skip-permissions entry", flags)
+	}
+	if flags[0].Description == "" {
+		t.Fatal("Antigravity skip-permissions flag has no description")
 	}
 }
 

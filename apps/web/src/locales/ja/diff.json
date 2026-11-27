@@ -1,4 +1,6 @@
 {
+  "before": "変更前",
+  "after": "変更後",
   "add": "追加",
   "addAComment": "コメントを追加...",
   "addComment": "コメントを追加",

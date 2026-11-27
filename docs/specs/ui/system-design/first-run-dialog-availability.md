@@ -19,7 +19,7 @@ requirements:
 
 ## Availability and state
 
-Use the existing `useResponsiveBreakpoint()` hook and its `isMobile` result, which is true below 768 CSS pixels. `PageClient` presents `OnboardingDialog` only when the existing `ONBOARDING_COMPLETED` browser-local marker is absent and `isMobile` is false. The breakpoint hook uses a synchronous external-store snapshot so initial phone rendering does not briefly show the dialog.
+Use the existing `useResponsiveBreakpoint()` hook and its `isMobile` result, which is true below 768 CSS pixels. `PageClient` presents `OnboardingDialog` only when the existing `ONBOARDING_COMPLETED` browser-local marker is absent and `isMobile` is false and the current URL has no nonempty `BOARD_GRAPH_FOCUS_PARAM`. Read the graph focus from the reactive search parameters on every render so same-page navigation updates visibility. Use the existing dialog open prop to preserve draft state. The breakpoint hook uses a synchronous external-store snapshot so initial phone rendering does not briefly show the dialog.
 
 Phone suppression is a visibility rule, not a completion transition. Do not call `handleOnboardingComplete`, write the marker, or save agent-profile edits on a phone visit or a desktop-to-phone resize. If the viewport becomes large enough again while the marker is absent, the dialog can reopen. Existing Skip and Get Started completion paths remain unchanged on larger screens.
 

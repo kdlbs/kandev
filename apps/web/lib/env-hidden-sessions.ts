@@ -1,6 +1,23 @@
 import { getSessionStorage, setSessionStorage } from "@/lib/local-storage";
+import type { DockviewApi } from "dockview-react";
 
 const prefix = "kandev.dockview.env-hidden-sessions-v1.";
+const hiddenByApi = new WeakMap<DockviewApi, Map<string | null, Set<string>>>();
+
+/** Live hide admission is visit-scoped without an environment, persisted otherwise. */
+export function getLayoutHiddenSessions(api: DockviewApi, envId: string | null): Set<string> {
+  let byEnv = hiddenByApi.get(api);
+  if (!byEnv) {
+    byEnv = new Map();
+    hiddenByApi.set(api, byEnv);
+  }
+  let hidden = byEnv.get(envId);
+  if (!hidden) {
+    hidden = new Set(envId ? getEnvHiddenSessions(envId) : []);
+    byEnv.set(envId, hidden);
+  }
+  return hidden;
+}
 
 export type EnvHiddenSessionRecord = { sessionId: string; taskId: string };
 

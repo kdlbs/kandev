@@ -8,7 +8,6 @@ import {
   pinnedViewForFraction,
   pinnedWipeFraction,
   rectView,
-  swipeDirection,
   nextZoomStep,
   panBy,
   zoomAt,
@@ -56,9 +55,16 @@ export type ReviewViewportOptions = {
   panEnabled?: boolean;
   /** Pinned-wipe pan range: either image edge may reach the center line. */
   pinned?: boolean;
-  /** Called for a horizontal swipe that starts while the view is at Fit. */
-  onSwipe?: (direction: 1 | -1) => void;
+  /** Where the pinned center line falls on the image while the view is at Fit. */
+  pinnedAt?: number;
 };
+
+/** The Fit view, moved so a pinned center line falls on `pinnedAt` of the image. */
+function pinnedFit(stage: Size, image: Size, pinnedAt: number | undefined): ReviewView {
+  const fit = fitView(stage, image);
+  if (pinnedAt === undefined || image.width <= 0) return fit;
+  return clampPinnedView(pinnedViewForFraction(fit, stage, image, pinnedAt), stage, image);
+}
 
 function sameView(a: ReviewView, b: ReviewView): boolean {
   return (
@@ -72,10 +78,10 @@ export function useReviewViewport(
   image: Size,
   options: ReviewViewportOptions = {},
 ) {
-  const { areaRef, panEnabled = true, pinned = false } = options;
+  const { areaRef, panEnabled = true, pinned = false, pinnedAt } = options;
   const stage = useElementSize(stageRef);
   const [manual, setManual] = useState<ReviewView | null>(null);
-  const fit = fitView(stage, image);
+  const fit = pinnedFit(stage, image, pinned ? pinnedAt : undefined);
   const minScale = minScaleFor(fit.scale);
   const clamp = pinned ? clampPinnedView : clampView;
   const view = manual ? clamp(manual, stage, image) : fit;
@@ -119,6 +125,10 @@ export function useReviewViewport(
     (scale: number) => apply((v) => zoomAt(v, scale, center(), latest.current.minScale)),
     [apply, center],
   );
+  const restore = useCallback((next: ReviewView) => {
+    const { stage: s, image: i, clamp: c } = latest.current;
+    setManual(c(next, s, i));
+  }, []);
   const setPinnedFraction = useCallback((fraction: number) => {
     const { view: v, stage: s, image: i } = latest.current;
     setManual(clampPinnedView(pinnedViewForFraction(v, s, i, fraction), s, i));
@@ -151,14 +161,7 @@ export function useReviewViewport(
   panEnabledRef.current = panEnabled;
   const minScaleRef = useRef(minScale);
   minScaleRef.current = minScale;
-  const swipeRef = useRef(options.onSwipe);
-  swipeRef.current = options.onSwipe;
-  const pointerHandlers = useSwipe(
-    usePointerPanZoom(pointers, apply, panEnabledRef, minScaleRef),
-    pointers,
-    swipeRef,
-    latest,
-  );
+  const pointerHandlers = usePointerPanZoom(pointers, apply, panEnabledRef, minScaleRef);
 
   return {
     view,
@@ -171,6 +174,7 @@ export function useReviewViewport(
     zoomToRect,
     zoomTo,
     atFit: manual === null,
+    restore,
     pinnedFraction: pinnedWipeFraction(view, stage, image),
     setPinnedFraction,
   };
@@ -253,40 +257,5 @@ function usePointerPanZoom(
     onPointerMove,
     onPointerUp: onPointerEnd,
     onPointerCancel: onPointerEnd,
-  };
-}
-
-type PointerHandlers = ReturnType<typeof usePointerPanZoom>;
-
-/** Adds swipe detection for a single pointer that starts while the view is at Fit. */
-function useSwipe(
-  handlers: PointerHandlers,
-  pointers: RefObject<Map<number, Point>>,
-  onSwipe: RefObject<((direction: 1 | -1) => void) | undefined>,
-  latest: RefObject<{ atFit: boolean }>,
-): PointerHandlers {
-  const start = useRef<{ id: number; x: number; y: number } | null>(null);
-  return {
-    ...handlers,
-    onPointerDown: (event) => {
-      handlers.onPointerDown(event);
-      const single = pointers.current.size <= 1;
-      start.current =
-        single && latest.current.atFit && onSwipe.current
-          ? { id: event.pointerId, x: event.clientX, y: event.clientY }
-          : null;
-    },
-    onPointerUp: (event) => {
-      handlers.onPointerUp(event);
-      const origin = start.current;
-      start.current = null;
-      if (!origin || origin.id !== event.pointerId) return;
-      const direction = swipeDirection(event.clientX - origin.x, event.clientY - origin.y);
-      if (direction !== 0) onSwipe.current?.(direction);
-    },
-    onPointerCancel: (event) => {
-      handlers.onPointerCancel(event);
-      start.current = null;
-    },
   };
 }

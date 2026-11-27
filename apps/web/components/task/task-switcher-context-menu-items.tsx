@@ -2,14 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Fragment, type ReactNode } from "react";
-import {
-  IconCopy,
-  IconEdit,
-  IconPencil,
-  IconPin,
-  IconPinFilled,
-  IconTrash,
-} from "@tabler/icons-react";
+import { IconCopy, IconEdit, IconPin, IconPinFilled, IconTrash } from "@tabler/icons-react";
 import {
   ContextMenuItem,
   ContextMenuSeparator,
@@ -24,6 +17,7 @@ import {
 import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
+import { TaskFlagItem } from "./task-flag-menu-item";
 import { TaskColorMenu } from "./task-switcher-color-menu";
 import { TaskPluginLinkMenu, selectTaskLinkActions } from "./task-switcher-link-menu";
 import {
@@ -31,6 +25,7 @@ import {
   TaskCreateSubtaskItem,
   TaskDeleteItem,
   TaskDetachItem,
+  TaskRenameItem,
   TaskShowInGraphItem,
   TaskTurnErrorDismissItem,
 } from "./task-switcher-action-items";
@@ -64,6 +59,7 @@ type SingleGroupProps = Pick<
   | "onTogglePin"
   | "onEditTask"
   | "onRenameTask"
+  | "flagActions"
   | "onCreateSubtask"
   | "onDetachTask"
   | "onArchiveTask"
@@ -279,10 +275,11 @@ function SingleEditGroup({
   isDeleting,
   onEditTask,
   onRenameTask,
+  flagActions,
   nativeUnlinkEntries,
 }: Pick<
   SingleGroupProps,
-  "task" | "isDeleting" | "onEditTask" | "onRenameTask" | "nativeUnlinkEntries"
+  "task" | "isDeleting" | "onEditTask" | "onRenameTask" | "flagActions" | "nativeUnlinkEntries"
 >) {
   const { t } = useTranslation();
   return (
@@ -307,6 +304,7 @@ function SingleEditGroup({
         <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
       )}
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
+      <TaskFlagItem task={task} disabled={isDeleting} actions={flagActions} />
       {taskRowActionAvailability(task).mark && (
         <ContextMenuItem disabled>
           <IconCopy className="mr-2 h-4 w-4" />
@@ -577,25 +575,6 @@ function TaskPinItem({
     <ContextMenuItem disabled={disabled} onSelect={() => onTogglePin(taskId)}>
       {isPinned ? <IconPinFilled className="mr-2 h-4 w-4" /> : <IconPin className="mr-2 h-4 w-4" />}
       {isPinned ? t("task:unpin") : t("task:annotationPin")}
-    </ContextMenuItem>
-  );
-}
-
-function TaskRenameItem({
-  task,
-  disabled,
-  onRenameTask,
-}: {
-  task: TaskSwitcherItem;
-  disabled?: boolean;
-  onRenameTask?: (taskId: string, currentTitle: string) => void;
-}) {
-  const { t } = useTranslation();
-  if (!onRenameTask) return null;
-  return (
-    <ContextMenuItem disabled={disabled} onSelect={() => onRenameTask(task.id, task.title)}>
-      <IconPencil className="mr-2 h-4 w-4" />
-      {t("task:rename")}
     </ContextMenuItem>
   );
 }

@@ -3,6 +3,7 @@ import { mapSidebarWorkspaces } from "../slices/ui/sidebar-workspace-state";
 import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
 import type { KanbanState } from "../slices/kanban/types";
+import type { TaskNavigationSelectionOwner } from "../task-navigation-selection";
 import type {
   ActiveTurnWindowObservation,
   TaskSessionHydrationEpoch,
@@ -22,6 +23,7 @@ import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revis
 import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 import { mergeRuntimeStorageHealth } from "@/lib/session-delivery-storage";
 import type { RuntimeStorageHealth } from "@/lib/types/http";
+import { admitTaskSessionRows, isConfirmedSessionRemoved } from "@/lib/state/session-removal";
 import {
   captureActiveTurnWindowObservation,
   mergeTurnRows,
@@ -64,6 +66,9 @@ export type HydrationOptions = {
   turnWindowObservationsAtRequestStart?: Readonly<Record<string, ActiveTurnWindowObservation>>;
   /** Session generations captured when the hydration request started. */
   taskSessionHydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
+  /** Route identity may hydrate data, but not replace a newer selection owner. */
+  taskSelectionAtRequestStart?: TaskNavigationSelectionOwner;
+  preserveTaskSelection?: boolean;
 };
 
 /** Deep-merge a field with optional loading state preservation. */
@@ -160,8 +165,31 @@ function seedOrderRevisionsFromSteps(
   );
 }
 
+function hydrateTaskSelection(
+  draft: Draft<AppState>,
+  incoming: HydrationState["tasks"],
+  options: HydrationOptions,
+): void {
+  if (!incoming || isConfirmedSessionRemoved(draft.taskSessions, incoming.activeSessionId ?? ""))
+    return;
+  if (options.preserveTaskSelection) return;
+  const owner = options.taskSelectionAtRequestStart;
+  if (
+    owner &&
+    (draft.taskRemoval.navigationRevision !== owner.navigationRevision ||
+      draft.workflowSessionFocus.intent?.taskId === incoming.activeTaskId ||
+      draft.workflowSessionFocus.request?.taskId === incoming.activeTaskId)
+  )
+    return;
+  deepMerge(draft.tasks, incoming);
+}
+
 /** Hydrate kanban and workspace slices. */
-function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState): void {
+function hydrateKanbanAndWorkspace(
+  draft: Draft<AppState>,
+  state: HydrationState,
+  options: HydrationOptions,
+): void {
   if (state.kanban) {
     // Merge tasks by ID with timestamp comparison to avoid overwriting fresher WS data
     const { tasks, ...kanbanRest } = state.kanban;
@@ -177,7 +205,7 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
   }
   if (state.workflows) deepMerge(draft.workflows, state.workflows);
   if (state.workspaceContextRead) deepMerge(draft.workspaceContextRead, state.workspaceContextRead);
-  if (state.tasks) deepMerge(draft.tasks, state.tasks);
+  hydrateTaskSelection(draft, state.tasks, options);
   if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
   if (state.repositories) deepMerge(draft.repositories, state.repositories);
   if (state.repositoryBranchPolicies)
@@ -590,7 +618,8 @@ function hydrateTaskSessions(
     incomingStorage,
   });
 
-  deepMerge(draft.taskSessions, { ...incoming, items });
+  const { confirmedRemovals: _ignoredRemovals, ...snapshot } = incoming;
+  deepMerge(draft.taskSessions, { ...snapshot, items });
   applyHydratedRuntimeStorage(draft, previousStorage, incomingStorage);
 
   for (const [sessionId, previousCursor] of previousCursors) {
@@ -614,7 +643,10 @@ function prepareHydratedSessionItems(
   const items = { ...incomingItems };
   for (const [sessionId, session] of Object.entries(incomingItems)) {
     const existing = draft.taskSessions.items[sessionId];
-    if (isStaleSessionStateEvent(existing, session.updated_at)) {
+    if (
+      isConfirmedSessionRemoved(draft.taskSessions, sessionId) ||
+      isStaleSessionStateEvent(existing, session.updated_at)
+    ) {
       delete items[sessionId];
       continue;
     }
@@ -656,7 +688,11 @@ function hydrateTaskSessionsByTask(
   const itemsByTaskId = Object.fromEntries(
     Object.entries(incoming.itemsByTaskId ?? {}).map(([taskId, sessions]) => [
       taskId,
-      sessions.map((session) => {
+      admitTaskSessionRows(
+        draft.taskSessions,
+        draft.taskSessionsByTask.itemsByTaskId[taskId] ?? [],
+        sessions,
+      ).map((session) => {
         const canonical = draft.taskSessions.items[session.id];
         return canonical &&
           (hydratedSessionIds.has(session.id) ||
@@ -1091,7 +1127,7 @@ export function hydrateState(
     turnWindowObservationsAtRequestStart,
   } = options;
 
-  hydrateKanbanAndWorkspace(draft, state);
+  hydrateKanbanAndWorkspace(draft, state, options);
   hydrateSettings(draft, state);
   hydrateSession(draft, state, activeSessionId, forceMergeSessionId, {
     taskSessionHydrationEpochsAtRequestStart,

@@ -13,7 +13,7 @@ import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
 import { sortIdsByDisplayOrder, type DisplayOrderTask } from "@/lib/kanban/task-order";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { getEffectiveView } from "@/lib/kanban/view-registry";
+import { getEffectiveViewId } from "@/lib/kanban/view-modes";
 import { sortWorkflowStepsByPosition } from "@/lib/kanban/workflow-step-order";
 import { taskMatchesPriorityFilter } from "@/lib/kanban/priority-filter-tokens";
 import { selectWorkflowSwimlanes, type WorkflowLike } from "@/lib/kanban/workflow-swimlanes";
@@ -153,7 +153,7 @@ export function useTaskMultiSelectStore() {
       if (!state.userSettings) return ids;
       const sortToken = state.userSettings.kanbanSort ?? "created_desc";
       const isPipelineView =
-        getEffectiveView(state.userSettings.kanbanViewMode ?? "", isMobile).id === "graph2";
+        getEffectiveViewId(state.userSettings.kanbanViewMode ?? "", isMobile) === "graph2";
       const stepIndexOf = isPipelineView
         ? buildPipelineStepIndexOf(
             state.workflows.items,

@@ -1,14 +1,13 @@
 import type { DockviewApi } from "dockview-react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
-  getEnvHiddenSessions,
+  getLayoutHiddenSessions,
   getEnvHiddenSessionRecords,
   setEnvHiddenSessionOwner,
   setEnvHiddenSessions,
 } from "@/lib/env-hidden-sessions";
 import type { TaskId } from "@/lib/types/http";
 
-const hiddenByApi = new WeakMap<DockviewApi, Map<string | null, Set<string>>>();
 const hideListenersByApi = new WeakMap<DockviewApi, Set<(sessionId: string) => void>>();
 
 export function onDidHideSessionPanel(
@@ -25,17 +24,7 @@ export function onDidHideSessionPanel(
 }
 
 export function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
-  const envId = useDockviewStore.getState().currentLayoutEnvId;
-  let byEnv = hiddenByApi.get(api);
-  if (!byEnv) {
-    byEnv = new Map();
-    hiddenByApi.set(api, byEnv);
-  }
-  const current = byEnv.get(envId);
-  if (current) return current;
-  const loaded = new Set(envId ? getEnvHiddenSessions(envId) : []);
-  byEnv.set(envId, loaded);
-  return loaded;
+  return getLayoutHiddenSessions(api, useDockviewStore.getState().currentLayoutEnvId);
 }
 
 function persist(api: DockviewApi, hidden: Set<string>) {

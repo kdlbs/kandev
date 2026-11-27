@@ -17,10 +17,14 @@ import {
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { formatDateTime } from "@/lib/i18n/formats";
 
+import { ComposerWarning, ComposerWarningRow } from "./composer-warning";
+
 type StorageTranslate = ReturnType<typeof useTranslation>["t"];
 
 type NoticeView = {
   usage: string | null;
+  usagePercent: number | null;
+  local: boolean;
   remote: boolean;
   executor: string;
   pressure: boolean;
@@ -41,16 +45,32 @@ const PRESSURE_REASON_KEYS: Record<string, string> = {
 function pressureReasonLabel(health: RuntimeStorageHealth, t: StorageTranslate): string {
   const reason = health.failure_storage?.reason;
   const key = reason ? PRESSURE_REASON_KEYS[reason] : undefined;
-  return key ? t(key) : t("task:storagePressureGeneric");
+  return key ? t(key) : t("task:storagePressureUnknown");
+}
+
+function highUsageLabel(
+  health: RuntimeStorageHealth,
+  view: NoticeView,
+  t: StorageTranslate,
+): string | null {
+  const reason = health.failure_storage?.reason;
+  if (!view.pressure || health.state !== "warning" || reason === "disk_space_low" || !view.usage) {
+    return null;
+  }
+  return t("task:storageAdvisoryHighUsage", { usage: view.usage });
 }
 
 function buildNoticeView(health: RuntimeStorageHealth, t: StorageTranslate): NoticeView {
-  const usageNumber = formatStorageUsage(runtimeStorageUsagePercent(health));
+  const usagePercent = runtimeStorageUsagePercent(health);
+  const usageNumber = formatStorageUsage(usagePercent);
+  const local = health.location === "local_runtime";
   const remote = health.location === "executor_runtime";
   const parsed = health.observed_at ? new Date(health.observed_at) : null;
   const parsedPressure = health.pressure_observed_at ? new Date(health.pressure_observed_at) : null;
   return {
     usage: usageNumber,
+    usagePercent,
+    local,
     remote,
     executor: health.executor_label?.trim() || t("task:storageAdvisoryExecutorFallback"),
     pressure: health.write_pressure === true,
@@ -58,6 +78,33 @@ function buildNoticeView(health: RuntimeStorageHealth, t: StorageTranslate): Not
     pressureObservedAt:
       parsedPressure && !Number.isNaN(parsedPressure.getTime()) ? parsedPressure : null,
   };
+}
+
+function capacityGuidanceKey(health: RuntimeStorageHealth): string {
+  const reason = health.failure_storage?.reason;
+  const location = health.failure_storage?.location;
+  if (reason === "filesystem_full") {
+    if (location === "local_runtime") return "task:storageRecoveryFilesystemBodyLocal";
+    if (location === "executor_runtime") return "task:storageRecoveryFilesystemBodyRemote";
+    return "task:storageRecoveryFilesystemBodyUnknown";
+  }
+  if (location === "local_runtime") return "task:storageRecoveryQuotaBodyLocal";
+  if (location === "executor_runtime") return "task:storageRecoveryQuotaBodyRemote";
+  return "task:storageRecoveryQuotaBodyUnknown";
+}
+
+function shouldShowStorageSettings(health: RuntimeStorageHealth, view: NoticeView): boolean {
+  if (!view.local) return false;
+  if (health.state === "warning") {
+    return true;
+  }
+  const reason = health.failure_storage?.reason;
+  return (
+    view.pressure &&
+    (reason === "disk_space_low" ||
+      reason === "filesystem_full" ||
+      reason === "disk_quota_exceeded")
+  );
 }
 
 /** Local monotonic elapsed time since this revision entered the browser. */
@@ -79,6 +126,9 @@ function NoticeGuidance({ health, view }: { health: RuntimeStorageHealth; view: 
   const { t } = useTranslation();
   if (view.pressure) {
     const reason = health.failure_storage?.reason;
+    if (!reason || !PRESSURE_REASON_KEYS[reason]) {
+      return <>{t("task:storageAdvisoryPressureGuidanceUnknown")}</>;
+    }
     if (reason === "event_too_large") {
       return <>{t("task:storageAdvisoryPressureGuidanceOversized")}</>;
     }
@@ -87,6 +137,18 @@ function NoticeGuidance({ health, view }: { health: RuntimeStorageHealth; view: 
     }
     if (reason === "storage_write_failed") {
       return <>{t("task:storageAdvisoryPressureGuidanceWriteFailed")}</>;
+    }
+    if (reason === "filesystem_full" || reason === "disk_quota_exceeded") {
+      return (
+        <>
+          {t(capacityGuidanceKey(health), {
+            executor: health.failure_storage?.executor_label || view.executor,
+          })}
+        </>
+      );
+    }
+    if (reason !== "disk_space_low") {
+      return <>{t("task:storageAdvisoryPressureGuidanceUnknown")}</>;
     }
     return <>{t("task:storageAdvisoryPressureGuidance", { executor: view.executor })}</>;
   }
@@ -112,6 +174,7 @@ function NoticeDetails({ health, view }: { health: RuntimeStorageHealth; view: N
       : null;
   const reason = health.failure_storage?.reason;
   const reasonKey = reason ? PRESSURE_REASON_KEYS[reason] : undefined;
+  const usageLabel = highUsageLabel(health, view, t);
   return (
     <div
       data-testid="session-delivery-storage-details-panel"
@@ -128,6 +191,7 @@ function NoticeDetails({ health, view }: { health: RuntimeStorageHealth; view: N
       <p className="min-w-0 break-words tabular-nums">
         {[kind, free, total].filter(Boolean).join(" · ")}
       </p>
+      {usageLabel && <p className="min-w-0 break-words tabular-nums">{usageLabel}</p>}
       {view.remote && health.executor_label && (
         <p className="min-w-0 break-words">
           {t("task:storageAdvisoryExecutorLabel", { executor: health.executor_label })}
@@ -194,12 +258,11 @@ function TaskStorageNotice({ health, taskId }: StorageNoticeProps) {
   const primaryLabel = view.pressure ? pressureReasonLabel(health, t) : usageLabel;
   if (!primaryLabel) return null;
   return (
-    <div
+    <ComposerWarning
       data-testid="session-delivery-storage-notice"
       data-storage-state={health.state}
       data-pressure={view.pressure ? "true" : "false"}
       data-stale={stale ? "true" : "false"}
-      className="border-border/60 bg-amber-500/5 my-1 flex flex-col gap-1 rounded-md border px-2 py-2"
     >
       <StorageNoticeRow
         health={health}
@@ -210,7 +273,7 @@ function TaskStorageNotice({ health, taskId }: StorageNoticeProps) {
         onToggleDetails={() => setDetailsOpen((open) => !open)}
         onDismiss={dismiss}
       />
-    </div>
+    </ComposerWarning>
   );
 }
 
@@ -233,10 +296,10 @@ function StorageNoticeRow({
 }) {
   const { t } = useTranslation();
   const usageLabel = view.usage ? t("task:storageAdvisoryUsage", { usage: view.usage }) : null;
+  const showStorageSettings = shouldShowStorageSettings(health, view);
   return (
     <>
-      <div className="flex min-w-0 items-center gap-2">
-        <IconAlertTriangle className="size-4 shrink-0 text-amber-600" aria-hidden="true" />
+      <ComposerWarningRow icon={IconAlertTriangle}>
         <span className="flex min-w-0 flex-1 items-baseline gap-1 overflow-hidden text-xs">
           {stale && (
             <span className="shrink-0 font-medium">{t("task:storageAdvisoryLastReported")}:</span>
@@ -249,7 +312,7 @@ function StorageNoticeRow({
             </>
           )}
           <span className="min-w-0 font-medium break-words">{primaryLabel}</span>
-          {view.pressure && usageLabel && (
+          {view.pressure && health.failure_storage?.reason === "disk_space_low" && usageLabel && (
             <span className="text-muted-foreground hidden shrink-0 tabular-nums md:inline">
               {usageLabel}
             </span>
@@ -261,7 +324,7 @@ function StorageNoticeRow({
           )}
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-1">
-          {!view.remote && (
+          {showStorageSettings && (
             <Link
               href="/settings/system/storage"
               data-testid="session-delivery-storage-settings"
@@ -302,7 +365,7 @@ function StorageNoticeRow({
             <IconX className="size-3" aria-hidden="true" />
           </button>
         </span>
-      </div>
+      </ComposerWarningRow>
       {detailsOpen && <NoticeDetails health={health} view={view} />}
     </>
   );

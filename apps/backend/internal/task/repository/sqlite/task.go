@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
@@ -72,6 +73,7 @@ var taskScanColumns = []taskScanColumn{
 	{name: "workflow_agent_overrides"},
 	{name: "title"},
 	{name: "description"},
+	{name: "flag_note"},
 	{name: "state"},
 	{name: "priority"},
 	{name: "execution_grade"},
@@ -429,6 +431,9 @@ func (r *Repository) prepareTaskForCreate(task *models.Task) error {
 }
 
 func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task) (entryID string, err error) {
+	if err := r.validateProjectWorkspaceTx(ctx, tx, task); err != nil {
+		return "", err
+	}
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
@@ -446,9 +451,9 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		workflowAgentOverridesValue = workflowAgentOverrides
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO tasks (executor_actor_user_id, id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, execution_grade, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workflowCreator(ctx), task.ID, task.WorkspaceID, task.InitialWorkspaceLayout, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.ExecutionGrade, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
+		INSERT INTO tasks (executor_actor_user_id, id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, flag_note, state, priority, execution_grade, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflowCreator(ctx), task.ID, task.WorkspaceID, task.InitialWorkspaceLayout, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.FlagNote, task.State, task.Priority, task.ExecutionGrade, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
 	if err != nil {
 		if isExternalIDUniqueViolation(err) {
 			return "", fmt.Errorf("%w: %w", ErrExternalIDConflict, err)
@@ -488,6 +493,32 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		return "", err
 	}
 	return entryID, nil
+}
+
+func (r *Repository) validateProjectWorkspaceTx(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	expectation, ok := admission.ProjectWorkspaceValidation(ctx)
+	if !ok {
+		return nil
+	}
+	if task.ProjectID != expectation.ProjectID || task.WorkspaceID != expectation.WorkspaceID {
+		return repoerrors.ErrProjectMembershipChanged
+	}
+	query := `SELECT workspace_id FROM office_projects WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR SHARE`
+	}
+	var workspaceID string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(query), expectation.ProjectID).Scan(&workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return repoerrors.ErrProjectMembershipChanged
+	}
+	if err != nil {
+		return err
+	}
+	if workspaceID != expectation.WorkspaceID {
+		return repoerrors.ErrProjectMembershipChanged
+	}
+	return nil
 }
 
 func (r *Repository) lockWorkflowStepsForAdmission(ctx context.Context, tx *sql.Tx, targetStepID, feederStepID string) error {
@@ -1416,23 +1447,17 @@ func (r *Repository) updateTaskTx(
 	if err != nil {
 		return "", 0, err
 	}
-	var currentState v1.TaskState
-	var storedExecutionGrade string
-	stateQuery := `SELECT state, execution_grade FROM tasks WHERE id = ?`
-	if dialect.IsPostgres(r.db.DriverName()) {
-		stateQuery += forUpdateClause
-	}
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState, &storedExecutionGrade); err != nil {
+	current, err := r.readTaskCompletionMoveSourceTx(ctx, tx, task.ID, fromWorkflowID, fromStepID)
+	if err != nil {
 		return "", 0, err
 	}
 	if err := r.admitCompletionTx(ctx, tx, admission, task); err != nil {
 		return "", 0, err
 	}
 	if supplied, _ := ctx.Value(taskFieldExecutionGradeSuppliedKey{}).(bool); !supplied {
-		task.ExecutionGrade = storedExecutionGrade
+		task.ExecutionGrade = current.ExecutionGrade
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, task.ID, currentState, task.State,
-		fromWorkflowID, fromStepID, task.WorkflowID, task.WorkflowStepID); err != nil {
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, &current, task); err != nil {
 		return "", 0, err
 	}
 	metadata, err := r.preserveTaskHierarchySnapshot(ctx, tx, task)
@@ -2400,6 +2425,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		task.QueuedAt = nil
 		if admittedState != nil {
 			task.State = *admittedState
+		} else if guardBusinessState && (actualWorkflowID != task.WorkflowID || actualSourceStepID != targetStepID) {
+			if err := r.completeAutomaticStepEntryTx(ctx, tx, task); err != nil {
+				return false, false, err
+			}
 		}
 	} else {
 		task.WIPAdmitted = false
@@ -3519,9 +3548,15 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT execution_grade FROM tasks WHERE id = ?`), task.ID).Scan(&task.ExecutionGrade); err != nil {
+	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
 		return err
 	}
+	current, err := r.readTaskCompletionMoveSourceTx(ctx, tx, task.ID, fromWorkflowID, fromStepID)
+	if err != nil {
+		return err
+	}
+	task.ExecutionGrade = current.ExecutionGrade
 
 	// Always an arrival into targetStepID (the fallback promotion path used
 	// when the atomic PromoteQueuedTaskIfWorkflowStepHasCapacity is
@@ -3545,8 +3580,7 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		return wfmodels.NewWIPLimitError(targetStepID, limit, occupants)
 	}
 
-	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
-	if err != nil {
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, &current, task); err != nil {
 		return err
 	}
 	metadata, err := r.preserveTaskHierarchySnapshot(ctx, tx, task)
@@ -3697,16 +3731,12 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	if err != nil {
 		return false, err
 	}
-	var currentState v1.TaskState
-	stateQuery := `SELECT state, execution_grade FROM tasks WHERE id = ?`
-	if dialect.IsPostgres(r.db.DriverName()) {
-		stateQuery += forUpdateClause
-	}
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState, &task.ExecutionGrade); err != nil {
+	current, err := r.readTaskCompletionMoveSourceTx(ctx, tx, task.ID, fromWorkflowID, fromStepID)
+	if err != nil {
 		return false, err
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, task.ID, currentState, task.State,
-		fromWorkflowID, fromStepID, task.WorkflowID, destinationStepID); err != nil {
+	task.ExecutionGrade = current.ExecutionGrade
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, &current, task); err != nil {
 		return false, err
 	}
 	// See updateTaskTx's comment: stamped after the transactional lock, not
@@ -4930,7 +4960,7 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	var externalIDSettledAt sql.NullTime
 	err := row.Scan(
 		&task.ID, &task.WorkspaceID, &task.InitialWorkspaceLayout, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
-		&task.Title, &task.Description, &task.State, &task.Priority, &task.ExecutionGrade, &task.Position,
+		&task.Title, &task.Description, &task.FlagNote, &task.State, &task.Priority, &task.ExecutionGrade, &task.Position,
 		&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 		&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 		&task.CreatedAt, &task.UpdatedAt,
@@ -4983,7 +5013,7 @@ func (r *Repository) scanTaskRows(rows *sql.Rows, includeEntryIdentity bool) ([]
 		var externalIDSettledAt sql.NullTime
 		destinations := []interface{}{
 			&task.ID, &task.WorkspaceID, &task.InitialWorkspaceLayout, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
-			&task.Title, &task.Description, &task.State, &task.Priority, &task.ExecutionGrade, &task.Position,
+			&task.Title, &task.Description, &task.FlagNote, &task.State, &task.Priority, &task.ExecutionGrade, &task.Position,
 			&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 			&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 			&task.CreatedAt, &task.UpdatedAt,
@@ -5807,7 +5837,7 @@ func (r *Repository) updateTaskState(ctx context.Context, id string, state v1.Ta
 		}
 		return err
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, id, currentState, state, workflowID, stepID, workflowID, stepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, id, currentState, state, workflowID, stepID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`), state, r.nowUTC(), id); err != nil {
@@ -5858,8 +5888,7 @@ func (r *Repository) updateTaskStateIfWorkflowStep(
 	if stepID != expectedStepID || (expectedState != nil && currentState != *expectedState) {
 		return false, nil
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, currentState, state,
-		workflowID, stepID, workflowID, stepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, taskID, currentState, state, workflowID, stepID); err != nil {
 		return false, err
 	}
 	updateQuery := `UPDATE tasks SET state = ?, updated_at = ?
@@ -5978,7 +6007,7 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 		(requirePrimary && !currentSessionIsPrimary) {
 		return oldState, false, false, nil
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, oldState, state, workflowID, stepID, workflowID, stepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, taskID, oldState, state, workflowID, stepID); err != nil {
 		return oldState, false, false, err
 	}
 	requirePrimaryValue := 0
@@ -6139,7 +6168,7 @@ func (r *Repository) UpdateTaskStateIfCurrentIn(
 	if !taskStateInSet(currentState, allowed) {
 		return currentState, false, nil
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, id, currentState, state, workflowID, stepID, workflowID, stepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, id, currentState, state, workflowID, stepID); err != nil {
 		return currentState, false, err
 	}
 
@@ -6244,7 +6273,7 @@ func (r *Repository) tryUpdateTaskStateIfNotArchived(
 	if archivedAt.Valid {
 		return currentState, false, false, nil
 	}
-	if err := r.guardTaskCompletionTransitionTx(ctx, tx, id, currentState, state, workflowID, stepID, workflowID, stepID); err != nil {
+	if err := r.guardTaskCompletionStateTx(ctx, tx, id, currentState, state, workflowID, stepID); err != nil {
 		return currentState, false, false, err
 	}
 

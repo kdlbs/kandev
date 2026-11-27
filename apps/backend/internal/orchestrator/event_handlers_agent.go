@@ -145,7 +145,7 @@ func queueStatusEventData(status *messagequeue.QueueStatus) map[string]interface
 		"session_incarnation_id": status.SessionIncarnationID,
 		"status_epoch":           status.StatusEpoch,
 		"status_generation":      status.StatusGeneration,
-		"entries":                status.Entries,
+		"entries":                status.ProjectedEntries(),
 		"count":                  status.Count,
 		queueStatusMaxField:      status.Max,
 		"auto_run":               status.AutoRun,
@@ -640,12 +640,8 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.Error(err))
 	}
 	markerSnapshot, markerSnapshotKnown := s.interruptedMarkerSnapshotForResumeAttempt(data.SessionID, data.AttemptID)
-	// Every boot-ready callback is a recovery callback for marker purposes. A
-	// missing/finished attempt, empty attempt ID, or failed task snapshot leaves
-	// the marker snapshot unavailable and therefore fails closed in
-	// clearTaskInterruptedMarker.
-	// Ordinary sessions without a marker take the same no-op path; only an
-	// immutable marker captured for this attempt can clear the warning.
+	// The attempt snapshot still gates cleanup of recovery ownership below. Boot
+	// readiness does not resolve the task warning.
 	recoveryResolvedAt := s.markRecoveryResolvedForAttempt(
 		ctx, data.SessionID, session,
 		data.AttemptID,
@@ -4068,16 +4064,9 @@ func (s *Service) markRecoveryResolvedForAttempt(
 	}
 	if session.TaskID != "" {
 		s.dismissRecoveredAgentErrorForAttempt(ctx, session.TaskID, session, errorStamp, resolutionRecorded, resolvedAt)
-		// Boot-ready is the provider-confirmed recovery boundary. Keeping this
-		// out of the STARTING/RUNNING state funnel leaves the durable warning in
-		// place when a launch later fails or is cancelled.
-		if markerSnapshotKnown && markerSnapshot.captured {
-			s.clearTaskInterruptedMarker(ctx, session.TaskID, markerSnapshot.value)
-		}
 	}
-	// A guarded boot callback may clear recovery ownership only when it carries
-	// a valid immutable marker snapshot. A known recovery attempt whose task
-	// read failed keeps its durable settlement so a later sweep can retry it.
+	// A known recovery attempt whose task read failed keeps its durable
+	// settlement so a later sweep can retry it.
 	if !markerSnapshotKnown || markerSnapshot.captured {
 		s.clearRecoveryMetadataAfterBoot(ctx, sessionID, session)
 	}

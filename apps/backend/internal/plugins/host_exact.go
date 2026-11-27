@@ -812,13 +812,17 @@ func exactTaskUpdateErrorStatus(err error) pluginsdk.CommandStatus {
 	switch {
 	case errors.Is(err, repoerrors.ErrTaskVersionConflict),
 		errors.Is(err, repoerrors.ErrTaskOperationConflict),
-		errors.Is(err, repoerrors.ErrTaskManagementClaimConflict):
+		errors.Is(err, repoerrors.ErrTaskManagementClaimConflict),
+		errors.Is(err, repoerrors.ErrProjectMembershipChanged):
 		return pluginsdk.CommandConflict
 	case errors.Is(err, repoerrors.ErrTaskNotFound):
 		return pluginsdk.CommandNotFound
 	default:
-		if status.Code(err) == codes.InvalidArgument {
+		switch status.Code(err) {
+		case codes.InvalidArgument:
 			return pluginsdk.CommandInvalid
+		case codes.Aborted:
+			return pluginsdk.CommandConflict
 		}
 		return pluginsdk.CommandUnavailable
 	}

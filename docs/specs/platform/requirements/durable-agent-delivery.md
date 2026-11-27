@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-09-10
-updated: 2026-11-21
+updated: 2026-11-25
 owners:
   - kandev
 ---
@@ -87,8 +87,8 @@ Platform owns durable delivery between the backend and agentctl. Native harness 
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.1:** When the transport disconnects, Kandev must reconcile the original submission and stream before declaring a terminal outcome or starting another prompt.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.2:** When reconciliation cannot establish the outcome, Kandev must show an uncertain state, keep Stop available, and prevent automatic queue dispatch or tool replay.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.3:** When adoption cannot establish the active submission, Kandev must block new dispatch and replacement. Stop must remain available during reconciliation.
-- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.4:** After bounded initial reconciliation expires, later state-only reconciliation shall remain possible for the same owned submission without resend.
-- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5:** When retained evidence settles an uncertain submission, Kandev shall resolve only its matching delivery block after projection and authoritative outcome settlement. Other recovery blocks shall remain effective.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.4:** After bounded reconciliation, state-only retry shall remain possible for the same owned submission without resend. One writer failure revision shall start at most one automatic cycle per attachment.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5:** After terminal projection and authoritative settlement, Kandev shall resolve only the matching delivery block. When the current owner is idle and has no live successor, an exact settled cancellation shall correct a stale running state.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.6:** When an authenticated delivery failure has a matching current owner, recovery shall appear within ten seconds without another event or user action. This bound requires a reachable compatible agentctl and available backend storage. Reconnecting and uncertain state shall survive browser reload and backend restart. Unresolved delivery shall not appear ready for new work.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.7:** When a session has an uncertain prompt, workspace-only inspection shall remain available through an existing owned workspace execution. Cold workspace restoration may proceed when no saved execution or delivery recovery identity can be replaced. It shall not overwrite a pinned recovery source or candidate, start an agent, resend a prompt, or resolve uncertainty.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8:** When a user clicks the existing Resume action in Quick Chat or task chat, Kandev shall use explicit session recovery rather than an ordinary launch blocked by an interrupted prompt. Automatic opening and focus shall remain subject to recovery admission.

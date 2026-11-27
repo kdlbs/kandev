@@ -8,7 +8,7 @@ import { MR_PRESETS, ISSUE_PRESETS, presetLabel } from "@/components/gitlab/my-g
 import { useGitLabSearch } from "@/components/gitlab/my-gitlab/use-gitlab-search";
 import { useSavedPresets, type SavedPreset } from "@/components/gitlab/my-gitlab/use-saved-presets";
 import { useKnownProjects } from "@/components/gitlab/my-gitlab/use-known-projects";
-import { useCommittedQuery } from "@/components/gitlab/my-gitlab/use-committed-query";
+import { useCommittedQuery } from "@/hooks/use-committed-query";
 
 // Normative trim set for the milestone filter: Unicode White_Space plus
 // U+0085 (NEL), which JS's built-in String.prototype.trim() and the bare \s

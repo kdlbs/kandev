@@ -1,5 +1,6 @@
 import type { AddPanelOptions, DockviewApi } from "dockview-react";
 import { t } from "@/lib/i18n";
+import { hiddenSessionIdsFor } from "./dockview-hidden-session-panels";
 
 type StaleSessionPanel = {
   id: string;
@@ -13,6 +14,7 @@ export function ensureSessionPanel(
   inactive: boolean,
   createdSet: Set<string>,
 ): void {
+  if (hiddenSessionIdsFor(api).has(sessionId)) return;
   if (api.getPanel(`session:${sessionId}`)) {
     createdSet.add(sessionId);
     return;

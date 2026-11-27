@@ -101,21 +101,80 @@ test("shows a live 90% advisory above the composer and clears below 85%", async 
 
   notify?.({
     ...base,
+    state: "normal",
+    available_bytes: 500_000_000,
+    pressure_observed_at: new Date().toISOString(),
+    pressure_age_seconds: 0,
+    write_pressure: true,
+    delivery_state: "delivery_failed",
+    revision: 3,
+  });
+  await expect(notice).toContainText("Delivery is blocked");
+  await expect(notice).not.toContainText("Disk 50% used");
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "Kandev could not determine the cause",
+  );
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "session recovery",
+  );
+
+  notify?.({
+    ...base,
+    state: "warning",
+    available_bytes: 50_000_000,
+    pressure_observed_at: new Date().toISOString(),
+    pressure_age_seconds: 0,
+    write_pressure: true,
+    delivery_state: "delivery_failed",
+    failure_storage: { reason: "stream_limit_reached", location: "local_runtime" },
+    revision: 4,
+  });
+  await expect(notice).toContainText("Delivery is blocked: stream limit reached");
+  await expect(notice.locator(".flex.min-w-0.items-baseline")).not.toContainText("95% used");
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "High disk usage: 95% used",
+  );
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "Inspect retained output and delivery progress before resuming.",
+  );
+
+  notify?.({
+    ...base,
     state: "warning",
     available_bytes: 100_000_000,
     pressure_observed_at: new Date().toISOString(),
     pressure_age_seconds: 0,
-    revision: 3,
+    write_pressure: true,
+    delivery_state: "delivery_failed",
+    failure_storage: { reason: "stream_limit_reached", location: "local_runtime" },
+    revision: 5,
   });
   await expect(notice).toHaveCount(1);
-  await expect(notice).toContainText("Disk 90% used");
-  await expect(notice).not.toContainText("Delivery is blocked");
+  await expect(notice).toContainText("Delivery is blocked: stream limit reached");
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "High disk usage: 90% used",
+  );
   await expect(editor).toHaveText("Keep this draft while storage guidance changes");
 
-  notify?.({ ...base, state: "warning", available_bytes: 120_000_000, revision: 4 });
+  notify?.({
+    ...base,
+    state: "warning",
+    available_bytes: 120_000_000,
+    pressure_observed_at: new Date().toISOString(),
+    pressure_age_seconds: 0,
+    write_pressure: true,
+    delivery_state: "delivery_failed",
+    failure_storage: { reason: "stream_limit_reached", location: "local_runtime" },
+    revision: 6,
+  });
   await expect(notice).toHaveCount(1);
-  notify?.({ ...base, state: "normal", available_bytes: 200_000_000, revision: 5 });
+  await expect(testPage.getByTestId("session-delivery-storage-details-panel")).toContainText(
+    "High disk usage: 88% used",
+  );
+  await expect(testPage.getByTestId("session-delivery-storage-settings")).toHaveCount(1);
+  notify?.({ ...base, state: "normal", available_bytes: 200_000_000, revision: 7 });
   await expect(notice).toHaveCount(0);
+  await expect(testPage.getByTestId("session-delivery-storage-settings")).toHaveCount(0);
 
   notify?.({
     ...base,
@@ -129,18 +188,18 @@ test("shows a live 90% advisory above the composer and clears below 85%", async 
       location: "local_runtime",
       observed_at: new Date().toISOString(),
     },
-    revision: 6,
+    revision: 8,
   });
   await expect(notice).toHaveCount(1);
   await expect(notice).toContainText("Delivery is blocked: storage quota exhausted");
   await expect(notice).not.toContainText("Work continues");
-  notify?.({ ...base, state: "normal", available_bytes: 500_000_000, revision: 7 });
+  notify?.({ ...base, state: "normal", available_bytes: 500_000_000, revision: 9 });
   await expect(notice).toHaveCount(0);
   await expect(testPage.getByTestId("chat-input-area")).toBeVisible();
 
   await testPage.reload();
   await expect(testPage.getByTestId("chat-input-area")).toBeVisible();
   await expect(notice).toHaveCount(0);
-  notify?.({ ...base, state: "normal", available_bytes: 500_000_000, revision: 8 });
+  notify?.({ ...base, state: "normal", available_bytes: 500_000_000, revision: 10 });
   await expect(notice).toHaveCount(0);
 });

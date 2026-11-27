@@ -65,8 +65,10 @@ test.describe("Create task dependency selector on mobile", () => {
     expect(settingRowBox).not.toBeNull();
     expect(settingLabelBox).not.toBeNull();
     expect(selectorContainerBox).not.toBeNull();
-    expect(selectorContainerBox!.x).toBeGreaterThan(settingLabelBox!.x + settingLabelBox!.width);
-    expect(Math.abs(selectorContainerBox!.y - settingLabelBox!.y)).toBeLessThanOrEqual(4);
+    expect(selectorContainerBox!.x).toBeCloseTo(settingLabelBox!.x, 0);
+    expect(selectorContainerBox!.y).toBeGreaterThanOrEqual(
+      settingLabelBox!.y + settingLabelBox!.height,
+    );
     const settingInfo = dialog.getByTestId("task-create-dependency-setting-info");
     const settingInfoBox = await settingInfo.boundingBox();
     expect(settingInfoBox).not.toBeNull();

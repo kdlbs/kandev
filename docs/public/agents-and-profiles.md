@@ -58,9 +58,28 @@ Hermes launches with `hermes acp`. Install the required `hermes` executable from
 
 Goose launches with `goose acp`. Its **Settings > Agents** card runs only the official `download_cli.sh` installer. Homebrew (`block-goose-cli`) and pip (`pip install goose-ai`) are manual alternatives. Configure your model provider with `goose configure`. Goose currently supports task and workspace sessions.
 
-For local and worktree executors, Kandev selects a compatible `agy` CLI when it is available. The CLI must support ACP through `agy acp` (version 1.5.0 or later). Google owns CLI installation and updates; use the [Antigravity CLI setup guide](https://antigravity.google/docs/cli). The CLI uses its own Google sign-in. In **Settings > Agents**, choose **Sign in** to run `agy acp --login` on the Kandev host. This sign-in is separate from the standalone server's credentials.
+For local and worktree executors, Kandev selects a compatible `agy` CLI when it is available. The CLI must support ACP through `agy acp` at version 1.5.0 or later. Its `agy acp --help` output must advertise `--process-per-session`. Kandev adds this flag to each local CLI launch so HTTP MCP support does not depend on profile edits. Google owns CLI installation and updates; use the [Antigravity CLI setup guide](https://antigravity.google/docs/cli). The CLI uses its own Google sign-in. In **Settings > Agents**, choose **Sign in** to run `agy acp --login` on the Kandev host. This sign-in is separate from the standalone server's credentials.
 
 When a compatible CLI is unavailable, Kandev uses the standalone ACP server. The **Settings > Agents > Browse** install action provisions the pinned `agy_acp_server.par` (`agy_acp_server.exe` on Windows) and its `localharness_external` or `localharness` sibling (`localharness_external.exe` or `localharness.exe` on Windows). Both files must be executable and stay in the same directory. The standalone server has its own Google sign-in and credential store. Its consent flow opens a browser on the Kandev host. Remote and container executors use their own standalone runtime and sign-in.
+
+## ACP v2 preview
+
+Enable **ACP v2 preview** in **Settings > System > Feature Toggles**, then
+restart Kandev. You can also set `KANDEV_FEATURES_ACP_V2=true` in the process
+environment. The preview starts off in all shipped profiles.
+
+The preview covers structured task chat on local and worktree executors.
+Use a managed Claude ACP 0.109.0 or 0.109.1 bridge, or a managed Codex ACP
+2.8.0 or 2.9.0 bridge. Sign in locally or configure the provider's API key.
+
+To return to ACP v1, disable **ACP v2 preview** in Feature Toggles and restart
+Kandev. If the environment locks the toggle, set `KANDEV_FEATURES_ACP_V2` to
+`false` and restart Kandev. If you remove the variable, restart Kandev to unlock
+the toggle. Disable any saved opt-in and restart again.
+
+If an ACP v2 process survives the restart, you can read its history, answer
+pending requests, and stop it. Reconnect the session to send new prompts over v1.
+Kandev reports a restore error if the agent cannot reopen the saved conversation.
 
 ## Codex app-server (experimental)
 
@@ -81,6 +100,7 @@ Agents that report background shell commands, subagents, or monitors feed the sh
 Provider support differs, and Kandev shows only what the connected runtime verifies:
 
 - **Claude ACP and native Codex** report job lifecycle and, for native Codex, supported job actions. Explicit controls appear only for an advertised capability.
+- **Codex ACP 2.8.0 and 2.9.0 with ACP v2 preview** report detached terminals and child sessions from live background snapshots when **Agent background work** is also enabled. Kandev retains available terminal output and exit status. This ACP adapter does not expose workload controls.
 - **OpenCode ACP** reports a detached shell launch with its native shell identity. With the optional integration plugin enabled on a supported OpenCode v2 2.2.0 runtime, Kandev can settle that job when the native shell exits. Without the plugin, or on any other runtime, the job stays inspectable and its later activity remains unknown. Neither path provides live output or process controls, and the original launch banner stays in the tool message.
 - **Other ACP agents** keep their existing behavior when they do not report background lifecycle.
 
@@ -397,6 +417,12 @@ Open **Command Preview** to review the command for the selected version.
 OpenCode has two runtime families. Fresh Kandev installations use the managed
 v2 package `@opencode/cli`. Kandev keeps an existing v1 selection on
 `opencode-ai` until you choose the v2 migration action.
+
+If a configured, managed OpenCode runtime is missing and you have agent
+management permission, open **Settings > Agents** and select **Reinstall** on
+its card. This opens **Install agents** with OpenCode first. Select **Install**
+to prepare the selected package and version. If installation fails, select
+**Retry** on the OpenCode card.
 
 #### Move OpenCode from v1 to v2
 
@@ -1088,6 +1114,10 @@ The field is not a shell script. Pipes, redirects, variable expansion, and comma
 
 Claude CLI passthrough uses standard output by default. Add an enabled `--verbose` entry to the profile CLI flags when you need diagnostic output.
 
+For Copilot, enable **Long context** in **CLI Flags** to pass `--context long_context` at launch. This option is off by default. To use long context for a new session, select a profile with the flag enabled and a model that supports it. Copilot controls the effective window and billing. Larger windows can use more AI credits. See [GitHub's supported Copilot models](https://docs.github.com/en/copilot/reference/ai-models/supported-models#models-with-extended-capabilities).
+
+For Antigravity, **Skip Antigravity CLI tool prompts** adds `--dangerously-skip-permissions` to a supported `agy acp` launch. It is off by default. When applied, Antigravity automatically approves all tool requests. Kandev applies it only when the selected CLI advertises the flag and the session policy allows blanket approval; standalone, coordinator, and managed-tool sessions keep their normal permission flow. This is separate from Kandev's **Auto-approve all permissions** setting.
+
 Some older profiles contain compatibility fields such as Auggie's `allow_indexing`; current launch behavior is represented by the active profile settings and flags.
 
 ### Command prefixes
@@ -1161,7 +1191,11 @@ In a structured ACP session, the agent can present a permission request and its 
 
 If an automatic decision fails before dispatch while the request is still answerable, Kandev exposes the request for a person. After a decision is dispatched, a failed or uncertain outcome shows non-actionable feedback instead of a second answer.
 
-Claude ACP also has a narrower built-in rule. When the agent uses the host-injected `kandev` MCP server, Kandev automatically selects an offered allow-once response, or allow-always when allow-once is not offered, even when **Auto-approve all permissions** is disabled. This covers every tool on that server, including task creation, task deletion, and plan changes. It is not a saved approval decision and is recreated for each task or Quick Chat session. Kandev still enforces MCP authentication, task and session authorization, user-question barriers, and workflow gates. Shell commands, file operations, third-party tools, and ambiguous requests keep the normal permission flow.
+Claude ACP and the Antigravity CLI have a narrower approval rule for the host-injected `kandev` MCP server. Kandev selects an offered allow-once response, or allow-always when allow-once is not offered, even when **Auto-approve all permissions** is disabled.
+
+For Antigravity, the typed `mcp_kandev_<tool>` name must match one tool in the live Kandev Core catalog. Kandev checks the CLI's global, workspace, and plugin MCP settings for another server that could produce the same name. A possible collision keeps the request in the normal permission flow. If the permission request omits its name, Kandev uses a tool notification only when its session and tool-call IDs match. This rule applies to Antigravity CLI sessions, not the standalone ACP server. See Google's [MCP configuration](https://antigravity.google/docs/mcp#global-and-workspace-server-configs) and [plugin naming](https://antigravity.google/docs/build-plugins) documentation.
+
+This rule is not a saved approval decision and is recreated for each task or Quick Chat session. Kandev still enforces MCP authentication, task and session authorization, user-question barriers, and workflow gates. Shell commands, file operations, third-party tools, ambiguous requests, and native Antigravity questions keep the normal permission flow.
 
 An external MCP client can also list live pending requests for an authorized task and submit one
 exact option originally offered by the agent. The request-generation ID prevents an old approval

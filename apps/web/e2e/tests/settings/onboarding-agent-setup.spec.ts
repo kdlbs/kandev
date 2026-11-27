@@ -6,30 +6,83 @@ import {
 } from "../../helpers/profile-capability-discovery";
 
 test.describe("Onboarding agent setup", () => {
+  test("opens the install catalog from a first run with no installed agents", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await testPage.route("**/api/v1/agents/available", async (route) => {
+      try {
+        const requestHeaders = route.request().headers();
+        const response = await fetch(route.request().url(), {
+          headers: {
+            ...(requestHeaders.accept ? { accept: requestHeaders.accept } : {}),
+            ...(requestHeaders.cookie ? { cookie: requestHeaders.cookie } : {}),
+          },
+        });
+        const payload = (await response.json()) as { agents: object[] };
+        await route.fulfill({
+          status: response.status,
+          contentType: "application/json",
+          json: {
+            ...payload,
+            agents: payload.agents.map((agent: object) => ({ ...agent, available: false })),
+          },
+        });
+      } catch {
+        await route.abort().catch(() => {});
+      }
+    });
+    await testPage.addInitScript(() => localStorage.removeItem("kandev.onboarding.completed"));
+    await testPage.goto("/");
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "AI Agents" })).toBeVisible();
+    const install = dialog.getByRole("link", { name: "Install agents" });
+    await expect(install).toBeInViewport();
+    await prCapture.screenshot("empty-agent-step");
+    await install.click();
+    await expect(testPage.getByRole("heading", { name: "Browse available agents" })).toBeVisible();
+    await expect(testPage.getByTestId("install-button-mock-agent")).toBeEnabled();
+    await expect(dialog).toHaveCount(0);
+    expect(
+      await testPage.evaluate(() => localStorage.getItem("kandev.onboarding.completed")),
+    ).toBeNull();
+  });
+
   // @covers AC-AGENTS-FIRST-RUN-SETUP-001.5
   test("bounds a long agent catalog on tall and short viewports while navigation stays fixed", async ({
     testPage,
   }) => {
     await testPage.setViewportSize({ width: 1280, height: 1200 });
     await testPage.route("**/api/v1/agents/available", async (route) => {
-      const response = await route.fetch();
-      const payload = await response.json();
-      const mock = payload.agents.find((agent: { name: string }) => agent.name === "mock-agent");
-      expect(mock).toBeTruthy();
-      await route.fulfill({
-        response,
-        json: {
-          ...payload,
-          agents: [
-            mock,
-            ...Array.from({ length: 20 }, (_, i) => ({
-              ...mock,
-              name: `catalog-agent-${i}`,
-              display_name: `Catalog agent ${i + 1}`,
-            })),
-          ],
-        },
-      });
+      try {
+        const requestHeaders = route.request().headers();
+        const response = await fetch(route.request().url(), {
+          headers: {
+            ...(requestHeaders.accept ? { accept: requestHeaders.accept } : {}),
+            ...(requestHeaders.cookie ? { cookie: requestHeaders.cookie } : {}),
+          },
+        });
+        const payload = (await response.json()) as { agents: { name: string }[] };
+        const mock = payload.agents.find((agent: { name: string }) => agent.name === "mock-agent");
+        expect(mock).toBeTruthy();
+        await route.fulfill({
+          status: response.status,
+          contentType: "application/json",
+          json: {
+            ...payload,
+            agents: [
+              mock,
+              ...Array.from({ length: 20 }, (_, i) => ({
+                ...mock,
+                name: `catalog-agent-${i}`,
+                display_name: `Catalog agent ${i + 1}`,
+              })),
+            ],
+          },
+        });
+      } catch {
+        await route.abort().catch(() => {});
+      }
     });
     await testPage.addInitScript(() => localStorage.removeItem("kandev.onboarding.completed"));
     await testPage.goto("/");

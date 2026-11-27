@@ -655,7 +655,7 @@ describe("applyCustomLayout — persistence at call site", () => {
     expect(setEnvLayout).not.toHaveBeenCalled();
   });
 
-  it("skips persistence while maximized", async () => {
+  it("clears maximize state and persists when applying a custom layout", async () => {
     const api = makeStoreApi();
     type StoreState = ReturnType<typeof useDockviewStore.getState>;
     useDockviewStore.setState({
@@ -667,7 +667,9 @@ describe("applyCustomLayout — persistence at call site", () => {
     useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
     await flushRaf();
 
-    expect(setEnvLayout).not.toHaveBeenCalled();
+    expect(useDockviewStore.getState().preMaximizeLayout).toBeNull();
+    expect(setEnvLayout).toHaveBeenCalledTimes(1);
+    expect(setEnvLayout).toHaveBeenCalledWith("env-maxed-custom", expect.any(Object));
   });
 
   it("does not persist if the env changes between scheduling and rAF", async () => {

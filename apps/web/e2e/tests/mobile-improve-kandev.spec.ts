@@ -89,8 +89,14 @@ test.describe("Improve Kandev on mobile", () => {
     const retry = createDialog.getByTestId("improve-kandev-retry");
     await expect(retry).toBeVisible({ timeout: 10_000 });
     expect((await retry.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-    await expect(createDialog.getByText("Temporary bootstrap failure")).toBeVisible();
-    await expect(testPage.getByText("Could not prepare Improve Kandev")).toBeHidden();
+    await expect(
+      createDialog.getByTestId("task-create-form-body").getByText("Temporary bootstrap failure"),
+    ).toBeVisible();
+    await expect(
+      createDialog
+        .getByTestId("toast-message")
+        .filter({ hasText: "Could not prepare Improve Kandev" }),
+    ).toBeVisible();
     await prCapture.screenshot("phone-bootstrap-retry", {
       caption: "Phone Improve Kandev form with its draft preserved and touch-sized inline Retry",
     });

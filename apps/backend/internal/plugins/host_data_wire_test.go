@@ -300,19 +300,22 @@ func TestPluginHostData_Wire_Messages(t *testing.T) {
 // api_write:tasks (but not messages) can create/update tasks over the wire, and
 // its undeclared message send is denied with the exact wire message on the
 // same connection.
+// @covers AC-PLUGINS-PLUGINS-001.17, AC-PLUGINS-PLUGINS-001.19
 func TestPluginHostData_Wire_Writes(t *testing.T) {
 	t.Run("TasksCreateUpdateSucceed_MessageDenied", func(t *testing.T) {
 		d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
-		d.taskWriter.created = &taskmodels.Task{ID: "task-new", WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate"}
+		d.taskWriter.created = &taskmodels.Task{ID: "task-new", WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate", ProjectID: "project-1"}
 		d.taskWriter.updated = &taskmodels.Task{ID: "task-1", Title: "Renamed"}
 		host := dialPluginHostOverWire(t, d.host)
 
 		created, err := host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
-			WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate", StartAgent: true,
+			WorkspaceID: "ws-1", WorkflowID: "wf-1", ProjectID: stringPointer("project-1"), Title: "Investigate", StartAgent: true,
 		})
 		require.NoError(t, err)
 		require.Equal(t, "task-new", created.ID)
 		require.Equal(t, "plugin:p1", d.taskWriter.lastCreate.Source)
+		require.Equal(t, "project-1", d.taskWriter.lastCreate.ProjectID)
+		require.Equal(t, "project-1", created.ProjectID)
 		require.Equal(t, 1, d.starter.calls, "start_agent should reach the wired starter")
 
 		title := "Renamed"
@@ -327,6 +330,20 @@ func TestPluginHostData_Wire_Writes(t *testing.T) {
 		require.True(t, ok, "expected a gRPC status error, got %v", err)
 		require.Equal(t, codes.PermissionDenied, st.Code())
 		require.Equal(t, "capability 'api_write:messages' not declared", st.Message())
+	})
+
+	t.Run("TaskCreateRejectsExplicitEmptyProjectID", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+		host := dialPluginHostOverWire(t, d.host)
+		_, err := host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+			WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Invalid project", ProjectID: stringPointer(""),
+			Repositories: []pluginsdk.PluginTaskRepository{{RepositoryID: "repo-explicit"}},
+		})
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		require.Equal(t, codes.InvalidArgument, st.Code())
+		require.Equal(t, 0, d.taskWriter.createCalls)
 	})
 
 	t.Run("SendMessageSucceeds", func(t *testing.T) {

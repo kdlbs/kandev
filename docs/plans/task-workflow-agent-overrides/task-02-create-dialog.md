@@ -31,6 +31,11 @@ system_design:
 Expose grouped replacements inside Advanced settings. Prove the complete task
 lifecycle on desktop and phone, then document the feature.
 
+The advanced settings refresh aligns labels and bordered selectors, shows each
+source profile in its default picker, and offers a row-level restore action.
+Desktop uses aligned rows. Phone uses stacked fields and a searchable drawer.
+The existing desktop and phone override scenarios verify selection and reset.
+
 ## In scope
 
 - Extend shared form state, types, payload construction, and retry paths.

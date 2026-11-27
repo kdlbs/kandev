@@ -63,6 +63,28 @@ beforeEach(() => {
   mocks.listTaskSessions.mockResolvedValue({ sessions: [], total: 0 });
 });
 
+describe("current membership shell selection", () => {
+  it.each([undefined, "removed", "completed"])(
+    "uses membership primary after stale task identity, preserving explicit selection %s",
+    (requestedSessionId) => {
+      const identity: TaskNavigationIdentity = {
+        task: { ...makeTask(), primary_session_id: sessionId("removed") },
+        allSessionsResponse: {
+          sessions: [
+            { ...makeSession(), id: sessionId("completed"), state: "COMPLETED", is_primary: false },
+            { ...makeSession(), is_primary: true },
+          ],
+          total: 2,
+        },
+      };
+      const shell = buildTaskNavigationShellData(identity, requestedSessionId);
+      expect(shell.initialState.tasks?.activeSessionId).toBe(
+        requestedSessionId === "completed" ? "completed" : SESSION_ID,
+      );
+    },
+  );
+});
+
 describe("sessionless navigation enrichment", () => {
   it.each([
     ["before resolution", true],

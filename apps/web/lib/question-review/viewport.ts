@@ -10,6 +10,15 @@ export const ZOOM_STEPS = [0.25, 0.5, 1, 2, 4, 8] as const;
 const EPSILON = 1e-6;
 
 /** Zooming out stops at Fit when Fit is below the 25% manual minimum. */
+/**
+ * The size of the area two compared images share, or zero until both are
+ * measured, so nothing sized from it acts on one image alone.
+ */
+export function measuredPairSize(a: Size | undefined, b: Size | undefined): Size {
+  if (!a?.width || !a.height || !b?.width || !b.height) return { width: 0, height: 0 };
+  return { width: Math.max(a.width, b.width), height: Math.max(a.height, b.height) };
+}
+
 export function minScaleFor(fitScale: number): number {
   return fitScale > 0 ? Math.min(MIN_SCALE, fitScale) : MIN_SCALE;
 }

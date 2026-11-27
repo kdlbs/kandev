@@ -1,7 +1,8 @@
 import { compareVersions, validateRecord } from "./plugin-sdk.mjs";
-import { packageName } from "./sdk-registry.mjs";
+import { isTransientRegistryError, packageName } from "./sdk-registry.mjs";
+import { isDefiniteUploadRejection } from "./sdk-upload-attempts.mjs";
 
-export const REGISTRY_OBSERVATION_WINDOW_MS = 300_000;
+export const REGISTRY_OBSERVATION_WINDOW_MS = 600_000;
 export const REGISTRY_VALUE_LIMIT = 128;
 const REGISTRY_PROBE_WAITS_MS = [10_000, 20_000, 30_000];
 
@@ -57,11 +58,53 @@ function verifyRegistry(registry, candidate, source) {
   )
     throw new Error("npm version integrity or record conflict");
 }
+export function verifyPublicationRegistry(registry, candidate, source) {
+  verifyRegistry(registry, candidate, source);
+  return registry;
+}
 async function readState(io, context) {
   const tag = await io.readTag(context.source);
   const registry = await io.readRegistry(context.source.record.sdk_version);
   verifyTag(tag, context);
   return { tag, registry };
+}
+
+export async function loadPublicationCandidate(io, context) {
+  validateContext(context);
+  const { source } = context;
+  io.diagnostics?.start("source_verification");
+  const tag = await io.readTag(source);
+  verifyTag(tag, context);
+  if (!tag)
+    throw new Error("signed SDK tag is missing; run SDK preparation first");
+  io.diagnostics?.phase("source_verification", "passed", {
+    source_commit: source.commit,
+    host_tag: source.hostTag,
+  });
+  io.diagnostics?.start("candidate_verification");
+  const candidate = await io.obtainCandidate(source, {
+    allowCreate: false,
+    bootstrapAllowed: false,
+  });
+  verifyCandidate(candidate, context);
+  await io.verifyFinalizedCandidate(candidate, source);
+  io.diagnostics?.phase("candidate_verification", "passed", {
+    integrity: candidate.integrity,
+  });
+  return { tag, candidate };
+}
+
+export async function loadPublicationEvidence(
+  io,
+  context,
+  initialRegistry = undefined,
+) {
+  const { tag, candidate } = await loadPublicationCandidate(io, context);
+  const { source } = context;
+  const registry =
+    initialRegistry ?? (await io.readRegistry(source.record.sdk_version));
+  verifyPublicationRegistry(registry, candidate, source);
+  return { tag, registry, candidate };
 }
 async function observe(io, read, valid, label, writeError) {
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -80,13 +123,20 @@ function probeWait(attempt) {
   ];
 }
 
-function isDefiniteAuthenticationRejection(error) {
+export function isDefiniteAuthenticationRejection(error) {
   const output = [error?.npmCode, error?.code, error?.stderr, error?.message]
     .filter((value) => typeof value === "string")
     .join("\n");
   return /\b(?:ENEEDAUTH|E401|E403)\b|unauthorized|authentication|permission denied|forbidden/i.test(
     output,
   );
+}
+
+function uploadHistoryError(message) {
+  const error = new Error(message);
+  error.code = "SDK_UPLOAD_HISTORY_UNRESOLVED";
+  error.category = "upload_history";
+  return error;
 }
 
 function describeRegistryState(state) {
@@ -131,13 +181,39 @@ async function observeRegistry(
   valid,
   { label, phase, version, describe = () => ({}) },
   writeError,
+  definiteRejection = isDefiniteAuthenticationRejection,
 ) {
   const started = io.now();
   const deadline = started + REGISTRY_OBSERVATION_WINDOW_MS;
   let attempt = 0;
   for (;;) {
-    if (attempt > 0 && io.now() >= deadline) break;
-    const value = await read();
+    let value;
+    try {
+      value = await read();
+    } catch (error) {
+      attempt += 1;
+      const now = io.now();
+      const authenticationReconciliationComplete =
+        writeError && attempt === 1 && definiteRejection(writeError);
+      const nextWait =
+        isTransientRegistryError(error) &&
+        !authenticationReconciliationComplete &&
+        now < deadline
+          ? Math.min(probeWait(attempt - 1), deadline - now)
+          : 0;
+      reportObservation(io, {
+        phase,
+        version,
+        attempt,
+        elapsed_ms: Math.round(now - started),
+        next_wait_ms: nextWait,
+        visible: false,
+        read_error: true,
+      });
+      if (nextWait <= 0) throw error;
+      await io.registryWait(nextWait);
+      continue;
+    }
     attempt += 1;
     if (valid(value)) {
       reportObservation(io, {
@@ -151,20 +227,13 @@ async function observeRegistry(
       });
       return value;
     }
-    if (
-      writeError &&
-      attempt === 1 &&
-      isDefiniteAuthenticationRejection(writeError)
-    ) {
-      writeError.phase = phase;
-      writeError.operation =
-        phase === "channel_promotion" ? "dist-tag" : "upload";
-      throw writeError;
-    }
     const now = io.now();
-    const remaining = deadline - now;
+    const authenticationReconciliationComplete =
+      writeError && attempt === 1 && definiteRejection(writeError);
     const nextWait =
-      remaining > 0 ? Math.min(probeWait(attempt - 1), remaining) : 0;
+      !authenticationReconciliationComplete && now < deadline
+        ? Math.min(probeWait(attempt - 1), deadline - now)
+        : 0;
     reportObservation(io, {
       phase,
       version,
@@ -174,10 +243,57 @@ async function observeRegistry(
       visible: false,
       ...describe(value),
     });
+    if (authenticationReconciliationComplete) {
+      writeError.phase = phase;
+      writeError.operation =
+        phase === "channel_promotion" ? "dist-tag" : "upload";
+      throw writeError;
+    }
     if (nextWait <= 0) break;
     await io.registryWait(nextWait);
   }
   throw visibilityTimeoutError(label, writeError, phase);
+}
+
+export async function readRegistryWithRetry(io, version) {
+  const started = io.now();
+  const deadline = started + REGISTRY_OBSERVATION_WINDOW_MS;
+  let attempt = 0;
+  for (;;) {
+    try {
+      const state = await io.readRegistry(version);
+      attempt += 1;
+      reportObservation(io, {
+        phase: "version_visibility",
+        version,
+        attempt,
+        elapsed_ms: Math.round(io.now() - started),
+        next_wait_ms: 0,
+        visible: Boolean(state.version),
+        read_error: false,
+        ...describeRegistryState(state),
+      });
+      return state;
+    } catch (error) {
+      attempt += 1;
+      const now = io.now();
+      const nextWait =
+        isTransientRegistryError(error) && now < deadline
+          ? Math.min(probeWait(attempt - 1), deadline - now)
+          : 0;
+      reportObservation(io, {
+        phase: "version_visibility",
+        version,
+        attempt,
+        elapsed_ms: Math.round(now - started),
+        next_wait_ms: nextWait,
+        visible: false,
+        read_error: true,
+      });
+      if (nextWait <= 0) throw error;
+      await io.registryWait(nextWait);
+    }
+  }
 }
 
 export async function preparePublication(io, context) {
@@ -269,7 +385,8 @@ async function ensureLatest(io, context) {
       },
       writeError,
     );
-    if (registry.latest !== version) await io.verifyNewerLatest(registry.latest);
+    if (registry.latest !== version)
+      await io.verifyNewerLatest(registry.latest);
     io.diagnostics?.phase("channel_promotion", "passed", {
       observed_latest: boundedRegistryValue(registry.latest),
     });
@@ -281,30 +398,31 @@ async function ensureLatest(io, context) {
 }
 
 export async function publishPublication(io, context) {
-  validateContext(context);
   const { source } = context;
-  io.diagnostics?.start("source_verification");
-  let { tag, registry } = await readState(io, context);
-  if (!tag)
-    throw new Error("signed SDK tag is missing; run SDK preparation first");
-  io.diagnostics?.phase("source_verification", "passed", {
-    source_commit: source.commit,
-    host_tag: source.hostTag,
-  });
-  io.diagnostics?.start("candidate_verification");
-  const candidate = await io.obtainCandidate(source, {
-    allowCreate: false,
-    bootstrapAllowed: false,
-  });
-  verifyCandidate(candidate, context);
-  verifyRegistry(registry, candidate, source);
-  await io.verifyFinalizedCandidate(candidate, source);
-  io.diagnostics?.phase("candidate_verification", "passed", {
-    integrity: candidate.integrity,
-  });
+  const evidence =
+    context.initialEvidence ??
+    (await loadPublicationEvidence(io, context, context.initialRegistry));
+  let { registry } = evidence;
+  const { candidate } = evidence;
   let uploaded = false;
+  const uploadAttempt = context.uploadAttempt ?? null;
+  if (uploadAttempt) {
+    io.diagnostics?.setUploadAttempt?.(uploadAttempt);
+    if (["accepted", "uncertain"].includes(uploadAttempt.outcome)) {
+      io.diagnostics?.setWriteOutcome(uploadAttempt.outcome);
+      uploaded = true;
+    } else if (uploadAttempt.outcome === "already_public") {
+      io.diagnostics?.setWriteOutcome(uploadAttempt.outcome);
+    } else if (uploadAttempt.outcome === "rejected") {
+      io.diagnostics?.setWriteOutcome("rejected");
+    }
+  }
   if (!registry.version) {
-    if (!registry.packageExists && !context.firstPublishOIDCReady) {
+    if (
+      !registry.packageExists &&
+      !context.firstPublishOIDCReady &&
+      !uploadAttempt
+    ) {
       if (!candidate.receipt.bootstrap_allowed)
         throw new Error("absent package is not an approved initial bootstrap");
       io.diagnostics?.phase("npm_upload", "skipped", {
@@ -313,49 +431,115 @@ export async function publishPublication(io, context) {
       io.diagnostics?.setPublication("not_attempted");
       return { status: "bootstrap_required", candidate, source };
     }
-    io.diagnostics?.start("npm_upload");
-    let writeError;
-    try {
-      await io.publish(candidate);
-      io.diagnostics?.setWriteOutcome("accepted");
-      io.diagnostics?.phase("npm_upload", "passed", {
-        write_outcome: "accepted",
-      });
-    } catch (error) {
-      writeError = error;
-      const rejected = isDefiniteAuthenticationRejection(error);
-      const outcome = rejected ? "rejected" : "uncertain";
-      io.diagnostics?.setWriteOutcome(outcome);
-      if (rejected)
-        io.diagnostics?.phase("npm_upload", "failed", {
-          write_outcome: outcome,
+    if (uploadAttempt) {
+      if (
+        ["accepted", "uncertain", "already_public"].includes(
+          uploadAttempt.outcome,
+        )
+      ) {
+        if (uploadAttempt.outcome === "already_public") {
+          io.diagnostics?.phase("npm_upload", "skipped", {
+            reason: "resume_already_public_result",
+          });
+        } else {
+          io.diagnostics?.start("npm_upload");
+          io.diagnostics?.phase("npm_upload", "passed", {
+            write_outcome: uploadAttempt.outcome,
+            resumed: true,
+          });
+        }
+        io.diagnostics?.start("version_visibility");
+        const writeError =
+          uploadAttempt.outcome === "uncertain"
+            ? new Error("recorded SDK upload outcome is uncertain")
+            : undefined;
+        registry = await observeRegistry(
+          io,
+          () => io.readRegistry(source.record.sdk_version),
+          (value) => {
+            verifyRegistry(value, candidate, source);
+            return value.version !== null;
+          },
+          {
+            label: "npm publication",
+            phase: "version_visibility",
+            version: source.record.sdk_version,
+            describe: describeRegistryState,
+          },
+          writeError,
+        );
+        io.diagnostics?.phase("version_visibility", "passed", {
+          observed_version: boundedRegistryValue(registry.version?.version),
+          observed_latest: boundedRegistryValue(registry.latest),
         });
+        io.diagnostics?.setPublication("confirmed");
+      } else if (uploadAttempt.outcome === "rejected") {
+        io.diagnostics?.start("npm_upload");
+        io.diagnostics?.phase("npm_upload", "failed", {
+          write_outcome: "rejected",
+          resumed: true,
+        });
+        const error = new Error(
+          "SDK upload was rejected by npm; repair the publisher and backfill this signed release.",
+        );
+        error.code = "SDK_UPLOAD_REJECTED";
+        error.category = "npm_authentication";
+        throw error;
+      } else {
+        throw uploadHistoryError(
+          "SDK upload history does not authorize a completion or a new upload.",
+        );
+      }
+    } else if (context.noFreshUpload) {
+      throw uploadHistoryError(
+        "SDK upload history is missing for the absent signed version.",
+      );
+    } else {
+      io.diagnostics?.start("npm_upload");
+      let writeError;
+      try {
+        await io.publish(candidate);
+        io.diagnostics?.setWriteOutcome("accepted");
+        io.diagnostics?.phase("npm_upload", "passed", {
+          write_outcome: "accepted",
+        });
+      } catch (error) {
+        writeError = error;
+        const rejected = isDefiniteUploadRejection(error);
+        const outcome = rejected ? "rejected" : "uncertain";
+        io.diagnostics?.setWriteOutcome(outcome);
+        if (rejected)
+          io.diagnostics?.phase("npm_upload", "failed", {
+            write_outcome: outcome,
+          });
+      }
+      io.diagnostics?.start("version_visibility");
+      registry = await observeRegistry(
+        io,
+        () => io.readRegistry(source.record.sdk_version),
+        (value) => {
+          verifyRegistry(value, candidate, source);
+          return value.version !== null;
+        },
+        {
+          label: "npm publication",
+          phase: "version_visibility",
+          version: source.record.sdk_version,
+          describe: describeRegistryState,
+        },
+        writeError,
+        isDefiniteUploadRejection,
+      );
+      io.diagnostics?.phase("npm_upload", "passed", {
+        write_outcome: writeError ? "uncertain" : "accepted",
+      });
+      io.diagnostics?.phase("version_visibility", "passed", {
+        observed_version: boundedRegistryValue(registry.version?.version),
+        observed_latest: boundedRegistryValue(registry.latest),
+      });
+      io.diagnostics?.setPublication("confirmed");
+      uploaded = true;
     }
-    io.diagnostics?.start("version_visibility");
-    registry = await observeRegistry(
-      io,
-      () => io.readRegistry(source.record.sdk_version),
-      (value) => {
-        verifyRegistry(value, candidate, source);
-        return value.version !== null;
-      },
-      {
-        label: "npm publication",
-        phase: "version_visibility",
-        version: source.record.sdk_version,
-        describe: describeRegistryState,
-      },
-      writeError,
-    );
-    io.diagnostics?.phase("npm_upload", "passed", {
-      write_outcome: writeError ? "uncertain" : "accepted",
-    });
-    io.diagnostics?.phase("version_visibility", "passed", {
-      observed_version: boundedRegistryValue(registry.version?.version),
-      observed_latest: boundedRegistryValue(registry.latest),
-    });
-    io.diagnostics?.setPublication("confirmed");
-    uploaded = true;
   } else {
     io.diagnostics?.phase("npm_upload", "skipped", {
       reason: "version_already_public",

@@ -11,7 +11,7 @@ describe("shouldActivateSessionPanel", () => {
         currentTaskId: "task-1",
         currentSessionId: "session-luna",
         currentActivePanelId: "plan",
-        workflowFocusRequested: true,
+        focusRequested: true,
       }),
     ).toBe(true);
   });

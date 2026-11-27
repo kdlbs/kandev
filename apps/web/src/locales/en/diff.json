@@ -1,4 +1,6 @@
 {
+  "before": "Before",
+  "after": "After",
   "add": "Add",
   "addAComment": "Add a comment...",
   "addComment": "Add comment",

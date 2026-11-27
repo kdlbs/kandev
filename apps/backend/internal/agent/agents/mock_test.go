@@ -165,6 +165,17 @@ func TestNewMockAgentWithID_AppliesIdentityOverrides(t *testing.T) {
 	}
 }
 
+func TestMockAgent_AntigravityIdentityUsesCuratedProfileSettings(t *testing.T) {
+	agent := NewMockAgentWithID(AntigravityACPAgentID, "Antigravity ACP Agent", "Antigravity")
+	setting, ok := agent.PermissionSettings()[PermissionKeyAntigravitySkipPermissions]
+	if !ok {
+		t.Fatal("Antigravity mock identity is missing its curated CLI flag setting")
+	}
+	if setting.CLIFlag != "--dangerously-skip-permissions" || setting.Default {
+		t.Fatalf("Antigravity mock setting = %#v, want disabled dangerous skip-permissions flag", setting)
+	}
+}
+
 func TestNewMockAgent_DefaultIdentity(t *testing.T) {
 	a := NewMockAgent()
 	if a.ID() != "mock-agent" {

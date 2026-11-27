@@ -5,6 +5,12 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
+const (
+	acpSessionUpdateToolCall       = "tool_call"
+	acpSessionUpdateToolCallUpdate = "tool_call_update"
+	acpToolCallKindOther           = "other"
+)
+
 // acpDialect contains pure compatibility decisions for an agent's observed
 // ACP implementation. The Adapter remains responsible for RPC execution,
 // session state, serialization, and event delivery.
@@ -22,7 +28,7 @@ type acpDialect struct {
 		[]streams.ConfigOption,
 		[]modelInfo,
 		string,
-	) []streams.ConfigOption
+	) ([]streams.ConfigOption, []string)
 	modelChangeRequest   func(dialectConfigChange) (*dialectRPC, error)
 	configChangeRequest  func(dialectConfigChange) (*dialectRPC, error)
 	suppressNotification func(acp.SessionNotification) bool
@@ -30,6 +36,7 @@ type acpDialect struct {
 	normalizePromptUsage func(*streams.PromptUsage, map[string]any) *streams.PromptUsage
 	subagentFrame        func(map[string]any, string, any) (subagentFrame, bool)
 	mcpToolCall          func(map[string]any, any) (mcpToolCallFrame, bool)
+	cursorShellWatch     func(acp.SessionUpdate) (cursorShellWatchFrame, bool)
 	mcpToolResult        func(any) (any, bool)
 	responseAttemptReset func(map[string]any) bool
 	permissionToolName   func(*string, map[string]any, string, string) *string
@@ -122,9 +129,9 @@ func (d acpDialect) modelConfigAfterChange(
 	config []streams.ConfigOption,
 	models []modelInfo,
 	modelID string,
-) []streams.ConfigOption {
+) ([]streams.ConfigOption, []string) {
 	if d.configAfterModelChange == nil {
-		return config
+		return config, nil
 	}
 	return d.configAfterModelChange(config, models, modelID)
 }

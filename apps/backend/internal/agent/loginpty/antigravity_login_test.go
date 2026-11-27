@@ -97,7 +97,8 @@ func antigravityLoginCLI(t *testing.T, version string) string {
 }
 
 func antigravityLoginCLIScript(version string) string {
-	return fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'agy %s'; exit 0; fi\nexit 0\n", version)
+	return fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'agy %s'; exit 0; fi\n"+
+		"if [ \"$1\" = \"acp\" ] && [ \"$2\" = \"--help\" ]; then printf 'Usage: agy acp [flags]\\n\\nFlags:\\n  --process-per-session  Serve each session from an isolated worker process\\n'; exit 0; fi\nexit 0\n", version)
 }
 
 func antigravityLoginRouter(t *testing.T, agent *agents.AntigravityACP) (*Manager, *gin.Engine) {

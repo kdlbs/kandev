@@ -2024,6 +2024,9 @@ func clarificationQuestionData(question clarification.Question, options []interf
 	if len(question.Images) > 0 {
 		data["images"] = question.Images
 	}
+	if len(question.ImageGroups) > 0 {
+		data["image_groups"] = question.ImageGroups
+	}
 	if question.AllowCustomText != nil {
 		data["allow_custom_text"] = *question.AllowCustomText
 	}

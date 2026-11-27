@@ -1,10 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { RetryPolicy } from "@/lib/types/automation";
-import { SELECTED_CARD_CLASS_NAME, UNSELECTED_CARD_CLASS_NAME } from "./automation-card-styles";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { IconInfoCircle } from "@tabler/icons-react";
+import { SegmentedChoice, type SegmentedOption } from "./segmented-choice";
 import { retryPolicyAfterModeChange, type FormState } from "./automation-payload";
 type Props = {
   policy: RetryPolicy;
@@ -12,46 +13,34 @@ type Props = {
   updateField: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 };
 
-const modes: Array<{ value: RetryPolicy["mode"]; title: string; description: string }> = [
-  { value: "disabled", title: "retryDisabledTitle", description: "retryDisabledDescription" },
-  { value: "finite", title: "retryFiniteTitle", description: "retryFiniteDescription" },
-  { value: "infinite", title: "retryInfiniteTitle", description: "retryInfiniteDescription" },
-];
-
 function RetryModeSelector({ policy, updateField }: Pick<Props, "policy" | "updateField">) {
   const { t } = useTranslation();
+  const options: SegmentedOption<RetryPolicy["mode"]>[] = [
+    {
+      value: "disabled",
+      label: t("automations:retryDisabledTitle"),
+      description: t("automations:retryDisabledDescription"),
+    },
+    {
+      value: "finite",
+      label: t("automations:retryFiniteTitle"),
+      description: t("automations:retryFiniteDescription"),
+    },
+    {
+      value: "infinite",
+      label: t("automations:retryInfiniteTitle"),
+      description: t("automations:retryInfiniteDescription"),
+    },
+  ];
   return (
-    <RadioGroup
-      data-testid="automation-retry-modes"
-      aria-label={t("automations:retryTitle")}
+    <SegmentedChoice
+      id="automation-retry"
+      label={t("automations:retryTitle")}
       value={policy.mode}
-      onValueChange={(value) =>
-        updateField("retryPolicy", retryPolicyAfterModeChange(policy, value as RetryPolicy["mode"]))
-      }
-      className="gap-2"
-    >
-      {modes.map((mode) => (
-        <Label
-          key={mode.value}
-          htmlFor={`automation-retry-${mode.value}`}
-          className={`flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 ${
-            policy.mode === mode.value ? SELECTED_CARD_CLASS_NAME : UNSELECTED_CARD_CLASS_NAME
-          }`}
-        >
-          <RadioGroupItem
-            id={`automation-retry-${mode.value}`}
-            value={mode.value}
-            className="mt-0.5"
-          />
-          <span className="min-w-0 space-y-1">
-            <span className="block text-sm font-medium">{t(`automations:${mode.title}`)}</span>
-            <span className="block text-xs text-muted-foreground">
-              {t(`automations:${mode.description}`)}
-            </span>
-          </span>
-        </Label>
-      ))}
-    </RadioGroup>
+      options={options}
+      onValueChange={(mode) => updateField("retryPolicy", retryPolicyAfterModeChange(policy, mode))}
+      testId="automation-retry-modes"
+    />
   );
 }
 
@@ -116,20 +105,31 @@ function RetryHistorySelector({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-1.5">
-      <Label htmlFor="automation-retry-history">{t("automations:retryHistoryLabel")}</Label>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <span className="flex items-center gap-1.5">
+        <Label htmlFor="automation-retry-history">{t("automations:retryHistoryLabel")}</Label>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex cursor-help items-center text-muted-foreground max-md:min-h-11 max-md:min-w-11 max-md:justify-center"
+              aria-label={t("automations:retryHistoryHelp")}
+            >
+              <IconInfoCircle aria-hidden className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-[280px]">
+            {t("automations:retryHistoryHelp")}
+          </TooltipContent>
+        </Tooltip>
+      </span>
       <Select
         value={policy.history_mode}
         onValueChange={(value) =>
           updatePolicy({ history_mode: value as RetryPolicy["history_mode"] })
         }
-        disabled={policy.mode === "disabled"}
       >
-        <SelectTrigger
-          id="automation-retry-history"
-          aria-describedby="automation-retry-history-help"
-          className="w-full"
-        >
+        <SelectTrigger id="automation-retry-history" className="w-full sm:w-48">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -137,30 +137,23 @@ function RetryHistorySelector({
           <SelectItem value="timeline">{t("automations:retryHistoryTimeline")}</SelectItem>
         </SelectContent>
       </Select>
-      <p id="automation-retry-history-help" className="text-xs text-muted-foreground">
-        {t("automations:retryHistoryDescription")}
-      </p>
     </div>
   );
 }
 
 export function RetryPolicySection({ policy, savedPolicy, updateField }: Props) {
-  const { t } = useTranslation();
   const dirty = JSON.stringify(policy) !== JSON.stringify(savedPolicy);
   const updatePolicy = (patch: Partial<RetryPolicy>) =>
     updateField("retryPolicy", { ...policy, ...patch });
   return (
-    <div className="space-y-3 border-t pt-3" data-settings-dirty={dirty}>
-      <div>
-        <h3 className="text-sm font-medium">{t("automations:retryTitle")}</h3>
-        <p className="text-xs text-muted-foreground">{t("automations:retryDescription")}</p>
-      </div>
+    <div className="space-y-3" data-settings-dirty={dirty}>
       <RetryModeSelector policy={policy} updateField={updateField} />
       {policy.mode !== "disabled" && (
-        <RetryTuningControls policy={policy} updatePolicy={updatePolicy} />
+        <>
+          <RetryTuningControls policy={policy} updatePolicy={updatePolicy} />
+          <RetryHistorySelector policy={policy} updatePolicy={updatePolicy} />
+        </>
       )}
-      <RetryHistorySelector policy={policy} updatePolicy={updatePolicy} />
-      <p className="text-xs text-muted-foreground">{t("automations:retryHistoryHelp")}</p>
     </div>
   );
 }

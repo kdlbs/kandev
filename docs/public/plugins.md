@@ -115,6 +115,11 @@ You can install from a URL (kandev downloads the tarball) or by uploading a
 plugin has nothing to reveal, unlike a webhook-secret/API-key registration
 flow.
 
+For URL installs, Kandev waits for the package download and install result
+before replying. The package download has a 60-second limit. The server's
+configured write timeout applies to the final response after the install
+pipeline completes.
+
 ![The Install plugin dialog with From URL and Upload file tabs and a drag-and-drop area for a .tar.gz package.](../screenshots/plugin-install-dialog.png)
 
 The same operations are available over HTTP:

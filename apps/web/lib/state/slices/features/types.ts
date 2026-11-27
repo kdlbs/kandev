@@ -8,7 +8,6 @@ export const defaultFeatureFlags = {
   providerKeywordContext: false,
   // New release toggles start disabled in every frontend state. The SSR layer
   // overwrites this with the backend's effective values after startup.
-  lspBrowserContinuity: false,
   office: false,
   integratedControl: false,
   workspaceCollaboration: false,
@@ -25,6 +24,7 @@ export const defaultFeatureFlags = {
   coordinatorPhase3: false,
   coordinatorPhase31: false,
   codexAppServer: false,
+  acpV2: false,
   agentBackgroundWork: false,
   opencodePlugin: false,
 } as const;

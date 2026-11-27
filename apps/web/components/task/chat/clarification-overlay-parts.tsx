@@ -111,6 +111,8 @@ export function ClarificationStepper({
 
 type OptionListProps = {
   renderOptionPreview?: (option: ClarificationOption) => ReactNode;
+  /** Passive marker inside the choice itself, before the selected check. */
+  renderOptionBadge?: (option: ClarificationOption) => ReactNode;
   options: ClarificationOption[];
   selectedOption: string | null;
   isSubmitting: boolean;
@@ -123,6 +125,7 @@ type OptionListProps = {
 
 export function ClarificationOptions({
   renderOptionPreview,
+  renderOptionBadge,
   options,
   selectedOption,
   isSubmitting,
@@ -175,6 +178,7 @@ export function ClarificationOptions({
                 </span>
               )}
             </span>
+            {renderOptionBadge?.(option)}
             {isSelected && <IconCheck className="h-3.5 w-3.5 text-blue-500 mt-1 flex-shrink-0" />}
           </button>
         );

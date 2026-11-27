@@ -74,6 +74,10 @@ save only edited model, model-option, and passthrough fields, and prove the desk
 
 ## Acceptance
 
+- When no agent is installed and the catalog offers an installation,
+  administrators can open it from the first tour step on desktop or tablet.
+  Agent rows show the copy control beside the install command and omit the
+  decorative trailing download icon.
 - The ready tour exposes only the requested settings, loads profile models
   without a manual Refresh, and has aligned 28px desktop/44px touch controls.
   Loading/error/empty/missing-model states preserve selection and provide recovery.

@@ -173,7 +173,9 @@ test.describe("Docker executor profile persistence", () => {
 
       const floatingSave = testPage.getByTestId("settings-floating-save");
       await floatingSave.getByRole("button", { name: "Save changes" }).click();
-      await expect(testPage.getByText("Profile saved")).toBeVisible({ timeout: 10_000 });
+      await expect(
+        testPage.getByTestId("toast-message").getByText("Profile saved", { exact: true }),
+      ).toBeVisible({ timeout: 10_000 });
 
       await expect(floatingSave).not.toBeVisible({ timeout: 10_000 });
 
@@ -292,7 +294,9 @@ test.describe("Docker executor profile persistence", () => {
         .getByTestId("settings-floating-save")
         .getByRole("button", { name: "Save changes" })
         .click();
-      await expect(testPage.getByText("Profile saved")).toBeVisible();
+      await expect(
+        testPage.getByTestId("toast-message").getByText("Profile saved", { exact: true }),
+      ).toBeVisible();
       await expect
         .poll(async () => (await apiClient.getExecutorProfile(exec.id, profile.id)).config)
         .toMatchObject({ allow_user_namespaces: "true" });

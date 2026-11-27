@@ -8,10 +8,17 @@ import { Button } from "./button";
 import { IconX } from "@tabler/icons-react";
 import { handleDialogDefaultActionKeyDown } from "./lib/dialog-default-action";
 import { useDialogBodyLockRecovery } from "./lib/dialog-body-lock";
+import { ModalToastOutlet } from "./modal-toast-outlet";
+
+const DialogModalContext = React.createContext(true);
 
 function Dialog({ onOpenChange, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   const handleOpenChange = useDialogBodyLockRecovery(props.open, onOpenChange);
-  return <DialogPrimitive.Root data-slot="dialog" onOpenChange={handleOpenChange} {...props} />;
+  return (
+    <DialogModalContext.Provider value={props.modal !== false}>
+      <DialogPrimitive.Root data-slot="dialog" onOpenChange={handleOpenChange} {...props} />
+    </DialogModalContext.Provider>
+  );
 }
 
 function DialogTrigger({ ...props }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
@@ -48,14 +55,17 @@ function DialogContent({
   showCloseButton = true,
   overlayClassName,
   enterConfirms = true,
+  toastOutlet = true,
   onKeyDown,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
+  toastOutlet?: boolean;
   overlayClassName?: string;
   /** Pressing Enter activates the semantic action button. Default: true. */
   enterConfirms?: boolean;
 }) {
+  const modal = React.useContext(DialogModalContext);
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     onKeyDown?.(event);
     if (enterConfirms) handleDialogDefaultActionKeyDown(event);
@@ -73,6 +83,7 @@ function DialogContent({
         {...props}
       >
         {children}
+        {toastOutlet && modal && <ModalToastOutlet />}
         {showCloseButton && (
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button variant="ghost" className="absolute top-2 right-2" size="icon-sm">

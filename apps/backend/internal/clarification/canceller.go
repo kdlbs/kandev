@@ -128,6 +128,21 @@ func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string
 	return c.expireSessionBundles(ctx, sessionID)
 }
 
+// ExpireRequestAndNotify expires one native callback and its durable bundle.
+func (c *Canceller) ExpireRequestAndNotify(ctx context.Context, sessionID, pendingID string) error {
+	writeCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
+	changed, err := c.repo.ExpireActiveClarificationBundle(writeCtx, sessionID, pendingID)
+	if err != nil {
+		return err
+	}
+	if request, ok := c.store.GetRequest(pendingID); ok && request.SessionID == sessionID {
+		c.store.CancelRequest(pendingID)
+	}
+	c.publishBundleUpdates(writeCtx, changed)
+	return nil
+}
+
 // publishBundleUpdates routes committed rows through the task service so every
 // message event carries the authoritative pending-action projection.
 func (c *Canceller) publishBundleUpdates(ctx context.Context, messages []*taskmodels.Message) {

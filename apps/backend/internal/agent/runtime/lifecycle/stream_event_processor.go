@@ -245,7 +245,8 @@ func (p *streamEventProcessor) batchableEvent(event agentctl.AgentEvent) bool {
 	if _, ok := p.delivery.(canonicalAgentDeliveryBatchReceiver); !ok {
 		return false
 	}
-	return event.Type != streams.EventTypeShellOutputUpdate && event.Type != streams.EventTypeToolCall &&
+	return !event.ReplaceMessageContent &&
+		event.Type != streams.EventTypeShellOutputUpdate && event.Type != streams.EventTypeToolCall &&
 		canonicalAgentDeliveryEvent(event)
 }
 

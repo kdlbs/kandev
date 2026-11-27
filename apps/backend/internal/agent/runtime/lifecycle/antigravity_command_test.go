@@ -6,17 +6,20 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/antigravityruntime"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentruntime"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 func TestAntigravityLocalLaunchPolicy(t *testing.T) {
 	m := &Manager{}
-	base := []string{"agy_acp_server.par", "--uid="}
+	base := []string{"agy_acp_server.par", "--uid=", "--dangerously-skip-permissions", "--profile-flag"}
 	policy, _, resolved, _, err := m.applyLocalRuntimeCommand(context.Background(), nil, agents.NewAntigravityACP(),
 		agentruntime.RuntimeDocker, base, nil, "", false)
 	if err != nil {
@@ -27,6 +30,51 @@ func TestAntigravityLocalLaunchPolicy(t *testing.T) {
 	}
 	if resolved[0] != "agy_acp_server.par" {
 		t.Fatalf("non-local command changed to %q", resolved[0])
+	}
+	if slices.Contains(resolved, "--dangerously-skip-permissions") || !slices.Contains(resolved, "--profile-flag") {
+		t.Fatalf("non-local Antigravity args = %q, want skip flag removed and unrelated flag kept", resolved)
+	}
+}
+
+func TestAntigravityContextResetAppliesSkipPermissionEligibility(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		variant      string
+		supported    bool
+		surface      mcpprofile.Surface
+		wantSkipFlag bool
+	}{
+		{name: "supported CLI task", variant: acpcompat.AntigravityRuntimeCLI, supported: true, surface: mcpprofile.SurfaceKanbanTask, wantSkipFlag: true},
+		{name: "unsupported CLI", variant: acpcompat.AntigravityRuntimeCLI, surface: mcpprofile.SurfaceKanbanTask},
+		{name: "standalone provider runtime", variant: acpcompat.AntigravityRuntimeStandalone, surface: mcpprofile.SurfaceKanbanTask},
+		{name: "scoped coordinator launch", variant: acpcompat.AntigravityRuntimeCLI, supported: true, surface: mcpprofile.SurfaceCoordinator},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := &mcpprofile.Context{Surface: tt.surface}
+			selection := &agents.LocalRuntimeSelection{
+				Command: agents.NewCommand("/opt/agy", "acp"), Variant: tt.variant,
+				SupportsDangerouslySkipPermissions: tt.supported,
+			}
+			execution := &AgentExecution{
+				RuntimeName: agentruntime.RuntimeStandalone, LocalRuntimeSelection: selection, McpProfile: profile,
+			}
+			profileInfo := &AgentProfileInfo{CLIFlags: []settingsmodels.CLIFlag{
+				{Flag: "--dangerously-skip-permissions", Enabled: true},
+				{Flag: "--profile-flag", Enabled: true},
+			}}
+			commands, err := (&Manager{commandBuilder: NewCommandBuilder()}).buildFreshAgentCommandWithProfile(
+				context.Background(), execution, agents.NewAntigravityACP(), profileInfo,
+			)
+			if err != nil {
+				t.Fatalf("buildFreshAgentCommandWithProfile: %v", err)
+			}
+			if got := slices.Contains(commands.args, "--dangerously-skip-permissions"); got != tt.wantSkipFlag {
+				t.Fatalf("context reset skip flag present = %t, want %t; args = %q", got, tt.wantSkipFlag, commands.args)
+			}
+			if !slices.Contains(commands.args, "--profile-flag") {
+				t.Fatalf("context reset dropped unrelated flag: %q", commands.args)
+			}
+		})
 	}
 }
 
@@ -69,19 +117,19 @@ func TestAntigravityLocalLaunchUsesCLIAndPreservesProfileArgs(t *testing.T) {
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	dir := t.TempDir()
 	cliPath := filepath.Join(dir, "agy")
-	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.5.15'\n"), 0o755); err != nil {
+	if err := os.WriteFile(cliPath, []byte(lifecycleAntigravityCLIScript("1.5.15")), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	writeLifecycleAntigravityStandalone(t, dir)
 	t.Setenv("PATH", dir)
 	base := agents.NewAntigravityACP().Runtime().Cmd.Args()
-	args := append(append([]string(nil), base...), "--profile-flag", "profile-value")
+	args := append(append([]string(nil), base...), "--profile-flag", "value with spaces", "--process-per-session=false", "--", "after-delimiter")
 	policy, _, resolved, _, err := (&Manager{}).applyLocalRuntimeCommand(context.Background(), nil,
 		agents.NewAntigravityACP(), agentruntime.RuntimeStandalone, args, nil, "", false)
 	if err != nil {
 		t.Fatalf("applyLocalRuntimeCommand: %v", err)
 	}
-	want := []string{cliPath, "acp", "--profile-flag", "profile-value"}
+	want := []string{cliPath, "acp", "--process-per-session", "--profile-flag", "value with spaces", "--process-per-session=false", "--process-per-session", "--", "after-delimiter"}
 	if len(resolved) != len(want) {
 		t.Fatalf("command = %v, want %v", resolved, want)
 	}
@@ -95,6 +143,63 @@ func TestAntigravityLocalLaunchUsesCLIAndPreservesProfileArgs(t *testing.T) {
 	}
 }
 
+func TestAntigravitySkipPermissionsLaunchPolicy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX CLI scripts")
+	}
+	tests := []struct {
+		name         string
+		version      string
+		supportsFlag bool
+		surface      mcpprofile.Surface
+		managed      bool
+		coordinator  bool
+		wantFlag     bool
+	}{
+		{name: "supported ordinary task", version: "1.5.15", supportsFlag: true, surface: mcpprofile.SurfaceKanbanTask, wantFlag: true},
+		{name: "unsupported CLI", version: "1.5.15", surface: mcpprofile.SurfaceKanbanTask},
+		{name: "standalone runtime", version: "1.4.9", supportsFlag: true, surface: mcpprofile.SurfaceKanbanTask},
+		{name: "coordinator surface", version: "1.5.15", supportsFlag: true, surface: mcpprofile.SurfaceCoordinator},
+		{name: "managed conversation", version: "1.5.15", supportsFlag: true, surface: mcpprofile.SurfaceManagedConversation, managed: true},
+		{name: "scoped managed policy on task surface", version: "1.5.15", supportsFlag: true, surface: mcpprofile.SurfaceKanbanTask, managed: true},
+		{name: "coordinator policy on task surface", version: "1.5.15", supportsFlag: true, surface: mcpprofile.SurfaceKanbanTask, coordinator: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+			dir := t.TempDir()
+			cliPath := filepath.Join(dir, "agy")
+			if err := os.WriteFile(cliPath, []byte(lifecycleAntigravityCLIScriptWithSkipFlag(tt.version, tt.supportsFlag)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeLifecycleAntigravityStandalone(t, dir)
+			t.Setenv("PATH", dir)
+			profile := mcpprofile.Context{Surface: tt.surface}
+			if tt.managed {
+				profile.ManagedToolPolicy = &mcpprofile.ManagedToolPolicy{}
+			}
+			if tt.coordinator {
+				profile.CoordinatorToolPolicy = &mcpprofile.CoordinatorToolPolicy{}
+			}
+			request := &LaunchRequest{McpProfile: &profile}
+			base := agents.NewAntigravityACP().Runtime().Cmd.Args()
+			args := append(append([]string(nil), base...), "--dangerously-skip-permissions", "--profile-flag")
+			_, _, resolved, _, err := (&Manager{}).applyLocalRuntimeCommand(context.Background(), request,
+				agents.NewAntigravityACP(), agentruntime.RuntimeStandalone, args, nil, "", false)
+			if err != nil {
+				t.Fatalf("applyLocalRuntimeCommand: %v", err)
+			}
+			if got := slices.Contains(resolved, "--dangerously-skip-permissions"); got != tt.wantFlag {
+				t.Fatalf("skip-permissions flag present = %t, want %t; command = %q", got, tt.wantFlag, resolved)
+			}
+			if !slices.Contains(resolved, "--profile-flag") {
+				t.Fatalf("unrelated profile flag was lost: %q", resolved)
+			}
+		})
+	}
+}
+
 func TestAntigravityTaskCommandSelectsCLIWithoutStandaloneBundle(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake CLI uses a POSIX script")
@@ -103,7 +208,7 @@ func TestAntigravityTaskCommandSelectsCLIWithoutStandaloneBundle(t *testing.T) {
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	binDir := t.TempDir()
 	cliPath := filepath.Join(binDir, "agy")
-	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.5.15'\n"), 0o755); err != nil {
+	if err := os.WriteFile(cliPath, []byte(lifecycleAntigravityCLIScript("1.5.15")), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir)
@@ -122,7 +227,7 @@ func TestAntigravityTaskCommandSelectsCLIWithoutStandaloneBundle(t *testing.T) {
 
 	// The request keeps the selected CLI through a later command build even if
 	// the candidate's qualification changes after instance creation.
-	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.4.9'\n"), 0o755); err != nil {
+	if err := os.WriteFile(cliPath, []byte(lifecycleAntigravityCLIScript("1.4.9")), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	promoted, err := manager.buildAgentCommandWithContext(
@@ -156,7 +261,7 @@ func TestAntigravityResumeUsesSavedRuntime(t *testing.T) {
 			t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 			dir := t.TempDir()
 			cliPath := filepath.Join(dir, "agy")
-			if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy 1.5.15'\n"), 0o755); err != nil {
+			if err := os.WriteFile(cliPath, []byte(lifecycleAntigravityCLIScript("1.5.15")), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			writeLifecycleAntigravityStandalone(t, dir)
@@ -171,8 +276,11 @@ func TestAntigravityResumeUsesSavedRuntime(t *testing.T) {
 			if policy == nil || policy.RuntimeVariant != tt.wantVariant || filepath.Base(resolved[0]) != tt.wantCommand {
 				t.Fatalf("selection = policy %+v, command %v", policy, resolved)
 			}
-			if resolved[len(resolved)-1] != "--profile-flag" {
+			if !slices.Contains(resolved, "--profile-flag") {
 				t.Fatalf("profile arguments lost: %v", resolved)
+			}
+			if tt.wantVariant == acpcompat.AntigravityRuntimeCLI && resolved[len(resolved)-1] != "--process-per-session" {
+				t.Fatalf("saved CLI command does not end with worker mode: %v", resolved)
 			}
 		})
 	}
@@ -250,7 +358,7 @@ func TestAntigravityTaskResumeCommandUsesSavedRuntimeAfterRestart(t *testing.T) 
 			dir := t.TempDir()
 			if tt.cliVersion != "" {
 				cliPath := filepath.Join(dir, "agy")
-				if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho 'agy "+tt.cliVersion+"'\n"), 0o755); err != nil {
+				if err := os.WriteFile(cliPath, []byte(lifecycleAntigravityCLIScript(tt.cliVersion)), 0o755); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -274,6 +382,9 @@ func TestAntigravityTaskResumeCommandUsesSavedRuntimeAfterRestart(t *testing.T) 
 			}
 			if filepath.Base(commands.args[0]) != tt.wantCommand || request.AuthPolicy == nil || request.AuthPolicy.RuntimeVariant != tt.wantVariant {
 				t.Fatalf("resume selection = command %#v, policy %+v; want %s", commands.args, request.AuthPolicy, tt.wantVariant)
+			}
+			if tt.wantVariant == acpcompat.AntigravityRuntimeCLI && !slices.Contains(commands.args, "--process-per-session") {
+				t.Fatalf("saved CLI resume command lacks worker mode: %#v", commands.args)
 			}
 		})
 	}
@@ -321,4 +432,17 @@ func writeLifecycleAntigravityStandalone(t *testing.T, dir string) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func lifecycleAntigravityCLIScript(version string) string {
+	return lifecycleAntigravityCLIScriptWithSkipFlag(version, true)
+}
+
+func lifecycleAntigravityCLIScriptWithSkipFlag(version string, supportsSkip bool) string {
+	help := "Usage: agy acp [flags]\\n\\nFlags:\\n  --process-per-session  Serve each session from an isolated worker process\\n"
+	if supportsSkip {
+		help += "  --dangerously-skip-permissions  Approve all tool requests\\n"
+	}
+	return "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'agy " + version + "'; exit 0; fi\n" +
+		"if [ \"$1\" = \"acp\" ] && [ \"$2\" = \"--help\" ]; then printf '" + help + "'; exit 0; fi\nexit 0\n"
 }

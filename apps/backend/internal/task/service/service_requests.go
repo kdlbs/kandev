@@ -174,12 +174,14 @@ type CreateTaskRequest struct {
 	AllowReservedMetadata bool `json:"-"`
 
 	// Office extensions
-	AssigneeAgentProfileID string   `json:"assignee_agent_profile_id,omitempty"`
-	Origin                 string   `json:"origin,omitempty"`
-	ProjectID              string   `json:"project_id,omitempty"`
-	Labels                 string   `json:"labels,omitempty"`
-	BlockedBy              []string `json:"blocked_by,omitempty"`
-	RelatedTaskIDs         []string `json:"related_task_ids,omitempty"`
+	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
+	Origin                 string `json:"origin,omitempty"`
+	ProjectID              string `json:"project_id,omitempty"`
+	// RequireProjectWorkspaceValidation is set by plugin task writes that select a project explicitly.
+	RequireProjectWorkspaceValidation bool     `json:"-"`
+	Labels                            string   `json:"labels,omitempty"`
+	BlockedBy                         []string `json:"blocked_by,omitempty"`
+	RelatedTaskIDs                    []string `json:"related_task_ids,omitempty"`
 
 	// RequireAssigneeAgentProfileValidation opts this request into create-time
 	// validation of AssigneeAgentProfileID (must name an Office agent instance
@@ -215,6 +217,7 @@ type UpdateTaskRequest struct {
 	ExecutionGrade *string                `json:"execution_grade,omitempty"`
 	Title          *string                `json:"title,omitempty"`
 	Description    *string                `json:"description,omitempty"`
+	FlagNote       *string                `json:"flag_note,omitempty"`
 	Priority       *string                `json:"priority,omitempty"`
 	State          *v1.TaskState          `json:"state,omitempty"`
 	WorkflowStepID *string                `json:"workflow_step_id,omitempty"`
