@@ -27,8 +27,11 @@ existing contract: it binds the same process-local loopback listener and
 carries each accepted connection over its own `pods/exec` stream, without a
 TTY, into `agentctl tcp-stdio --port <port>` in the Pod's main container. The
 bridge dials only Pod loopback. The two directions of a connection end
-independently, as with kubectl port-forward: end of the request half-closes
-the TCP write side, and the response is relayed until agentctl closes.
+independently: end of the request half-closes the TCP write side, and the
+response is relayed until agentctl closes, with no drain deadline. This is
+more lenient than port-forward on containerd, whose CRI implementation does
+not half-close and closes both directions about one second after either one
+ends ([`portForward`](https://github.com/containerd/containerd/blob/59228e1af476a2b67cd80319e7e7249842413a05/internal/cri/server/sandbox_portforward_linux.go#L83-L125)).
 
 For executors that select it, exec streaming is the only required streaming
 capability. Port-forward stays required for the default transport.

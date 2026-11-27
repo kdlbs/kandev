@@ -52,7 +52,11 @@ bound to the accepted connection:
 backend client ── 127.0.0.1 listener ── pods/exec stream ── agentctl tcp-stdio ── 127.0.0.1:<port> in the Pod
 ```
 
-The two directions end independently, as in kubectl port-forward:
+The two directions end independently. Unlike containerd's CRI port-forward,
+which does not half-close and closes both directions about one second after
+either one ends
+([`portForward`](https://github.com/containerd/containerd/blob/59228e1af476a2b67cd80319e7e7249842413a05/internal/cri/server/sandbox_portforward_linux.go#L83-L125)),
+there is no drain deadline:
 
 1. The backend client half-closes. Reading the accepted connection returns EOF,
    and the client-go executor closes the stream's stdin (SPDY half-close or the
@@ -68,6 +72,12 @@ A connection also ends when the forward session closes (its context cancels
 every exec stream) or when the stream fails. A failure on an open session logs
 one warning with the Pod, port, duration, and a bounded, credential-redacted
 stderr tail. Opens and closes log at debug level.
+
+The in-Pod bridge has no context of its own. When the backend side is gone,
+the bridge lives until agentctl closes the connection. Go's net/http does that
+at once for an idle connection, and also for a handler that honours its
+request context, because net/http cancels that context when the client's EOF
+arrives. A handler that ignores its context keeps the bridge until it returns.
 
 ## Main-container targeting
 
@@ -85,7 +95,10 @@ container, as before.
 
 With `exec`, the streaming step requests only the `pods/exec` permissions and
 runs `cat` in the probe Pod's main container. It sends 64 KiB of random bytes
-and passes only on an exact echo. The handshake-only exec and port-forward
+and passes only on an exact echo. Stdin stays open until the whole echo has
+arrived, or for at most 10 seconds, and only then closes. Kata Containers can
+drop stdout still in flight at stdin EOF, and an early close made a working
+data path report `32768 of 65536 bytes`. The handshake-only exec and port-forward
 probes remain for `port_forward`.
 
 ## Verification

@@ -65,11 +65,13 @@ func ParseArgs(args []string, stderr io.Writer) (int, error) {
 
 // Bridge copies stdin to conn and conn to stdout, and closes conn on return.
 //
-// The two directions end independently, like kubectl port-forward. EOF on
-// stdin means the client finished its request: the bridge half-closes the TCP
-// write side so the server sees EOF, and keeps copying the response until the
-// server closes the connection. There is no drain deadline, so a slow or
-// chunked response after the request ends is delivered in full. The bridge
+// The two directions end independently. EOF on stdin means the client
+// finished its request: the bridge half-closes the TCP write side so the
+// server sees EOF, and keeps copying the response until the server closes the
+// connection. There is no drain deadline, so a slow or chunked response after
+// the request ends is delivered in full. (containerd's CRI port-forward, by
+// contrast, does not half-close and closes both directions about one second
+// after either one ends.) The bridge
 // returns when the TCP peer closes (EOF on conn) or a write to stdout fails.
 func Bridge(conn net.Conn, stdin io.Reader, stdout io.Writer) error {
 	defer func() { _ = conn.Close() }()
