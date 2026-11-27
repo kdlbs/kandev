@@ -405,29 +405,45 @@ function TaskCreateFooterSlot({
   );
 }
 
-function useManualStartRequired(editingTask: TaskCreateDialogProps["editingTask"]): boolean {
-  return useAppStore((state) => {
-    if (!editingTask) return false;
-    const task = findTaskInSnapshots(
-      editingTask.id,
-      state.kanbanMulti?.snapshots ?? {},
-      state.kanban?.tasks,
-    );
-    const sessions = state.taskSessionsByTask?.itemsByTaskId[editingTask.id];
-    if (sessions?.length || task?.primarySessionId || task?.sessionCount) return false;
-    return (
-      editingTask.manualStartRequired === true ||
-      task?.metadata?.fork_pr_requires_manual_start === true
-    );
-  });
+function resolveForkReviewRunner(
+  editingTask: NonNullable<TaskCreateDialogProps["editingTask"]>,
+  boardTask: ReturnType<typeof findTaskInSnapshots>,
+) {
+  return {
+    primaryExecutorProfileId:
+      editingTask.primaryExecutorProfileId ?? boardTask?.primaryExecutorProfileId ?? undefined,
+    runnerEditable: editingTask.runnerEditable ?? boardTask?.runnerEditable,
+    runnerIneligibleReason: editingTask.runnerIneligibleReason ?? boardTask?.runnerIneligibleReason,
+  };
 }
 
 function useEditPropsWithManualStart(props: TaskCreateDialogProps): TaskCreateDialogProps {
   const { editingTask } = props;
-  const manualStartRequired = useManualStartRequired(editingTask);
-  if (!editingTask || (editingTask.manualStartRequired === true) === manualStartRequired)
-    return props;
-  return { ...props, editingTask: { ...editingTask, manualStartRequired } };
+  const taskId = editingTask?.id;
+  const boardTask = useAppStore((state) =>
+    taskId
+      ? findTaskInSnapshots(taskId, state.kanbanMulti?.snapshots ?? {}, state.kanban?.tasks)
+      : null,
+  );
+  const hasSessions = useAppStore((state) =>
+    Boolean(taskId && state.taskSessionsByTask?.itemsByTaskId[taskId]?.length),
+  );
+  if (!editingTask) return props;
+  const manualStartRequired =
+    !hasSessions &&
+    !boardTask?.primarySessionId &&
+    !boardTask?.sessionCount &&
+    (editingTask.manualStartRequired === true ||
+      boardTask?.metadata?.fork_pr_requires_manual_start === true);
+  if (!manualStartRequired && !editingTask.manualStartRequired) return props;
+  return {
+    ...props,
+    editingTask: {
+      ...editingTask,
+      manualStartRequired,
+      ...resolveForkReviewRunner(editingTask, boardTask),
+    },
+  };
 }
 
 function TaskCreateDialogContent(inputProps: TaskCreateDialogProps) {

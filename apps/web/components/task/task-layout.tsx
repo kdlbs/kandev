@@ -1,7 +1,7 @@
 "use client";
 
 import { TaskGraphPanelRequest } from "@/components/task-graph/task-graph-panel-request";
-import { memo, useCallback, useState, type ReactNode } from "react";
+import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { ClarificationDraftProvider } from "./chat/clarification-draft-context";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -66,16 +66,17 @@ export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
   if (props.workspaceId && props.workspaceId !== pickerWorkspaceId) {
     setPickerWorkspaceId(props.workspaceId);
   }
+  const chatContent = useMemo(
+    () =>
+      props.taskId && props.sessionlessChatContent
+        ? { taskId: props.taskId, content: props.sessionlessChatContent }
+        : null,
+    [props.taskId, props.sessionlessChatContent],
+  );
   return (
     <TaskSheetSelectionProvider workspaceId={props.workspaceId}>
       <ClarificationDraftProvider taskId={props.taskId ?? null}>
-        <SessionlessChatContentContext.Provider
-          value={
-            props.taskId && props.sessionlessChatContent
-              ? { taskId: props.taskId, content: props.sessionlessChatContent }
-              : null
-          }
-        >
+        <SessionlessChatContentContext.Provider value={chatContent}>
           <ResponsiveTaskLayout {...props} />
         </SessionlessChatContentContext.Provider>
       </ClarificationDraftProvider>

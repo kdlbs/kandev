@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PortForwardingManager } from "./port-forward-dialog";
 import { TaskTopBar } from "@/components/task/task-top-bar";
 import { ForkReviewTaskStart } from "@/components/task/fork-review-task-start";
@@ -143,19 +143,20 @@ function TaskPageRecoveryFeedback({
   );
 }
 
-function withSessionlessChatContent(
+function useWaitingChatLayout(
   layoutProps: ReturnType<typeof buildTaskLayoutProps>,
   task: Task | null,
   status: UseEnsureTaskSessionResult["status"],
   workflowSteps: TaskPageInnerProps["workflowSteps"],
 ) {
-  if (!task || status !== "manual_start_required") return layoutProps;
-  return {
-    ...layoutProps,
-    sessionlessChatContent: (
-      <ForkReviewTaskStart key={task.id} task={task} workflowSteps={workflowSteps} />
-    ),
-  };
+  const sessionlessChatContent = useMemo(
+    () =>
+      task && status === "manual_start_required" ? (
+        <ForkReviewTaskStart key={task.id} task={task} workflowSteps={workflowSteps} />
+      ) : null,
+    [task, status, workflowSteps],
+  );
+  return sessionlessChatContent ? { ...layoutProps, sessionlessChatContent } : layoutProps;
 }
 
 function TaskPageLayoutFeedback({
@@ -381,7 +382,7 @@ function useTaskPageDerivedProps(
     taskProps,
     debugEntries,
     topBarProps,
-    layoutProps: withSessionlessChatContent(layoutProps, task, ensureSession.status, workflowSteps),
+    layoutProps: useWaitingChatLayout(layoutProps, task, ensureSession.status, workflowSteps),
     bootstrapRecoveryError,
     automaticRecoveryOwnedByChat,
     hasPageLevelMobileFeedback,

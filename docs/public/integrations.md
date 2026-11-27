@@ -399,6 +399,8 @@ it.
 
 ### Configure and use the workspace
 
+When a Review Watch finds a fork PR or cannot verify the source repository, Kandev creates the task and waits for you to select **Start Task**. The empty chat and Edit dialog warn that starting the review can run setup scripts from the PR with access to executor credentials.
+
 <details>
 <summary>Workspace GitHub details</summary>
 
@@ -419,8 +421,6 @@ When upgrading from global task views, your existing views are copied once into 
 A **Review Watch** polls a GitHub search and creates review work. It requires a workflow, starting step, prompt, and workspace. The default query is `type:pr state:open review-requested:@me -is:draft`; add repository filters or replace the query as needed. An optional agent or executor profile overrides the selected step's defaults. The poll interval defaults to 300 seconds and accepts 60–3,600 seconds. The prompt field accepts `@name` references to saved prompts, resolved the same way as in a workflow step; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 
 When a review watch is created, Kandev saves its verified target GitHub login. App-backed polling replaces `review-requested:@me` with that explicit login because an installation is not a user. Creating a user-targeted review watch therefore requires a connected personal identity or human PAT/CLI automation identity. A migrated watch with no verified target is disabled until an identity is reconnected.
-
-When a Review Watch finds a fork PR or cannot verify the source repository, Kandev creates the task and waits for you to select **Start Task**. The empty chat and Edit dialog warn that starting the review can run setup scripts from the PR with access to executor credentials.
 
 An **Issue Watch** behaves similarly for issues. Its default search is `type:issue state:open`. Choose labels or provide a custom GitHub query; the custom query takes precedence over label selection.
 

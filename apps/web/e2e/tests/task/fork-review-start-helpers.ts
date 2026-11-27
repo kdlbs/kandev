@@ -8,15 +8,30 @@ export async function verifyForkReviewStart(
   { testPage, apiClient, seedData }: { testPage: Page; apiClient: ApiClient; seedData: SeedData },
   mobile: boolean,
 ) {
+  const { executors } = await apiClient.listExecutors();
+  const worktree = executors.find((executor) => executor.type === "worktree");
+  if (!worktree) throw new Error("Missing worktree executor");
+  const runner = await apiClient.createExecutorProfile(worktree.id, "Review Watch runner");
+  await apiClient.saveUserSettings({
+    workspace_id: seedData.workspaceId,
+    workflow_filter_id: seedData.workflowId,
+    task_create_last_used: {
+      repository_id: seedData.repositoryId,
+      branch: "main",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    },
+  });
   const task = await apiClient.createTask(seedData.workspaceId, "Fork review awaiting start", {
     description: "/e2e:simple-message",
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
     agent_profile_id: seedData.agentProfileId,
-    executor_profile_id: seedData.worktreeExecutorProfileId,
+    executor_profile_id: runner.id,
     metadata: {
       agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: runner.id,
       fork_pr_requires_manual_start: true,
       auto_start_guard: true,
     },
@@ -58,6 +73,7 @@ export async function verifyForkReviewStart(
       "executor credentials",
     );
   }
+  await expect(dialog.getByTestId("executor-profile-selector")).toContainText(runner.name);
   await dialog.getByTestId("submit-start-agent").click();
   await expect
     .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length)
@@ -65,6 +81,7 @@ export async function verifyForkReviewStart(
   const {
     sessions: [session],
   } = await apiClient.listTaskSessions(task.id);
+  expect(session.executor_profile_id).toBe(runner.id);
   await testPage.reload();
   await expect(
     testPage.locator(`[data-testid="session-chat"][data-session-id="${session.id}"]`),

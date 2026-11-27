@@ -40,21 +40,32 @@ Desktop and phone use the same reading order. Text wraps within the existing scr
 Run from the repository root:
 
 ```sh
-pnpm --dir apps/web exec vitest run hooks/domains/session/use-ensure-task-session.test.ts
+pnpm --dir apps install --frozen-lockfile
+pnpm --dir apps/web exec vitest run hooks/domains/session/use-ensure-task-session.test.ts components/task/sidebar-page-actions.test.tsx components/task-create-dialog-effects-executor.test.ts components/task-create-dialog-helpers.test.ts
+pnpm --dir apps/web run typecheck
 pnpm --dir apps/web run i18n:check
 make build-web-e2e
 make -C apps/backend build-kandev build-agentctl build-mock-agent e2e-plugin-package build-e2e-delivery-fixture build-e2e-send-now-fixture
 pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project chromium tests/task/fork-review-start.spec.ts
 pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-fork-review-start.spec.ts
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+node scripts/validate-public-docs.mjs
+git diff --check
 ```
-
 
 ## Results
 
 - The implementation reuses the backend waiting response delivered in #5443.
-- Focused frontend tests, typecheck, lint, locale validation, and the web build passed.
-- Desktop and phone Playwright tests passed against the current build. They
-  verified the warning inside chat, cancel, manual start, and reload. The desktop test
-  also checked the waiting state in the task preview. The warning sits near
-  the bottom, where the composer normally appears.
-- All build and test processes ran in systemd scopes with an 8 GB memory cap.
+- The frozen workspace install, focused Vitest command, typecheck, locale
+  validation, and E2E web build passed.
+- The backend launcher, agent, delivery fixture, and plugin fixture builds
+  passed. The send-now fixture build reached the 8 GB cap. The fork-review
+  specs do not use that fixture. Local Playwright runs used the fresh runtime
+  and web build with the generic artifact age check disabled.
+- Both Playwright projects passed after verifying the waiting state in chat,
+  cancellation, explicit start, and reload. The desktop test also checks the
+  task preview. The runner regression checks use a saved runner that differs
+  from the last-used profile.
+- Documentation catalog validation, specification lint, public docs
+  validation, and the diff check passed.

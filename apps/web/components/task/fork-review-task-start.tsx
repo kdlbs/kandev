@@ -40,6 +40,9 @@ export function ForkReviewTaskStart({
           id: task.id,
           workflowStepId: task.workflow_step_id,
           manualStartRequired: true,
+          primaryExecutorProfileId: task.primary_executor_profile_id ?? undefined,
+          runnerEditable: task.runner_editable,
+          runnerIneligibleReason: task.runner_ineligible_reason,
         }}
       />
     </div>
