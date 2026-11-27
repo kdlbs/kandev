@@ -155,3 +155,88 @@ describe("MermaidBlock streaming behaviour", () => {
     expect(container.innerHTML).toContain('data-test="first"');
   });
 });
+
+// @covers AC-UI-MERMAID-RENDERING-003.1, AC-UI-MERMAID-RENDERING-003.2
+it("captures pinch at the zoom limit only in the targeted diagram", async () => {
+  const view = render(
+    <>
+      <MermaidBlock code={VALID_DIAGRAM} />
+      <MermaidBlock code={VALID_DIAGRAM} />
+    </>,
+  );
+  await flush(400);
+  const [first, second] = view.container.querySelectorAll(".mermaid-block");
+  const viewport = first.querySelector(".mermaid-scroll-region")!;
+  for (let i = 0; i < 2; i++) {
+    const pinch = new WheelEvent("wheel", { deltaY: -1000, bubbles: true, cancelable: true });
+    Object.defineProperty(pinch, "ctrlKey", { value: true });
+    act(() => {
+      viewport.dispatchEvent(pinch);
+    });
+    expect(pinch.defaultPrevented).toBe(true);
+    expect(first.textContent).toContain("150%");
+    expect(second.textContent).toContain("75%");
+  }
+  act(() => {
+    view.getByRole("button", { name: "150%" }).click();
+  });
+  expect(first.textContent).toContain("75%");
+  const scroll = new WheelEvent("wheel", { deltaY: 100, cancelable: true });
+  expect(viewport.dispatchEvent(scroll)).toBe(true);
+});
+
+// @covers AC-UI-MERMAID-RENDERING-003.2, AC-UI-MERMAID-RENDERING-003.3
+it("applies WebKit gesture scale once and releases the viewport on unmount", async () => {
+  const view = render(<MermaidBlock code={VALID_DIAGRAM} />);
+  await flush(400);
+  const viewport = view.container.querySelector(".mermaid-scroll-region")!;
+  const gesture = (type: string, scale: number) => {
+    const event = Object.assign(new Event(type, { cancelable: true }), { scale });
+    act(() => {
+      viewport.dispatchEvent(event);
+    });
+    return event.defaultPrevented;
+  };
+  viewport.dispatchEvent(Object.assign(new Event("touchstart"), { touches: [{}] }));
+  expect(gesture("gesturestart", 1)).toBe(false);
+  viewport.dispatchEvent(Object.assign(new Event("touchend"), { touches: [] }));
+  expect(gesture("gesturestart", 1)).toBe(true);
+  expect(gesture("gesturechange", 2)).toBe(true);
+  const wheel = new WheelEvent("wheel", { deltaY: 1000, cancelable: true });
+  Object.defineProperty(wheel, "ctrlKey", { value: true });
+  act(() => {
+    viewport.dispatchEvent(wheel);
+  });
+  expect(view.container.textContent).toContain("150%");
+  expect(gesture("gesturechange", 1)).toBe(true);
+  expect(view.container.textContent).toContain("75%");
+  expect(gesture("gestureend", 1)).toBe(true);
+  view.unmount();
+  expect(gesture("gesturestart", 1)).toBe(false);
+});
+
+it("ignores small drag movement, clamps the height, and releases an active drag on unmount", async () => {
+  const view = render(<MermaidBlock code={VALID_DIAGRAM} />);
+  await flush(400);
+  const grip = view.container.querySelector<HTMLElement>(".mermaid-frame-grip")!;
+  const viewport = view.container.querySelector<HTMLElement>(".mermaid-scroll-region")!;
+  grip.setPointerCapture = vi.fn();
+  grip.hasPointerCapture = () => true;
+  grip.releasePointerCapture = vi.fn();
+  const pointer = (type: string, y: number) =>
+    grip.dispatchEvent(
+      Object.assign(new Event(type), {
+        pointerId: 1,
+        button: 0,
+        clientY: y,
+        isPrimary: true,
+      }),
+    );
+  pointer("pointerdown", 0);
+  pointer("pointermove", 2);
+  expect(viewport.style.getPropertyValue("--mermaid-frame-height")).toBe("");
+  pointer("pointermove", 100000);
+  expect(viewport.style.getPropertyValue("--mermaid-frame-height")).toBe(`${window.innerHeight}px`);
+  view.unmount();
+  expect(grip.releasePointerCapture).toHaveBeenCalledWith(1);
+});

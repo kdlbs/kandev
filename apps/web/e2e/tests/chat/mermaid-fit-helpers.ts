@@ -34,7 +34,7 @@ export async function seedTaskWithWideMermaidMessage(
   seedData: SeedData,
   title: string,
   messageContent = WIDE_MERMAID_MESSAGE,
-): Promise<{ session: SessionPage; sessionId: string }> {
+): Promise<{ session: SessionPage; sessionId: string; taskId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -56,7 +56,7 @@ export async function seedTaskWithWideMermaidMessage(
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  return { session, sessionId: task.session_id };
+  return { session, sessionId: task.session_id, taskId: task.id };
 }
 
 export async function expectMermaidDiagramFitsViewport(session: SessionPage): Promise<void> {
