@@ -47,9 +47,7 @@ describe("recovery choices without a restorable workspace", () => {
     const { result } = renderHook(() => useRecoveryPresentation(model(false), actions, null));
 
     expect(choices(false).map((choice) => choice.kind)).not.toContain("restore");
-    expect(result.current.copy.prerequisite).toBe(
-      "No workspace was created, so there is nothing to restore.",
-    );
+    expect(result.current.copy.prerequisite).toBe("Workspace restore is unavailable right now.");
   });
 
   it("keeps the existing restore choice when availability is unknown", () => {

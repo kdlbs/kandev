@@ -94,6 +94,21 @@ func TestValidateUnroutedInitialTarget(t *testing.T) {
 		require.Equal(t, ceilingEntrySuperseded, disposition)
 	})
 
+	t.Run("malformed route metadata blocks a claimed resume", func(t *testing.T) {
+		fixture := newFreshStartWorkflowFixture(t, freshStartWorkflowOptions{})
+		configureUnroutedWorkflowTarget(t, fixture, wfmodels.WorkflowSessionTargetInitial, fixture.sessionID)
+		task, err := fixture.repo.GetTask(fixture.ctx, fixture.taskID)
+		require.NoError(t, err)
+		task.Metadata[models.MetaKeyWorkflowSessionRoute] = map[string]interface{}{"invalid": true}
+		require.NoError(t, fixture.repo.UpdateTask(fixture.ctx, task))
+		binding := initialTargetBinding(t, fixture)
+		ctx := withCeilingEntryKind(fixture.ctx, models.CeilingLaunchResume)
+
+		err = fixture.svc.validateClaimedCeilingBinding(ctx, fixture.taskID, &binding)
+
+		require.ErrorContains(t, err, "deferred workflow entry ownership is unavailable")
+	})
+
 	t.Run("different bound destination session is superseded", func(t *testing.T) {
 		fixture := newFreshStartWorkflowFixture(t, freshStartWorkflowOptions{})
 		configureUnroutedWorkflowTarget(t, fixture, wfmodels.WorkflowSessionTargetInitial, fixture.sessionID)

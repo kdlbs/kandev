@@ -1047,16 +1047,19 @@ func (s *Service) validateClaimedCeilingBinding(
 	if task == nil {
 		return ErrCeilingLaunchSuperseded
 	}
+	_, routePresent := models.LoadWorkflowSessionRoute(task.Metadata)
+	if !routePresent {
+		if _, metadataRoutePresent := task.Metadata[models.MetaKeyWorkflowSessionRoute]; metadataRoutePresent {
+			return fmt.Errorf("deferred workflow entry ownership is unavailable")
+		}
+	}
 	kind := ceilingEntryKindFromContext(ctx)
 	if kind == "" {
 		// A normal on_enter callback can carry an in-memory binding before the
 		// route commit has been materialized. It is safe only when the task still
 		// names the same workflow step and latest entry; durable replay callers
 		// always set kind and take the strict committed-route path below.
-		if _, routePresent := models.LoadWorkflowSessionRoute(task.Metadata); !routePresent {
-			if _, metadataRoutePresent := task.Metadata[models.MetaKeyWorkflowSessionRoute]; metadataRoutePresent {
-				return fmt.Errorf("deferred workflow entry ownership is unavailable")
-			}
+		if !routePresent {
 			if task.WorkflowID != "" && task.WorkflowID != binding.WorkflowID {
 				return fmt.Errorf("%w: %s", ErrCeilingLaunchSuperseded, ceilingEntryDetailWorkflowChanged)
 			}

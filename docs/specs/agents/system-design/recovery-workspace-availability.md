@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: agents
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-005

@@ -64,14 +64,14 @@ test("explains unavailable workspace restore on desktop and phone", async ({
   const desktopCard = desktopSession.activeChat().getByTestId("session-recovery-card");
   await expect(desktopCard).toBeVisible();
   await expect(desktopCard.getByTestId("session-recovery-prerequisite")).toHaveText(
-    "No workspace was created, so there is nothing to restore.",
+    "Workspace restore is unavailable right now.",
   );
   await expect(desktopCard.getByTestId("recovery-restore-workspace-button")).toHaveCount(0);
   if (prCapture.capturing) {
     await desktopCard.scrollIntoViewIfNeeded();
     await prCapture.screenshot("desktop-workspace-unavailable-recovery", {
       page: desktopTestPage,
-      caption: "Desktop recovery explains that no workspace exists and omits restore.",
+      caption: "Desktop recovery explains restore is unavailable and omits its action.",
       fullPage: true,
     });
   }
@@ -82,7 +82,7 @@ test("explains unavailable workspace restore on desktop and phone", async ({
   const card = session.activeChat().getByTestId("session-recovery-card");
   await expect(card).toBeVisible();
   await expect(card.getByTestId("session-recovery-prerequisite")).toHaveText(
-    "No workspace was created, so there is nothing to restore.",
+    "Workspace restore is unavailable right now.",
   );
   await expect(card.getByTestId("recovery-restore-workspace-button")).toHaveCount(0);
 
@@ -95,7 +95,7 @@ test("explains unavailable workspace restore on desktop and phone", async ({
   if (prCapture.capturing) {
     await card.scrollIntoViewIfNeeded();
     await prCapture.screenshot("phone-workspace-unavailable-recovery", {
-      caption: "Phone recovery explains that no workspace exists and omits restore.",
+      caption: "Phone recovery explains restore is unavailable and omits its action.",
       fullPage: true,
     });
   }
@@ -104,7 +104,7 @@ test("explains unavailable workspace restore on desktop and phone", async ({
   await session.waitForLoad();
   const reloadedCard = session.activeChat().getByTestId("session-recovery-card");
   await expect(reloadedCard.getByTestId("session-recovery-prerequisite")).toHaveText(
-    "No workspace was created, so there is nothing to restore.",
+    "Workspace restore is unavailable right now.",
   );
   await expect(reloadedCard.getByTestId("recovery-restore-workspace-button")).toHaveCount(0);
   await assertNoDocumentHorizontalOverflow(testPage, "reloaded workspace recovery on phone");

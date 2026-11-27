@@ -2559,7 +2559,7 @@
   "workspaceRecoveryInspectionBusy": "このワークスペースを確認中です。セッションの再開をお試しください。",
   "continueOnNewBranch": "新しいブランチで続行",
   "restoreReadOnlyWorkspace": "読み取り専用ワークスペースを復元",
-  "restoreUnavailableNoWorkspace": "ワークスペースが作成されていないため、復元するものはありません。",
+  "workspaceRestoreUnavailable": "ワークスペースは現在復元できません。",
   "sessionRecoveryGuardInProgress": "再起動後にKandevがエージェントを確認しています。確認が完了してからセッションを再開してください。",
   "sessionRecoveryGuardUnstoppable": "このセッションの以前のエージェントプロセスは、バックエンド再起動後に停止できなかった。バックエンドを再起動して解消し、その後もう一度試して。",
   "sessionStatusGenerating": "生成中",

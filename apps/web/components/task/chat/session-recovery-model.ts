@@ -382,7 +382,7 @@ export function useRecoveryPresentation(
   const copy = recoveryPresentationCopy(model, bootstrap, managedCloneRelocation, t);
   const workspaceCopy =
     model.metadata?.workspace_restorable === false
-      ? { ...copy, prerequisite: t("task:restoreUnavailableNoWorkspace") }
+      ? { ...copy, prerequisite: t("task:workspaceRestoreUnavailable") }
       : copy;
   const { busy, busyAction } = recoveryPresentationBusy(model, automatic, actions);
   const causes = recoveryPresentationCauses(model, bootstrap, automatic, t);

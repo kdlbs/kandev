@@ -2541,7 +2541,7 @@
   "continueFromHistoryDisclosure": "Saved history starts a new native conversation. The interrupted prompt outcome remains unknown.",
   "continuingFromHistory": "Continuing from saved history...",
   "restoreReadOnlyWorkspace": "Restore read-only workspace",
-  "restoreUnavailableNoWorkspace": "No workspace was created, so there is nothing to restore.",
+  "workspaceRestoreUnavailable": "Workspace restore is unavailable right now.",
   "sessionRecoveryGuardInProgress": "Kandev is checking the agent after a restart. Wait for this check to finish before resuming.",
   "sessionRecoveryGuardUnstoppable": "This session's previous agent process couldn't be stopped after the backend restarted. Restart the backend to clear this, then try again.",
   "sessionStatusGenerating": "Generating",

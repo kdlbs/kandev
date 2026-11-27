@@ -90,6 +90,7 @@ vi.mock("react-i18next", () => ({
         "task:failedToResumeSession": FAILED_TO_RESUME_MESSAGE,
         "task:failedToStartFreshSession": "Failed to start fresh session",
         "task:failedToRestoreWorkspace": "Failed to restore workspace",
+        "task:workspaceRestoreUnavailable": "Workspace restore is unavailable right now.",
         "task:managedCloneRelocationTitle": "Workspace needs repair",
         "task:managedCloneRelocationBody": "Move files to the current clone to resume.",
         "task:managedCloneRelocateResume": "Move files and resume",
@@ -586,7 +587,7 @@ describe("SessionStoppedBanner recovery failures", () => {
 });
 
 describe("SessionStoppedBanner workspace availability", () => {
-  it("does not offer restore when failure metadata says no workspace exists", () => {
+  it("explains unavailable restore when no task is available for recovery", () => {
     const recoveryActions = {
       ...guardRecoveryActions("Provider is unavailable", "fresh_start"),
       guardDetails: null,
@@ -597,10 +598,12 @@ describe("SessionStoppedBanner workspace availability", () => {
         mode="recoverable"
         recoveryActions={recoveryActions}
         workspaceRestorable={false}
+        taskId={null}
       />,
     );
 
     expect(screen.queryByTestId(RESTORE_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.getByText("Workspace restore is unavailable right now.")).toBeTruthy();
   });
 });
 

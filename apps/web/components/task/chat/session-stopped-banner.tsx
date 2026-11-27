@@ -351,6 +351,15 @@ function StoppedSessionMessages({
       {props.sessionId && !profileExists && (
         <p className="mt-1 text-xs text-muted-foreground">{t("task:agentProfileNoLongerExists")}</p>
       )}
+      {props.workspaceRestorable === false && (
+        <p
+          role="status"
+          data-testid="workspace-restore-unavailable"
+          className="mt-1 text-xs text-muted-foreground"
+        >
+          {t("task:workspaceRestoreUnavailable")}
+        </p>
+      )}
       {recoveryErrorMessage && (
         <p
           role="status"

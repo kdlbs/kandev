@@ -1,6 +1,6 @@
 ---
 created: 2026-11-27
-status: complete
+status: implemented
 requirements:
   - REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-002
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-005
@@ -140,7 +140,7 @@ within the cyclomatic limit.
   the key out.
 - Web: `appendReadOnlyRestoreChoice` returns early when
   `model.metadata?.workspace_restorable === false`. The card adds a localized
-  prerequisite line, `task:restoreUnavailableNoWorkspace`.
+  prerequisite line, `task:workspaceRestoreUnavailable`.
 - Web: `use-session-recovery-actions.ts` records `operation: "fresh_start"`
   when the failed action is `fresh_start` or `runtime_retry`. Add
   `task:failedToStartFreshSession` and use it in `recoveryFailureCopy`,
@@ -165,7 +165,7 @@ After, when the retry is refused for some other reason:
 ```text
 ┌ Agent startup failed ────────────────────────────────────┐
 │ Worktree setup failed                                    │
-│ No workspace was created, so there is nothing to restore.│
+│ Workspace restore is unavailable right now.              │
 │ [Start fresh session]                                    │
 │ Failed to start fresh session                            │
 │ ▸ Details  (sanitized backend cause)                     │
@@ -207,7 +207,12 @@ stops the generic refusal.
 cd apps/backend
 go test -trimpath ./internal/orchestrator -run 'TestFreshStart|TestValidateUnrouted|TestCeiling|TestSessionFailureMetadata|TestRecover' -count=1
 go test -trimpath -race ./internal/orchestrator -run 'TestFreshStartInitialTargetWithoutRoute' -count=1
-cd ../.. && bash scripts/lint-go-changed <changed-go-files>
+cd ../.. && bash scripts/lint-go-changed \
+  apps/backend/internal/orchestrator/ceiling_entry.go \
+  apps/backend/internal/orchestrator/initial_recovery_prompt.go \
+  apps/backend/internal/orchestrator/fresh_start_initial_target_test.go \
+  apps/backend/internal/orchestrator/event_handlers_agent.go \
+  apps/backend/internal/orchestrator/event_handlers_agent_recovery_workspace_test.go
 cd apps && pnpm --filter @kandev/web test -- session-recovery use-session-recovery-actions action-message-recovery session-stopped-banner
 pnpm --filter @kandev/web typecheck && pnpm --filter @kandev/web lint
 cd web && pnpm run i18n:check && pnpm run i18n:pseudo

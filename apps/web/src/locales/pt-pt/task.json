@@ -2511,7 +2511,7 @@
   "continueFromHistoryDisclosure": "O histórico guardado inicia uma nova conversa nativa. O resultado da instrução interrompida permanece desconhecido.",
   "continuingFromHistory": "A continuar a partir do histórico guardado...",
   "restoreReadOnlyWorkspace": "Restaurar workspace só de leitura",
-  "restoreUnavailableNoWorkspace": "Não foi criado um workspace, por isso não há nada para restaurar.",
+  "workspaceRestoreUnavailable": "O restauro do workspace não está disponível neste momento.",
   "sessionRecoveryGuardInProgress": "O Kandev está a verificar o agente após um reinício. Aguarde a conclusão da verificação antes de retomar.",
   "sessionRecoveryGuardUnstoppable": "Não foi possível parar o processo do agente anterior desta sessão após o reinício do backend. Reinicie o backend para resolver isto e tente novamente.",
   "gitOperationFailedGeneric": "A operação falhou",
