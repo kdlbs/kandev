@@ -38,6 +38,7 @@ const (
 
 	sshRemoteGOOSLinux   = "linux"
 	sshRemoteGOOSDarwin  = "darwin"
+	sshRemoteGOOSWindows = "windows"
 	sshRemoteGOARCHAMD64 = "amd64"
 	sshRemoteGOARCHARM64 = "arm64"
 )
@@ -383,15 +384,21 @@ func requireSupportedRemotePlatform(platform SSHRemotePlatform) error {
 		sshRemoteGOOSDarwin + "/" + sshRemoteGOARCHAMD64:
 		return nil
 	default:
-		reported := platform.String()
-		if reported == "unknown" && (platform.UnameOS != "" || platform.UnameArch != "") {
-			reported = fmt.Sprintf("%s/%s", platform.UnameOS, platform.UnameArch)
-		}
 		return fmt.Errorf(
 			"unsupported remote platform %q — SSH executor supports linux/{amd64,arm64} and darwin/{amd64,arm64}",
-			reported,
+			reportedRemotePlatform(platform),
 		)
 	}
+}
+
+// reportedRemotePlatform names a platform for errors, preferring the raw uname
+// values when normalization could not map them.
+func reportedRemotePlatform(platform SSHRemotePlatform) string {
+	reported := platform.String()
+	if reported == "unknown" && (platform.UnameOS != "" || platform.UnameArch != "") {
+		reported = fmt.Sprintf("%s/%s", platform.UnameOS, platform.UnameArch)
+	}
+	return reported
 }
 
 // expandRemoteHome rewrites a leading ~/ to the home directory reported by the

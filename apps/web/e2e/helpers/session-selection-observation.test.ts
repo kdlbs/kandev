@@ -80,12 +80,19 @@ it("recognizes the source-supported informational background update", () => {
   expect(isBackgroundUpdateNotice(update)).toBe(true);
 });
 
+it("recognizes the update notice with its rendered dismiss control", () => {
+  expect(
+    isBackgroundUpdateNotice({ ...update, icons: [...update.icons, "tabler-icon tabler-icon-x "] }),
+  ).toBe(true);
+});
+
 it.each([
   { title: "Session restart failed" },
   { description: "Failed to launch session: session is not resumable" },
   { icons: ["tabler-icon tabler-icon-x h-5 w-5"] },
   { icons: ["tabler-icon tabler-icon-check h-5 w-5"] },
   { icons: [] },
+  { icons: [...update.icons, "tabler-icon tabler-icon-check h-5 w-5"] },
 ])("rejects error or unclassified feedback %j", (changes) => {
   expect(isBackgroundUpdateNotice({ ...update, ...changes })).toBe(false);
 });

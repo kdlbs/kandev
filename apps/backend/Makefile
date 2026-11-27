@@ -61,6 +61,7 @@ ifeq ($(OS)$(MSYSTEM),Windows_NT)
   GO_LINUX_ARM64 = set CGO_ENABLED=0& set GOOS=linux& set GOARCH=arm64&
   GO_DARWIN_ARM64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=arm64&
   GO_DARWIN_AMD64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=amd64&
+  GO_WINDOWS_AMD64 = set CGO_ENABLED=0& set GOOS=windows& set GOARCH=amd64&
   # Run-target env prefixes and binary invocation. cmd.exe has no `NAME=VAL cmd`
   # syntax (use `set NAME=VAL&`) and no `exec`; the binary path needs backslashes.
   DEV_ENV = set KANDEV_DEBUG_DEV_MODE=true&
@@ -90,6 +91,7 @@ else
   GO_LINUX_ARM64 = CGO_ENABLED=0 GOOS=linux GOARCH=arm64
   GO_DARWIN_ARM64 = CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
   GO_DARWIN_AMD64 = CGO_ENABLED=0 GOOS=darwin GOARCH=amd64
+  GO_WINDOWS_AMD64 = CGO_ENABLED=0 GOOS=windows GOARCH=amd64
   DEV_ENV = KANDEV_DEBUG_DEV_MODE=true
   DEBUG_ENV = KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug KANDEV_WEB_TITLE_PREFIX=$(call shell_quote,$(KANDEV_WEB_TITLE_PREFIX))
   EXEC = exec
@@ -186,7 +188,7 @@ endif
 DEADCODE_VERSION ?= v0.48.0
 DEADCODE_GO_TOOLCHAIN ?= go1.26.0
 
-.PHONY: all build build-dev build-runtime build-kandev build-kandev-linux build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-codexdbg codexdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
+.PHONY: all build build-dev build-runtime build-kandev build-kandev-linux build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-agentctl-windows-amd64 build-acpdbg acpdbg build-codexdbg codexdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
 
 ## Default target
 all: build
@@ -286,7 +288,7 @@ build-agentctl:
 build-agentctl-dev: $(DEV_AGENTCTL_TARGETS)
 
 ## Build all remote agentctl helpers used by SSH/Docker/Sprites executors.
-build-agentctl-remote: build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64
+build-agentctl-remote: build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-agentctl-windows-amd64
 
 ## Build agentctl for linux/amd64 (used by Docker/Sprites and Linux SSH hosts)
 build-agentctl-linux:
@@ -313,6 +315,12 @@ build-agentctl-darwin-amd64:
 	@$(call MKDIR,$(BUILD_DIR))
 	$(GO_DARWIN_AMD64) $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-amd64 ./cmd/agentctl
 	$(call adhoc_sign_darwin,$(BUILD_DIR)/agentctl-darwin-amd64)
+
+## Build agentctl for windows/amd64 (used by x64 Windows SSH hosts)
+build-agentctl-windows-amd64:
+	@echo "Building agentctl for windows/amd64..."
+	@$(call MKDIR,$(BUILD_DIR))
+	$(GO_WINDOWS_AMD64) $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-windows-amd64.exe ./cmd/agentctl
 
 ## Build mock-agent for linux/amd64 (used by Docker E2E tests)
 build-mock-agent-linux:

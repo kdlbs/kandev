@@ -3,6 +3,16 @@ set -euo pipefail
 
 ASSETS_DIR="${1:?Usage: $0 <assets-dir> <output-file>}"
 REPORT="${2:?Usage: $0 <assets-dir> <output-file>}"
+# Tags cut before the Windows helper shipped publish only four helpers.
+WINDOWS_HELPER="${WINDOWS_HELPER:-true}"
+if [[ "$WINDOWS_HELPER" != "true" && "$WINDOWS_HELPER" != "false" ]]; then
+  echo "WINDOWS_HELPER must be true or false" >&2
+  exit 1
+fi
+HELPER_ASSETS=(agentctl-linux-amd64.gz agentctl-linux-arm64.gz agentctl-darwin-amd64.gz agentctl-darwin-arm64.gz)
+if [[ "$WINDOWS_HELPER" = "true" ]]; then
+  HELPER_ASSETS+=(agentctl-windows-amd64.exe.gz)
+fi
 mkdir -p "$(dirname "$REPORT")"
 
 asset_size() {
@@ -36,7 +46,7 @@ asset_mib() {
       fi
     done
   done
-  for asset in agentctl-linux-amd64.gz agentctl-linux-arm64.gz agentctl-darwin-amd64.gz agentctl-darwin-arm64.gz; do
+  for asset in "${HELPER_ASSETS[@]}"; do
     bytes="$(asset_size "$asset")"
     printf '| helper | `%s` | %s | %s |\n' "$asset" "$bytes" "$(asset_mib "$bytes")"
   done

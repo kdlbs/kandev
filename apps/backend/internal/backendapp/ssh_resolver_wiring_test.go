@@ -33,6 +33,7 @@ func TestSSHResolverUsesBuildIdentityForStandardManifest(t *testing.T) {
 			{Platform: "linux/arm64", Asset: "agentctl-linux-arm64.gz", SHA256: digestText, SizeBytes: int64(len(payload))},
 			{Platform: "darwin/amd64", Asset: "agentctl-darwin-amd64.gz", SHA256: digestText, SizeBytes: int64(len(payload))},
 			{Platform: "darwin/arm64", Asset: "agentctl-darwin-arm64.gz", SHA256: digestText, SizeBytes: int64(len(payload))},
+			{Platform: "windows/amd64", Asset: "agentctl-windows-amd64.exe.gz", SHA256: digestText, SizeBytes: int64(len(payload))},
 		},
 	}
 	manifestBytes, err := json.Marshal(manifest)
