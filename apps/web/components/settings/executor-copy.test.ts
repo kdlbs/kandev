@@ -160,7 +160,7 @@ describe("getExecutorDescription", () => {
     ["local_docker", "Runs Docker containers on this machine."],
     ["remote_docker", "Connects to a remote Docker host."],
     ["sprites", "Runs agents in Sprites.dev cloud sandboxes."],
-    ["ssh", "Runs agents on a trusted Linux amd64 or macOS host over SSH."],
+    ["ssh", "Runs agents on a trusted Linux, macOS, or Windows host over SSH."],
     ["k8s", "Runs agents in administrator-configured Kubernetes Pods."],
   ] as const)("renders %s unchanged", (type, expected) => {
     expect(getExecutorDescription(type)).toBe(expected);

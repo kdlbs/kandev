@@ -90,6 +90,7 @@ func TestSSHOrphanWorkdirRoots(t *testing.T) {
 type orphanSweepRootTestStore struct {
 	profiles []*models.ExecutorProfile
 	task     *models.Task
+	sessions []*models.TaskSession
 }
 
 func (s *orphanSweepRootTestStore) GetTask(context.Context, string) (*models.Task, error) {
@@ -97,7 +98,7 @@ func (s *orphanSweepRootTestStore) GetTask(context.Context, string) (*models.Tas
 }
 
 func (s *orphanSweepRootTestStore) ListTaskSessions(context.Context, string) ([]*models.TaskSession, error) {
-	return nil, nil
+	return s.sessions, nil
 }
 
 func (s *orphanSweepRootTestStore) ListExecutorsRunningByTaskID(context.Context, string) ([]*models.ExecutorRunning, error) {
@@ -123,6 +124,10 @@ func (s *orphanSweepRootTestStore) ListExecutorProfiles(context.Context, string)
 func TestSweepSSHExecutorOrphansUsesProfileWorkdirRoot(t *testing.T) {
 	archivedAt := time.Now().Add(-time.Hour)
 	handler := newSSHScriptedHandler(t,
+		sshScriptRule{match: "uname -a", result: sshOK},
+		sshScriptRule{match: "uname -m", result: sshOut("arm64")},
+		sshScriptRule{match: "uname -s", result: sshOut("Darwin")},
+		sshScriptRule{match: "git --version", result: sshFail("git: command not found")},
 		sshScriptRule{
 			match:  "/Users/neo/kandev-workspaces/tasks",
 			result: sshOut("PROC\t4242\t1\t/opt/kandev/agentctl --workdir /Users/neo/kandev-workspaces/tasks/task-1\n"),

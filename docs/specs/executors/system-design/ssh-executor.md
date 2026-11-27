@@ -18,7 +18,7 @@ The proposed [SSH passthrough design](ssh-passthrough.md) extends this controlle
 lifecycle with remote CLI terminal execution. Its
 [requirements](../requirements/ssh-passthrough.md) own that mode's behavior.
 
-The proposed [Windows remote host design](ssh-windows-remote.md) extends this
+The [Windows remote host design](ssh-windows-remote.md) extends this
 lifecycle to Windows hosts. Its [requirements](../requirements/ssh-windows-remote.md)
 own that platform's behavior.
 
@@ -144,10 +144,10 @@ Multiple sessions in the _same_ task share the same worktree on disk (same files
 
 ### agentctl binary upload with content-hash cache
 
-- On `CreateInstance`, detect the remote platform via `uname -s` and `uname -m`, normalize it to a Go `GOOS/GOARCH` tuple, and resolve the matching agentctl helper via `AgentctlResolver`.
-- Supported remote platforms are `linux/amd64`, `linux/arm64`, `darwin/arm64`, and `darwin/amd64`. Unsupported platforms fail with a clear error: `unsupported remote platform "<platform>" — SSH executor supports linux/{amd64,arm64} and darwin/{amd64,arm64}`.
-  - **Validation status:** `linux/amd64` and `darwin/arm64` have been validated end-to-end on real hosts (`darwin/arm64` live over Tailscale against Apple Silicon Macs). `linux/arm64` and `darwin/amd64` are wired through the full build/upload/launch path and share the same cross-compiled helper, but have **not** yet been exercised on real ARM Linux / Intel Mac remotes — treat them as supported-but-unverified until someone confirms a task completes on that hardware.
-- Current runtime bundles include `agentctl-linux-amd64`, `agentctl-linux-arm64`, `agentctl-darwin-arm64`, and `agentctl-darwin-amd64`; development builds produce them with `make -C apps/backend build-agentctl-remote`. The proposed [compact runtime distribution design](../../release/system-design/compact-runtime-distribution.md) would fetch a matching helper on first remote use from standard Stable archives while retaining complete offline archives. The darwin helpers are ad-hoc-signed (Go signs darwin/arm64 at link time; `make` re-signs both via `codesign`/`rcodesign`); bundle validation rejects an unsigned `agentctl-darwin-arm64` because Apple Silicon refuses to run it.
+- On `CreateInstance`, detect the remote platform via `uname -s` and `uname -m`, normalize it to a Go `GOOS/GOARCH` tuple, and resolve the matching agentctl helper via `AgentctlResolver`. When `uname` is unavailable, a PowerShell probe identifies Windows hosts; see the [Windows remote host design](ssh-windows-remote.md).
+- Supported remote platforms are `linux/amd64`, `linux/arm64`, `darwin/arm64`, `darwin/amd64`, and `windows/amd64`. Unsupported platforms, including `windows/arm64`, fail with a clear error: `unsupported remote platform "<platform>" — SSH executor supports linux/{amd64,arm64}, darwin/{amd64,arm64}, and windows/amd64`.
+  - **Validation status:** `linux/amd64` and `darwin/arm64` have been validated end-to-end on real hosts (`darwin/arm64` live over Tailscale against Apple Silicon Macs). `linux/arm64` and `darwin/amd64` are wired through the full build/upload/launch path and share the same cross-compiled helper, but have **not** yet been exercised on real ARM Linux / Intel Mac remotes — treat them as supported-but-unverified until someone confirms a task completes on that hardware. `windows/amd64` has been validated end-to-end on a Windows 11 x64 host with stock OpenSSH, covering launch, idle prompts, backend restart, helper replacement, archive, the task terminal panel, `DefaultShell` set to PowerShell, and a `pwsh` profile.
+- Current runtime bundles include `agentctl-linux-amd64`, `agentctl-linux-arm64`, `agentctl-darwin-arm64`, `agentctl-darwin-amd64`, and `agentctl-windows-amd64.exe`; development builds produce them with `make -C apps/backend build-agentctl-remote`. The proposed [compact runtime distribution design](../../release/system-design/compact-runtime-distribution.md) would fetch a matching helper on first remote use from standard Stable archives while retaining complete offline archives. The darwin helpers are ad-hoc-signed (Go signs darwin/arm64 at link time; `make` re-signs both via `codesign`/`rcodesign`); bundle validation rejects an unsigned `agentctl-darwin-arm64` because Apple Silicon refuses to run it.
 - Compute SHA256 locally; check `~/.kandev/bin/agentctl.sha256` on the remote via `sha256sum`. Upload only if missing or mismatched.
 - Upload via SFTP to `~/.kandev/bin/agentctl` (chmod 755), then write the sha256 sidecar.
 - Binary is shared across all tasks and sessions on the host.
@@ -292,7 +292,6 @@ task and session state.
 
 ## Out of scope (v1)
 
-- **Remote Windows.** SSH transport to Windows is out of scope for v1. The proposed [Windows remote host design](ssh-windows-remote.md) adds it.
 - **Password / keyboard-interactive auth.** Keys + agent only.
 - **Passphrase-protected keys handled inside kandev.** User must load the key into `ssh-agent`.
 - **Chained ProxyJump.** Single bastion only; multi-hop deferred.

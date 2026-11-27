@@ -73,6 +73,7 @@ type fakeSSHServer struct {
 	// sftpEnabled serves the "sftp" subsystem against the real filesystem, so
 	// tests point remote paths at a t.TempDir() and assert on real bytes.
 	sftpEnabled bool
+	sftpHandler *sftp.Handlers
 
 	// tcpTarget maps a requested direct-tcpip port onto a real local address.
 	// Returning "" rejects the channel.
@@ -520,6 +521,14 @@ func (s *fakeSSHServer) runExec(channel ssh.Channel, command string) {
 }
 
 func (s *fakeSSHServer) runSFTP(channel ssh.Channel) {
+	if s.sftpHandler != nil {
+		reqServer := sftp.NewRequestServer(channel, *s.sftpHandler)
+		defer func() { _ = reqServer.Close() }()
+		if err := reqServer.Serve(); err != nil && !errors.Is(err, io.EOF) {
+			s.t.Logf("fake request sftp server: %v", err)
+		}
+		return
+	}
 	server, err := sftp.NewServer(channel)
 	if err != nil {
 		return

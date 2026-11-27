@@ -245,6 +245,33 @@ func assignProcessToJob(job windows.Handle, pid int) error {
 }
 
 func ResumeSuspendedProcess(pid int) error {
+	if err := resumeSuspendedProcessByHandle(pid); err == nil {
+		return nil
+	}
+	return resumeSuspendedProcessThreads(pid)
+}
+
+var procNtResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
+
+// resumeSuspendedProcessByHandle resumes every thread of pid with one ntdll
+// call. The thread-snapshot fallback walks every thread on the machine, which
+// costs tens of milliseconds per command on a busy host.
+func resumeSuspendedProcessByHandle(pid int) error {
+	if err := procNtResumeProcess.Find(); err != nil {
+		return err
+	}
+	process, err := windows.OpenProcess(windows.PROCESS_SUSPEND_RESUME, false, uint32(pid))
+	if err != nil {
+		return fmt.Errorf("OpenProcess(pid=%d) for resume: %w", pid, err)
+	}
+	defer func() { _ = windows.CloseHandle(process) }()
+	if status, _, _ := procNtResumeProcess.Call(uintptr(process)); status != 0 {
+		return fmt.Errorf("NtResumeProcess(pid=%d): NTSTATUS 0x%08x", pid, uint32(status))
+	}
+	return nil
+}
+
+func resumeSuspendedProcessThreads(pid int) error {
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
 	if err != nil {
 		return fmt.Errorf("CreateToolhelp32Snapshot: %w", err)

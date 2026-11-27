@@ -171,7 +171,11 @@ func TestNormalizeSSHRemotePlatformAcceptsUnameAliases(t *testing.T) {
 		{osName: "linux", arch: "amd64", wantGOOS: "linux", wantArch: "amd64", wantSupported: true},
 		{osName: "  Linux  ", arch: "  X86_64 ", wantGOOS: "linux", wantArch: "amd64", wantSupported: true},
 		{osName: "DARWIN", arch: "AARCH64", wantGOOS: "darwin", wantArch: "arm64", wantSupported: true},
-		{osName: "Windows_NT", arch: "x86_64", wantGOOS: "", wantArch: "amd64", wantSupported: false},
+		{osName: "Windows_NT", arch: "x86_64", wantGOOS: "windows", wantArch: "amd64", wantSupported: true},
+		{osName: "MINGW64_NT-10.0-22631", arch: "AMD64", wantGOOS: "windows", wantArch: "amd64", wantSupported: true},
+		{osName: "MSYS_NT-10.0-22631", arch: "ARM64", wantGOOS: "windows", wantArch: "arm64", wantSupported: false},
+		{osName: "CYGWIN_NT-10.0", arch: "x86_64", wantGOOS: "windows", wantArch: "amd64", wantSupported: true},
+		{osName: "FreeBSD", arch: "x86_64", wantGOOS: "", wantArch: "amd64", wantSupported: false},
 		{osName: "Linux", arch: "i686", wantGOOS: "linux", wantArch: "", wantSupported: false},
 	}
 	for _, tc := range tests {
@@ -189,9 +193,12 @@ func TestNormalizeSSHRemotePlatformAcceptsUnameAliases(t *testing.T) {
 }
 
 func TestSSHDefaultShellForPlatformIsPlatformAware(t *testing.T) {
-	// End-to-end contract: Darwin defaults to zsh, everything else to bash.
+	// End-to-end contract: Darwin defaults to zsh, Windows to powershell, everything else to bash.
 	if got := SSHDefaultShellForPlatform(SSHRemotePlatform{GOOS: "darwin", GOARCH: "arm64"}); got != "zsh" {
 		t.Fatalf("darwin default shell = %q, want zsh", got)
+	}
+	if got := SSHDefaultShellForPlatform(SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"}); got != "powershell" {
+		t.Fatalf("windows default shell = %q, want powershell", got)
 	}
 	if got := SSHDefaultShellForPlatform(SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}); got != "bash" {
 		t.Fatalf("linux default shell = %q, want bash", got)
@@ -620,7 +627,7 @@ func TestEnsureRemoteTaskDir(t *testing.T) {
 			sshScriptRule{match: remoteHomeCommand, result: sshOut("/home/kandev")},
 			sshScriptRule{match: "mkdir -p", result: sshOK},
 		).handle)
-		taskDir, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "task-42")
+		taskDir, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "task-42", SSHRemotePlatform{})
 		if err != nil {
 			t.Fatalf("ensureRemoteTaskDir: %v", err)
 		}
@@ -635,7 +642,7 @@ func TestEnsureRemoteTaskDir(t *testing.T) {
 
 	t.Run("empty task dir name is rejected before dialing", func(t *testing.T) {
 		server := newFakeSSHServer(t, nil)
-		_, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "")
+		_, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "", SSHRemotePlatform{})
 		if err == nil || !strings.Contains(err.Error(), "task dir name is empty") {
 			t.Fatalf("error = %v", err)
 		}
@@ -651,7 +658,7 @@ func TestEnsureRemoteTaskDir(t *testing.T) {
 			}
 			return sshOut("/home/kandev")
 		})
-		_, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "task-42")
+		_, err := ensureRemoteTaskDir(context.Background(), server.dial(t), "~/.kandev", "task-42", SSHRemotePlatform{})
 		if err == nil || !strings.Contains(err.Error(), "/home/kandev/.kandev/tasks/task-42") {
 			t.Fatalf("error = %v, want the task dir path in the message", err)
 		}
@@ -783,14 +790,14 @@ func TestIsRemoteAgentctlAlive(t *testing.T) {
 		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
 			sshScriptRule{match: "kill -0 4242", result: sshOK},
 		).handle)
-		if !isRemoteAgentctlAlive(context.Background(), server.dial(t), 4242) {
+		if !isRemoteAgentctlAlive(context.Background(), server.dial(t), 4242, SSHRemotePlatform{}) {
 			t.Fatal("expected pid to be reported alive")
 		}
 	})
 
 	t.Run("dead pid", func(t *testing.T) {
 		server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshFail("no such process") })
-		if isRemoteAgentctlAlive(context.Background(), server.dial(t), 4242) {
+		if isRemoteAgentctlAlive(context.Background(), server.dial(t), 4242, SSHRemotePlatform{}) {
 			t.Fatal("failed kill -0 must report not alive")
 		}
 	})
@@ -798,8 +805,8 @@ func TestIsRemoteAgentctlAlive(t *testing.T) {
 	t.Run("non-positive pid short-circuits", func(t *testing.T) {
 		server := newFakeSSHServer(t, nil)
 		client := server.dial(t)
-		if isRemoteAgentctlAlive(context.Background(), client, 0) ||
-			isRemoteAgentctlAlive(context.Background(), client, -1) {
+		if isRemoteAgentctlAlive(context.Background(), client, 0, SSHRemotePlatform{}) ||
+			isRemoteAgentctlAlive(context.Background(), client, -1, SSHRemotePlatform{}) {
 			t.Fatal("non-positive pids must report not alive")
 		}
 		if cmds := server.commands(); len(cmds) != 0 {

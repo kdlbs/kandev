@@ -1,7 +1,7 @@
 ---
 id: "02-port-windows-ssh-lifecycle"
 title: "Port the Windows SSH lifecycle with shell and passthrough guards"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-publish-windows-helpers"
@@ -22,6 +22,7 @@ acceptance_criteria:
   - AC-EXECUTORS-SSH-WINDOWS-001.14
   - AC-EXECUTORS-SSH-WINDOWS-001.15
   - AC-EXECUTORS-SSH-WINDOWS-001.17
+  - AC-EXECUTORS-SSH-WINDOWS-001.18
 system_design:
   - ../../specs/executors/system-design/ssh-windows-remote.md
 ---
@@ -60,6 +61,9 @@ commit.
     Windows host whose resolved shell fails `isPowerShellShell`. Use a typed
     error that names the saved shell and the supported shells.
 - F8: In the same check, reject `req.IsPassthrough` for Windows hosts.
+- Reclamation gap found during the port: `SSHTaskDirReclaimer.Reclaim` skips a
+  Windows task directory with `unsupported_platform` before running any remote
+  command (`AC-EXECUTORS-SSH-WINDOWS-001.18`).
 - F7:
   - Replace `isRemoteAgentctlAlive(ctx, client, pid, platforms ...)` with an
     explicit `platform` parameter.
@@ -79,7 +83,7 @@ commit.
   - `TestSSHWindowsRejectsARM64Host`: a `KANDEV_WIN_INFO` probe that reports
     `ARM64` yields `windows/arm64`, which fails with the unsupported-platform
     error. That error lists `windows/amd64` as the only Windows platform.
-- F12: `requireSupportedSSHPlatform` and its error text omit `windows/arm64`. Update the fork's ported tests that expect it to be supported:
+- F12: `requireSupportedSSHPlatform` and its error text omit `windows/arm64`. Update the fork's ported tests that expect `windows/arm64` to be supported:
   `TestRequireSupportedRemotePlatform` and
   `TestRequireSupportedRemotePlatformPreservesRawDetail`. Arch normalization
   still maps `ARM64`, so a rejection names the real platform.
@@ -139,4 +143,18 @@ Record each of these tests with its command and result:
 
 ## Results
 
-Pending.
+Completed on 2026-11-22.
+
+- New files came from the fork commit. Modified files took the fork diff
+  through `git apply -3`, so upstream changes since the fork base survived.
+- Remote Docker keeps its Linux and macOS gate.
+  `SSHRequireSupportedExecutorPlatform` is the exported SSH gate that the
+  connection test uses.
+- `validateSSHWindowsLaunch` rejects passthrough launches and non-PowerShell
+  shells before any upload or preparation. `SSHTaskDirReclaimer.Reclaim` skips
+  Windows task directories (`AC-EXECUTORS-SSH-WINDOWS-001.18`).
+- Personal names in the fork's test fixtures became `Kandev User` and
+  `example/demo`.
+
+The targeted lifecycle and `ssh` tests passed, the changed packages showed no
+failure outside the macOS baseline, and lint reported 0 issues.

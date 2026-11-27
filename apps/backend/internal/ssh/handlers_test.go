@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -30,8 +31,36 @@ func TestReadinessShellForRequest(t *testing.T) {
 			want:     "bash",
 		},
 		{
+			name:     "windows defaults to powershell",
+			platform: lifecycle.SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"},
+			want:     "powershell",
+		},
+		{
 			name: "unknown defaults to bash",
 			want: "bash",
+		},
+		{
+			name:     "windows ignores a saved POSIX shell",
+			shell:    "bash",
+			platform: lifecycle.SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"},
+			want:     "powershell",
+		},
+		{
+			name:     "windows keeps pwsh",
+			shell:    "pwsh",
+			platform: lifecycle.SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"},
+			want:     "pwsh",
+		},
+		{
+			name:     "linux ignores a saved PowerShell shell",
+			shell:    "pwsh",
+			platform: lifecycle.SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"},
+			want:     "bash",
+		},
+		{
+			name:  "unknown platform keeps the saved shell",
+			shell: "pwsh",
+			want:  "pwsh",
 		},
 	}
 
@@ -41,5 +70,24 @@ func TestReadinessShellForRequest(t *testing.T) {
 				t.Fatalf("readinessShellForRequest() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-WINDOWS-001.3
+func TestSSHWindowsShellProbeOffersOnlyPowerShell(t *testing.T) {
+	winShells, winProbe := candidateShellsForPlatform(lifecycle.SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"})
+	if winProbe != "powershell" {
+		t.Fatalf("windows probe shell = %q, want powershell", winProbe)
+	}
+	if want := []string{"powershell", "pwsh"}; !reflect.DeepEqual(winShells, want) {
+		t.Fatalf("windows candidate shells = %v, want %v", winShells, want)
+	}
+
+	posixShells, posixProbe := candidateShellsForPlatform(lifecycle.SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"})
+	if posixProbe != "sh" {
+		t.Fatalf("linux probe shell = %q, want sh", posixProbe)
+	}
+	if len(posixShells) == 0 || posixShells[0] != "bash" {
+		t.Fatalf("linux candidate shells = %v, want bash first", posixShells)
 	}
 }

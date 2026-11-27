@@ -436,6 +436,8 @@ test-windows:
 	@echo "Running Windows SQLite database path tests..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/system/backups -run TestVerifySnapshotOpensNativeAbsolutePath
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/task/inventoryrepair -run "^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$$"
+	@echo "Running Windows SSH remote executor tests..."
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/agent/runtime/lifecycle ./internal/ssh ./internal/agentctl/server/shell ./internal/common/winproc ./cmd/agentctl -run "^TestSSHWindows|^TestResumeSuspendedProcess"
 
 ## Verify run/dev/start-debug expand to the right per-shell command line across
 ## native Windows (cmd), Git Bash/MSYS, and Unix — the Make-target dispatch the

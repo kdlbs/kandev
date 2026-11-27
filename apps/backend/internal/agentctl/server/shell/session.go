@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/ptyexec"
 	"go.uber.org/zap"
 )
 
@@ -27,8 +27,8 @@ type Session struct {
 	shellArgs []string // Shell arguments
 	config    Config   // Stored config for respawn
 
-	// PTY and process
-	pty       *os.File
+	// PTY and process. Unix uses a PTY master; Windows uses ConPTY.
+	pty       ptyexec.PtyHandle
 	cmd       *exec.Cmd
 	lifecycle shellProcessLifecycleHandle
 	reapErr   error
@@ -69,7 +69,7 @@ func killAndWaitShellCommand(cmd *exec.Cmd) error {
 	_ = cmd.Process.Kill()
 	done := make(chan struct{})
 	go func() {
-		_ = cmd.Wait()
+		_ = waitShellCommand(cmd)
 		close(done)
 	}()
 	select {
@@ -196,14 +196,10 @@ func (s *Session) start(cfg Config) error {
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
 	s.cmd.Dir = cfg.WorkDir
 	s.cmd.Env = buildShellEnv(cfg.WorkDir, cfg.Env)
-	configureShellProcess(s.cmd)
 
 	// Start with PTY
 	var err error
-	s.pty, err = pty.StartWithSize(s.cmd, &pty.Winsize{
-		Cols: uint16(cfg.Cols),
-		Rows: uint16(cfg.Rows),
-	})
+	s.pty, err = ptyexec.Start(s.cmd, uint16(cfg.Cols), uint16(cfg.Rows))
 	if err != nil {
 		return fmt.Errorf("failed to start PTY: %w", err)
 	}
@@ -394,7 +390,7 @@ func (s *Session) Resize(cols, rows uint16) error {
 	s.config.Cols = int(cols)
 	s.config.Rows = int(rows)
 
-	return pty.Setsize(s.pty, &pty.Winsize{Cols: cols, Rows: rows})
+	return s.pty.Resize(cols, rows)
 }
 
 // Subscribe adds a subscriber for shell output
@@ -520,7 +516,7 @@ func (s *Session) GetBufferedOutput() []byte {
 // waitForExit waits for the shell process to exit and respawns if not stopping
 func (s *Session) waitForExit(cmd *exec.Cmd, doneCh chan struct{}, lifecycle shellProcessLifecycleHandle) {
 	if cmd != nil {
-		_ = cmd.Wait()
+		_ = waitShellCommand(cmd)
 	}
 	pid := 0
 	var process *os.Process
@@ -595,14 +591,10 @@ func (s *Session) respawn() error {
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
 	s.cmd.Dir = s.workDir
 	s.cmd.Env = buildShellEnv(s.workDir, s.config.Env)
-	configureShellProcess(s.cmd)
 
 	// Start with PTY
 	var err error
-	s.pty, err = pty.StartWithSize(s.cmd, &pty.Winsize{
-		Cols: uint16(s.config.Cols),
-		Rows: uint16(s.config.Rows),
-	})
+	s.pty, err = ptyexec.Start(s.cmd, uint16(s.config.Cols), uint16(s.config.Rows))
 	if err != nil {
 		return fmt.Errorf("failed to start PTY: %w", err)
 	}

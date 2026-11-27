@@ -1,7 +1,7 @@
 ---
 id: "06-docs-copy-and-host-validation"
 title: "Public docs, UI copy, spec promotion, and real-host evidence"
-status: pending
+status: done
 wave: 6
 depends_on:
   - "02-port-windows-ssh-lifecycle"
@@ -58,7 +58,7 @@ promote the specs.
   | H2 | Stock | Launch a task with the default prepare script; agent answers one prompt | `001.5`, `001.8` |
   | H3 | Stock | Launch returns; wait 2 min with the agent idle; prompt again | `001.11` |
   | H4 | Stock | Stop the backend, restart it, open the task; no replacement launch | `001.11`, `001.12` |
-  | H5 | Stock | Stop; then archive; session and task dirs are reclaimed | `001.13` |
+  | H5 | Stock | Archive; the controller stops and the session dir is removed, while the task dir is kept (Windows never reclaims) | `001.13`, `001.18` |
   | H6 | Stock | While H2's session runs, launch with a rebuilt helper (new hash) | `001.6` |
   | H7 | `DefaultShell` = PowerShell (user-approved; restore afterward) | Repeat H2 and H4 | `001.5`, `001.12` |
   | H8 | `pwsh` saved shell | Repeat H2 | `001.3` |
@@ -125,4 +125,33 @@ For each host scenario, record:
 
 ## Results
 
-Pending.
+Completed on 2026-11-23.
+
+Docs and copy: `docs/public/executors.md` has the Windows host requirements, a
+"Windows hosts" subsection, and passthrough and reclamation notes.
+`feature-status.md` and `release-process.md` match it. Three `executors.json`
+keys are updated in all eight locales; `zh-hk`, `zh-tw`, and `pseudo` come
+from the generators, minus three unrelated regressions they introduced.
+
+Real-host matrix: an isolated backend drove the product API against the test
+host with Kandev's mock agent.
+
+| # | Result |
+| --- | --- |
+| H1 | Passed. The connection test reported `windows/amd64` |
+| H2 | Passed. The default prepare cloned the repository, and the WMI-launched controller answered a prompt |
+| H3 | Passed. After 120 seconds idle, the same controller answered |
+| H4 | Passed. After a backend restart, the same remote PID reattached and answered in the same session |
+| H5 | Passed. Archive stopped the controller and removed the session dir; the task dir stayed |
+| H6 | Passed. A rebuilt helper launched a second task while the running controller kept `agentctl.exe.old-*` |
+| H7 | Passed. With `DefaultShell` set to PowerShell, launch and resume worked; the value was then removed |
+| H8 | Passed. A `pwsh` profile launched and answered |
+
+The run left no `agentctl.exe` running and no validation files, and
+`DefaultShell` is absent. Its three findings became tasks 07 through 09: no PTY
+for the task terminal, a first-turn checkpoint timeout, and leftover `gh` shim
+directories.
+
+The web i18n, lint, and type checks, the public-docs validators, and the
+spec validators passed. The requirement is `active`, the design is `current`,
+and `ssh-executor.md` lists Windows in its support matrix.

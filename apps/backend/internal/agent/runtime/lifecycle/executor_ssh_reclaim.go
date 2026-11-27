@@ -78,6 +78,9 @@ const (
 	SSHReclaimSkipStashPresent    SSHReclaimSkipReason = "stash_present"
 	SSHReclaimSkipNotACheckout    SSHReclaimSkipReason = "not_a_checkout"
 	SSHReclaimSkipProbeFailed     SSHReclaimSkipReason = "probe_failed"
+	// SSHReclaimSkipUnsupportedPlatform preserves a task directory on a host
+	// whose platform has no reclamation probes (Windows).
+	SSHReclaimSkipUnsupportedPlatform SSHReclaimSkipReason = "unsupported_platform"
 )
 
 // SSHReclaimVerdict is the answer to "is this directory disposable".
@@ -168,6 +171,11 @@ func (r *SSHTaskDirReclaimer) Reclaim(
 	workdirRoot string,
 	taskDir string,
 ) (SSHReclaimOutcome, SSHReclaimVerdict, error) {
+	if isWindowsRemotePath(taskDir) || isWindowsRemotePath(workdirRoot) {
+		verdict := unsafeVerdict(SSHReclaimSkipUnsupportedPlatform, "Windows task directories are not reclaimed")
+		r.log("preserving remote task directory", taskDir, string(verdict.Reason), verdict.Detail)
+		return SSHReclaimOutcomeSkipped, verdict, nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, sshReclaimTimeout)
 	defer cancel()
 

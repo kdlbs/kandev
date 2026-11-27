@@ -1,12 +1,15 @@
 ---
 created: 2026-11-22
-updated: 2026-11-22
-status: in_progress
+updated: 2026-11-27
+status: implemented
 requirements:
   - REQ-EXECUTORS-SSH-WINDOWS-001
   - REQ-EXECUTORS-SSH-WINDOWS-002
+  - REQ-EXECUTORS-REPOSITORY-BRANCH-001
+  - REQ-EXECUTORS-REPOSITORY-BRANCH-002
 system_design:
   - ../../specs/executors/system-design/ssh-windows-remote.md
+  - ../../specs/executors/system-design/repository-branch-resolution.md
   - ../../specs/release/system-design/compact-runtime-distribution.md
 legacy_specs: []
 ---
@@ -49,6 +52,10 @@ records the probes that shaped the transport and launch.
 | F10 | The CI filter is an 11-alternative regex copied into two files | `backend-tests.yml`, `Makefile` | Task 05 uses a `TestSSHWindows` prefix |
 | F11 | OpenSSH ends a `Start-Process` controller when its launch channel closes | Real-host probe | Task 04 launches through `Win32_Process.Create` |
 | F12 | The fork ships and accepts `windows/arm64`, which is now out of scope | Fork helper tables and `requireSupportedRemotePlatform` | Task 01 removes the helper; task 02 rejects the platform |
+| F13 | agentctl's interactive shell cannot start a PTY on Windows | Real-host H2: `failed to start PTY: unsupported` | Task 07 starts the shell under ConPTY |
+| F14 | The first turn of each new session misses its turn-change start checkpoint | Real-host H2: 9 of 9 change sets `capture_failed`; a thread-snapshot resume per Git command | Task 08 resumes by handle |
+| F15 | Forced stops leave one `%TEMP%\kandev-github-cli-*` directory per session | Real-host H5 | Task 09 sweeps released shim directories |
+| F16 | A port inside a Windows excluded range fails the launch without a retry | Real-host launch: bind refused with an access error | Task 09 classifies the refusal as a port collision |
 
 ## Decisions
 
@@ -70,7 +77,7 @@ fork's `main`, because it carries `release: 0.102.1` and is 29 commits behind.
    separately, and it carries the size cost. Its first commit adds this design
    package, because the release design links to
    `REQ-EXECUTORS-SSH-WINDOWS-002`.
-2. **PR B: `feat(ssh): support Windows remote hosts`** (tasks 02 through 06).
+2. **PR B: `feat(ssh): support Windows remote hosts`** (tasks 02 through 09).
    This PR is stacked on PR A. Keep it in draft until PR A merges, then rebase
    it onto `main`. Use one commit per work order. Its executor-only diff also
    contains public docs, copy, spec promotion, and work-order results.
@@ -91,8 +98,15 @@ real-host validation matrix from task 06 and links the requirement and design.
 | 4 | [04 Launch the controller through WMI](task-04-cim-controller-launch.md) | 03 | B |
 | 5 | [05 Execute PowerShell on Windows CI](task-05-windows-native-script-tests.md) | 04 | B |
 | 6 | [06 Docs, copy, and real-host evidence](task-06-docs-copy-and-host-validation.md) | 02, 05 | B |
+| 7 | [07 Task terminal under ConPTY](task-07-windows-task-terminal.md) | 06 | B |
+| 8 | [08 Resume managed processes by handle](task-08-windows-managed-process-resume.md) | 06 | B |
+| 8 | [09 Shim sweep and excluded-port retry](task-09-windows-shim-sweep-and-port-retry.md) | 06 | B |
+| 9 | [10 Review fixes](task-10-review-fixes.md) | 07, 08, 09 | A (release verifier), B (the rest) |
 
-The order is sequential. Each work order changes code that the next one tests.
+Waves 1 through 6 are sequential. Each of those work orders changes code that
+the next one tests. Tasks 07 through 09 resolve the findings from task 06's
+real-host matrix and do not depend on each other. Task 10 fixes the findings of a local review of
+the finished branch.
 
 ## Lifecycle evidence
 
@@ -100,9 +114,9 @@ The order is sequential. Each work order changes code that the next one tests.
 | --- | --- | --- | --- |
 | Restart and recovery | `001.12` | A live controller is reattached without replacement | `TestSSHWindowsBackendShutdownPreservesAgentctlAndResumeReconnects`, `TestSSHWindowsRecoverInstancesDetailedReattachesAndDiscoversControlPort`; real host (task 06) |
 | Confirmed absence | `001.12` | An exited controller clears its metadata and follows replacement | `TestSSHWindowsResumeClearsMetadataWhenRemoteProcessExited` |
-| Stale owner and PID reuse | `001.13` | A reused PID without the recorded workdir survives | `TestSSHWindowsPersistedStopVerifiesIdentityAndGuardsSessionDir`; Windows-native identity test (task 05) |
+| Stale owner and PID reuse | `001.13` | A reused PID without the recorded workdir survives, on tracked, persisted, and orphan stops | `TestSSHWindowsPersistedStopVerifiesIdentityAndGuardsSessionDir`, `TestSSHWindowsStopGatesKillOnTaskIdentityInOneScript`, `TestSSHWindowsExecStopLeavesReusedPidRunning`; real host (task 10) |
 | Concurrent work | `001.6` | Helper replacement does not stop a running session | New SFTP rename-aside test (task 03); Windows-native running-image test (task 05) |
-| Orphan ownership | `001.14` | Only proven orphans stop | `TestSSHWindowsOrphanSweepInventoriesAndStopsOrphanedAgentctl`; Windows-native inventory test (task 05) |
+| Orphan ownership | `001.14` | Only proven orphans stop, and a re-claimed session directory survives | `TestSSHWindowsOrphanSweepInventoriesAndStopsOrphanedAgentctl`, `TestSSHWindowsOrphanStopGuardsSessionDir`; Windows-native inventory test (task 05); real host (task 10) |
 | Channel close | `001.11` | The controller survives its launch channel | Real-host probe (F11); Windows-native survival test (task 04); real-host H3 (task 06) |
 | Entry paths | `001.1`, `.3` | Connection test, shell probe, and launch use one detection path | `TestSSHWindowsDetectRemoteInfoFallsBackToPowerShell`, `TestSSHWindowsShellProbeOffersOnlyPowerShell`, `TestSSHWindowsCreateInstancePowerShellEndToEnd` |
 

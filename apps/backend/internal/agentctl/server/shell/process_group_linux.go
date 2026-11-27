@@ -12,8 +12,6 @@ import (
 	"github.com/kandev/kandev/internal/common/procstat"
 )
 
-func configureShellProcess(_ *exec.Cmd) {}
-
 type shellProcessLifecycleHandle struct{}
 
 func installShellProcessLifecycle(_ *exec.Cmd) (shellProcessLifecycleHandle, error) {

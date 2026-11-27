@@ -90,11 +90,10 @@ helper exits gracefully.
 
 ## Excluded process paths
 
-- `internal/agentctl/server/shell` prepares the embedded shell for
-  `pty.StartWithSize`, which is an interactive pseudo-terminal session.
-  `configureShellProcess` keeps its flags.
 - `internal/common/ptyexec` starts interactive terminals through ConPTY. ConPTY
-  creates the process itself and does not read `SysProcAttr`.
+  creates the process itself and does not read `SysProcAttr`. The embedded
+  shell in `internal/agentctl/server/shell` starts through `ptyexec` and sets
+  no process attributes.
 - `internal/launcher` supervises processes that have no Job Object. They keep
   the launcher's console, so closing the terminal still delivers the console
   close event to them.

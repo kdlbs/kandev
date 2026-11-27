@@ -305,7 +305,7 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 			return nil, err
 		}
 	} else {
-		taskDir, err = r.prepareRemoteTaskDir(baseCtx, client, workdir, req)
+		taskDir, err = r.prepareRemoteTaskDir(baseCtx, client, workdir, req, platform)
 		if err != nil {
 			return nil, err
 		}
@@ -353,6 +353,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	port, controlPort, pid, fwd, authToken := launch.instancePort, launch.controlPort, launch.pid, launch.forwarder, launch.authToken
 	instance := r.buildInstance(req, target, fwd, taskDir, sessionDir, port, controlPort, pid, workdir, authToken,
 		launch.receipt, launch.createResponse)
+	if platform.isKnown() {
+		instance.Metadata[MetadataKeySSHRemotePlatform] = platform.String()
+	}
 
 	r.mu.Lock()
 	if existing, ok := r.sessions[req.InstanceID]; ok {
@@ -428,6 +431,9 @@ func (r *SSHExecutor) buildInstanceForLostRace(req *ExecutorCreateRequest, exist
 	if existing.controlPort > 0 {
 		metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(existing.controlPort)
 	}
+	if existing.platform.isKnown() {
+		metadata[MetadataKeySSHRemotePlatform] = existing.platform.String()
+	}
 	applySSHLaunchReceiptMetadata(metadata, existing.launchReceipt)
 	// existing.metadata is the winning session's own cloned request metadata
 	// (cloneSSHMetadata(req.Metadata), captured after openSSHRuntimeAPITunnelForRequest
@@ -473,12 +479,18 @@ func (r *SSHExecutor) preflightGitHubCredentialBroker(
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
 ) error {
+	if platform.GOOS == "" {
+		platform = sshPlatformFromMetadata(req.Metadata)
+	}
 	shell := sshShellForRemote(req.Metadata, platform)
 	return runBrokerReachabilityPreflight(ctx, req.Env, func(
 		ctx context.Context,
 		command string,
 		env map[string]string,
 	) ([]byte, error) {
+		if isWindowsRemotePlatform(platform) || isPowerShellShell(shell) {
+			return runWindowsBrokerReachability(ctx, client, shell, env)
+		}
 		envScript, err := buildSSHEnvInitScript(env)
 		if err != nil {
 			return nil, err
@@ -486,8 +498,18 @@ func (r *SSHExecutor) preflightGitHubCredentialBroker(
 		input := strings.NewReader(envScript)
 		wrapped := WrapLoginShell(shell, "set -a; "+sshStdinEnvImport+"; set +a\n"+command)
 		stdout, stderr, err := runSSHCommandStdin(ctx, client, wrapped, input)
+		if err != nil && platform.GOOS == "" {
+			if winInfo, ok := detectWindowsRemoteInfo(ctx, client); ok && isWindowsRemotePlatform(winInfo.Platform) {
+				return runWindowsBrokerReachability(ctx, client, SSHDefaultShellForPlatform(winInfo.Platform), env)
+			}
+		}
 		return []byte(stdout + stderr), err
 	})
+}
+
+func runWindowsBrokerReachability(ctx context.Context, client *ssh.Client, shell string, env map[string]string) ([]byte, error) {
+	stdout, stderr, err := runPowerShellEnvelope(ctx, client, shell, powerShellEnvelope{Env: env, Script: windowsBrokerReachabilityScript})
+	return []byte(stdout + stderr), err
 }
 
 // prepareRemoteHost runs the steps that are independent of any particular
@@ -504,7 +526,11 @@ func (r *SSHExecutor) prepareRemoteHost(
 		r.report(req.OnProgress, "Detecting remote OS", PrepareStepFailed, err.Error())
 		return "", SSHRemotePlatform{}, fmt.Errorf("ssh: detect remote: %w", err)
 	}
-	if err := requireSupportedRemotePlatform(info.Platform); err != nil {
+	if err := requireSupportedSSHPlatform(info.Platform); err != nil {
+		r.report(req.OnProgress, "Detecting remote OS", PrepareStepFailed, err.Error())
+		return "", info.Platform, err
+	}
+	if err := validateSSHWindowsLaunch(req, info.Platform); err != nil {
 		r.report(req.OnProgress, "Detecting remote OS", PrepareStepFailed, err.Error())
 		return "", info.Platform, err
 	}
@@ -529,8 +555,8 @@ func (r *SSHExecutor) prepareRemoteHost(
 }
 
 // prepareRemoteTaskDir makes <workdir>/tasks/<taskDir> before preparation runs.
-func (r *SSHExecutor) prepareRemoteTaskDir(ctx context.Context, client *ssh.Client, workdir string, req *ExecutorCreateRequest) (string, error) {
-	taskDir, err := ensureRemoteTaskDir(ctx, client, workdir, sshTaskDirName(req))
+func (r *SSHExecutor) prepareRemoteTaskDir(ctx context.Context, client *ssh.Client, workdir string, req *ExecutorCreateRequest, platform SSHRemotePlatform) (string, error) {
+	taskDir, err := ensureRemoteTaskDir(ctx, client, workdir, sshTaskDirName(req), platform)
 	if err != nil {
 		r.report(req.OnProgress, "Preparing task directory", PrepareStepFailed, err.Error())
 		return "", err
@@ -698,7 +724,7 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 				// distinguishing a mismatch/already-burned nonce from
 				// bootstrap mode never having been configured on the remote.
 				logCtx, logCancel := sshRemoteCleanupContext(ctx)
-				logTail := readRemoteAgentctlLogTail(logCtx, client, sessionDir)
+				logTail := readRemoteAgentctlLogTail(logCtx, client, sessionDir, sshAgentctlLogTailLines)
 				logCancel()
 				err = fmt.Errorf("%w (port %d, pid %d, nonce %s); log:\n%s",
 					err, port, pid, nonceFingerprint, logTail)
@@ -878,6 +904,9 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 	}
 	if controlPort > 0 {
 		metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(controlPort)
+	}
+	if state.platform.isKnown() {
+		metadata[MetadataKeySSHRemotePlatform] = state.platform.String()
 	}
 	applySSHLaunchReceiptMetadata(metadata, state.launchReceipt)
 	copySSHRuntimeAPIMetadata(metadata, req.Metadata)
@@ -1089,7 +1118,7 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 				zap.String("session_dir", sessionDir))
 			return nil
 		}
-		if _, _, err := runSSHCommand(cleanupCtx, client, removeRemoteDirCommand(sessionDir)); err != nil {
+		if err := removeRemoteDir(cleanupCtx, client, sessionDir); err != nil {
 			return fmt.Errorf("ssh: remove persisted session dir for unmatched pid on instance %q: %w", instance.InstanceID, err)
 		}
 		return nil
@@ -1202,7 +1231,8 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	if err != nil {
 		return fmt.Errorf("ssh resume: connect: %w", err)
 	}
-	agentctlBin, err := expandRemoteHome(ctx, client, sshRemoteAgentctlPath)
+	platform := sshPlatformFromMetadata(req.Metadata, taskDir, sessionDir)
+	agentctlBin, err := expandRemoteHomeForPlatform(ctx, client, sshRemoteAgentctlBinaryPath(platform), platform)
 	if err != nil {
 		_ = client.Close()
 		return fmt.Errorf("ssh resume: resolve agentctl path: %w", err)
@@ -1220,10 +1250,11 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 			return nil
 		}
 	} else {
-		// Legacy records have no launch receipt, so remote kill -0 remains their
-		// only liveness evidence. Never use it to classify a receipt-backed PID:
-		// another user's process can reuse that number after a host reboot.
-		alive, err := probeRemoteAgentctlLiveness(ctx, client, pid)
+		// Legacy records have no launch receipt, so remote kill -0 / Get-Process
+		// remains their only liveness evidence. Never use it to classify a
+		// receipt-backed PID: another user's process can reuse that number after
+		// a host reboot.
+		alive, err := probeRemoteAgentctlLiveness(ctx, client, pid, platform)
 		if err != nil {
 			_ = client.Close()
 			return fmt.Errorf("ssh resume: probe agentctl pid %d: %w", pid, err)
@@ -1297,6 +1328,7 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		launchReceipt:    receipt,
 		metadata:         cloneSSHMetadata(req.Metadata),
 		prepareEnv:       sshRemoteContributionEnv(req, agentctlBin),
+		platform:         platform,
 		runtimeAPITunnel: runtimeAPITunnel,
 		port:             remotePort,
 		controlPort:      parseSSHControlPortMetadata(req.Metadata),
@@ -1641,9 +1673,11 @@ func (r *SSHExecutor) GetRemoteStatus(ctx context.Context, instance *ExecutorIns
 	state := r.sessions[instance.InstanceID]
 	var transportLost bool
 	var client *ssh.Client
+	var platform SSHRemotePlatform
 	if state != nil {
 		transportLost = state.transportLost
 		client = state.client
+		platform = state.platform
 	}
 	r.mu.Unlock()
 	now := time.Now()
@@ -1674,7 +1708,7 @@ func (r *SSHExecutor) GetRemoteStatus(ctx context.Context, instance *ExecutorIns
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if !isRemoteAgentctlAlive(probeCtx, client, state.pid) {
+	if !isRemoteAgentctlAlive(probeCtx, client, state.pid, platform) {
 		// A concurrent teardown may have closed client after the read above
 		// but before (or during) this probe, so a failed probe alone doesn't
 		// distinguish "agentctl not answering" from "transport lost mid-probe"

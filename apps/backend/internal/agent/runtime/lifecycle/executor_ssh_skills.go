@@ -43,8 +43,12 @@ func materializeSSHSkillManifest(
 	if workspace == nil {
 		return fmt.Errorf("SSH skill workspace is required")
 	}
-	taskRoot := path.Clean(strings.TrimSpace(taskDir))
-	if taskRoot == "." || !path.IsAbs(taskRoot) {
+	// A Windows task directory, including a UNC share, stays in Windows form;
+	// the uploader converts it to an SFTP path at the boundary.
+	taskRoot := strings.TrimSpace(taskDir)
+	if isWindowsRemotePath(taskRoot) {
+		taskRoot = cleanWindowsRemotePath(taskRoot)
+	} else if taskRoot = path.Clean(taskRoot); taskRoot == "." || !path.IsAbs(taskRoot) {
 		return fmt.Errorf("SSH task directory must be absolute")
 	}
 	var manifest skill.Manifest
@@ -59,8 +63,8 @@ func materializeSSHSkillManifest(
 	if !ok {
 		return fmt.Errorf("SSH skill manifest project directory is unsafe")
 	}
-	projectRoot := path.Join(taskRoot, projectDir)
-	decisionRoot := path.Join(projectRoot, skill.DirName(skill.ReservedDecisionSkillSlug))
+	projectRoot := joinRemotePath(taskRoot, projectDir)
+	decisionRoot := joinRemotePath(projectRoot, skill.DirName(skill.ReservedDecisionSkillSlug))
 	if err := workspace.RemoveAll(ctx, decisionRoot); err != nil {
 		return fmt.Errorf("remove stale SSH decision skill: %w", err)
 	}
@@ -96,8 +100,8 @@ func writeSSHManifestSkill(
 	projectRoot string,
 	item skill.Skill,
 ) error {
-	root := path.Join(projectRoot, skill.DirName(item.Slug))
-	if err := workspace.WriteFile(ctx, path.Join(root, "SKILL.md"), []byte(item.Content), 0o644); err != nil {
+	root := joinRemotePath(projectRoot, skill.DirName(item.Slug))
+	if err := workspace.WriteFile(ctx, joinRemotePath(root, "SKILL.md"), []byte(item.Content), 0o644); err != nil {
 		return fmt.Errorf("write SSH skill %q: %w", item.Slug, err)
 	}
 	for _, support := range item.Files {
@@ -105,7 +109,7 @@ func writeSSHManifestSkill(
 		if !safe || relative == "SKILL.md" {
 			continue
 		}
-		if err := workspace.WriteFile(ctx, path.Join(root, relative), []byte(support.Content), 0o644); err != nil {
+		if err := workspace.WriteFile(ctx, joinRemotePath(root, relative), []byte(support.Content), 0o644); err != nil {
 			return fmt.Errorf("write SSH skill support file %q: %w", support.Path, err)
 		}
 	}
@@ -119,6 +123,13 @@ func sshSafeRelativePath(value string) (string, bool) {
 	cleaned := path.Clean(value)
 	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return "", false
+	}
+	// Windows path joins trim whitespace from each segment, so " .." would
+	// become a parent reference there. Reject it on every host.
+	for _, segment := range strings.Split(cleaned, "/") {
+		if strings.TrimSpace(segment) == ".." {
+			return "", false
+		}
 	}
 	return cleaned, true
 }

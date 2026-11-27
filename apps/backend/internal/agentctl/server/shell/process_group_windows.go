@@ -8,17 +8,17 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/winproc"
-	"golang.org/x/sys/windows"
 )
 
-func configureShellProcess(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
-	}
+// waitShellCommand reaps a ConPTY shell. ConPTY started the process, so
+// cmd.Wait would fail with "exec: not started"; cmd.Process is a handle that
+// ptyexec.Start resolved for the same PID.
+func waitShellCommand(cmd *exec.Cmd) error {
+	_, err := cmd.Process.Wait()
+	return err
 }
 
 type shellProcessLifecycleHandle struct {
@@ -26,7 +26,7 @@ type shellProcessLifecycleHandle struct {
 }
 
 func installShellProcessLifecycle(cmd *exec.Cmd) (shellProcessLifecycleHandle, error) {
-	job, err := winproc.InstallKillOnCloseJobForSuspendedCommand(cmd)
+	job, err := winproc.InstallKillOnCloseJobForCommand(cmd)
 	if err != nil {
 		return shellProcessLifecycleHandle{}, err
 	}

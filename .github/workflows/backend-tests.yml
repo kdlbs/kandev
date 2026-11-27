@@ -1332,6 +1332,13 @@ jobs:
         if: matrix.suite == 'native'
         run: go test -race -v -run '^TestAgentSurvivalAvailabilityMatchesPlatformScope$' ./internal/runtimeflags
 
+      # Runs generated PowerShell through cmd.exe /c, as stock Win32 OpenSSH
+      # does, including a WMI-launched stand-in agentctl.exe and NTFS helper
+      # replacement. Fake-server unit tests cannot prove these semantics.
+      - name: Test Windows SSH remote executor
+        if: matrix.suite == 'native'
+        run: go test -trimpath -race -tags fts5 -v -run '^TestSSHWindows|^TestResumeSuspendedProcess' ./internal/agent/runtime/lifecycle ./internal/ssh ./internal/agentctl/server/shell ./internal/common/winproc ./cmd/agentctl
+
       - name: Save Windows Go modules
         if: success() && matrix.suite == 'compile' && steps.windows_module_cache.outputs.cache-hit != 'true'
         continue-on-error: true

@@ -610,76 +610,8 @@ func TestSSHRemoteContributionScriptPinsTargetAndSourceIdentity(t *testing.T) {
 }
 
 func TestSSHRemoteContributionScriptReusesLocalDescendant(t *testing.T) {
-	root := t.TempDir()
-	targetBare := filepath.Join(root, "target.git")
-	sourceBare := filepath.Join(root, "source.git")
-	targetSeed := filepath.Join(root, "target-seed")
-	sourceSeed := filepath.Join(root, "source-seed")
-	workspace := filepath.Join(root, "workspace")
-	for _, args := range [][]string{
-		{"init", "--bare", "--initial-branch=main", targetBare},
-		{"init", "--bare", "--initial-branch=main", sourceBare},
-		{"init", "--initial-branch=main", targetSeed},
-		{"init", "--initial-branch=main", sourceSeed},
-	} {
-		runSSHContributionGit(t, root, args...)
-	}
-	for _, repo := range []string{targetSeed, sourceSeed} {
-		runSSHContributionGit(t, repo, "config", "user.email", "test@example.com")
-		runSSHContributionGit(t, repo, "config", "user.name", "Test User")
-	}
-	if err := os.WriteFile(filepath.Join(targetSeed, "README.md"), []byte("target\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runSSHContributionGit(t, targetSeed, "add", "README.md")
-	runSSHContributionGit(t, targetSeed, "commit", "-m", "target base")
-	runSSHContributionGit(t, targetSeed, "remote", "add", "origin", targetBare)
-	runSSHContributionGit(t, targetSeed, "push", "origin", "main")
-
-	if err := os.WriteFile(filepath.Join(sourceSeed, "README.md"), []byte("source\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runSSHContributionGit(t, sourceSeed, "add", "README.md")
-	runSSHContributionGit(t, sourceSeed, "commit", "-m", "source base")
-	runSSHContributionGit(t, sourceSeed, "checkout", "-b", "feature/remote")
-	if err := os.WriteFile(filepath.Join(sourceSeed, "change.txt"), []byte("contribution\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runSSHContributionGit(t, sourceSeed, "add", "change.txt")
-	runSSHContributionGit(t, sourceSeed, "commit", "-m", "source contribution")
-	sourceSHA := strings.TrimSpace(runSSHContributionGit(t, sourceSeed, "rev-parse", "HEAD"))
-	runSSHContributionGit(t, sourceSeed, "remote", "add", "origin", sourceBare)
-	runSSHContributionGit(t, sourceSeed, "push", "origin", "main", "feature/remote")
-
-	targetURL := "https://github.com/acme/widget.git"
-	sourceURL := "https://github.com/contributor/widget.git"
-	configPath := filepath.Join(root, "gitconfig")
-	config := "[url \"file://" + targetBare + "\"]\n\tinsteadOf = " + targetURL + "\n" +
-		"[url \"file://" + sourceBare + "\"]\n\tinsteadOf = " + sourceURL + "\n"
-	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", configPath)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	binding := &models.RemoteContribution{
-		Version:      models.RemoteContributionVersion,
-		Provider:     models.RemoteContributionProviderGitHub,
-		Kind:         models.RemoteContributionKindPullRequest,
-		CanonicalURL: "https://github.com/acme/widget/pull/7",
-		Number:       7,
-		State:        models.RemoteContributionStateOpen,
-		BaseBranch:   "main",
-		HeadBranch:   "feature/remote",
-		HeadSHA:      sourceSHA,
-		SourceRepository: models.RemoteContributionRepository{
-			Host: "github.com", Path: "contributor/widget", RemoteURL: sourceURL,
-		},
-		CollaborationAllowed: true,
-	}
+	fixture := newSSHContributionFixture(t)
+	workspace, targetURL, binding, sourceSHA := fixture.workspace, fixture.targetURL, fixture.binding, fixture.sourceSHA
 	runSSHContributionScript(t, sshRemoteContributionScript(workspace, targetURL, binding))
 	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "rev-parse", "HEAD")); got != sourceSHA {
 		t.Fatalf("initial SSH checkout HEAD = %q, want %q", got, sourceSHA)

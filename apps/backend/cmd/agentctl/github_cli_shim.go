@@ -324,12 +324,28 @@ func isGitHubCLIShimInvocation(argv0 string) bool {
 	return strings.EqualFold(name, "gh") || strings.EqualFold(name, "gh.exe")
 }
 
+// githubCLIShimLockName is held open by the agentctl that owns a shim directory
+// for its whole lifetime. Windows refuses to delete an open file, so a lock that
+// can be removed proves its owner has exited.
+const githubCLIShimLockName = ".owner.lock"
+
 func installGitHubCLIShim(agentctlExecutable, tempRoot string) (string, func(), error) {
+	if runtime.GOOS == windowsOS {
+		sweepStaleGitHubCLIShimDirs(tempRoot)
+	}
 	dir, err := os.MkdirTemp(tempRoot, githubCLIShimDirPrefix)
 	if err != nil {
 		return "", nil, fmt.Errorf("create gh shim directory: %w", err)
 	}
-	cleanup := func() { _ = os.RemoveAll(dir) }
+	lock, err := os.Create(filepath.Join(dir, githubCLIShimLockName))
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, fmt.Errorf("create gh shim owner lock: %w", err)
+	}
+	cleanup := func() {
+		_ = lock.Close()
+		_ = os.RemoveAll(dir)
+	}
 	shim := filepath.Join(dir, githubCLIShimName())
 	if err := linkOrCopyExecutable(agentctlExecutable, shim); err != nil {
 		cleanup()
@@ -344,6 +360,31 @@ func installGitHubCLIShim(agentctlExecutable, tempRoot string) (string, func(), 
 		return "", nil, fmt.Errorf("install Bash environment: %w", err)
 	}
 	return dir, cleanup, nil
+}
+
+// sweepStaleGitHubCLIShimDirs removes shim directories whose owner exited
+// without cleaning up. A Windows stop forcibly ends agentctl, so the owner's own
+// cleanup never runs there. A directory whose lock is still open, or that has
+// no lock because an older agentctl created it, is kept.
+func sweepStaleGitHubCLIShimDirs(tempRoot string) {
+	root := tempRoot
+	if root == "" {
+		root = os.TempDir()
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), githubCLIShimDirPrefix) {
+			continue
+		}
+		dir := filepath.Join(root, entry.Name())
+		if os.Remove(filepath.Join(dir, githubCLIShimLockName)) != nil {
+			continue
+		}
+		_ = os.RemoveAll(dir)
+	}
 }
 
 func installGitHubCLIBashEnv(shimDir string) error {

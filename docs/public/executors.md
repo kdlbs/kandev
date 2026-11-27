@@ -659,14 +659,48 @@ SSH is implemented as a separate remote connection per session. Kandev uploads a
 
 ### Host requirements
 
-- Linux `amd64`/`arm64` or macOS `amd64`/`arm64`;
+- Linux `amd64`/`arm64`, macOS `amd64`/`arm64`, or Windows x64 (`windows/amd64`);
 - SSH public-key authentication and SFTP;
-- `bash` on Linux or `zsh` on macOS by default, or a compatible configured login shell;
+- `bash` on Linux, `zsh` on macOS, or `powershell` on Windows by default, or a compatible configured login shell (on Windows, only `powershell` or `pwsh`; on Linux and macOS, a PowerShell shell fails the launch);
 - TCP forwarding enabled by `sshd` and enough `MaxSessions` capacity;
 - the selected agent command already installed and visible to a login shell;
 - writable remote home and adequate disk/process capacity.
 
-Released Kandev bundles include helpers for all four platform combinations. The full automated SSH task E2E target currently exercises a Linux/amd64 container; other platform gates and helper selection are unit-tested.
+Released Kandev bundles include helpers for all five supported platforms. The full automated SSH task E2E target currently exercises a Linux/amd64 container. Windows CI runs the generated PowerShell through `cmd.exe`, as stock Windows OpenSSH does. Other platform gates and helper selection are unit-tested.
+
+### Windows hosts
+
+Kandev runs every remote command on a Windows host through PowerShell, so the stock OpenSSH configuration works: `DefaultShell` can stay `cmd.exe`. The host needs:
+
+- the built-in OpenSSH Server with its `sftp` subsystem;
+- Windows PowerShell 5.1 or PowerShell 7 (`pwsh`);
+- Git for Windows and the agent CLI on the user or machine `PATH`;
+- permission for the SSH user to start processes through WMI (`Win32_Process.Create`), which a default local account has.
+
+Kandev starts `agentctl.exe` through WMI. Windows OpenSSH ends every process that an exec channel started when that channel closes, so a process started directly would not survive.
+
+On a Windows host:
+
+- The default shell is `powershell`; choose `pwsh` in the connection's shell setting to use PowerShell 7. Any other saved shell, including `cmd`, Git Bash, MSYS2, and Cygwin, fails the launch before preparation.
+- Profile prepare and cleanup scripts run as PowerShell. An empty prepare script uses Kandev's Windows default, which clones or reuses the task checkout and selects the Kandev branch, or the branch or pull request you chose for the task.
+- Kandev keeps its files under `%USERPROFILE%\.kandev`. The helper is `bin\agentctl.exe`, and task directories are under `tasks\`.
+- A helper upgrade renames a running `agentctl.exe` aside, so sessions that still use the old helper keep running.
+- Stop forcibly ends the controller's process tree, because Windows has no graceful stop signal. The next controller start removes the temporary files that a stopped controller left in `%TEMP%`.
+- The task terminal panel opens a PowerShell session in the task directory.
+
+<details>
+<summary>Not supported on Windows hosts</summary>
+
+- ARM64 Windows hosts. They fail the connection test as an unsupported platform.
+- Remote Docker and CLI passthrough.
+- Task-directory reclamation. Kandev keeps the directory and records the cleanup as skipped (`unsupported_platform`).
+- Agent remote-authentication setup scripts. They are POSIX shell scripts, so Kandev skips them and logs a warning.
+- WSL as a Windows host. Run `sshd` inside the WSL distribution and connect to it as a Linux host instead.
+- Paths that contain `%NAME%` sequences, which `cmd.exe` expands.
+
+</details>
+
+If Microsoft Defender quarantines the uploaded `agentctl.exe`, launches fail after a successful upload. Allow `%USERPROFILE%\.kandev\bin` in Defender, or use your organization's approval process for the helper.
 
 ### Create the connection
 
@@ -715,7 +749,7 @@ Kandev copies selected bundle files during fresh provisioning or environment res
 ### CLI passthrough
 
 Enable **CLI passthrough** on the selected agent profile to use its terminal UI
-on the SSH target. The CLI runs in the remote task workspace. Install and
+on the SSH target. Passthrough is unavailable on Windows hosts. The CLI runs in the remote task workspace. Install and
 authenticate that CLI on the target before starting the session. A custom
 prepare script is not required. Environment variables follow the same SSH
 credential forwarding policy as ACP sessions.
@@ -745,7 +779,7 @@ support, update Kandev and start a fresh session.
 
 ### Repository sources and cleanup
 
-> **Cleanup:** SSH task directories stay by default. A profile can enable task-directory reclamation after terminal archive or delete. Reclamation removes ignored files, including secrets. Keep required ignored data elsewhere.
+> **Cleanup:** SSH task directories stay by default. A profile can enable task-directory reclamation after terminal archive or delete. Reclamation removes ignored files, including secrets. Keep required ignored data elsewhere. Windows hosts never reclaim task directories.
 
 <details>
 <summary>SSH repository source details</summary>

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: executors
 created: 2026-11-22
 owners:
@@ -105,6 +105,27 @@ installing Linux or WSL.
 - **AC-EXECUTORS-SSH-WINDOWS-001.17:** When an SSH passthrough launch targets a
   Windows host, launch shall fail before task preparation. The error shall state
   that passthrough mode is unavailable on Windows hosts.
+- **AC-EXECUTORS-SSH-WINDOWS-001.18:** When task-directory reclamation is enabled
+  for a Windows host task, the system shall preserve the task directory and run
+  no remote command. It shall record the cleanup as skipped with reason
+  `unsupported_platform` and shall not retry it.
+- **AC-EXECUTORS-SSH-WINDOWS-001.19:** When an agent's remote-authentication
+  method declares a setup script, a Windows launch shall skip that script and log
+  the skip. Those scripts are POSIX shell scripts.
+- **AC-EXECUTORS-SSH-WINDOWS-001.20:** When a user opens the task terminal panel
+  for a Windows host task, the panel shall run an interactive PowerShell session
+  in the task directory. Input, output, and resizing shall work as they do on a
+  POSIX host.
+- **AC-EXECUTORS-SSH-WINDOWS-001.21:** When a Windows session stop ends
+  `agentctl`, the GitHub CLI shim directory that controller created in
+  `%TEMP%` shall be removed no later than the next `agentctl` start on that
+  host. A shim directory that a running `agentctl` still uses shall be kept.
+- **AC-EXECUTORS-SSH-WINDOWS-001.22:** The first turn of a new Windows session
+  shall capture its turn-change start checkpoint, as later turns do, on a host
+  with thousands of running threads.
+- **AC-EXECUTORS-SSH-WINDOWS-001.23:** When the selected `agentctl` port is
+  in a Windows excluded port range and the bind is refused, launch shall retry
+  with another port, as it does for a port in use.
 
 ### REQ-EXECUTORS-SSH-WINDOWS-002: Windows helper distribution
 
@@ -143,6 +164,8 @@ as the Linux and macOS helpers.
   remains reproducible and unsigned, unlike the signed native Windows runtime.
 - SSH passthrough mode on Windows hosts until a separate requirement specifies
   remote Windows terminal behavior.
+- Task-directory reclamation on Windows hosts.
+- Remote-authentication setup scripts on Windows hosts.
 
 ## System design
 

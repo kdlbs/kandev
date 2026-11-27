@@ -14,7 +14,7 @@ func TestProbeRemoteAgentctlLiveness(t *testing.T) {
 			sshScriptRule{match: "kill -0 4242", result: sshOK},
 		).handle)
 
-		alive, err := probeRemoteAgentctlLiveness(context.Background(), server.dial(t), 4242)
+		alive, err := probeRemoteAgentctlLiveness(context.Background(), server.dial(t), 4242, SSHRemotePlatform{})
 		if err != nil || !alive {
 			t.Fatalf("probe = (%v, %v), want (true, nil)", alive, err)
 		}
@@ -25,7 +25,7 @@ func TestProbeRemoteAgentctlLiveness(t *testing.T) {
 			return sshFail("no such process")
 		})
 
-		alive, err := probeRemoteAgentctlLiveness(context.Background(), server.dial(t), 4242)
+		alive, err := probeRemoteAgentctlLiveness(context.Background(), server.dial(t), 4242, SSHRemotePlatform{})
 		if err != nil || alive {
 			t.Fatalf("probe = (%v, %v), want (false, nil)", alive, err)
 		}
@@ -36,7 +36,7 @@ func TestProbeRemoteAgentctlLiveness(t *testing.T) {
 			return sshFail("kill: 4242: Operation not permitted")
 		})
 
-		alive, err := probeRemoteAgentctlLiveness(context.Background(), server.dial(t), 4242)
+		alive, err := probeRemoteAgentctlLiveness(context.Background(), server.dial(t), 4242, SSHRemotePlatform{})
 		if err == nil || alive {
 			t.Fatalf("probe = (%v, %v), want (false, error)", alive, err)
 		}
@@ -52,7 +52,7 @@ func TestProbeRemoteAgentctlLiveness(t *testing.T) {
 			t.Fatalf("close client: %v", err)
 		}
 
-		alive, err := probeRemoteAgentctlLiveness(context.Background(), client, 4242)
+		alive, err := probeRemoteAgentctlLiveness(context.Background(), client, 4242, SSHRemotePlatform{})
 		if err == nil || alive {
 			t.Fatalf("probe = (%v, %v), want (false, error)", alive, err)
 		}

@@ -38,7 +38,8 @@ const (
 
 // Skip reasons decided by this phase. The probe-decided reasons
 // (dirty_worktree, unpushed_commits, stash_present, not_a_checkout,
-// probe_failed) are produced by the reclaimer and passed through verbatim.
+// probe_failed, unsupported_platform) are produced by the reclaimer and passed
+// through verbatim.
 //
 // Every skip is a *success* for the cleanup job: the directory is preserved on
 // purpose, and retrying would not change the verdict.

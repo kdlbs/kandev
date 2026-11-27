@@ -1,7 +1,7 @@
 ---
 id: "05-windows-native-script-tests"
 title: "Execute generated PowerShell on the Windows CI runner"
-status: pending
+status: done
 wave: 5
 depends_on:
   - "04-cim-controller-launch"
@@ -110,4 +110,24 @@ On Windows, run the same command under `make test-windows`. Record the PR's
 
 ## Results
 
-Pending.
+Completed on 2026-11-23.
+
+These tests found F13. Under `$ErrorActionPreference = 'Stop'`, Windows
+PowerShell 5.1 throws on every redirected native stderr line, so the fork's
+default preparation failed in a fresh workspace. The loader now defines
+`Invoke-KandevNative` for redirected native calls, and the cross-platform source
+guard `TestSSHWindowsScriptsWrapRedirectedNativeCommands` keeps the rule.
+
+- The execution tests live in an untagged file that skips off Windows, so lint
+  and type checks run on every platform. They drive production functions over
+  a fake SSH server that runs each request through local `cmd.exe /c`.
+- The planned stop, identity, inventory, and log-read tests became one
+  `TestSSHWindowsExecControllerLifecycle`.
+- The tests cannot run on macOS, and the test host's Go toolchain is older than
+  the module requires. The same scenarios ran on the test host through a
+  throwaway local harness under PowerShell 5.1 and 7, and all passed. The
+  harness was not committed.
+
+The source guard failed when one Git probe was unwrapped. The workflow
+contract test, `check-make-shells`, and lint passed. The Windows `native` CI
+job runs these tests in PR B.

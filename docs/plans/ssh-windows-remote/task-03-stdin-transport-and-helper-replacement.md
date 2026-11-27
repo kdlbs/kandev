@@ -1,7 +1,7 @@
 ---
 id: "03-stdin-transport-and-helper-replacement"
 title: "Fixed-length PowerShell transport and running-helper replacement"
-status: pending
+status: done
 wave: 3
 depends_on:
   - "02-port-windows-ssh-lifecycle"
@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-EXECUTORS-SSH-WINDOWS-001.5
   - AC-EXECUTORS-SSH-WINDOWS-001.6
   - AC-EXECUTORS-SSH-WINDOWS-001.9
+  - AC-EXECUTORS-SSH-WINDOWS-001.19
 system_design:
   - ../../specs/executors/system-design/ssh-windows-remote.md
 ---
@@ -95,4 +96,22 @@ cd ../.. && bash scripts/lint-go-changed $(git diff --name-only origin/main -- '
 
 ## Results
 
-Pending.
+Completed on 2026-11-22.
+
+- `executor_ssh_powershell.go` holds the loader, `powerShellEnvelope`, and the
+  run helpers. The fork's `WrapPowerShell` and command-line environment builder
+  are removed, and `WrapLoginShell` is POSIX-only again.
+- Real-host probes shaped the loader. A dot-sourced script hides a failing
+  last statement, so the loader appends `$__kLastOk = $?`. Windows PowerShell
+  5.1 writes redirected errors as `#< CLIXML`, so the loader catches errors and
+  writes plain messages.
+- `sftpReplaceWindowsFile` installs the helper and its sidecar by renaming the
+  existing file aside.
+- The catalog's remote-auth setup scripts are POSIX shell, so they are skipped
+  on Windows with a warning (`AC-EXECUTORS-SSH-WINDOWS-001.19`).
+
+The targeted tests failed first and then passed, and lint reported 0 issues.
+On the test host, the production loader ran through stock `cmd.exe` with a
+4,183-character command line. Environment values with quotes, `$`, backticks,
+and CJK text round-tripped, exit codes matched `-Command`, and a 64 KiB script
+ran.

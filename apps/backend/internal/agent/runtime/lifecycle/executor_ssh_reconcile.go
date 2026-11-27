@@ -184,7 +184,7 @@ func (r *SSHExecutor) reconcileRemoteController(
 	if err != nil {
 		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "remote platform detection failed")
 	}
-	if err := requireSupportedRemotePlatform(info.Platform); err != nil {
+	if err := requireSupportedSSHPlatform(info.Platform); err != nil {
 		return sshlaunch.Unresolved(sshlaunch.ReasonUnsupportedIdentity, "remote platform does not support reconciliation")
 	}
 	bin, err := ensureAgentctlOnHostWithProgress(ctx, ctx, client, r.agentctlResolver, info.Platform, r.logger, nil)
@@ -207,9 +207,15 @@ func runRemoteSSHReconcile(
 	if err != nil {
 		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "reconcile request could not be encoded")
 	}
-	stdout, _, overflow, err := runSSHCommandStdinBounded(
-		ctx, client, shellQuote(bin)+" ssh-reconcile", bytes.NewReader(body), maxSSHReconcileResponseBytes,
-	)
+	var stdout string
+	var overflow bool
+	if isWindowsRemotePath(bin) {
+		stdout, _, overflow, err = runRemoteWindowsSSHReconcile(ctx, client, bin, body)
+	} else {
+		stdout, _, overflow, err = runSSHCommandStdinBounded(
+			ctx, client, shellQuote(bin)+" ssh-reconcile", bytes.NewReader(body), maxSSHReconcileResponseBytes,
+		)
+	}
 	if overflow {
 		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "reconcile helper response exceeded its bound")
 	}

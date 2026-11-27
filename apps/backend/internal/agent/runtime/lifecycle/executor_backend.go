@@ -402,6 +402,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHIdentitySource:       true,
 	MetadataKeySSHIdentityFile:         true,
 	MetadataKeySSHShell:                true,
+	MetadataKeySSHRemotePlatform:       true,
 	MetadataKeySSHReclaimTaskDir:       true,
 	MetadataKeyOfflineBudgetMinutes:    true,
 	MetadataKeySSHLaunchReceipt:        true,

@@ -9,8 +9,6 @@ import (
 	"syscall"
 )
 
-func configureShellProcess(_ *exec.Cmd) {}
-
 type shellProcessLifecycleHandle struct{}
 
 func installShellProcessLifecycle(_ *exec.Cmd) (shellProcessLifecycleHandle, error) {

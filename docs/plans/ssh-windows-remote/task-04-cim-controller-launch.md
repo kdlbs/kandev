@@ -1,7 +1,7 @@
 ---
 id: "04-cim-controller-launch"
 title: "Launch the Windows controller through WMI"
-status: pending
+status: done
 wave: 4
 depends_on:
   - "03-stdin-transport-and-helper-replacement"
@@ -102,4 +102,23 @@ following task 06 H3, on an isolated instance. Record the result here.
 
 ## Results
 
-Pending.
+Completed on 2026-11-22.
+
+- `executor_ssh_windows_launch.go` holds `windowsAgentctlLaunchScript` and
+  `startRemoteWindowsAgentctlOnPort`. The `cmd.exe /d /s /c` wrapper quotes
+  every argument.
+- The missing-child branch kills the wrapper only while it is alive. On the
+  test host, PowerShell 5.1 under `Stop` turned `taskkill` stderr into a
+  terminating error that replaced the launch error.
+- The real command line of a WMI-launched `agentctl.exe` has two spaces before
+  `--workdir` and a trailing space. It is a regression case for
+  `remoteWindowsAgentctlCommandLineMatches`.
+- The planned `TestSSHWindowsExecLaunchSurvivesParentExit` became part of
+  `TestSSHWindowsExecControllerLifecycle` in task 05.
+
+The targeted tests failed first and then passed, and lint reported 0 issues.
+On the test host, the generated launch script started the real `agentctl.exe`
+in a path with spaces. Fifteen seconds after the channel closed, it was alive
+with a `cmd.exe` parent, the pidfile named it, and `/health` returned 200. The
+stop script ended it and removed the session directory. A missing
+`agentctl.exe` failed the launch with the log tail.
