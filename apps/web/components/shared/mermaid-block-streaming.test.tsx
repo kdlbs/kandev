@@ -214,3 +214,29 @@ it("applies WebKit gesture scale once and releases the viewport on unmount", asy
   view.unmount();
   expect(gesture("gesturestart", 1)).toBe(false);
 });
+
+it("ignores small drag movement, clamps the height, and releases an active drag on unmount", async () => {
+  const view = render(<MermaidBlock code={VALID_DIAGRAM} />);
+  await flush(400);
+  const grip = view.container.querySelector<HTMLElement>(".mermaid-frame-grip")!;
+  const viewport = view.container.querySelector<HTMLElement>(".mermaid-scroll-region")!;
+  grip.setPointerCapture = vi.fn();
+  grip.hasPointerCapture = () => true;
+  grip.releasePointerCapture = vi.fn();
+  const pointer = (type: string, y: number) =>
+    grip.dispatchEvent(
+      Object.assign(new Event(type), {
+        pointerId: 1,
+        button: 0,
+        clientY: y,
+        isPrimary: true,
+      }),
+    );
+  pointer("pointerdown", 0);
+  pointer("pointermove", 2);
+  expect(viewport.style.getPropertyValue("--mermaid-frame-height")).toBe("");
+  pointer("pointermove", 100000);
+  expect(viewport.style.getPropertyValue("--mermaid-frame-height")).toBe(`${window.innerHeight}px`);
+  view.unmount();
+  expect(grip.releasePointerCapture).toHaveBeenCalledWith(1);
+});

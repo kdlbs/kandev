@@ -171,19 +171,25 @@ function diagramStyles(svgSize: { w: number; h: number } | null, scale: number) 
 function MermaidFrameGrip({ viewport }: { viewport: HTMLElement }) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
-  const label = t("common:reset");
+  const resetRef = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
-    if (ref.current) return bindMermaidFrameResize(ref.current, viewport, label);
-  }, [viewport, label]);
+    if (ref.current && resetRef.current)
+      return bindMermaidFrameResize(ref.current, viewport, resetRef.current);
+  }, [viewport]);
   return (
-    <div
-      ref={ref}
-      role="separator"
-      aria-orientation="horizontal"
-      aria-label={t("editors:diagramHeight")}
-      tabIndex={0}
-      className="mermaid-frame-grip"
-    />
+    <>
+      <div
+        ref={ref}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label={t("editors:diagramHeight")}
+        tabIndex={0}
+        className="mermaid-frame-grip"
+      />
+      <button ref={resetRef} type="button" className="mermaid-frame-reset" hidden>
+        {t("common:reset")}
+      </button>
+    </>
   );
 }
 

@@ -43,7 +43,10 @@ test.describe("Mobile Mermaid diagram fit", () => {
       await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
       await expect.poll(() => frame.evaluate((el) => el.clientHeight)).toBe(initial + 64);
       await grip.tap();
-      await frame.locator(".mermaid-frame-reset").tap();
+      const reset = frame.locator(".mermaid-frame-reset");
+      await expect(reset).toBeVisible();
+      expect((await reset.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await reset.tap();
       await expect.poll(() => frame.evaluate((el) => el.clientHeight)).toBe(initial);
     } finally {
       await cdp.detach();

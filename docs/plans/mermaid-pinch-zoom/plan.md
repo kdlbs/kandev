@@ -20,6 +20,19 @@ The main risk is native browser gesture handling. Use focused event tests for ca
 
 Before and after a pinch in either surface, the reader sees the same toolbar. For example, a diagram at 100% can reach 125% while the surrounding paragraph keeps its text size.
 
+
+### UI-01. Zoomed diagram in agent output or Plan
+
+```text
++-----------------------------+
+|               [- 125% +]    |
+|   Review --> Tests --> ...  |
++-----------------------------+
+Following paragraph
+```
+
+The drawing scrolls inside the frame. The frame edges and toolbar stay fixed during zoom.
+
 ## Status
 
 Implemented in chat and both plan modes. Chromium gesture, desktop, and emulated phone checks passed. Physical trackpad and phone checks remain unverified.

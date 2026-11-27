@@ -1877,6 +1877,10 @@ html[data-rendering-engine="webkit"] .quick-chat-dialog[data-state="closed"] {
   .mermaid-frame-grip {
     height: 44px;
   }
+  .mermaid-frame-reset {
+    min-height: 44px;
+    min-width: 44px;
+  }
 }
 
 .tiptap-plan-wrapper .mermaid-container {

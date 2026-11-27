@@ -1,7 +1,7 @@
 ---
 id: "01-resize-diagrams"
 title: "Resize diagram viewports"
-status: implemented
+status: done
 wave: 1
 depends_on: []
 plan: plan.md

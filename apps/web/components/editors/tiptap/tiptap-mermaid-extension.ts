@@ -163,8 +163,13 @@ class MermaidNodeView implements NodeView {
     this.grip.setAttribute("role", "separator");
     this.grip.setAttribute("aria-orientation", "horizontal");
     this.grip.setAttribute("aria-label", t("editors:diagramHeight"));
-    this.diagramView.append(scrollWrapper, this.grip);
-    this.unbindResize = bindMermaidFrameResize(this.grip, scrollWrapper, t("common:reset"));
+    const resetButton = document.createElement("button");
+    resetButton.type = "button";
+    resetButton.hidden = true;
+    resetButton.className = "mermaid-frame-reset";
+    resetButton.textContent = t("common:reset");
+    this.diagramView.append(scrollWrapper, this.grip, resetButton);
+    this.unbindResize = bindMermaidFrameResize(this.grip, scrollWrapper, resetButton);
 
     // --- Code view (hidden by default) ---
     this.codeView = document.createElement("pre");

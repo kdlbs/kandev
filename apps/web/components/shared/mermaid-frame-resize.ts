@@ -1,18 +1,9 @@
 let nextViewportId = 0;
 
-function createResetButton(resetLabel: string) {
-  const resetButton = document.createElement("button");
-  resetButton.type = "button";
-  resetButton.className = "mermaid-frame-reset";
-  resetButton.textContent = resetLabel;
-  resetButton.hidden = true;
-  return resetButton;
-}
-
 export function bindMermaidFrameResize(
   grip: HTMLElement,
   viewport: HTMLElement,
-  resetLabel: string,
+  resetButton: HTMLButtonElement,
 ) {
   const controller = new AbortController();
   const options = { signal: controller.signal };
@@ -30,8 +21,6 @@ export function bindMermaidFrameResize(
   observer?.observe(viewport);
   sync();
 
-  const resetButton = createResetButton(resetLabel);
-  grip.after(resetButton);
   const reset = () => {
     viewport.style.removeProperty("--mermaid-frame-height");
     resetButton.hidden = true;
@@ -104,6 +93,6 @@ export function bindMermaidFrameResize(
     if (drag && grip.hasPointerCapture(drag.pointer)) grip.releasePointerCapture(drag.pointer);
     observer?.disconnect();
     controller.abort();
-    resetButton.remove();
+    resetButton.hidden = true;
   };
 }

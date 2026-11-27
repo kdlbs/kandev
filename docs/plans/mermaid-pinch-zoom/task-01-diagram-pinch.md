@@ -1,7 +1,7 @@
 ---
 id: "01-diagram-pinch"
 title: "Handle trackpad pinch in both Mermaid renderers"
-status: implemented
+status: done
 wave: 1
 depends_on: []
 plan: plan.md
@@ -23,6 +23,19 @@ Follow the [gesture design](../../specs/ui/system-design/mermaid-pinch-zoom.md).
 1. Add failing coverage for local zoom in each renderer. Check both directions, cancellation at limits, ordinary scroll, source view, and isolation between two diagrams.
 2. Implement the binding and listener cleanup. Verify that the percentage and reset follow the [interaction preview](plan.md#interaction-preview) across repeated gestures and renderer remounts.
 3. From apps/web run `pnpm exec vitest run components/shared/mermaid-block.test.tsx components/shared/mermaid-block-hooks.test.ts components/editors/tiptap/tiptap-plan-editor.test.tsx`. Run `pnpm e2e:run e2e/tests/chat/mermaid-fit.spec.ts e2e/tests/chat/mobile-mermaid-fit.spec.ts`. Verify pinch on a trackpad in chat and both plan modes, including pinching over surrounding text. Check ordinary touch scrolling on a phone.
+
+
+### UI-01. Zoomed diagram in agent output or Plan
+
+```text
++-----------------------------+
+|               [- 125% +]    |
+|   Review --> Tests --> ...  |
++-----------------------------+
+Following paragraph
+```
+
+The drawing scrolls inside the frame. The frame edges and toolbar stay fixed during zoom.
 
 ## Results
 
