@@ -155,7 +155,7 @@ export function PillPickerContent({
               refreshing={refreshing}
               label={refreshLabel}
               testId={refreshLabel === "repositories" ? "repo-refresh-button" : undefined}
-              touchTarget={refreshLabel === "repositories"}
+              touchTarget
             />
           ) : null}
           {(actions ?? (action ? [action] : [])).map((item) => (

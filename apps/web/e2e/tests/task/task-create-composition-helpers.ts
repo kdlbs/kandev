@@ -1,4 +1,4 @@
-import { expect, type Page, type Request } from "@playwright/test";
+import { expect, type Locator, type Page, type Request } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
@@ -19,6 +19,19 @@ type FlowArgs = {
   mobile?: boolean;
   signal?: (typeof COMPOSITION_CASES)[number];
 };
+
+async function clearInitialRepository(page: Page, dialog: Locator, mobile: boolean) {
+  const sources = mobile ? page.getByTestId("mobile-repository-sheet-content") : dialog;
+  if (mobile) await dialog.getByTestId("mobile-repository-manager").tap();
+  const removeRepository = sources.getByTestId("remove-repo-chip");
+  if (mobile) await removeRepository.tap();
+  else await removeRepository.click();
+  await expect(removeRepository).toHaveCount(0);
+  if (mobile) {
+    await page.getByTestId("mobile-repository-done").tap();
+    await expect(sources).toBeHidden();
+  }
+}
 
 export async function verifyTaskCreateComposition({
   page,
@@ -48,7 +61,7 @@ export async function verifyTaskCreateComposition({
     const dialog = page.getByTestId("create-task-dialog");
     await expect(dialog).toHaveCount(1);
     await expect(dialog).toBeVisible();
-    await dialog.getByTestId("source-mode-scratch").click();
+    await clearInitialRepository(page, dialog, mobile);
     await dialog.getByTestId("task-title-input").fill(title);
     const editor = dialog.getByTestId("task-description-input");
     await editor.fill(prompt);

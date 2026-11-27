@@ -39,7 +39,7 @@ test("phone keeps one native task through a lost response with reachable recover
   const dialog = await openMobileCreateDialog(testPage);
   await selectRecoveryWorkflow(dialog, workflowId);
   await fillRecoveryDraft(dialog, title, prompt);
-  await expectCreateReady(dialog);
+  await expectCreateReady(dialog, testPage);
   await dialog.getByTestId("submit-start-agent").click();
   await expect(dialog.getByTestId(RECOVERY_STATUS)).toBeVisible();
 

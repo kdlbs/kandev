@@ -53,6 +53,9 @@ test.describe("Mobile workspace repository sets", () => {
       await testPage.getByTestId(`repository-set-edit-${set.id}`).tap();
       await testPage.getByTestId(`repository-set-base-${repository.id}`).tap();
       const dropdown = testPage.getByTestId(`repository-set-base-dropdown-${repository.id}`);
+      await waitForFiniteAnimations(
+        testPage.locator('[data-slot="drawer-content"]:visible').last(),
+      );
       const list = dropdown.getByRole("listbox");
       await expect(list.getByRole("option", { name: /scroll-test-39/ })).toBeAttached();
       await expect

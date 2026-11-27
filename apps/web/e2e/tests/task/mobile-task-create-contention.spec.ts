@@ -40,7 +40,7 @@ test("phone creates while another task streams and keeps the other task's saved 
       response.request().method() === "POST" &&
       new URL(response.url()).pathname === "/api/v1/tasks",
   );
-  await expectStandardCreateReady(dialog);
+  await expectStandardCreateReady(dialog, testPage);
   await dialog.getByTestId("submit-start-agent").click();
   const response = await createResponse;
   expect(response.ok()).toBeTruthy();

@@ -55,21 +55,26 @@ export async function selectRecoveryWorkflow(dialog: Locator, workflowId: string
   await expect(dialog.getByTestId("workflow-selector-popover")).toHaveCount(0);
 }
 
-/** Waits for the dialog's data-driven selectors before the default readiness gate. */
-/** Waits for the standard create dialog's data-backed controls, then the UI. */
-export async function expectStandardCreateReady(dialog: Locator) {
+export async function expectStandardCreateReady(dialog: Locator, mobilePage?: Page) {
   await expect(dialog.getByTestId("agent-profile-selector")).toBeVisible();
   await expect(dialog.getByTestId("executor-profile-selector")).toBeVisible();
-  await expect(dialog.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
+  if (mobilePage) {
+    const manager = dialog.getByTestId("mobile-repository-manager");
+    await expect(manager).toContainText("Repositories (1)");
+    await manager.tap();
+    const sheet = mobilePage.getByTestId("mobile-repository-sheet-content");
+    await expect(sheet.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
+    await mobilePage.getByTestId("mobile-repository-done").tap();
+    await expect(sheet).toBeHidden();
+  } else {
+    await expect(dialog.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
+  }
   await expect(dialog.getByTestId("submit-start-agent")).toBeEnabled();
 }
 
-export async function expectCreateReady(dialog: Locator) {
+export async function expectCreateReady(dialog: Locator, mobilePage?: Page) {
   await expect(dialog.getByTestId("workflow-selector-trigger")).toBeVisible();
-  await expect(dialog.getByTestId("agent-profile-selector")).toBeVisible();
-  await expect(dialog.getByTestId("executor-profile-selector")).toBeVisible();
-  await expect(dialog.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
-  await expect(dialog.getByTestId("submit-start-agent")).toBeEnabled();
+  await expectStandardCreateReady(dialog, mobilePage);
 }
 
 export async function fillRecoveryDraft(
