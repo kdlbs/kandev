@@ -235,6 +235,22 @@ func TestKubernetesExecutorConfigFromMetadataReadsTransport(t *testing.T) {
 	require.ErrorContains(t, err, "config.transport")
 }
 
+// TestKubernetesExecutorConfigHashUnchangedWithoutTransport pins the recorded
+// executor-config hash of existing executors: without `transport` the JSON,
+// and therefore the hash, must equal the pre-transport encoding, or every
+// running session would look reconfigured after the upgrade.
+func TestKubernetesExecutorConfigHashUnchangedWithoutTransport(t *testing.T) {
+	config := kubeexecutor.ExecutorConfig{
+		AuthMode: kubeexecutor.AuthModeInCluster, Namespace: "kandev-agents", RequestTimeoutSeconds: 30,
+	}
+	preTransport := `{"auth_mode":"in_cluster","namespace":"kandev-agents","request_timeout_seconds":30}`
+
+	require.Equal(t, kubernetesStringHash(preTransport), kubernetesConfigHash(config))
+
+	config.Transport = kubeexecutor.StreamTransportExec
+	require.NotEqual(t, kubernetesStringHash(preTransport), kubernetesConfigHash(config))
+}
+
 func TestKubernetesTransportIsTrustedConnectionMetadata(t *testing.T) {
 	require.True(t, isTrustedExecutorConfigKey(MetadataKeyKubernetesTransport))
 	require.Contains(t, kubernetesConnectionMetadataKeys[:], MetadataKeyKubernetesTransport)
