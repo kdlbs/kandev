@@ -283,3 +283,50 @@ func TestCursorTaskCleanupDropsUnmatchedSessionState(t *testing.T) {
 		t.Fatalf("session-2 entry = %+v, want untouched", remaining)
 	}
 }
+
+func TestLateMCPInput(t *testing.T) {
+	for _, tc := range []struct {
+		agent, provider string
+		args            any
+		valid           bool
+	}{
+		{cursorAgentID, "kandev-rich-output", map[string]any{"version": float64(2)}, true},
+		{grokAgentID, "kandev-walkthroughs", map[string]any{}, true},
+		{cursorAgentID, "github", map[string]any{}, true},
+		{cursorAgentID, "kandev-rich-output", "malformed", false},
+	} {
+		t.Run(tc.agent+"/"+tc.provider, func(t *testing.T) {
+			a := newTestAdapter()
+			a.agentID = tc.agent
+			a.normalizer = NewNormalizer(tc.agent)
+			a.dialect = newACPDialect(tc.agent)
+			a.convertToolCallUpdate("session", &acpsdk.SessionUpdateToolCall{
+				ToolCallId: "call", Kind: "other", Title: "MCP: tool", RawInput: map[string]any{},
+			})
+			title := tc.provider + ": show_rich_output_kandev"
+			update := a.convertToolCallResultUpdate("session", &acpsdk.SessionToolCallUpdate{
+				ToolCallId: "call", Title: &title,
+				RawInput: map[string]any{
+					"providerIdentifier": tc.provider, "toolName": "show_rich_output_kandev", "args": tc.args,
+				},
+			})
+			completed := acpsdk.ToolCallStatus("completed")
+			output := map[string]any{"success": true}
+			terminal := a.convertToolCallResultUpdate("session", &acpsdk.SessionToolCallUpdate{
+				ToolCallId: "call", Status: &completed, RawOutput: output,
+			})
+			for _, ev := range []*AgentEvent{update, terminal} {
+				p := ev.NormalizedPayload
+				if p.IsMCPTool() != tc.valid {
+					t.Fatalf("MCP provenance = %t, want %t", p.IsMCPTool(), tc.valid)
+				}
+				if tc.valid && (p.Generic().Name != tc.provider+"/show_rich_output_kandev" || !reflect.DeepEqual(p.Generic().Input, tc.args)) {
+					t.Fatalf("unexpected MCP payload: %+v", p.Generic())
+				}
+			}
+			if !reflect.DeepEqual(terminal.NormalizedPayload.Generic().Output, output) {
+				t.Fatal("lost terminal output")
+			}
+		})
+	}
+}

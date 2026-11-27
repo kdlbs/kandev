@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +37,7 @@ import (
 
 // Server is the HTTP API server for a single agent instance.
 type Server struct {
+	pendingCanvasGuidance         atomic.Pointer[string] // Successful MCP attachment awaiting its first delivered prompt.
 	cfg                           *config.InstanceConfig
 	procMgr                       *process.Manager
 	mcpServer                     *mcp.Server

@@ -296,9 +296,9 @@ changes. Native controls use localized names and host callbacks.
 
 ## Provider identity
 
-Preserve existing normalized MCP identity and arguments. Codex uses explicitly
+Codex uses explicitly
 marked MCP envelopes with `{server, tool, arguments}`; Cursor and Grok use
-complete `{providerIdentifier, toolName, args}` envelopes. The generic name
+complete `{providerIdentifier, toolName, args}` envelopes on opening or correlated update frames. Promote the tracked payload before result normalization and preserve accumulated output. The generic name
 retains `<provider>/<tool>`. Historic `kandev: <tool>_kandev` titles and nested
 `raw_input.args`/`arguments` retain their existing compatibility helpers.
 
