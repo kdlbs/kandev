@@ -209,7 +209,10 @@ func TestSSHWindowsExecDefaultPrepare(t *testing.T) {
 	requireWindowsExecution(t)
 	client := newLocalWindowsSSHServer(t).dial(t)
 	root := filepath.Join(t.TempDir(), "kandev user's root")
-	originURL := newWindowsGitOrigin(t, root)
+	// The local file origin stays outside the apostrophe path, where the base
+	// branch fetch fails on Windows. The workspace keeps the apostrophe so path
+	// quoting is still exercised.
+	originURL := newWindowsGitOrigin(t, filepath.Join(t.TempDir(), "kandev origin"))
 	r := NewSSHExecutor(nil, nil, nil, newTestLogger())
 	windows := SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"}
 	for _, shell := range windowsTestShells() {
