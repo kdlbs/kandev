@@ -40,10 +40,9 @@ export function buildSidebarTaskEditTarget(
     workflowId: item.workflowId,
     workflowStepId,
     state: sourceTask.state,
-    manualStartRequired:
-      sourceTask.metadata?.fork_pr_requires_manual_start === true &&
+    ...(sourceTask.metadata?.fork_pr_requires_manual_start === true &&
       !sourceTask.primarySessionId &&
-      !sourceTask.sessionCount,
+      !sourceTask.sessionCount && { manualStartRequired: true }),
     repositoryId: sourceTask.repositoryId ?? undefined,
     repositories: sourceTask.repositories,
     primaryExecutorProfileId: sourceTask.primaryExecutorProfileId ?? undefined,
