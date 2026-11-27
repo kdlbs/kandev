@@ -76,20 +76,28 @@ func (a *Adapter) sweepCursorTaskMetaOnPromptEnd(sessionID string, generation ui
 		return
 	}
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.clearCursorTaskMetaLocked(sessionID)
-	if a.sessionID == sessionID {
-		for key := range a.cursorChildLaunches {
-			if key.generation == generation {
-				delete(a.cursorChildLaunches, key)
-			}
-		}
-		for id, child := range a.cursorChildren {
-			if child.generation <= generation && child.reported != streams.RunStateRunning {
-				delete(a.cursorChildren, id)
-			}
+	if a.sessionID != sessionID {
+		return
+	}
+
+	for key := range a.cursorChildLaunches {
+		if key.generation == generation {
+			delete(a.cursorChildLaunches, key)
 		}
 	}
-	a.mu.Unlock()
+	for id, child := range a.cursorChildren {
+		if child.generation <= generation && child.reported != streams.RunStateRunning {
+			if child.reported != "" {
+				if a.retiredCursorChildren == nil {
+					a.retiredCursorChildren = make(map[string]struct{})
+				}
+				a.retiredCursorChildren[id] = struct{}{}
+			}
+			delete(a.cursorChildren, id)
+		}
+	}
 }
 
 func (a *Adapter) clearCursorTaskMetaLocked(sessionID string) {

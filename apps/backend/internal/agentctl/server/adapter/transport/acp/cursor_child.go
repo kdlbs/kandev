@@ -16,7 +16,10 @@ type cursorSessionClient struct {
 	adapter *Adapter
 }
 
-const cursorChildSpawned = "subagent_spawned"
+const (
+	cursorChildSpawned     = "subagent_spawned"
+	cursorChildStateUpdate = "subagent_state_update"
+)
 
 var _ sdk.RawSessionUpdateHandler = cursorSessionClient{}
 
@@ -39,7 +42,7 @@ func (c cursorSessionClient) HandleRawSessionUpdate(_ context.Context, raw json.
 		return false, nil
 	}
 	switch frame.Update.SessionUpdate {
-	case cursorChildSpawned, "subagent_state_update":
+	case cursorChildSpawned, cursorChildStateUpdate:
 		select {
 		case c.adapter.notifQueue <- notifWork{cursorChild: &frame, promptGeneration: c.adapter.currentPromptGeneration()}:
 		case <-c.adapter.lifetimeCtx.Done():
@@ -139,6 +142,9 @@ func (a *Adapter) cursorChildUpdateLocked(frame cursorChildFrame, generation uin
 // call ID; later state updates identify the child by its native session ID.
 func (a *Adapter) matchCursorChildLaunchLocked(key cursorLaunchKey, frame cursorChildFrame) (string, bool) {
 	id := frame.Update.SubagentSessionID
+	if _, retired := a.retiredCursorChildren[id]; retired {
+		return "", false
+	}
 	launch := a.cursorChildLaunches[key]
 	switch {
 	case frame.background:
@@ -173,7 +179,6 @@ func (child *cursorChild) apply(frame cursorChildFrame) bool {
 		return true
 	}
 	u := frame.Update
-
 	if u.SessionUpdate == cursorChildSpawned {
 		child.spawned = true
 		child.title = u.Task

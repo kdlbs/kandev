@@ -146,6 +146,7 @@ func (a *Adapter) advanceNativeGenerationLocked(replacementSessionID string) []A
 			retiredWatches = append(retiredWatches, event)
 		}
 	}
+	clear(a.retiredCursorChildren)
 	clear(a.cursorChildLaunches)
 	clear(a.cursorChildren)
 	a.nativeGeneration++

@@ -126,7 +126,7 @@ func TestCursorReusedLaunchWithOverlappingChildren(t *testing.T) {
 	running := backgroundObservations(drainEvents(a))
 	require.Len(t, running, 2)
 	finish := spawn
-	finish.Update.SessionUpdate = "subagent_state_update"
+	finish.Update.SessionUpdate = cursorChildStateUpdate
 	finish.Update.State = "completed"
 	for i, id := range []string{"first", "second"} {
 		finish.Update.SubagentSessionID = id
@@ -137,4 +137,32 @@ func TestCursorReusedLaunchWithOverlappingChildren(t *testing.T) {
 	}
 	a.sweepCursorTaskMetaOnPromptEnd("parent", 3)
 	require.Empty(t, a.cursorChildren)
+	// A duplicate from the old turn must not claim the next launch binding.
+	a.observeCursorChild(finish, 4)
+	a.observeCursorChild(spawn, 4)
+	a.observeCursorChild(launch, 4)
+	require.Empty(t, backgroundObservations(drainEvents(a)))
+	spawn.Update.SubagentSessionID = "third"
+	a.observeCursorChild(spawn, 4)
+	third := backgroundObservations(drainEvents(a))
+	require.Len(t, third, 1)
+	require.Equal(t, streams.RunStateRunning, third[0].State)
+
+}
+
+func TestCursorChildTerminalState(t *testing.T) {
+	for _, test := range []struct {
+		wire  string
+		state streams.RunState
+	}{
+		{"completed", streams.RunStateCompleted}, {"failed", streams.RunStateFailed},
+		{"cancelled", streams.RunStateInterrupted}, {"disconnected", streams.RunStateUnknown},
+	} {
+		child := cursorChild{spawned: true, background: true}
+		frame := cursorChildFrame{}
+		frame.Update.SessionUpdate = cursorChildStateUpdate
+		frame.Update.State = test.wire
+		require.True(t, child.apply(frame))
+		require.Equal(t, test.state, child.observedState())
+	}
 }
