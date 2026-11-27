@@ -2014,6 +2014,8 @@
   "stopDevServerPreview": "開発サーバーのプレビュー停止",
   "startFreshSession": "新しいセッション開始",
   "startPlanMode": "計画モード開始",
+  "forkReviewManualStartTitle": "手動で開始してください",
+  "forkReviewManualStartDetail": "Kandev は、このプルリクエストが対象リポジトリから送信されたことを確認できませんでした。レビューを開始すると、プルリクエスト内のセットアップスクリプトが実行される場合があります。これらのスクリプトは実行環境の認証情報にアクセスできる可能性があります。",
   "startTask": "タスク開始",
   "startTaskInPlanMode": "計画モードでタスク開始",
   "startTunnel": "トンネル開始",

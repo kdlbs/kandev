@@ -56,6 +56,7 @@ export type TaskEditTarget = {
   description?: string;
   workflowStepId: string;
   state?: Task["state"];
+  manualStartRequired?: boolean;
   repositoryId?: string;
   repositories?: TaskRepositorySnapshot[];
   primaryExecutorProfileId?: string;

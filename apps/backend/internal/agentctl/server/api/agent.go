@@ -1098,6 +1098,9 @@ func (s *Server) finishMCPAttachmentAttempt(
 	servers []types.McpServer,
 	err error,
 ) {
+	if err == nil {
+		s.resetCanvasGuidance(attemptID, servers)
+	}
 	authenticationFailure := acptransport.ProjectSessionOperationFailure(err, nil) != nil
 	if !authenticationFailure && !adapterPublishesMCPAttachmentResults(adapter) {
 		s.publishMCPAttachmentStart(ctx)
@@ -1436,9 +1439,10 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// the in-flight prompt even though the agent subprocess keeps running fine.
 	// The prompt completes naturally when the agent process exits (stdin/stdout close),
 	// the user cancels, or agentctl shuts down.
+	pendingCanvas := s.pendingCanvasGuidance.Load()
 	go func() {
 		prompt := func(promptCtx context.Context) error {
-			return promptOrSteer(promptCtx, adapter, req)
+			return s.promptWithCanvasGuidance(promptCtx, adapter, req, pendingCanvas)
 		}
 		var err error
 		if durableDelivery {

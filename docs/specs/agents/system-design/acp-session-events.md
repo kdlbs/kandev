@@ -8,6 +8,7 @@ requirements:
   - REQ-AGENTS-ACP-SESSION-EVENTS-004
   - REQ-AGENTS-ACP-SESSION-EVENTS-005
   - REQ-AGENTS-ACP-SESSION-EVENTS-006
+  - REQ-AGENTS-ACP-SESSION-EVENTS-007
 ---
 
 # ACP Session Events System Design
@@ -31,6 +32,7 @@ The [Copilot native design](copilot-native-compaction.md) defines a separate evi
 | `REQ-AGENTS-ACP-SESSION-EVENTS-004` | [Capability advertisement](#capability-advertisement) |
 | `REQ-AGENTS-ACP-SESSION-EVENTS-005` | [acpdbg](#acpdbg) |
 | `REQ-AGENTS-ACP-SESSION-EVENTS-006` | [Copilot interrupted-call recovery](#copilot-interrupted-call-recovery) |
+| `REQ-AGENTS-ACP-SESSION-EVENTS-007` | [Routine Copilot plugin notices](#routine-copilot-plugin-notices) |
 
 ## SDK pin
 
@@ -170,6 +172,15 @@ Status persistence uses `task_session_messages`. Existing notification tracing
 records the marked event on the same authorized session path. The marker and
 status content carry the fixed warning and classification. Tool inputs, raw ACP
 metadata, and raw provider output stay within the existing transport boundaries.
+
+## Routine Copilot plugin notices
+
+Register a notification predicate on the Copilot dialect. Match only text in an
+`AgentMessageChunk` with a nil `MessageId`. Compare the original text against
+the two case-sensitive patterns in requirement 007. Evaluate dialect suppression
+once before the interruption observer. Skip the observer for suppressed frames.
+Keep the existing replay fast path and live suppression path. For a live Copilot
+match, record the notice at debug level and emit no message event.
 
 ## Capability advertisement
 

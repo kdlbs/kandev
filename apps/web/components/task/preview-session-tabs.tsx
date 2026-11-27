@@ -50,6 +50,7 @@ type PreviewSessionTabsProps = {
   sessionId: string | null;
   isArchived?: boolean;
   ensureSession?: UseEnsureTaskSessionResult;
+  sessionlessChatContent?: React.ReactNode;
   workspaceId?: string | null;
   onSessionChange?: (sessionId: string | null) => void;
 };
@@ -253,6 +254,7 @@ export function PreviewSessionTabs({
   sessionId,
   isArchived,
   ensureSession,
+  sessionlessChatContent,
   workspaceId,
   onSessionChange,
 }: PreviewSessionTabsProps) {
@@ -347,6 +349,7 @@ export function PreviewSessionTabs({
       >
         <PreviewNoSessionsState
           ensureSession={ensureSession}
+          sessionlessChatContent={sessionlessChatContent}
           resumption={resumption}
           workspaceId={workspaceId}
         />
@@ -373,6 +376,7 @@ export function PreviewSessionTabs({
             listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [@media(pointer:coarse)]:!h-11 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
           />
         </div>
+        {hasNoSessions && sessionlessChatContent}
         <div className="flex-1 min-h-0">
           <PreviewTabBody
             viewMode={viewMode}
@@ -620,15 +624,18 @@ function PreviewEmptyState() {
 /** Sessionless state: preparing/error/empty, per `ensureSession`. */
 function PreviewNoSessionsState({
   ensureSession,
+  sessionlessChatContent,
   resumption,
   workspaceId,
 }: {
   ensureSession?: UseEnsureTaskSessionResult;
+  sessionlessChatContent?: React.ReactNode;
   resumption: ReturnType<typeof useSessionResumption>;
   workspaceId?: string | null;
 }) {
   const { t } = useTranslation();
 
+  if (ensureSession?.status === "manual_start_required") return sessionlessChatContent;
   if (ensureSession?.status === "preparing") {
     return <PreviewLoadingState label={t("task:preparingWorkspace2")} />;
   }

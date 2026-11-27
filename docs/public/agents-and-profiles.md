@@ -102,6 +102,7 @@ Provider support differs, and Kandev shows only what the connected runtime verif
 - **Claude ACP and native Codex** report job lifecycle and, for native Codex, supported job actions. Explicit controls appear only for an advertised capability.
 - **Codex ACP 2.8.0 and 2.9.0 with ACP v2 preview** report detached terminals and child sessions from live background snapshots when **Agent background work** is also enabled. Kandev retains available terminal output and exit status. This ACP adapter does not expose workload controls.
 - **OpenCode ACP** reports a detached shell launch with its native shell identity. With the optional integration plugin enabled on a supported OpenCode v2 2.2.0 runtime, Kandev can settle that job when the native shell exits. Without the plugin, or on any other runtime, the job stays inspectable and its later activity remains unknown. Neither path provides live output or process controls, and the original launch banner stays in the tool message.
+- **Cursor ACP** reports background subagents when the CLI supports child lifecycle notifications. A child appears in Active while it runs and moves to History when Cursor reports its outcome. Cursor can deliver the result in the original chat turn.
 - **Other ACP agents** keep their existing behavior when they do not report background lifecycle.
 
 A bounded probe or reconnect can also leave a job unknown. Unknown activity is neither a successful completion nor a verified running job, and retained history stays reachable after the active count reaches zero.

@@ -1888,6 +1888,8 @@
   "stopDevServerPreview": "停止开发服务器预览",
   "startFreshSession": "开始全新会话",
   "startPlanMode": "启动计划模式",
+  "forkReviewManualStartTitle": "需要手动启动",
+  "forkReviewManualStartDetail": "Kandev 无法确认此拉取请求来自目标仓库。开始审查可能会运行该拉取请求中的设置脚本。这些脚本可能有权访问执行器凭据。",
   "startTask": "启动任务",
   "startTaskInPlanMode": "以计划模式启动任务",
   "startTunnel": "启动隧道",

@@ -1889,6 +1889,8 @@
   "stopDevServerPreview": "Parar a pré-visualização do servidor de desenvolvimento",
   "startFreshSession": "Iniciar uma sessão nova",
   "startPlanMode": "Iniciar o modo de planeamento",
+  "forkReviewManualStartTitle": "É necessário iniciar manualmente",
+  "forkReviewManualStartDetail": "O Kandev não conseguiu confirmar que este PR vem do repositório de destino. Iniciar a revisão pode executar scripts de configuração do PR. Esses scripts podem ter acesso às credenciais do executor.",
   "startTask": "Iniciar tarefa",
   "startTaskInPlanMode": "Iniciar a tarefa em modo de planeamento",
   "startTunnel": "Iniciar o túnel",

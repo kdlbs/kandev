@@ -43,7 +43,7 @@ export function isFinalWorkflowStep(
   return terminal?.id === current.id;
 }
 
-export type EnsureTaskSessionStatus = "idle" | "preparing" | "error";
+export type EnsureTaskSessionStatus = "idle" | "preparing" | "error" | "manual_start_required";
 
 export type UseEnsureTaskSessionResult = {
   status: EnsureTaskSessionStatus;
@@ -229,8 +229,12 @@ export function useEnsureTaskSession(
         })
       : ensureTaskSession(taskId, { activationSource: "session_open" });
     ensurePromise
-      .then(async () => {
+      .then(async (response) => {
         if (!isCurrentAttempt()) return;
+        if (response.source === "awaiting_manual_start") {
+          setStatus("manual_start_required");
+          return;
+        }
         // Force-reload: backend may have returned an existing_* source our initial list missed.
         await loadSessions(true);
         if (!isCurrentAttempt()) return;
@@ -261,5 +265,9 @@ export function useEnsureTaskSession(
     setRetryToken((n) => n + 1);
   }, []);
 
-  return { status, error, retry };
+  return {
+    status: status === "manual_start_required" && sessions.length > 0 ? "idle" : status,
+    error,
+    retry,
+  };
 }

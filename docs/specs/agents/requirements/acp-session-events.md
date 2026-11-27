@@ -156,6 +156,17 @@ or whether a tool may have changed their workspace.
   in the same transcript after reconnect or reload. Ordinary assistant messages
   and unrecognized warning frames shall keep their regular chat presentation.
 
+### REQ-AGENTS-ACP-SESSION-EVENTS-007: Routine Copilot organization plugin notices
+
+#### Acceptance criteria
+
+- **AC-AGENTS-ACP-SESSION-EVENTS-007.1:** Chat shall omit a Copilot assistant text chunk without a message ID when its text equals
+  `Info: Plugins required by your organization admin are ready.` or starts with
+  `Info: Updating plugins required by your organization admin:`.
+- **AC-AGENTS-ACP-SESSION-EVENTS-007.2:** All other chunks shall keep their existing handling. This includes identical text with a message ID,
+  other agents' output, and plugin warnings and errors.
+- **AC-AGENTS-ACP-SESSION-EVENTS-007.3:** A routine notice before a qualified interruption warning shall preserve the warning's classification.
+
 ## Out of scope
 
 - Native child sessions, inter-session messages, client-supplied system prompts, and MCP

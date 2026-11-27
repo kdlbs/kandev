@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/kandev/kandev/internal/common/config"
 )
@@ -136,7 +137,7 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	}
 	cfg.Ports.BackendURL = cfg.Endpoints.accessURL
 	ignoreBrokenPipeSignal()
-	logStartup(cfg.Header, cfg.Version, cfg.Ports, resolveDatabasePathForConfig(cfg.Startup), cfg.LogLevel, serverHostForConfig(cfg.Startup))
+	logStartup(cfg.Header, cfg.Version, cfg.Ports, resolveDatabasePathForConfig(cfg.Startup), cfg.LogLevel, cfg.Endpoints.bindHosts...)
 	setLauncherShutdownDebug(cfg.Opts.Debug || os.Getenv("KANDEV_SHUTDOWN_DEBUG") == "1")
 	shutdownDebugf("runManagedApp start mode=%q backend=%q backend_cwd=%q debug=%t", cfg.Mode, cfg.Backend, cfg.BackendCWD, cfg.Opts.Debug)
 
@@ -201,15 +202,11 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	return waitForAppExit(supervisor, backend)
 }
 
-func logStartup(header, version string, ports portConfig, dbPath, logLevel string, serverHosts ...string) {
+func logStartup(header, version string, ports portConfig, dbPath, logLevel string, bindHosts ...string) {
 	fmt.Println("[kandev] " + header)
 	fmt.Println("[kandev] version:", normalizedBuildVersion(version))
 	fmt.Println("[kandev] url:", ports.BackendURL)
-	serverHost := os.Getenv("KANDEV_SERVER_HOST")
-	if len(serverHosts) > 0 && serverHosts[0] != "" {
-		serverHost = serverHosts[0]
-	}
-	hosts := networkAddressesForBindHost(listHostNetworkAddresses(), serverHost)
+	hosts := networkAddressesForBindHost(listHostNetworkAddresses(), strings.Join(bindHosts, ","))
 	for _, url := range networkURLsForPort(ports.BackendPort, hosts) {
 		fmt.Println("[kandev]   network:", url)
 	}
@@ -243,13 +240,6 @@ func openBrowser(url string) {
 		cmd = exec.Command("xdg-open", url)
 	}
 	_ = cmd.Start()
-}
-
-func serverHostForConfig(cfg *config.Config) string {
-	if cfg != nil && configSourceIsExplicit(cfg, "server.host") {
-		return cfg.Server.Host
-	}
-	return os.Getenv("KANDEV_SERVER_HOST")
 }
 
 func shouldOpenBrowser(opts Options, cfg *config.Config) bool {
