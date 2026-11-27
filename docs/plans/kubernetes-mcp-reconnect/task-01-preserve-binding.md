@@ -87,7 +87,8 @@ Broad `make test` reported failures and was stopped; it did not pass. Plugin
 fixture TLS, launcher containment, and missing-checkout failures reproduced with
 matching errors on clean upstream main. Worker preparation passed both baseline
 and an isolated candidate rerun after its broad-run failure. Other broad failures
-remain unclassified; no whole-repository pass is claimed. Broad `make lint` was
-stopped before a result. Changed-package lint remains the scoped verification;
-normal commit hooks must pass before publication. Hosted CI, upstream integration,
-and deployment remain unverified.
+remain unclassified; no whole-repository test pass is claimed. Full `make lint`
+completed successfully, including backend, web, harness, specification, and
+architecture checks. Normal commit and commit-message hooks passed, including
+changed-package Go lint. Hosted CI, upstream integration, and deployment remain
+unverified.
