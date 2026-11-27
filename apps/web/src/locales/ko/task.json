@@ -1959,6 +1959,8 @@
   "stopDevServerPreview": "개발 서버 미리 보기 중지",
   "startFreshSession": "새 세션 시작",
   "startPlanMode": "계획 모드 시작",
+  "forkReviewManualStartTitle": "수동으로 시작해야 합니다",
+  "forkReviewManualStartDetail": "Kandev가 이 풀 리퀘스트가 대상 저장소에서 왔는지 확인하지 못했습니다. 검토를 시작하면 풀 리퀘스트의 설정 스크립트가 실행될 수 있습니다. 이러한 스크립트는 실행기 자격 증명에 접근할 수 있습니다.",
   "startTask": "작업 시작",
   "startTaskInPlanMode": "계획 모드에서 작업 시작",
   "startTunnel": "터널 시작",

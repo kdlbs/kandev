@@ -1888,6 +1888,8 @@
   "stopDevServerPreview": "停止開發伺服器預覽",
   "startFreshSession": "開始全新工作階段",
   "startPlanMode": "啟動計劃模式",
+  "forkReviewManualStartTitle": "需要手動啟動",
+  "forkReviewManualStartDetail": "Kandev 無法確認此提取要求來自目標儲存庫。開始審查可能會執行該提取要求中的設定指令碼。這些指令碼可能有權存取執行器認證資訊。",
   "startTask": "啟動任務",
   "startTaskInPlanMode": "以計劃模式啟動任務",
   "startTunnel": "啟動隧道",
