@@ -66,30 +66,34 @@ function TriggerBadges({ triggers }: { triggers: Automation["triggers"] }) {
 
 function RowActions({
   id,
+  canTrigger,
   onTrigger,
   onDelete,
 }: {
   id: string;
+  canTrigger: boolean;
   onTrigger: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const { t } = useTranslation();
   return (
     <div className="flex items-center justify-end gap-0.5">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="max-md:h-11 max-md:min-h-11 max-md:min-w-11 [@media(any-pointer:coarse)]:h-11 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 cursor-pointer"
-            aria-label={t("automations:triggerManually")}
-            onClick={() => onTrigger(id)}
-          >
-            <IconPlayerPlay className="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("automations:triggerManually")}</TooltipContent>
-      </Tooltip>
+      {canTrigger && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="max-md:h-11 max-md:min-h-11 max-md:min-w-11 [@media(any-pointer:coarse)]:h-11 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 cursor-pointer"
+              aria-label={t("automations:triggerManually")}
+              onClick={() => onTrigger(id)}
+            >
+              <IconPlayerPlay className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("automations:triggerManually")}</TooltipContent>
+        </Tooltip>
+      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -180,7 +184,12 @@ export function AutomationsTable({
                     : t("automations:neverTriggered")}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
-                  <RowActions id={a.id} onTrigger={onTrigger} onDelete={onDelete} />
+                  <RowActions
+                    id={a.id}
+                    canTrigger={a.enabled && a.can_trigger_now === true}
+                    onTrigger={onTrigger}
+                    onDelete={onDelete}
+                  />
                 </TableCell>
               </TableRow>
             ))

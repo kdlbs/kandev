@@ -328,7 +328,14 @@ function ProfileCredentialControls({
   return (
     <>
       {credentialError?.target === target ? (
-        <AutomationCredentialErrorMessage error={credentialError} id={errorId} />
+        <AutomationCredentialErrorMessage
+          error={credentialError}
+          id={errorId}
+          canChoosePersonalSecret={
+            canEdit &&
+            fields.some((field) => field.key === credentialError.field && field.secretId !== "")
+          }
+        />
       ) : null}
       {eligible ? (
         <PersonalCredentialFields

@@ -33,6 +33,7 @@
   "comingSoonSuffix": "（近日公開）",
   "completeRequiredFields": "保存前に必須の自動化項目を入力して。",
   "credentialChooseProfile": "別のプロフィールを選択してください。",
+  "credentialPersonalSecretRecovery": "下で自分のシークレットを選択するか、自動化を無効にして下書きとして保存してください。",
   "credentialChooseRepository": "利用可能なワークスペースシークレットを持つリポジトリを選択してください。",
   "credentialRepositorySource": "リポジトリ {{name}}",
   "credentialRunRecovery": "この認証情報へのアクセスを復元するか別のソースを選択してから、もう一度自動化を実行してください。",

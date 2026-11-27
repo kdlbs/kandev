@@ -31,6 +31,8 @@ const MEMBER = {
   displayName: "Automation Workspace Member",
 };
 const AUTOMATION_NAME = "Credential access review";
+const CREDENTIAL_RUN_READY = "Mock agent accepted the credential-backed run";
+const RUNTIME_PROOF_FILENAME = "automation-credential-environment-verified";
 const REPOSITORY_NAME = "Credential review repository";
 const AGENT_SECRET_KEY = "SERVICE_KEY";
 const EXECUTOR_SECRET_KEY = "EXECUTOR_KEY";
@@ -221,7 +223,7 @@ async function createCredentialDraft(base: CredentialTestBase): Promise<Credenti
   await replacePromptEditor(
     collaboratorPage,
     collaboratorPage.getByTestId("automation-prompt-editor"),
-    "/e2e:cancel-hold",
+    `/e2e:cancel-hold ${CREDENTIAL_RUN_READY}`,
     { touch: base.mobile },
   );
 
@@ -241,7 +243,9 @@ async function createCredentialDraft(base: CredentialTestBase): Promise<Credenti
   const credentialError = collaboratorPage.getByTestId("automation-credential-error");
   await expect(credentialError).toBeVisible();
   await expect(credentialError).toContainText(/SERVICE_KEY|EXECUTOR_KEY|REPO_TOKEN/);
-  await expect(credentialError).toContainText(/Choose another profile|Choose another repository/);
+  await expect(credentialError).toContainText(
+    "Choose your own secret below, or turn off Enabled to save a draft.",
+  );
   await expect(credentialError).not.toContainText(/secret-id|[0-9a-f]{8}-[0-9a-f]{4}/i);
   if (base.mobile) {
     const target = await credentialError.getAttribute("data-credential-error-target");
@@ -500,7 +504,7 @@ async function grantWorkspaceSecret(state: CredentialDraftState): Promise<Creden
 }
 
 async function enableCredentialAutomation(state: CredentialDraftState): Promise<void> {
-  const { collaboratorPage, mobile, automationId } = state;
+  const { collaboratorPage, mobile, automationId, workspaceId } = state;
   await collaboratorPage.reload();
   await expect(collaboratorPage.getByTestId("automation-editor")).toBeVisible();
   await expect(
@@ -512,6 +516,9 @@ async function enableCredentialAutomation(state: CredentialDraftState): Promise<
   const save = state.collaboratorWs.waitForResponse("automation.update");
   await clickOrTap(state.saveButton, mobile);
   await save;
+  await collaboratorPage.goto(`/settings/workspaces/${workspaceId}/automations`);
+  const settingsRow = collaboratorPage.getByTestId(`automation-row-${automationId}`);
+  await expect(settingsRow.getByRole("button", { name: "Trigger manually" })).toBeVisible();
   await collaboratorPage.goto(`/automations/${automationId}`);
   await expect(collaboratorPage.getByTestId("automation-run-now")).toBeVisible({ timeout: 20_000 });
 }
@@ -564,6 +571,10 @@ async function verifyMemberCannotControlRun(
   }
   await expect(memberPage.getByTestId("automation-run-now")).toHaveCount(0);
   await expect(memberPage.getByTestId("automation-stop-run")).toHaveCount(0);
+  await memberPage.goto(`/settings/workspaces/${state.workspaceId}/automations`);
+  const settingsRow = memberPage.getByTestId(`automation-row-${state.automationId}`);
+  await expect(settingsRow).toBeVisible();
+  await expect(settingsRow.getByRole("button", { name: "Trigger manually" })).toHaveCount(0);
   await memberPage.close();
 }
 
@@ -611,6 +622,9 @@ async function stopCredentialRunAndRevoke(
   await expect(
     collaboratorPage.getByTestId(`automation-workspace-credential-${REPOSITORY_SECRET_KEY}`),
   ).toContainText("Grant revoked");
+  await collaboratorPage.goto(`/automations/${automationId}`);
+  await expect(collaboratorPage.getByTestId("automation-activity")).toBeVisible();
+  await expect(collaboratorPage.getByTestId("automation-run-now")).toHaveCount(0);
 }
 
 async function verifyNoCredentialPath(state: CredentialDraftState): Promise<void> {
@@ -624,6 +638,12 @@ async function verifyNoCredentialPath(state: CredentialDraftState): Promise<void
   await expect(collaboratorPage.getByTestId("automation-credential-error")).toHaveCount(0);
   const name = "No secret automation path";
   await collaboratorPage.getByTestId("automation-name-input").fill(name);
+  await replacePromptEditor(
+    collaboratorPage,
+    collaboratorPage.getByTestId("automation-prompt-editor"),
+    "/e2e:simple-message",
+    { touch: mobile },
+  );
   const save = collaboratorWs.waitForResponse("automation.create");
   await clickOrTap(state.saveButton, mobile);
   await save;
@@ -636,7 +656,10 @@ async function verifyNoCredentialPath(state: CredentialDraftState): Promise<void
   );
   expect(automationId).toMatch(/^[0-9a-f-]{36}$/i);
   await collaboratorPage.goto(`/automations/${automationId}`);
-  await startCredentialRun({ ...state, automationId });
+  await clickOrTap(collaboratorPage.getByTestId("automation-run-now"), mobile);
+  await expect(
+    collaboratorPage.getByTestId("automation-activity").getByText("Succeeded", { exact: true }),
+  ).toBeVisible({ timeout: 20_000 });
   if (mobile) {
     await expect
       .poll(() =>
@@ -792,6 +815,7 @@ export function registerAutomationCredentialTests(mobile: boolean) {
       expect(executorProfileId).toBeTruthy();
 
       const repositoryPath = path.join(backend.tmpDir, "automation-credential-repo");
+      const runtimeProofPath = path.join(backend.tmpDir, RUNTIME_PROOF_FILENAME);
       await fs.promises.mkdir(repositoryPath, { recursive: true });
       execFileSync("git", ["init", "--initial-branch=main"], { cwd: repositoryPath });
       execFileSync("git", ["config", "user.email", "automation-e2e@example.dev"], {
@@ -814,6 +838,12 @@ export function registerAutomationCredentialTests(mobile: boolean) {
             local_path: repositoryPath,
             default_branch: "main",
             secret_bindings: [{ key: REPOSITORY_SECRET_KEY, secret_id: workspaceSecretId }],
+            setup_script: [
+              `test "$${AGENT_SECRET_KEY}" = '${COLLABORATOR_SECRET} value'`,
+              `test "$${EXECUTOR_SECRET_KEY}" = '${COLLABORATOR_SECRET} value'`,
+              `test "$${REPOSITORY_SECRET_KEY}" = '${WORKSPACE_SECRET} value'`,
+              `printf verified > '${runtimeProofPath.replaceAll("'", "'\\''")}'`,
+            ].join(" && "),
           },
         },
       );
@@ -852,6 +882,14 @@ export function registerAutomationCredentialTests(mobile: boolean) {
       const approved = await grantWorkspaceSecret(draft);
       await enableCredentialAutomation(draft);
       const runId = await startCredentialRun(draft);
+      await expect(
+        draft.collaboratorPage
+          .getByTestId("run-transcript")
+          .getByText(CREDENTIAL_RUN_READY, { exact: true }),
+      ).toBeVisible({ timeout: 20_000 });
+      expect(
+        await fs.promises.readFile(path.join(testBackend.tmpDir, RUNTIME_PROOF_FILENAME), "utf8"),
+      ).toBe("verified");
       await verifyMemberCannotControlRun(draft, runId);
       await stopCredentialRunAndRevoke(approved, runId);
       await verifyNoCredentialPath(draft);

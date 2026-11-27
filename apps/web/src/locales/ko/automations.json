@@ -33,6 +33,7 @@
   "comingSoonSuffix": " (출시 예정)",
   "completeRequiredFields": "저장하기 전에 필수 자동화 항목을 입력하세요.",
   "credentialChooseProfile": "다른 프로필을 선택하세요.",
+  "credentialPersonalSecretRecovery": "아래에서 내 비밀을 선택하거나 자동화를 비활성화하여 초안으로 저장하세요.",
   "credentialChooseRepository": "사용 가능한 Workspace 보안 비밀이 있는 저장소를 선택하세요.",
   "credentialRepositorySource": "저장소 {{name}}",
   "credentialRunRecovery": "이 자격 증명에 대한 액세스를 복구하거나 다른 소스를 선택한 다음 자동화를 다시 실행하세요.",

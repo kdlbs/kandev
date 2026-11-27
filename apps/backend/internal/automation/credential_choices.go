@@ -191,6 +191,9 @@ func (s *Service) projectCurrentWorkspaceCredentialChoices(
 	viewer credentialChoiceViewer,
 	seen map[string]struct{},
 ) error {
+	if viewer.ownerID != "" && a.CreatedByUserID == viewer.ownerID {
+		return nil
+	}
 	for _, selected := range a.Repositories {
 		if selected.RepositoryID == "" || s.credentialRepositoryReader == nil {
 			continue

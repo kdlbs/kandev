@@ -33,6 +33,7 @@
   "comingSoonSuffix": "（即將推出）",
   "completeRequiredFields": "請先填寫必填的自動化欄位，再儲存。",
   "credentialChooseProfile": "請選擇其他設定檔。",
+  "credentialPersonalSecretRecovery": "請在下方選擇自己的密鑰，或關閉啓用開關以儲存草稿。",
   "credentialChooseRepository": "請選擇包含可用 Workspace 密鑰的存儲庫。",
   "credentialRepositorySource": "存儲庫 {{name}}",
   "credentialRunRecovery": "恢復對此認證資料的存取權限或選擇其他來源，然後重新執行自動化。",

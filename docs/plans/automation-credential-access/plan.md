@@ -314,3 +314,11 @@ The final pre-bind regression follow-up also passed:
 - `make -C apps/backend build` completed for the backend and agent binaries.
 - Changed-Go lint completed with zero issues across the affected packages.
 - `gofmt -l` returned no changed Go files, and `git diff --check` passed.
+
+## QA follow-up
+
+On 2026-11-27, QA found two Run now issues. The settings list showed the action to a member who could only view the run. The Runs view hid it from an owner whose automation could already use their own repository secret. The settings list now uses the same permission as the Runs view. An owner's existing secret access needs no new approval. When a personal picker is available, a blocked save points to that picker and explains how to save a disabled draft.
+
+The authenticated desktop and phone Playwright scenarios passed with retries disabled. The local setup script verified both personal secret values and the approved Workspace secret value using synthetic data. The mock agent accepted the run. The tests also checked owner Stop, revoke status, the member's controls, and a successful run without secrets. The rendered review covered the inline error, the picker, and the grant confirmation on both viewports.
+
+The focused Go tests, 61 frontend tests, type checking, changed-file lint, and locale checks passed. `TestAutomationOwnerCanRunWithOwnRepositorySecret` covers the owner's existing secret access.

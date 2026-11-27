@@ -130,6 +130,25 @@ func TestAutomationCanTriggerNowRequiresCurrentCredentialAuthority(t *testing.T)
 	require.True(t, automationCanTriggerNow(ctx, base))
 }
 
+func TestAutomationOwnerCanRunWithOwnRepositorySecret(t *testing.T) {
+	svc, a := credentialChoiceService(t)
+	ctx := credentialIdentity("owner-1")
+	a.ID = "owner-automation"
+	a.CreatedByUserID = "owner-1"
+	a.Enabled = true
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	svc.SetWorkspaceCredentialGrantDependencies(testWorkspaceOwner, credentialChoiceRepositoryReader{
+		"repo-1": credentialChoiceRepository(a.WorkspaceID),
+	}, &credentialChoiceSecretStore{secret: &secrets.Secret{
+		ID: "workspace-secret", OwnerUserID: "owner-1", Scope: secrets.ScopeWorkspace, WorkspaceID: a.WorkspaceID,
+	}}, testCredentialOwnerContext, testCredentialCreatorAccess)
+
+	projected, err := svc.GetAutomation(ctx, a.ID)
+	require.NoError(t, err)
+	require.True(t, projected.CanTriggerNow)
+	require.Empty(t, projected.CredentialChoices)
+}
+
 func TestAutomationWorkspaceSecretGrant(t *testing.T) {
 	t.Run("removed repository grants stay stale while a disabled draft can be rebound", func(t *testing.T) {
 		svc, a := credentialChoiceService(t)

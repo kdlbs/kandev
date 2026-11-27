@@ -33,6 +33,7 @@
   "comingSoonSuffix": " (Coming soon)",
   "completeRequiredFields": "Complete the required automation fields before saving.",
   "credentialChooseProfile": "Choose another profile.",
+  "credentialPersonalSecretRecovery": "Choose your own secret below, or turn off Enabled to save a draft.",
   "credentialChooseRepository": "Choose a repository with an available Workspace secret.",
   "credentialRepositorySource": "Repository {{name}}",
   "credentialRunRecovery": "Restore access to this credential or choose another source, then run the automation again.",

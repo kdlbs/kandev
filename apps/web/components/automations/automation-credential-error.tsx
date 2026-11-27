@@ -78,10 +78,12 @@ function localizedSource(error: AutomationCredentialError, t: Translate) {
 function credentialRecovery(
   error: AutomationCredentialError,
   context: "editor" | "run",
+  canChoosePersonalSecret: boolean,
   t: Translate,
 ) {
   if (context === "run") return t("automations:credentialRunRecovery");
   if (error.target === "repositorySelections") return t("automations:credentialChooseRepository");
+  if (canChoosePersonalSecret) return t("automations:credentialPersonalSecretRecovery");
   return t("automations:credentialChooseProfile");
 }
 
@@ -98,10 +100,12 @@ export function automationCredentialErrorSummary(
 export function AutomationCredentialErrorMessage({
   error,
   context = "editor",
+  canChoosePersonalSecret = false,
   id,
 }: {
   error: AutomationCredentialError;
   context?: "editor" | "run";
+  canChoosePersonalSecret?: boolean;
   id?: string;
 }) {
   const { t } = useTranslation();
@@ -115,7 +119,7 @@ export function AutomationCredentialErrorMessage({
       data-credential-error-target={error.target}
     >
       <p>{automationCredentialErrorSummary(error, translate)}</p>
-      <p>{credentialRecovery(error, context, translate)}</p>
+      <p>{credentialRecovery(error, context, canChoosePersonalSecret, translate)}</p>
     </div>
   );
 }

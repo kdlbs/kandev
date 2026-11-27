@@ -33,6 +33,7 @@
   "comingSoonSuffix": " (Brevemente)",
   "completeRequiredFields": "Preencha os campos obrigatórios da automatização antes de guardar.",
   "credentialChooseProfile": "Escolha outro perfil.",
+  "credentialPersonalSecretRecovery": "Escolha o seu próprio segredo abaixo ou desative a automação para guardar um rascunho.",
   "credentialChooseRepository": "Escolha um repositório com um segredo de Workspace disponível.",
   "credentialRepositorySource": "Repositório {{name}}",
   "credentialRunRecovery": "Restaure o acesso a esta credencial ou escolha outra origem e execute novamente a automatização.",
