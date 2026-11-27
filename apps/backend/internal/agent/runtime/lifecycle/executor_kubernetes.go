@@ -88,7 +88,7 @@ func NewKubernetesExecutor(agentctlResolver *AgentctlResolver, log *logger.Logge
 	runtime := &KubernetesExecutor{
 		agentctlResolver:  agentctlResolver,
 		logger:            log,
-		clientFactory:     newKubernetesRuntimeClient,
+		clientFactory:     newKubernetesRuntimeClientFactory(log),
 		healthRetryDelay:  agentctlHealthRetryDelay,
 		launchTimingClock: time.Now,
 		sessions:          make(map[string]*kubernetesSession),
@@ -617,10 +617,21 @@ func startKubernetesForward(
 	pod *corev1.Pod,
 	remotePort uint16,
 ) (kubeexecutor.PortForwardSession, error) {
-	forward, err := streams.Forward(context.WithoutCancel(ctx), kubeexecutor.PortForwardRequest{
-		Namespace: pod.Namespace, Pod: pod.Name, LocalAddress: kubernetesControlHost,
-		LocalPort: 0, RemotePort: remotePort,
-	})
+	request := kubeexecutor.PortForwardRequest{
+		Namespace: pod.Namespace, Pod: pod.Name,
+		LocalAddress: kubernetesControlHost, LocalPort: 0, RemotePort: remotePort,
+	}
+	// The exec transport runs the bridge from the uploaded agentctl, so it
+	// must target the main container, never a sidecar. Port-forward needs
+	// no container.
+	if streams.ForwardsOverExec() {
+		container, err := kubeexecutor.AgentctlContainer(pod)
+		if err != nil {
+			return nil, fmt.Errorf("kubernetes lifecycle: forward port %d: %w", remotePort, err)
+		}
+		request.Container = container
+	}
+	forward, err := streams.Forward(context.WithoutCancel(ctx), request)
 	if err != nil {
 		return nil, fmt.Errorf("kubernetes lifecycle: forward port %d: %w", remotePort, err)
 	}
@@ -678,6 +689,7 @@ func kubernetesExecutorConfigFromMetadata(metadata map[string]interface{}) (kube
 		MetadataKeyKubernetesKubeContext:           getMetadataString(metadata, MetadataKeyKubernetesKubeContext),
 		MetadataKeyKubernetesConfigNamespace:       getMetadataString(metadata, MetadataKeyKubernetesConfigNamespace),
 		MetadataKeyKubernetesRequestTimeoutSeconds: getMetadataString(metadata, MetadataKeyKubernetesRequestTimeoutSeconds),
+		MetadataKeyKubernetesTransport:             getMetadataString(metadata, MetadataKeyKubernetesTransport),
 	}
 	return kubeexecutor.ParseExecutorConfig(values)
 }

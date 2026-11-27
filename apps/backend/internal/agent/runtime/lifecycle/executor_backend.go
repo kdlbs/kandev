@@ -250,6 +250,7 @@ const (
 	MetadataKeyKubernetesKubeContext           = "kube_context"
 	MetadataKeyKubernetesConfigNamespace       = "namespace"
 	MetadataKeyKubernetesRequestTimeoutSeconds = "request_timeout_seconds"
+	MetadataKeyKubernetesTransport             = "transport"
 	MetadataKeyKubernetesProfilePlatform       = "platform"
 	MetadataKeyKubernetesProfileMainContainer  = "main_container"
 	MetadataKeyKubernetesPodTemplateYAML       = "pod_template_yaml"
@@ -415,6 +416,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyKubernetesKubeContext:            true,
 	MetadataKeyKubernetesConfigNamespace:        true,
 	MetadataKeyKubernetesRequestTimeoutSeconds:  true,
+	MetadataKeyKubernetesTransport:              true,
 	MetadataKeyKubernetesNamespace:              true,
 	MetadataKeyKubernetesPodName:                true,
 	MetadataKeyKubernetesPodUID:                 true,
@@ -528,6 +530,7 @@ var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeyKubernetesKubeContext:            true,
 	MetadataKeyKubernetesConfigNamespace:        true,
 	MetadataKeyKubernetesRequestTimeoutSeconds:  true,
+	MetadataKeyKubernetesTransport:              true,
 	MetadataKeyKubernetesNamespace:              true,
 	MetadataKeyKubernetesPodName:                true,
 	MetadataKeyKubernetesPodUID:                 true,

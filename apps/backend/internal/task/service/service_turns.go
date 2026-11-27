@@ -1629,6 +1629,7 @@ func mergeKubernetesExecutorConfigMetadata(info *lifecycle.WorkspaceInfo, config
 		lifecycle.MetadataKeyKubernetesKubeContext,
 		lifecycle.MetadataKeyKubernetesConfigNamespace,
 		lifecycle.MetadataKeyKubernetesRequestTimeoutSeconds,
+		lifecycle.MetadataKeyKubernetesTransport,
 	} {
 		dst[key] = config[key]
 	}
