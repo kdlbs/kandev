@@ -2,7 +2,7 @@ import type { LocalRepository, Repository } from "@/lib/types/http";
 import type {
   TaskRemoteRepoRow,
   TaskRepoRow,
-  TaskRepositorySelection,
+  TaskWorkspaceSelection,
 } from "@/components/task-create-dialog-types";
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import { splitLocalExecutorBranches } from "@/components/task-create-dialog-branch-utils";
@@ -24,7 +24,7 @@ type FreshRepositoryPayload = Partial<{
 
 export function buildRepositoriesPayload(opts: {
   /** Ordered mixed rows from the current task draft. */
-  selections?: TaskRepositorySelection[];
+  selections?: TaskWorkspaceSelection[];
   /** True when the form is in GitHub Remote (URL) mode. */
   useRemote: boolean;
   /** Remote-URL rows; non-empty `url` rows are mapped 1:1 to payload entries. */
@@ -86,7 +86,7 @@ export function buildRepositoriesPayload(opts: {
 }
 
 function buildMixedRepositoryPayload(
-  selections: TaskRepositorySelection[],
+  selections: TaskWorkspaceSelection[],
   opts: Parameters<typeof buildRepositoriesPayload>[0],
 ): NonNullable<CreateTaskParams["repositories"]> {
   const fresh = opts.freshBranch
@@ -388,7 +388,7 @@ function resolveRowDefaultBranch(
 export function resolveLegacySelections(
   repositories: TaskRepoRow[],
   remoteRepos: TaskRemoteRepoRow[],
-): TaskRepositorySelection[] {
+): TaskWorkspaceSelection[] {
   return [
     ...repositories.map((row) => ({ kind: "local" as const, ...row })),
     ...remoteRepos.map((row) => ({ kind: "remote" as const, ...row })),

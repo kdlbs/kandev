@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 import type { Branch, ExecutorType, Repository } from "@/lib/types/http";
 import type {
   DialogFormState,
-  TaskRepositorySelection,
+  TaskWorkspaceSelection,
 } from "@/components/task-create-dialog-types";
 import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
 import { getWorkspaceSourceCapabilities } from "@/components/workspace-source-picker/executor-capabilities";
@@ -61,7 +61,7 @@ export function useSelectedRemoteOriginInspection(
     const selections = resolveRepositorySelections(fs);
     for (const candidate of candidates) {
       const selection = selections.find(
-        (item): item is Extract<TaskRepositorySelection, { kind: "local" }> =>
+        (item): item is Extract<TaskWorkspaceSelection, { kind: "local" }> =>
           item.kind === "local" && item.key === candidate.key,
       );
       const state = inspection.states[candidate.key];
@@ -73,7 +73,7 @@ export function useSelectedRemoteOriginInspection(
       ) {
         continue;
       }
-      const patch: Partial<Extract<TaskRepositorySelection, { kind: "local" }>> = {};
+      const patch: Partial<Extract<TaskWorkspaceSelection, { kind: "local" }>> = {};
       if (selection.checkoutSource !== "remote_origin") {
         patch.checkoutSource = "remote_origin";
       }
@@ -91,7 +91,7 @@ export function useSelectedRemoteOriginInspection(
 }
 
 export function effectiveRemoteOriginBranch(
-  selection: Extract<TaskRepositorySelection, { kind: "local" }>,
+  selection: Extract<TaskWorkspaceSelection, { kind: "local" }>,
 ): string {
   return (selection.baseBranch || selection.branch).trim();
 }
@@ -109,7 +109,7 @@ export function remoteOriginBranchesForState(
 
 /** A selected row is ready only when its current origin and selected ref agree. */
 export function remoteOriginSelectionIsCompatible(
-  selection: Extract<TaskRepositorySelection, { kind: "local" }>,
+  selection: Extract<TaskWorkspaceSelection, { kind: "local" }>,
   state: RepositoryCloneSourceState | undefined,
 ): boolean {
   if (selection.checkoutSource !== "remote_origin" || state?.status !== "ready") return false;
@@ -128,7 +128,7 @@ export function remoteOriginSelectionIsCompatible(
  */
 export function remoteOriginSelectionNeedsRecovery(
   remoteOriginMode: boolean | undefined,
-  selection: Extract<TaskRepositorySelection, { kind: "local" }>,
+  selection: Extract<TaskWorkspaceSelection, { kind: "local" }>,
   state: RepositoryCloneSourceState | undefined,
 ): boolean {
   return (
@@ -146,9 +146,9 @@ function isSavedRemoteRepository(
 }
 
 export function isHostRepositorySelection(
-  selection: TaskRepositorySelection,
+  selection: TaskWorkspaceSelection,
   repositories: Array<Pick<Repository, "id" | "local_path" | "provider" | "remote_url">>,
-): selection is Extract<TaskRepositorySelection, { kind: "local" }> {
+): selection is Extract<TaskWorkspaceSelection, { kind: "local" }> {
   if (selection.kind !== "local") return false;
   if (selection.localPath) return true;
   if (!selection.repositoryId) return false;
@@ -157,8 +157,8 @@ export function isHostRepositorySelection(
 }
 
 function sameBranches(
-  left: Extract<TaskRepositorySelection, { kind: "local" }>["remoteBranches"],
-  right: NonNullable<Extract<TaskRepositorySelection, { kind: "local" }>["remoteBranches"]>,
+  left: Extract<TaskWorkspaceSelection, { kind: "local" }>["remoteBranches"],
+  right: NonNullable<Extract<TaskWorkspaceSelection, { kind: "local" }>["remoteBranches"]>,
 ): boolean {
   if (!left || left.length !== right.length) return false;
   return left.every(

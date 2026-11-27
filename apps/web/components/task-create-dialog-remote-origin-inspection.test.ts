@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Branch } from "@/lib/types/http";
 import type { RepositoryId } from "@/lib/types/ids";
 import type { RepositoryCloneSourceState } from "@/hooks/domains/repositories/use-repository-clone-source";
-import type { TaskRepositorySelection } from "./task-create-dialog-types";
+import type { TaskWorkspaceSelection } from "./task-create-dialog-types";
 import {
   effectiveRemoteOriginBranch,
   isHostRepositorySelection,
@@ -23,7 +23,7 @@ function readyState(branches: Branch[], inspectedOrigin = origin): RepositoryClo
   };
 }
 
-function selection(overrides: Partial<Extract<TaskRepositorySelection, { kind: "local" }>> = {}) {
+function selection(overrides: Partial<Extract<TaskWorkspaceSelection, { kind: "local" }>> = {}) {
   return {
     kind: "local" as const,
     key: "row-1",

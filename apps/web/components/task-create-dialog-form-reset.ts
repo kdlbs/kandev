@@ -5,7 +5,7 @@ import type {
   TaskCreateDialogInitialValues,
   TaskRemoteRepoRow,
   TaskRepoRow,
-  TaskRepositorySelection,
+  TaskWorkspaceSelection,
 } from "@/components/task-create-dialog-types";
 import type { TaskRemoteProviderReadinessMap } from "@/components/task-create-dialog-remote-provider-readiness";
 
@@ -18,7 +18,7 @@ export type FormResetters = {
   setRepositoriesDirty: (value: boolean) => void;
   setRemoteRepos: (value: TaskRemoteRepoRow[]) => void;
   /** Canonical reset path for the ordered mixed selection state. */
-  resetRepositorySelections?: (value: TaskRepositorySelection[]) => void;
+  resetRepositorySelections?: (value: TaskWorkspaceSelection[]) => void;
   setAgentProfileId: (value: string) => void;
   setExecutorId: (value: string) => void;
   setExecutorProfileId: (value: string) => void;
@@ -132,7 +132,7 @@ function resolveInitialNoRepository(initialValues?: TaskCreateDialogInitialValue
 export function repositorySelectionsFromInitialValues(
   initialValues: TaskCreateDialogInitialValues | undefined,
   restoredRepositories?: TaskRepoRow[],
-): TaskRepositorySelection[] {
+): TaskWorkspaceSelection[] {
   if (initialValues?.repositorySelections) return initialValues.repositorySelections;
   const localRows =
     restoredRepositories ??
@@ -222,7 +222,7 @@ function remotePresetBranch(
 
 export function remoteSelectionsFromInitialValues(
   initialValues?: TaskCreateDialogInitialValues,
-): TaskRepositorySelection[] {
+): TaskWorkspaceSelection[] {
   return seededRemoteRepositories(initialValues).map((row) => ({
     kind: "remote" as const,
     ...row,

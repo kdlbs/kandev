@@ -16,7 +16,7 @@ import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import type { Repository } from "@/lib/types/http";
 import { hasUnavailablePickerRemoteProvider } from "@/components/task-create-dialog-remote-provider-readiness";
 import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
-import type { TaskRepositorySelection } from "@/components/task-create-dialog-types";
+import type { TaskWorkspaceSelection } from "@/components/task-create-dialog-types";
 import type { SubtaskWorkspaceMode, useSubtaskFormState } from "./new-subtask-form-state";
 import { toContextItems, useDialogAttachments } from "./session-dialog-shared";
 import { t } from "@/lib/i18n";
@@ -74,7 +74,7 @@ export function shouldSubmitFreshBranch({
   workspaceMode,
   isLocalExecutor,
 }: {
-  selections: TaskRepositorySelection[];
+  selections: TaskWorkspaceSelection[];
   freshBranchEnabled: boolean;
   workspaceMode: SubtaskWorkspaceMode;
   isLocalExecutor: boolean;

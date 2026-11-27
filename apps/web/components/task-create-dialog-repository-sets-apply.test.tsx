@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Repository, RepositorySet } from "@/lib/types/http";
 import { repositoryId, workspaceId } from "@/lib/types/ids";
-import type { TaskRepoRow, TaskRepositorySelection } from "@/components/task-create-dialog-types";
+import type { TaskRepoRow, TaskWorkspaceSelection } from "@/components/task-create-dialog-types";
 
 const toast = vi.fn();
 
@@ -82,7 +82,7 @@ describe("useApplyRepositorySet", () => {
   });
 
   it("appends set members without dropping an existing folder selection", () => {
-    const folder: TaskRepositorySelection = {
+    const folder: TaskWorkspaceSelection = {
       kind: "folder",
       key: "folder-1",
       localPath: "/work/assets",

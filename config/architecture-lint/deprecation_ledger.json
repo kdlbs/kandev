@@ -18,11 +18,6 @@
       "marker": "Deprecated:"
     },
     {
-      "path": "apps/web/components/task-create-dialog-source-types.ts",
-      "declaration": "type:TaskRepositorySelection#1",
-      "marker": "@deprecated"
-    },
-    {
       "path": "apps/web/components/task-create-dialog-types.ts",
       "declaration": "property:TaskCreateDialogInitialValues.githubUrl#1",
       "marker": "@deprecated"

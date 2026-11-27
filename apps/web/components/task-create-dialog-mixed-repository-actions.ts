@@ -5,14 +5,14 @@ import type { LocalRepositoryChoice } from "@/components/task-create-dialog-repo
 import type { RemoteRepository } from "@/hooks/domains/integrations/use-remote-repositories";
 import type {
   DialogFormState,
-  TaskRepositorySelection,
+  TaskWorkspaceSelection,
 } from "@/components/task-create-dialog-types";
 import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
 
 export function buildLocalRepositorySelection(
   choice: LocalRepositoryChoice,
   isLocalExecutor?: boolean,
-): Omit<Extract<TaskRepositorySelection, { kind: "local" }>, "key"> {
+): Omit<Extract<TaskWorkspaceSelection, { kind: "local" }>, "key"> {
   return {
     kind: "local",
     ...(choice.repositoryId ? { repositoryId: choice.repositoryId } : {}),
@@ -32,7 +32,7 @@ type MixedRepositoryActionsArgs = {
   onFolderSelectionAdded?: (wasEmpty: boolean) => void;
   onRepositorySelectionAdded?: (wasFolderOnly: boolean) => void;
   onAllWorkspaceSourcesRemoved?: () => void;
-  onRepositorySelectionRemoved?: (remaining: TaskRepositorySelection[]) => void;
+  onRepositorySelectionRemoved?: (remaining: TaskWorkspaceSelection[]) => void;
 };
 
 export function useMixedRepositoryActions({
@@ -160,7 +160,7 @@ function useRepositoryRemoveActions(
   fs: DialogFormState,
   selectionCount: number,
   onAllWorkspaceSourcesRemoved?: () => void,
-  onRepositorySelectionRemoved?: (remaining: TaskRepositorySelection[]) => void,
+  onRepositorySelectionRemoved?: (remaining: TaskWorkspaceSelection[]) => void,
 ) {
   const shouldEnterScratch = selectionCount === 1;
   const removeLocal = useCallback(
@@ -202,7 +202,7 @@ function useRepositoryRemoveActions(
   return { removeLocal, removeRemote, removeFolder };
 }
 
-function remainingSelections(fs: DialogFormState, removedKey: string): TaskRepositorySelection[] {
+function remainingSelections(fs: DialogFormState, removedKey: string): TaskWorkspaceSelection[] {
   return resolveRepositorySelections(fs).filter((selection) => selection.key !== removedKey);
 }
 

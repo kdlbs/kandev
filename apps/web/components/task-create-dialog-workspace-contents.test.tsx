@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Repository } from "@/lib/types/http";
 import { repositoryId, workspaceId } from "@/lib/types/ids";
-import type { TaskRepositorySelection } from "./task-create-dialog-types";
+import type { TaskWorkspaceSelection } from "./task-create-dialog-types";
 import { applyRepositorySet } from "./task-create-dialog-repository-sets";
 import { buildCreateTaskPayload, buildWorkspaceSourcesPayload } from "./task-create-dialog-helpers";
 import { sourceMenuLabel } from "./task-create-dialog-workspace-source-menu";
@@ -13,7 +13,7 @@ const LOCAL_REPOSITORY_ID = "repo-local";
 
 describe("workspace source serialization contract", () => {
   it("serializes mixed selections in their visible order", () => {
-    const selections: TaskRepositorySelection[] = [
+    const selections: TaskWorkspaceSelection[] = [
       { kind: "local", key: "repo", repositoryId: LOCAL_REPOSITORY_ID, branch: "feature/local" },
       { kind: "folder", key: "folder", localPath: "/work/assets", displayName: "assets" },
       {
@@ -105,7 +105,7 @@ describe("workspace contents set actions", () => {
     expect(sourceMenuLabel(translate, 0)).toBe("task:addRepositoryFolder");
     expect(sourceMenuLabel(translate, 2)).toBe("task:add");
 
-    const folder: TaskRepositorySelection = {
+    const folder: TaskWorkspaceSelection = {
       kind: "folder",
       key: "folder",
       localPath: "/work/assets",

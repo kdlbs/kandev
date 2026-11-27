@@ -1,5 +1,5 @@
 import type { TaskCreateLastUsedSourceApi } from "@/lib/types/http-user-settings";
-import type { TaskRepositorySelection } from "@/components/task-create-dialog-types";
+import type { TaskWorkspaceSelection } from "@/components/task-create-dialog-types";
 
 /**
  * Rehydrates the backend-owned source snapshot into the dialog's ordered
@@ -8,14 +8,14 @@ import type { TaskRepositorySelection } from "@/components/task-create-dialog-ty
  */
 export function selectionsFromLastUsedSources(
   sources: TaskCreateLastUsedSourceApi[] | undefined,
-): TaskRepositorySelection[] {
+): TaskWorkspaceSelection[] {
   return (sources ?? []).flatMap((source, index) => selectionFromLastUsedSource(source, index));
 }
 
 function selectionFromLastUsedSource(
   source: TaskCreateLastUsedSourceApi,
   index: number,
-): TaskRepositorySelection[] {
+): TaskWorkspaceSelection[] {
   const key = `last-used-${index}`;
   if (source.kind === "folder") return folderSelection(source, key);
   if (source.kind !== "repository") return [];
@@ -26,7 +26,7 @@ function selectionFromLastUsedSource(
 function folderSelection(
   source: TaskCreateLastUsedSourceApi,
   key: string,
-): TaskRepositorySelection[] {
+): TaskWorkspaceSelection[] {
   if (!source.local_path) return [];
   return [
     {
@@ -47,7 +47,7 @@ function isRemoteSource(source: TaskCreateLastUsedSourceApi): boolean {
 function remoteSelection(
   source: TaskCreateLastUsedSourceApi,
   key: string,
-): Extract<TaskRepositorySelection, { kind: "remote" }> {
+): Extract<TaskWorkspaceSelection, { kind: "remote" }> {
   return {
     kind: "remote",
     key,
@@ -70,7 +70,7 @@ function remoteSelection(
 function localSelection(
   source: TaskCreateLastUsedSourceApi,
   key: string,
-): TaskRepositorySelection[] {
+): TaskWorkspaceSelection[] {
   if (!source.repository_id && !source.local_path) return [];
   return [
     {

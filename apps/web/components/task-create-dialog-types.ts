@@ -5,7 +5,7 @@ import type {
   TaskRemoteRepoRow,
   TaskRemoteRepositorySelection,
   TaskWorkspaceFolderSelection,
-  TaskRepositorySelection,
+  TaskWorkspaceSelection,
   TaskRepositorySetsConfig,
 } from "./task-create-dialog-source-types";
 export type {
@@ -16,7 +16,6 @@ export type {
   TaskRemoteRepositorySelection,
   TaskWorkspaceFolderSelection,
   TaskWorkspaceSelection,
-  TaskRepositorySelection,
   TaskRepositorySetsConfig,
 } from "./task-create-dialog-source-types";
 import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
@@ -179,7 +178,7 @@ export type TaskCreateDialogInitialValues = {
   /** Existing task repository rows, including immutable policy snapshots. */
   repositories?: TaskRepositorySnapshot[];
   /** Optional mixed draft supplied by callers that already have ordered rows. */
-  repositorySelections?: TaskRepositorySelection[];
+  repositorySelections?: TaskWorkspaceSelection[];
   repositoryId?: string;
   branch?: string;
   /** Existing remote branch to check out directly in the worktree (e.g. a PR's head branch),
@@ -427,7 +426,7 @@ export type DialogFormState = {
    */
   repositories: TaskRepoRow[];
   /** Ordered local and remote rows. The legacy projections above remain for boundary adapters. */
-  repositorySelections?: TaskRepositorySelection[];
+  repositorySelections?: TaskWorkspaceSelection[];
   repositorySelectionsTouched?: boolean;
   appendRepositorySelection?: (
     selection:
@@ -439,8 +438,8 @@ export type DialogFormState = {
   appendFolderSelection?: (selection: Omit<TaskWorkspaceFolderSelection, "key">) => string;
   /** Ordered folder projection used by source-aware callers. */
   workspaceFolders?: Array<Omit<TaskWorkspaceFolderSelection, "kind">>;
-  resetRepositorySelections?: (v: TaskRepositorySelection[]) => void;
-  hydrateRepositorySelections?: (v: TaskRepositorySelection[]) => void;
+  resetRepositorySelections?: (v: TaskWorkspaceSelection[]) => void;
+  hydrateRepositorySelections?: (v: TaskWorkspaceSelection[]) => void;
   /** False while rows are hydrated from an existing task; true after user edits. */
   repositoriesDirty: boolean;
   setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
@@ -579,7 +578,7 @@ export type SubmitHandlersDeps = {
   /** Unified repo list from the form. Empty when in GitHub URL mode. */
   repositories: TaskRepoRow[];
   /** Ordered mixed repository rows. When present, this is the source of truth for submission. */
-  repositorySelections?: TaskRepositorySelection[];
+  repositorySelections?: TaskWorkspaceSelection[];
   /** Whether the user explicitly changed repository selections in this form. */
   repositoriesDirty: boolean;
   /** Readiness for provider-backed picker rows. Pasted URLs do not use this gate. */
@@ -636,7 +635,7 @@ export type SubmitHandlersDeps = {
   setTaskName: (v: string) => void;
   setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
   setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>;
-  resetRepositorySelections?: (v: TaskRepositorySelection[]) => void;
+  resetRepositorySelections?: (v: TaskWorkspaceSelection[]) => void;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
   setMcpServerIds: (v: string[]) => void;
@@ -737,7 +736,7 @@ export type DialogFormBodyProps = {
   onFolderSelectionAdded?: (wasEmpty: boolean) => void;
   onRepositorySelectionAdded?: (wasFolderOnly: boolean) => void;
   onAllWorkspaceSourcesRemoved?: () => void;
-  onRepositorySelectionRemoved?: (remaining: TaskRepositorySelection[]) => void;
+  onRepositorySelectionRemoved?: (remaining: TaskWorkspaceSelection[]) => void;
   /** Repository sets available in this workspace, and how to apply or define one. */
   repositorySets?: TaskRepositorySetsConfig;
   localRepositoryCreation?: {

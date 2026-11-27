@@ -2,7 +2,7 @@
 
 import { IconFolder, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import type { TaskRepositorySelection } from "@/components/task-create-dialog-types";
+import type { TaskWorkspaceSelection } from "@/components/task-create-dialog-types";
 import { useTranslation } from "react-i18next";
 
 export function FolderSelectionChip({
@@ -10,7 +10,7 @@ export function FolderSelectionChip({
   repositoryLocked,
   onRemove,
 }: {
-  selection: Extract<TaskRepositorySelection, { kind: "folder" }>;
+  selection: Extract<TaskWorkspaceSelection, { kind: "folder" }>;
   repositoryLocked?: boolean;
   onRemove: () => void;
 }) {

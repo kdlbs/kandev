@@ -14,7 +14,7 @@ import type {
   StepType,
   TaskLocalRepositorySelection,
   TaskRemoteRepositorySelection,
-  TaskRepositorySelection,
+  TaskWorkspaceSelection,
   TaskFormInputsHandle,
 } from "@/components/task-create-dialog-types";
 import type { TaskRemoteProviderReadinessMap } from "@/components/task-create-dialog-remote-provider-readiness";
@@ -34,14 +34,14 @@ import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 export type SubtaskWorkspaceMode = "inherit_parent" | "new_workspace";
 
 type CanonicalSubtaskFormState = DialogFormState & {
-  repositorySelections: TaskRepositorySelection[];
+  repositorySelections: TaskWorkspaceSelection[];
   repositorySelectionsTouched: boolean;
   appendRepositorySelection: (
     selection:
       | Omit<TaskLocalRepositorySelection, "key">
       | Omit<TaskRemoteRepositorySelection, "key">,
   ) => string;
-  resetRepositorySelections: (selections: TaskRepositorySelection[]) => void;
+  resetRepositorySelections: (selections: TaskWorkspaceSelection[]) => void;
 };
 
 /**

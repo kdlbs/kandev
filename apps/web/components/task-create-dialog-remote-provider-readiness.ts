@@ -1,6 +1,6 @@
 import type {
   TaskRemoteRepoRow,
-  TaskRepositorySelection,
+  TaskWorkspaceSelection,
 } from "@/components/task-create-dialog-types";
 
 export type TaskRemoteProviderReadiness = "loading" | "ready" | "unavailable" | "failed";
@@ -22,7 +22,7 @@ export function isPickerRemoteProviderUnavailable(
 }
 
 export function hasUnavailablePickerRemoteProvider(
-  selections: TaskRepositorySelection[],
+  selections: TaskWorkspaceSelection[],
   readiness: TaskRemoteProviderReadinessMap | undefined,
 ): boolean {
   return selections.some(

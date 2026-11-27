@@ -54,7 +54,7 @@ by integrations and plugins. Sets remain owned by workspaces.
 
 ## Ordered draft
 
-Introduce `TaskRepositorySelection` as a discriminated union in the existing
+Use `TaskWorkspaceSelection` as a discriminated union in the existing
 task-create types module. Each row has a stable key and either a saved/local
 selection or a remote selection. Reuse the current row field types within the
 union. Preserve provider host, scope, immutable ID, URL, PR metadata, policy,
@@ -254,9 +254,8 @@ links and source boundaries. Workspaces still owns repository sets.
 
 ### Draft and transport
 
-Use the implemented `TaskWorkspaceSelection` union, with the existing
-`TaskRepositorySelection` compatibility alias: local/remote repository variants
-plus `{kind: "folder", key, localPath, displayName?}`. Preserve row keys and
+`TaskWorkspaceSelection` includes local and remote repository variants and
+`{kind: "folder", key, localPath, displayName?}`. Preserve row keys and
 repository source metadata. Derived repository projections exclude folders;
 Git queries, provider checks, and fresh-branch rules operate only on repositories.
 Scratch is derived from an explicitly empty contents list, not from a second mode

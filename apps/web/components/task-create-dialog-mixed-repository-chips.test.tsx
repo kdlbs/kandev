@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import type { DialogFormState, TaskRepositorySelection } from "./task-create-dialog-types";
+import type { DialogFormState, TaskWorkspaceSelection } from "./task-create-dialog-types";
 import type { Repository } from "@/lib/types/http";
 
 const touchDrawer = vi.hoisted(() => ({ enabled: true }));
@@ -139,7 +139,7 @@ function renderMixed(
   options: {
     repositoryLocked?: boolean;
     branchLocked?: boolean;
-    onRepositorySelectionRemoved?: (remaining: TaskRepositorySelection[]) => void;
+    onRepositorySelectionRemoved?: (remaining: TaskWorkspaceSelection[]) => void;
   } = {},
 ) {
   const props = {

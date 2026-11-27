@@ -13,12 +13,12 @@ import {
 import type {
   TaskRemoteRepoRow,
   TaskRepoRow,
-  TaskRepositorySelection,
+  TaskWorkspaceSelection,
   TaskWorkspaceFolderSelection,
 } from "@/components/task-create-dialog-types";
 
 export type RepositorySelectionState = {
-  selections: TaskRepositorySelection[];
+  selections: TaskWorkspaceSelection[];
   /** True after the user changes the draft, so async defaults cannot replace it. */
   touched: boolean;
   /** True when the selection differs from the values loaded for the open form. */
@@ -26,31 +26,31 @@ export type RepositorySelectionState = {
 };
 
 export type NewRepositorySelection =
-  | Omit<Extract<TaskRepositorySelection, { kind: "local" }>, "key">
-  | Omit<Extract<TaskRepositorySelection, { kind: "remote" }>, "key">
+  | Omit<Extract<TaskWorkspaceSelection, { kind: "local" }>, "key">
+  | Omit<Extract<TaskWorkspaceSelection, { kind: "remote" }>, "key">
   | Omit<TaskWorkspaceFolderSelection, "key">;
 
 type SelectionUpdater<T> = T[] | ((rows: T[]) => T[]);
 
 export type RepositorySelectionAction =
-  | { type: "append"; selection: TaskRepositorySelection }
+  | { type: "append"; selection: TaskWorkspaceSelection }
   | { type: "remove"; key: string }
-  | { type: "replace"; key: string; selection: TaskRepositorySelection }
+  | { type: "replace"; key: string; selection: TaskWorkspaceSelection }
   | { type: "set-local"; rows: SelectionUpdater<TaskRepoRow> }
   | { type: "hydrate-local"; rows: SelectionUpdater<TaskRepoRow> }
   | { type: "set-remote"; rows: SelectionUpdater<TaskRemoteRepoRow> }
   | { type: "set-folders"; rows: SelectionUpdater<TaskWorkspaceFolderSelection> }
   | { type: "set-dirty"; dirty: boolean }
-  | { type: "hydrate"; selections: TaskRepositorySelection[] }
-  | { type: "reset"; selections: TaskRepositorySelection[] };
+  | { type: "hydrate"; selections: TaskWorkspaceSelection[] }
+  | { type: "reset"; selections: TaskWorkspaceSelection[] };
 
 /** Resolves the canonical list while keeping legacy mode-shaped test doubles usable. */
 export function resolveRepositorySelections(input: {
-  repositorySelections?: TaskRepositorySelection[];
+  repositorySelections?: TaskWorkspaceSelection[];
   repositories: TaskRepoRow[];
   remoteRepos: TaskRemoteRepoRow[];
   useRemote?: boolean;
-}): TaskRepositorySelection[] {
+}): TaskWorkspaceSelection[] {
   if (input.repositorySelections) return input.repositorySelections;
   if (input.useRemote) {
     return input.remoteRepos.map((row) => ({ kind: "remote" as const, ...row }));
@@ -120,7 +120,7 @@ function resolveSelectionUpdater<T>(updater: SelectionUpdater<T>, current: T[]):
 
 function replaceKind(
   state: RepositorySelectionState,
-  kind: TaskRepositorySelection["kind"],
+  kind: TaskWorkspaceSelection["kind"],
   rows: Array<TaskRepoRow | TaskRemoteRepoRow | TaskWorkspaceFolderSelection>,
   markChanged = true,
 ): RepositorySelectionState {
@@ -133,11 +133,11 @@ function replaceKind(
   const next = state.selections.flatMap((selection) => {
     if (selection.kind !== kind) return [selection];
     const row = rowsByKey.get(selection.key);
-    return row ? [{ ...row, kind } as TaskRepositorySelection] : [];
+    return row ? [{ ...row, kind } as TaskWorkspaceSelection] : [];
   });
   for (const row of rows) {
     if (!existingKeys.has(row.key)) {
-      next.push({ ...row, kind } as TaskRepositorySelection);
+      next.push({ ...row, kind } as TaskWorkspaceSelection);
     }
   }
   const nextState = { ...state, selections: next };
@@ -218,12 +218,12 @@ function useRepositorySelectionRowActions(
         dispatch({
           type: "replace",
           key,
-          selection: { ...selection, key } as TaskRepositorySelection,
+          selection: { ...selection, key } as TaskWorkspaceSelection,
         });
         return key;
       }
       const key = allocateKey(selection.kind === "remote" ? "remote" : "row");
-      dispatch({ type: "append", selection: { ...selection, key } as TaskRepositorySelection });
+      dispatch({ type: "append", selection: { ...selection, key } as TaskWorkspaceSelection });
       return key;
     },
     [allocateKey, dispatch, state.selections],
@@ -318,11 +318,11 @@ function useRepositorySelectionStateActions(dispatch: Dispatch<RepositorySelecti
     [dispatch],
   );
   const resetRepositorySelections = useCallback(
-    (selections: TaskRepositorySelection[]) => dispatch({ type: "reset", selections }),
+    (selections: TaskWorkspaceSelection[]) => dispatch({ type: "reset", selections }),
     [dispatch],
   );
   const hydrateRepositorySelections = useCallback(
-    (selections: TaskRepositorySelection[]) => dispatch({ type: "hydrate", selections }),
+    (selections: TaskWorkspaceSelection[]) => dispatch({ type: "hydrate", selections }),
     [dispatch],
   );
   return {
@@ -337,31 +337,31 @@ function useRepositorySelectionStateActions(dispatch: Dispatch<RepositorySelecti
 }
 
 function isLocalSelection(
-  selection: TaskRepositorySelection,
-): selection is Extract<TaskRepositorySelection, { kind: "local" }> {
+  selection: TaskWorkspaceSelection,
+): selection is Extract<TaskWorkspaceSelection, { kind: "local" }> {
   return selection.kind === "local";
 }
 
 function isRemoteSelection(
-  selection: TaskRepositorySelection,
-): selection is Extract<TaskRepositorySelection, { kind: "remote" }> {
+  selection: TaskWorkspaceSelection,
+): selection is Extract<TaskWorkspaceSelection, { kind: "remote" }> {
   return selection.kind === "remote";
 }
 
 function isFolderSelection(
-  selection: TaskRepositorySelection,
-): selection is Extract<TaskRepositorySelection, { kind: "folder" }> {
+  selection: TaskWorkspaceSelection,
+): selection is Extract<TaskWorkspaceSelection, { kind: "folder" }> {
   return selection.kind === "folder";
 }
 
-function stripSelectionKind<T extends TaskRepositorySelection>(selection: T): Omit<T, "kind"> {
+function stripSelectionKind<T extends TaskWorkspaceSelection>(selection: T): Omit<T, "kind"> {
   const { kind: _kind, ...row } = selection;
   return row;
 }
 
 function isEmptyLocalSelection(
-  selection: TaskRepositorySelection | undefined,
-): selection is Extract<TaskRepositorySelection, { kind: "local" }> {
+  selection: TaskWorkspaceSelection | undefined,
+): selection is Extract<TaskWorkspaceSelection, { kind: "local" }> {
   return Boolean(
     selection?.kind === "local" &&
     !selection.repositoryId &&

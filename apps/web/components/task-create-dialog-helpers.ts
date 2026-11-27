@@ -15,7 +15,7 @@ import type {
   StepType,
   TaskRemoteRepoRow,
   TaskRepoRow,
-  TaskRepositorySelection,
+  TaskWorkspaceSelection,
   InitialWorkspaceLayoutMode,
 } from "@/components/task-create-dialog-types";
 import { hasUnavailablePickerRemoteProvider } from "@/components/task-create-dialog-remote-provider-readiness";
@@ -383,7 +383,7 @@ export function validateCreateInputs(inputs: {
   /** Unified repos list. The form is valid if any row has a repo set OR URL mode is filled. */
   repositories: TaskRepoRow[];
   /** Ordered mixed rows from the current draft. */
-  selections?: TaskRepositorySelection[];
+  selections?: TaskWorkspaceSelection[];
   /** Remote URL rows. The form is valid when at least one has a non-empty URL. */
   remoteRepos?: TaskRemoteRepoRow[];
   /** Readiness for provider-backed picker rows. Pasted URLs do not use this gate. */
@@ -411,7 +411,7 @@ export function validateCreateInputs(inputs: {
   );
 }
 
-function selectionHasValue(selection: TaskRepositorySelection): boolean {
+function selectionHasValue(selection: TaskWorkspaceSelection): boolean {
   if (selection.kind === "remote") return selection.url.trim() !== "";
   if (selection.kind === "folder") return Boolean(selection.localPath.trim());
   return Boolean(selection.repositoryId || selection.localPath);

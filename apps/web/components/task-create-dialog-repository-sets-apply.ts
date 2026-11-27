@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { useToast } from "@/components/toast-provider";
 import type { Repository, RepositorySet } from "@/lib/types/http";
-import type { TaskRepoRow, TaskRepositorySelection } from "@/components/task-create-dialog-types";
+import type { TaskRepoRow, TaskWorkspaceSelection } from "@/components/task-create-dialog-types";
 import { applyRepositorySet } from "@/components/task-create-dialog-repository-sets";
 
 type UseApplyRepositorySetArgs = {
@@ -14,8 +14,8 @@ type UseApplyRepositorySetArgs = {
   setRepositories: (rows: TaskRepoRow[]) => void;
   setRepositoriesDirty: (dirty: boolean) => void;
   setNoRepository: (noRepository: boolean) => void;
-  selections?: TaskRepositorySelection[];
-  setRepositorySelections?: (selections: TaskRepositorySelection[]) => void;
+  selections?: TaskWorkspaceSelection[];
+  setRepositorySelections?: (selections: TaskWorkspaceSelection[]) => void;
 };
 
 /**

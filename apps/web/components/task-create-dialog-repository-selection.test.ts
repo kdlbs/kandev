@@ -6,21 +6,21 @@ import {
   type RepositorySelectionState,
   type RepositorySelectionAction,
 } from "./task-create-dialog-repositories-state";
-import type { TaskRepositorySelection } from "./task-create-dialog-types";
+import type { TaskWorkspaceSelection } from "./task-create-dialog-types";
 
 const LOCAL_SELECTION_KEY = "local-1";
 const LOCAL_REPOSITORY_ID = "repo-local";
 const REMOTE_SELECTION_KEY = "remote-1";
 const REMOTE_REPOSITORY_URL = "https://git.example/remote";
 
-const local = (key: string, repositoryId: string): TaskRepositorySelection => ({
+const local = (key: string, repositoryId: string): TaskWorkspaceSelection => ({
   kind: "local",
   key,
   repositoryId,
   branch: "main",
 });
 
-const remote = (key: string, url: string): TaskRepositorySelection => ({
+const remote = (key: string, url: string): TaskWorkspaceSelection => ({
   kind: "remote",
   key,
   url,

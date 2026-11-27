@@ -6,7 +6,7 @@ import type {
   DialogFormState,
   TaskRemoteRepoRow,
   TaskRepoRow,
-  TaskRepositorySelection,
+  TaskWorkspaceSelection,
   TaskRepositorySetsConfig,
 } from "@/components/task-create-dialog-types";
 import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
@@ -81,7 +81,7 @@ export type MixedRepositoryChipsProps = {
   onFolderSelectionAdded?: (wasEmpty: boolean) => void;
   onRepositorySelectionAdded?: (wasFolderOnly: boolean) => void;
   onAllWorkspaceSourcesRemoved?: () => void;
-  onRepositorySelectionRemoved?: (remaining: TaskRepositorySelection[]) => void;
+  onRepositorySelectionRemoved?: (remaining: TaskWorkspaceSelection[]) => void;
 };
 
 /** Renders the ordered local and remote rows with one shared source picker. */
@@ -187,7 +187,7 @@ export function MixedRepositoryChips(props: MixedRepositoryChipsProps) {
 }
 
 type RepositorySelectionRowsProps = {
-  selections: TaskRepositorySelection[];
+  selections: TaskWorkspaceSelection[];
   localRows: TaskRepoRow[];
   remoteRows: TaskRemoteRepoRow[];
   repositories: Repository[];
@@ -605,13 +605,13 @@ function useRemoteRowResolution(fs: DialogFormState, rows: TaskRemoteRepoRow[]) 
 }
 
 function isLocalSelection(
-  selection: TaskRepositorySelection,
-): selection is Extract<TaskRepositorySelection, { kind: "local" }> {
+  selection: TaskWorkspaceSelection,
+): selection is Extract<TaskWorkspaceSelection, { kind: "local" }> {
   return selection.kind === "local";
 }
 
 function isRemoteSelection(
-  selection: TaskRepositorySelection,
-): selection is Extract<TaskRepositorySelection, { kind: "remote" }> {
+  selection: TaskWorkspaceSelection,
+): selection is Extract<TaskWorkspaceSelection, { kind: "remote" }> {
   return selection.kind === "remote";
 }

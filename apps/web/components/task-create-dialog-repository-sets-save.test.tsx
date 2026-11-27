@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 import type { RepositorySet } from "@/lib/types/http";
 import { repositoryId, workspaceId } from "@/lib/types/ids";
-import type { TaskRepoRow, TaskRepositorySelection } from "@/components/task-create-dialog-types";
+import type { TaskRepoRow, TaskWorkspaceSelection } from "@/components/task-create-dialog-types";
 
 const NAME_INPUT = "repository-set-name";
 const SUBMIT = "repository-set-save-submit";
@@ -48,7 +48,7 @@ const ROWS: TaskRepoRow[] = [
 function renderDialog(
   overrides: {
     rows?: TaskRepoRow[];
-    selections?: TaskRepositorySelection[];
+    selections?: TaskWorkspaceSelection[];
     onOpenChange?: () => void;
   } = {},
 ) {

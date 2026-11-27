@@ -171,8 +171,8 @@ test.describe("Branch selector behavior with executor types", () => {
       const pasteInput = testPage.getByTestId("task-repository-picker-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
-      await expect(testPage.getByTestId("remote-repo-popover-content")).toHaveCount(0);
-      await expect(testPage.getByTestId("remote-repo-chip-trigger")).toBeFocused();
+      await expect(testPage.getByTestId("workspace-source-menu")).toBeHidden();
+      await expect(testPage.getByTestId("remote-repo-chip-trigger")).toBeVisible();
 
       // Select local executor profile
       const executorSelector = testPage.getByTestId("executor-profile-selector");
@@ -522,8 +522,8 @@ test.describe("Fresh-branch flow", () => {
       const pasteInput = testPage.getByTestId("task-repository-picker-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
-      // Finish the repository popover's focus restoration before opening the executor picker.
-      await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toBeFocused();
+      await expect(testPage.getByTestId("workspace-source-menu")).toBeHidden();
+      await expect(testPage.getByTestId("remote-repo-chip-trigger")).toBeVisible();
       await testPage.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: /E2E Fresh Branch GH/i }).click();
 

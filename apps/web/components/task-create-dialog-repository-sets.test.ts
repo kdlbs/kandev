@@ -7,7 +7,7 @@ import {
   selectedRepositoryIdsForSet,
   selectedRepositoryMembersForSet,
 } from "@/components/task-create-dialog-repository-sets";
-import type { TaskRepoRow, TaskRepositorySelection } from "@/components/task-create-dialog-types";
+import type { TaskRepoRow, TaskWorkspaceSelection } from "@/components/task-create-dialog-types";
 import {
   repositorySelectionReducer,
   type RepositorySelectionState,
@@ -50,7 +50,7 @@ function row(key: string, repositoryIdValue?: string, branch = ""): TaskRepoRow 
 function localSelection(
   key: string,
   repositoryIdValue: string,
-): Extract<TaskRepositorySelection, { kind: "local" }> {
+): Extract<TaskWorkspaceSelection, { kind: "local" }> {
   return { kind: "local", ...row(key, repositoryIdValue, "main") };
 }
 
@@ -60,7 +60,7 @@ function idsOf(rows: TaskRepoRow[]) {
 
 describe("applyRepositorySet", () => {
   it("appends new local members after mixed rows without changing remote rows", () => {
-    const existingRemote: TaskRepositorySelection = {
+    const existingRemote: TaskWorkspaceSelection = {
       kind: "remote",
       key: "remote-1",
       url: "https://github.com/acme/remote",

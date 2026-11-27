@@ -3,14 +3,14 @@ import {
   buildRepositoriesPayload,
   buildWorkspaceSourcesPayload,
 } from "./task-create-dialog-helpers";
-import type { TaskRepositorySelection } from "@/components/task-create-dialog-types";
+import type { TaskWorkspaceSelection } from "@/components/task-create-dialog-types";
 
 const FRONT_REPOSITORY_ID = "repo-front";
 
 // eslint-disable-next-line max-lines-per-function -- mixed payload cases share one serializer fixture.
 describe("buildRepositoriesPayload — unified rows", () => {
   it("maps mixed selections in their original order", () => {
-    const selections: TaskRepositorySelection[] = [
+    const selections: TaskWorkspaceSelection[] = [
       { kind: "local", key: "local-1", repositoryId: "repo-local", branch: "main" },
       {
         kind: "remote",
@@ -69,7 +69,7 @@ describe("buildRepositoriesPayload — unified rows", () => {
     { name: "Local", isLocalExecutor: true },
     { name: "Worktree", isLocalExecutor: false },
   ])("drops remote-origin intent when switching back to $name execution", ({ isLocalExecutor }) => {
-    const selections: TaskRepositorySelection[] = [
+    const selections: TaskWorkspaceSelection[] = [
       {
         kind: "local",
         key: "local-1",

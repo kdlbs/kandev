@@ -95,9 +95,6 @@ export type TaskWorkspaceSelection =
   | TaskRemoteRepositorySelection
   | TaskWorkspaceFolderSelection;
 
-/** @deprecated Use TaskWorkspaceSelection for new source-aware callers. */
-export type TaskRepositorySelection = TaskWorkspaceSelection;
-
 export type TaskRepositorySetsConfig = {
   sets: RepositorySet[];
   onApply: (set: RepositorySet) => void;
@@ -109,7 +106,7 @@ export type TaskRepositorySetsConfig = {
     repositories: Repository[];
     isLocalExecutor: boolean;
     freshBranchEnabled: boolean;
-    selections?: TaskRepositorySelection[];
+    selections?: TaskWorkspaceSelection[];
     open: boolean;
     setOpen: (open: boolean) => void;
   } | null;

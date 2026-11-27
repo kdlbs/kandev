@@ -76,7 +76,7 @@ type RepoChipsRowProps = {
   onRepositorySelectionAdded?: (wasFolderOnly: boolean) => void;
   onAllWorkspaceSourcesRemoved?: () => void;
   onRepositorySelectionRemoved?: (
-    remaining: import("@/components/task-create-dialog-types").TaskRepositorySelection[],
+    remaining: import("@/components/task-create-dialog-types").TaskWorkspaceSelection[],
   ) => void;
   /** "No repository" mode: replace the chip row with a folder picker. */
   onToggleNoRepository?: () => void;

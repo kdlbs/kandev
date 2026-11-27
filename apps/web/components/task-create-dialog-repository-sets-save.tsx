@@ -18,7 +18,7 @@ import { createRepositorySet } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAppStore } from "@/components/state-provider";
 import type { Repository } from "@/lib/types/http";
-import type { TaskRepoRow, TaskRepositorySelection } from "@/components/task-create-dialog-types";
+import type { TaskRepoRow, TaskWorkspaceSelection } from "@/components/task-create-dialog-types";
 import {
   selectedRepositoryIdsForSet,
   selectedRepositoryMembersForSet,
@@ -31,7 +31,7 @@ type SaveRepositorySetDialogProps = {
   /** The picker's current rows; only workspace repository rows can be saved. */
   rows: TaskRepoRow[];
   /** Full ordered draft, used to explain remote and host-local exclusions. */
-  selections?: TaskRepositorySelection[];
+  selections?: TaskWorkspaceSelection[];
   /** Workspace defaults are needed to capture the effective local base. */
   repositories?: Repository[];
   /** Local execution keeps the checkout branch separate from the base. */

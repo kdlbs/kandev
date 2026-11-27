@@ -6,7 +6,7 @@ import type { WorkspaceSourceRequest } from "@/lib/types/http-workspace-sources"
 import type {
   DialogFormState,
   TaskRepoRow,
-  TaskRepositorySelection,
+  TaskWorkspaceSelection,
 } from "@/components/task-create-dialog-types";
 import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
 import { createDebugLogger } from "@/lib/debug/log";
@@ -561,13 +561,13 @@ function resolveCurrentExecutorType(
   );
 }
 
-function selectionHasRepository(selection: TaskRepositorySelection): boolean {
+function selectionHasRepository(selection: TaskWorkspaceSelection): boolean {
   if (selection.kind === "folder") return false;
   if (selection.kind === "remote") return Boolean(selection.url.trim());
   return Boolean(selection.repositoryId || selection.localPath);
 }
 
-function selectionHasFolder(selection: TaskRepositorySelection): boolean {
+function selectionHasFolder(selection: TaskWorkspaceSelection): boolean {
   return selection.kind === "folder" && Boolean(selection.localPath.trim());
 }
 
@@ -579,7 +579,7 @@ function useFolderOnlyExecutorHandlers(fs: DialogFormState, context?: DialogHand
   );
   const currentExecutorType = resolveCurrentExecutorType(fs, executors);
   const transitionToFolderOnly = useCallback(
-    (remaining: TaskRepositorySelection[], folderAdded = false) => {
+    (remaining: TaskWorkspaceSelection[], folderAdded = false) => {
       if (fs.executorChoiceTouched || currentExecutorType !== "worktree") return;
       const hasRepository = remaining.some(selectionHasRepository);
       const hasFolder = folderAdded || remaining.some(selectionHasFolder);
@@ -603,7 +603,7 @@ function useFolderOnlyExecutorHandlers(fs: DialogFormState, context?: DialogHand
     [fs, transitionToFolderOnly],
   );
   const onRepositorySelectionRemoved = useCallback(
-    (remaining: TaskRepositorySelection[]) => transitionToFolderOnly(remaining),
+    (remaining: TaskWorkspaceSelection[]) => transitionToFolderOnly(remaining),
     [transitionToFolderOnly],
   );
   const onRepositorySelectionAdded = useCallback(
