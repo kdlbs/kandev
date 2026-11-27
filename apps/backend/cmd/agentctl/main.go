@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/tcpstdio"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -64,6 +65,12 @@ func runMain() int {
 	// its request from stdin and exits without ever starting the HTTP server.
 	if len(os.Args) > 1 && os.Args[1] == "ssh-reconcile" {
 		return runSSHReconcile(context.Background(), os.Stdin, os.Stdout)
+	}
+
+	// The Kubernetes exec transport runs one stdio bridge per forwarded
+	// connection; it dials only Pod loopback and never starts the server.
+	if len(os.Args) > 1 && os.Args[1] == tcpstdio.Subcommand {
+		return tcpstdio.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	}
 
 	// Dispatch kandev CLI subcommands before flag parsing or server startup.
