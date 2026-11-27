@@ -12,7 +12,7 @@ Use this guide to run one agent on one local Git repository. Start with the buil
 1. Install and start Kandev.
 2. Add a local repository and review its scripts and trust boundary.
 3. Configure an agent profile and keep Worktree selected for the first task.
-4. Start, inspect, test, and review the task before archiving or opening a pull request.
+4. Start the example task, review its change, and move the task to **Done**.
 
 ## Prerequisites
 
@@ -25,23 +25,35 @@ Kandev runs the selected agent with the access exposed by its executor, profile,
 
 ## Install and start
 
-Choose one release channel:
+Standalone Kandev listens on `127.0.0.1` by default. On v0.104.0 and earlier, set `KANDEV_SERVER_HOST` to `127.0.0.1` before starting Kandev. See [Security and trust](security.md) for remote access.
+
+Choose one install method on Linux or macOS.
+
+**Homebrew**
 
 ```bash
-# Homebrew on macOS or Linux
 brew install kdlbs/kandev/kandev
 kandev
+```
 
-# Scoop on Windows
+**Run once with npm**
+
+```bash
+npx kandev@latest
+```
+
+**Global npm installation**
+
+```bash
+npm install -g kandev@latest
+kandev
+```
+
+On Windows, install [Scoop](https://scoop.sh/) first. Then run these commands in PowerShell.
+
+```powershell
 scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
 scoop install kandev
-kandev
-
-# One-off npm launch
-npx kandev@latest
-
-# Global npm installation
-npm install -g kandev@latest
 kandev
 ```
 
@@ -54,14 +66,13 @@ remote-helper download. A remote task needs outbound HTTPS to `github.com` and
 for the full offline command-line archive and the [Desktop guide](desktop-app.md) for its network limits.
 
 Stable is the default and is selected by npm's `latest` tag. To test the current prerelease from
-`main` without changing a global installation, launch the package once from the npm-only `nightly`
-tag:
+`main` on Linux or macOS, use the npm-only `nightly` tag.
 
 ```bash
 npx -y kandev@nightly
 ```
 
-To replace a global Stable installation with Nightly, use:
+To replace a global Stable installation with Nightly, run these commands.
 
 ```bash
 npm install -g kandev@nightly
@@ -272,7 +283,7 @@ Repositories saved by an older Kandev version may still contain a path spelling 
 
 1. Open **Settings > Agents**.
 2. Select **Rescan** if an installed CLI is missing. An available agent appears with its detected installation and authentication state.
-3. If necessary, select **Install**. Kandev runs that agent's advertised install script on the Kandev host and shows live output. You can instead install it yourself and rescan.
+3. If you need an agent, select **Install agents** to open the catalog. Select **Install** next to your agent. Kandev runs the install script on the Kandev host and shows its output. If you install the CLI yourself, return to **Settings > Agents** and select **Rescan**.
 4. Complete the provider's authentication flow. Some agents expose a dedicated login terminal; others use their own CLI outside Kandev.
 5. Open the agent and its profile. Verify the selected model and mode, permission switches, CLI flags, environment variables, MCP configuration, and CLI-passthrough setting. Save changes.
 
@@ -282,8 +293,18 @@ For the first task on an existing repository, keep the seeded **Worktree** execu
 
 ## Create and start the first task
 
+Use the example below with a test repository that has no `kandev-first-task.txt` file.
+
 1. Select **New Task** from the sidebar or task board.
-2. Enter a specific title and a description with the expected outcome, constraints, and validation. A non-empty description enables the normal start and create-only actions.
+2. If the title field is visible, enter **Add a test note**. Paste this description into the task.
+
+   ```text
+   Create a file named kandev-first-task.txt in the repository root.
+   Write one line: Hello from Kandev!
+   Read the file. Report its contents in chat.
+   Edit only this file. Leave the change uncommitted.
+   ```
+
 3. Under **Repo**, select the workspace repository and base branch. To start a new project, open the repository selector, choose **Create new repository**, enter one folder name, and select its parent folder. Kandev creates an empty `main` repository with one empty initial commit and no project files. Select **None** only for work that genuinely needs a plain workspace directory.
 4. Choose the Development workflow and an agent profile. For an existing repository, choose the Worktree executor profile. For a newly initialized repository, keep the Local profile that Kandev selects automatically. Kandev remembers compatible recent choices, so re-check them after changing repository, agent, or trust boundary.
 5. Select **Start task**. Its menu also offers **Start task in plan mode** and **Create without starting agent**. On an empty description, the primary action is **Start Plan Mode**.
@@ -307,6 +328,12 @@ The dialog also supports multiple repositories, remote GitHub rows, and a single
 - Agent and executor choices can be disabled when their remote credential requirements are incompatible.
 
 ## Supervise and finish the task
+
+In the default **Development** workflow, the task moves to **Review** when the agent finishes its turn.
+For the example task, open **Changes**. Check that the agent added only `kandev-first-task.txt`.
+Select the file. Check that it contains one line with `Hello from Kandev!`.
+If both checks pass, open the task's **Move to** action. Select **Done** and confirm the move.
+The task is complete when it reaches **Done** on the board. The example needs no pull request.
 
 1. Watch chat and tool activity. Answer clarification or permission requests instead of assuming a stalled process is finished.
 2. Inspect terminal output, files, preview, and **Changes** while the session runs.

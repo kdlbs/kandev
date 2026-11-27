@@ -17,7 +17,7 @@ Stable is the default release channel. A verified Kandev-managed npm/npx user se
 the npm Nightly channel from **Settings → System → Updates**. Desktop, Homebrew, and system services
 remain Stable-only.
 
-> **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. For one trusted user, use the narrow private-network boundary in [Mobile Remote Access](mobile-remote-access.md). For shared access, enable [opt-in authentication](authentication.md) and terminate TLS in a protected proxy. Authentication does not replace HTTPS. A non-loopback server without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
+> **Network security:** Kandev-managed services listen on `0.0.0.0` by default and ship with authentication **disabled**. Set `server.host: "127.0.0.1"` in the selected configuration for a local-only service. For one trusted user, use the narrow private-network boundary in [Mobile Remote Access](mobile-remote-access.md). For shared access, enable [opt-in authentication](authentication.md) and terminate TLS in a protected proxy. Authentication does not replace HTTPS. A non-loopback server without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
 
 ## Quick path
 

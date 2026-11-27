@@ -34,7 +34,7 @@ An action constant alone is not evidence that an action is registered or emitted
 
 ## Security and network boundary
 
-The experimental [Authentication & Users](authentication.md) feature is disabled by default. In that mode, `/ws` gives every client the synthetic single-user administrator identity. When authentication is enabled, the upgrade requires a valid browser session, bearer token, or `?token=<PAT>` fallback for clients that cannot send headers. The default backend host is `0.0.0.0`, so a default process can listen on every interface even though examples use `localhost`.
+The experimental [Authentication & Users](authentication.md) feature is disabled by default. In that mode, `/ws` gives every client the synthetic single-user administrator identity. When authentication is enabled, the upgrade requires a valid browser session, bearer token, or `?token=<PAT>` fallback for clients that cannot send headers. Standalone launches listen on `127.0.0.1` by default. The official container and Kandev-managed services listen on every interface unless you configure a bind address.
 
 The raw gateway rejects every action whose name starts with `mcp.` using a `FORBIDDEN` error before the shared dispatcher runs. This prevents raw clients from forging task or session identity that trusted MCP adapters inject; it is not user authentication. Internal MCP actions remain available through their mode-scoped MCP adapters and trusted in-process dispatch paths.
 
@@ -1168,7 +1168,7 @@ Routing is an efficiency mechanism, not the access-control boundary. With authen
 ## Reconnect and troubleshooting
 
 - **Upgrade returns 403:** inspect the browser `Origin` and proxy `Host`. The hostnames must match exactly or both be loopback; ports may differ. A scheme other than `http`/`https` or an origin containing a path is rejected.
-- **Connection works locally but is unsafe remotely:** this is expected with authentication disabled and the `0.0.0.0` default. Enable authentication deliberately and add TLS, or bind/firewall the backend behind a protected proxy before allowing network access.
+- **Connection is reachable over the network with authentication disabled:** restrict the listener or network first. Use an authenticated TLS proxy or a private tunnel for remote access.
 - **Request times out but the mutation happened:** the response may have been dropped or the socket may have closed while the server-side handler continued. Query current state before deciding whether to retry.
 - **Notifications stop or state looks stale:** reconnect, resubscribe, and refetch. Check whether the client is consuming frames quickly enough to avoid the 256-frame drop-new queue.
 - **Session stream is missing:** send `session.subscribe`; for an actively displayed session also send `session.focus`. Verify the payload's `session_id` matches exactly.
