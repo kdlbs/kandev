@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-09-23
-updated: 2026-11-23
+updated: 2026-11-27
 owners:
   - kandev
 ---
@@ -46,6 +46,11 @@ checkout content.
   that waits for a manual start shall not report a session-start failure. The
   task shall stay without a session and without workspace preparation until
   the user starts it.
+- **AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.7:** A task awaiting manual
+  start shall show a warning and an explicit Start Task action in the empty
+  chat. The warning shall explain that setup scripts from the PR may access
+  executor credentials. The task edit dialog shall show the warning before
+  the user starts the task.
 
 ## Exclusions
 

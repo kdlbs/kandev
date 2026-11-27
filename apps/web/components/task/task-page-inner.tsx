@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PortForwardingManager } from "./port-forward-dialog";
 import { TaskTopBar } from "@/components/task/task-top-bar";
+import { ForkReviewTaskStart } from "@/components/task/fork-review-task-start";
 import { TaskLayout } from "@/components/task/task-layout";
 import { DebugOverlay } from "@/components/debug-overlay";
 import { type Repository, type RepositoryScript, type Task } from "@/lib/types/http";
@@ -142,12 +143,27 @@ function TaskPageRecoveryFeedback({
   );
 }
 
+function withSessionlessChatContent(
+  layoutProps: ReturnType<typeof buildTaskLayoutProps>,
+  task: Task | null,
+  status: UseEnsureTaskSessionResult["status"],
+  workflowSteps: TaskPageInnerProps["workflowSteps"],
+) {
+  if (!task || status !== "manual_start_required") return layoutProps;
+  return {
+    ...layoutProps,
+    sessionlessChatContent: (
+      <ForkReviewTaskStart key={task.id} task={task} workflowSteps={workflowSteps} />
+    ),
+  };
+}
+
 function TaskPageLayoutFeedback({
   layoutProps,
   isMobile,
   hasPageLevelMobileFeedback,
 }: {
-  layoutProps: ReturnType<typeof buildTaskLayoutProps>;
+  layoutProps: React.ComponentProps<typeof TaskLayout>;
   isMobile: boolean;
   hasPageLevelMobileFeedback: boolean;
 }) {
@@ -365,7 +381,7 @@ function useTaskPageDerivedProps(
     taskProps,
     debugEntries,
     topBarProps,
-    layoutProps,
+    layoutProps: withSessionlessChatContent(layoutProps, task, ensureSession.status, workflowSteps),
     bootstrapRecoveryError,
     automaticRecoveryOwnedByChat,
     hasPageLevelMobileFeedback,
@@ -430,9 +446,9 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                 onMoveError={reportTaskMoveError}
               />
               <TaskPageEntryFeedback
+                workspaceId={task.workspace_id ?? null}
                 taskMoveError={taskMoveError}
                 ensureSession={ensureSession}
-                workspaceId={task.workspace_id ?? null}
               />
               <TaskNavigationReadFeedback recovery={props.taskReadRecovery} />
               <TaskArchivedProvider value={archivedValue}>
