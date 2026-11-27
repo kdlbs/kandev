@@ -751,6 +751,43 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 with self.subTest(asset=name):
                     self.assertIn(f"`{name}`", contents)
 
+    def test_runtime_size_report_omits_windows_helper_for_pre_windows_tags(self) -> None:
+        report_step = step_block("Record runtime asset sizes")
+        self.assertIn("WINDOWS_HELPER: ${{ needs.prepare.outputs.windows_helper }}", report_step)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            assets_dir = Path(temp_dir)
+            for platform in ("linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64"):
+                for suffix in ("", "-full"):
+                    (assets_dir / f"kandev-{platform}{suffix}.tar.gz").write_bytes(b"data")
+            for suffix in ("", "-full"):
+                (assets_dir / f"kandev-windows-x64{suffix}.zip").write_bytes(b"data")
+            for helper in CANONICAL_HELPERS[:-1]:
+                (assets_dir / f"{helper}.gz").write_bytes(b"data")
+
+            output = assets_dir / "runtime-size-report.md"
+            command = ["bash", str(RUNTIME_SIZE_REPORT_SCRIPT_PATH), str(assets_dir), str(output)]
+            legacy = subprocess.run(
+                command,
+                env={**os.environ, "WINDOWS_HELPER": "false"},
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(legacy.returncode, 0, legacy.stderr)
+            contents = output.read_text()
+            self.assertIn("`agentctl-darwin-arm64.gz`", contents)
+            self.assertNotIn("agentctl-windows-amd64.exe.gz", contents)
+
+            current = subprocess.run(
+                command,
+                env={**os.environ, "WINDOWS_HELPER": "true"},
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(current.returncode, 0)
+
     def test_homebrew_formula_requires_the_stable_remote_helper_manifest(self) -> None:
         formula = HOMEBREW_FORMULA_PATH.read_text()
         self.assertIn('require "json"', formula)

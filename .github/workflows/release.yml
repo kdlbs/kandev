@@ -3038,6 +3038,7 @@ jobs:
       - name: Record runtime asset sizes
         env:
           COMPACT_RUNTIME_CONTRACT: ${{ needs.prepare.outputs.compact_runtime_contract }}
+          WINDOWS_HELPER: ${{ needs.prepare.outputs.windows_helper }}
         run: |
           set -euo pipefail
           report=dist/release-assets/runtime-size-report.md
