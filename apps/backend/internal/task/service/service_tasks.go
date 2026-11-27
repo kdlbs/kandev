@@ -108,7 +108,7 @@ func isPriorityOnlyTaskUpdate(req *UpdateTaskRequest) bool {
 	return req != nil &&
 		req.Priority != nil && req.ExecutionGrade == nil &&
 		req.Title == nil &&
-		req.Description == nil &&
+		req.Description == nil && req.FlagNote == nil &&
 		req.State == nil &&
 		req.WorkflowStepID == nil &&
 		req.Repositories == nil &&
@@ -2252,6 +2252,9 @@ func (s *Service) validateTaskUpdateInput(ctx context.Context, id string, req *U
 			return err
 		}
 	}
+	if err := validateTaskFlagNote(req.FlagNote); err != nil {
+		return err
+	}
 	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return err
 	}
@@ -2307,7 +2310,7 @@ func (s *Service) writeTaskUpdateFields(
 	update := models.TaskFieldUpdate{
 		Title: req.Title, Description: req.Description, Priority: req.Priority, ExecutionGrade: req.ExecutionGrade,
 		State: req.State, WorkflowStepID: req.WorkflowStepID, Position: req.Position,
-		ParentID: req.ParentID, Metadata: req.Metadata,
+		ParentID: req.ParentID, Metadata: req.Metadata, FlagNote: req.FlagNote,
 	}
 	if req.AssigneeUserID != nil {
 		update.AssigneeUserID = &assignee

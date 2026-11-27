@@ -7,6 +7,7 @@ import {
   clampView,
   fitView,
   formatZoom,
+  measuredPairSize,
   minScaleFor,
   nextZoomStep,
   panBy,
@@ -152,5 +153,16 @@ describe("swipeDirection", () => {
     expect(swipeDirection(80, -5)).toBe(-1);
     expect(swipeDirection(30, 0)).toBe(0);
     expect(swipeDirection(80, 70)).toBe(0);
+  });
+});
+
+describe("measuredPairSize", () => {
+  // @covers AC-TASKS-QUESTION-IMAGE-ITEMS-003.9
+  it("reports a comparison's size only once both images are measured", () => {
+    const small = { width: 320, height: 200 };
+    const large = { width: 640, height: 480 };
+    expect(measuredPairSize(small, undefined)).toEqual({ width: 0, height: 0 });
+    expect(measuredPairSize(small, { width: 0, height: 0 })).toEqual({ width: 0, height: 0 });
+    expect(measuredPairSize(small, large)).toEqual(large);
   });
 });

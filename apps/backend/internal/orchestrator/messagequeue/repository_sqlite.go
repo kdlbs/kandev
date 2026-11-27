@@ -2024,6 +2024,13 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
 		return ErrSessionIdentityMismatch
 	}
+	available, err := sessionQueueSchemaAvailable(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if !available {
+		return nil
+	}
 	if err := lockSessionTxIn(ctx, tx, db, identity.SessionID); err != nil {
 		return err
 	}
@@ -2032,7 +2039,7 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 	if db.DriverName() == "pgx" {
 		query += postgresForUpdateSuffix
 	}
-	err := tx.GetContext(ctx, &incarnationID, db.Rebind(query), identity.SessionID, identity.TaskID)
+	err = tx.GetContext(ctx, &incarnationID, db.Rebind(query), identity.SessionID, identity.TaskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrSessionIdentityMismatch
 	}
@@ -2158,14 +2165,12 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 // caller must hold the session lock and must commit the surrounding
 // transaction after this function returns successfully.
 func PurgeSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, sessionID string) (int, error) {
-	for _, table := range []string{"queued_messages", "queue_session_locks"} {
-		present, err := internaldb.TableExists(tx, table)
-		if err != nil {
-			return 0, fmt.Errorf("check %s table: %w", table, err)
-		}
-		if !present {
-			return 0, nil
-		}
+	available, err := sessionQueueSchemaAvailable(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if !available {
+		return 0, nil
 	}
 
 	if err := ensureTaskPurgeRecoverySchemas(ctx, tx); err != nil {
@@ -2221,6 +2226,19 @@ func PurgeSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, se
 		return 0, fmt.Errorf("purge session dispatch claims: %w", err)
 	}
 	return int(removed), nil
+}
+
+func sessionQueueSchemaAvailable(ctx context.Context, tx *sqlx.Tx) (bool, error) {
+	for _, table := range []string{"queued_messages", "queue_session_locks"} {
+		present, err := internaldb.TableExistsContext(ctx, tx, table)
+		if err != nil {
+			return false, fmt.Errorf("check %s table: %w", table, err)
+		}
+		if !present {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // replaceCoalesced overwrites the existing coalesced row with msg inside the transaction.

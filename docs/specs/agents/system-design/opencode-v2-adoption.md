@@ -72,10 +72,15 @@ Managed selection overrides native preference, including executor `native_binary
 Stage managed candidates through `CacheUpdateCommand`, never `NativeUpdateCommand`.
 Use an explicit managed ACP candidate command, never `RefreshCommand` if it can rediscover PATH.
 Installation helpers for managed OpenCode must use the resolved exact package.
-Discovery and availability checks must recognize the selected managed runtime even when `opencode` is absent from PATH.
-`OpenCodeACP.IsInstalled` currently checks native presence; reconcile that check with managed readiness so a successful
-managed installation remains selectable. An unprepared fresh runtime may show an install action; discovery alone must not
-perform an unrequested global install. Installation uses the normal Kandev install/launch flow and the resolved managed command.
+Discovery and availability checks must recognize the selected managed runtime even when `opencode` is absent from PATH,
+and must survive reviewed default pin advances within the adopted family.
+`OpenCodeACP.IsInstalled` checks managed readiness against the npm execution cache (`<npm_cache>/_npx`) without running
+network operations or installs:
+1. Fast path: if the exact non-symlink execution directory for `NpxExecutionCacheKey(spec.PackageSpec(version))` exists, report available.
+2. Same-family fallback: when the exact-version directory is absent (for example after `reconcileOpenCodeDefault` advances `applied_default_version` to a newly shipped pin), scan `<npm_cache>/_npx` (rejecting a symlinked `_npx` directory and skipping symlinked or non-directory entries) and report available if at least one execution directory contains a regular `node_modules/<spec.Package>/package.json` file for the selected family's trusted package (`@opencode/cli` for v2 or `opencode-ai` for v1).
+Unrelated packages, cross-family packages, incomplete entries, and symlinks are skipped individually; they neither satisfy availability nor mask a valid sibling tree. Caller cancellation returns `ctx.Err()`; missing `npm`, missing cache directories, or zero matching entries return unavailable without error.
+Once reported available, `hostutility` bootstrap and normal launches execute the resolved exact managed command for the new pin, which materializes the new `_npx` execution tree on demand and restores the exact-key fast path.
+An unprepared fresh runtime still reports unavailable and shows an install action; discovery alone must not perform an unrequested install. Installation uses the normal Kandev install/launch flow and the resolved managed command.
 Before a managed Settings install command reaches the shell, prepare its internal npm project-prefix marker as a private
 temporary directory on the backend host. The displayed command may retain the readable marker; execution must not rely
 on creating or resolving that path beneath the user's home directory.
@@ -218,6 +223,31 @@ success, pre-activation failure with v1 retained, and post-activation discovery 
 Long commands/logs stay contained. Disable duplicate submission during a job.
 All copy uses the existing translation system and six supported locales.
 The [plan previews](../../../plans/opencode-v2-adoption/plan.md#ascii-ui-preview) define structural review views.
+
+### Reinstall a missing managed runtime
+
+For AC-AGENTS-OPENCODE-V2-001.14, use the configured OpenCode card in Settings > Agents as the
+recovery entry. Show **Reinstall** when discovery reports OpenCode unavailable, the runtime status
+identifies the source as managed, and the install catalog includes an install command. Use the
+same agent management permission that protects the catalog's Install button.
+
+The link opens the existing Install agents page with `?agent=opencode-acp`. Put that card first
+while it is eligible so the operator can reach its Install action immediately. Preserve the catalog
+and its normal ordering for other entries. A URL hint selects a card to show. The operator selects
+Install to submit `POST /api/v1/agent-install/opencode-acp`. The server resolves the current
+selection and prepares its exact package with `OpenCodeACP.SettingsInstallCommand`.
+
+Reuse the catalog's job status, output, and Retry action. The install success hook invalidates
+discovery and schedules a capability probe. Discovery clears the missing status and recovery
+link when the runtime becomes available. Install success and model probe results use the
+existing Settings flows. A missing or failed status lookup still leaves the Install agents entry
+available to authorized operators.
+
+Place Reinstall with the OpenCode card actions. On phones, the action sits below the identity
+and badges and opens the same catalog as a full-page Settings destination. Reuse the Settings
+scroll region and standard action sizing, with a 28px fine-pointer desktop control and a touch
+target of at least 44px on phones and coarse pointers. Follow the
+[desktop and phone previews](../../../plans/opencode-missing-runtime-recovery/plan.md#ascii-ui-preview).
 
 ## Session continuity and failure boundaries
 

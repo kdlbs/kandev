@@ -62,14 +62,14 @@ Useful primary sources:
 
 | Evidence | Observation | Confidence and limit |
 | --- | --- | --- |
-| Installed `agy` 1.4.12 | Google login works for its model catalog; `--acp` exits with unsupported flag. | Direct CLI execution. Does not authenticate standalone ACP. |
-| Official ACP 1.4.5, Linux x64 | Archive contains server plus harness. Digest verified before extraction. | Archive and packaged source inspected. Other platforms were not executed. |
-| Unmodified native launch | SIGILL before initialize on this Linux machine. | Direct execution and stack/disassembly evidence. Vendor fix not established. |
-| CPU 0 diagnostic launch | Initialize succeeds; unauthenticated session creation returns a typed auth error. | Controlled workaround only. No production affinity policy follows. |
-| Explicit `oauth-personal` | Native server prints a Google consent URL on stderr with PKCE and an ephemeral localhost callback. | Attempt cancelled without completing consent. Successful subscription inference is not yet verified. |
-| Vendor 1.4.5 code | Prompt results can contain typed token usage; `/usage` fetches allowance and renders Markdown. | Source evidence, not a captured successful authenticated turn. No provider dollar cost observed. |
-| Vendor model policy | `zed` is among clients eligible for third-party model discovery. | Source evidence. Account entitlement still determines the available catalog. |
-| T3 turn handling | Native error steps can reveal failures hidden behind chat text plus `end_turn`. | Prior-art implementation. Kandev must qualify the exact journal schema with its chosen runtime. |
+| Installed `agy` 1.4.12 | Google model login works; `--acp` is unsupported. | Direct CLI check; no standalone ACP authentication. |
+| Official ACP 1.4.5, Linux x64 | Server and harness archive; digest verified. | Archive/source inspected; other platforms untested. |
+| Unmodified native launch | SIGILL before initialize on Linux. | Direct execution; vendor fix unknown. |
+| CPU 0 diagnostic launch | Initialize works; unauthenticated session returns a typed auth error. | Controlled workaround; no production affinity policy. |
+| Explicit `oauth-personal` | Consent URL includes PKCE and an ephemeral localhost callback. | Cancelled before consent; subscription inference unverified. |
+| Vendor 1.4.5 code | Prompt results can include typed usage; `/usage` fetches allowance and Markdown. | Source only; no authenticated turn or provider dollar cost. |
+| Vendor model policy | `zed` can discover third-party models. | Source evidence; account entitlement controls the catalog. |
+| T3 turn handling | Native error steps can be hidden behind chat text and `end_turn`. | Prior art; qualify the journal schema on the selected runtime. |
 
 The Linux x64 archive was `agy-acp-server-1.4.5-linux-x86_64.zip`, with 321783181 compressed bytes.
 Its SHA-256 was `923923a0d7dc8073f66cc6f78647a3107e3a7ee2b7e1a24df8b3927b5188013b`.
@@ -100,10 +100,19 @@ Stateful process and database operations stay outside dialect functions.
 
 ## Existing identity
 
-Keep `antigravity-acp`, display order 22, logos, non-virtual ACP, and existing profiles.
-Base constructors remain pure. The local resolver supplies the entire base command before profile flags and wrappers apply.
-MCP configuration stays in ACP session creation. No project-local MCP file or assumed transport override is added.
-Native load/resume decisions remain capability-driven.
+Keep `antigravity-acp`, display order 22, and existing ACP profiles.
+Serve the provider-usage arch in both theme assets through the logo API.
+
+Use a curated `cli_flag` and the profile's `cli_flags` storage. A missing entry
+renders off. Duplicate exact entries resolve to enabled if any row is enabled;
+save collapses them into one row and keeps unrelated flags. Apply the flag only
+after runtime selection for a supported CLI launch whose session policy permits
+blanket tool approval. Reuse that eligibility check for preview, model and
+profile inference, utilities, initial spawn, resume, and context reset. Persist
+the trusted MCP surface with launch metadata and restore it for context resets
+after backend recovery. Missing or invalid surface metadata omits the flag. The
+existing CLI Flags card serves desktop and phone. Follow the
+[injected MCP approval design](injected-mcp-approval.md).
 
 ## Local runtime resolution
 

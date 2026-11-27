@@ -6,10 +6,10 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconInfoCircle } from "@tabler/icons-react";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
+import { SettingsInfo } from "@/components/settings/settings-info";
 import type { RepoFilter } from "@/lib/types/github";
+import { PR_EVENTS } from "./pr-events";
 
 type GitHubPRConfigProps = {
   config: Record<string, unknown>;
@@ -17,15 +17,14 @@ type GitHubPRConfigProps = {
   onUpdate: (config: Record<string, unknown>) => void;
 };
 
-// `value` is the GitHub PR event name persisted in the trigger config and
-// matched by the backend — protocol. Label and tooltip are copy.
-const PR_EVENTS = [
-  {
-    value: "opened",
-    labelKey: "automations:prEventOpened",
-    tooltipKey: "automations:prEventOpenedTooltip",
-  },
-] as const;
+const MAX_QUIET_PERIOD_MINUTES = 1440;
+
+function parseCommaList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
 export function GitHubPRConfig({ config, workspaceId, onUpdate }: GitHubPRConfigProps) {
   const { t } = useTranslation();
@@ -50,24 +49,21 @@ export function GitHubPRConfig({ config, workspaceId, onUpdate }: GitHubPRConfig
   };
 
   const handleBranchesBlur = () => {
-    const parsed = branches
-      .split(",")
-      .map((b) => b.trim())
-      .filter(Boolean);
-    onUpdate({ ...config, branches: parsed });
+    onUpdate({ ...config, branches: parseCommaList(branches) });
   };
 
   const handleAuthorsBlur = () => {
-    const parsed = authors
-      .split(",")
-      .map((a) => a.trim())
-      .filter(Boolean);
-    onUpdate({ ...config, authors: parsed });
+    onUpdate({ ...config, authors: parseCommaList(authors) });
   };
 
   return (
     <div className="space-y-3">
       <EventsSection events={events} onToggle={toggleEvent} />
+      {events.includes("opened") && <IncludeExistingInput config={config} onUpdate={onUpdate} />}
+      {events.includes("new_commits") && <QuietPeriodInput config={config} onUpdate={onUpdate} />}
+      {events.includes("review_requested") && (
+        <ReviewersInput config={config} onUpdate={onUpdate} />
+      )}
       <RepoFilterSelector
         allRepos={allRepos}
         selectedRepos={repos}
@@ -114,6 +110,115 @@ export function GitHubPRConfig({ config, workspaceId, onUpdate }: GitHubPRConfig
   );
 }
 
+// Rows stay 44 px tall on phones, tablets, and any coarse pointer.
+const TOUCH_ROW_CLASS_NAME = "min-h-11 md:[@media(pointer:fine)]:min-h-0";
+
+type FieldProps = {
+  config: Record<string, unknown>;
+  onUpdate: (config: Record<string, unknown>) => void;
+};
+
+function IncludeExistingInput({ config, onUpdate }: FieldProps) {
+  const { t } = useTranslation();
+  const checked = (config.include_existing_prs as boolean) ?? false;
+  return (
+    <div className="space-y-1">
+      <label className={`flex items-center gap-1.5 cursor-pointer ${TOUCH_ROW_CLASS_NAME}`}>
+        <Checkbox
+          checked={checked}
+          onCheckedChange={(value) => onUpdate({ ...config, include_existing_prs: value === true })}
+          aria-describedby="github-pr-include-existing-help"
+          className="cursor-pointer"
+        />
+        <span className="text-sm">{t("automations:prIncludeExistingLabel")}</span>
+      </label>
+      <p id="github-pr-include-existing-help" className="text-xs text-muted-foreground">
+        {t("automations:prIncludeExistingHelp")}
+      </p>
+    </div>
+  );
+}
+
+function QuietPeriodInput({ config, onUpdate }: FieldProps) {
+  const { t } = useTranslation();
+  const saved = String((config.quiet_period_minutes as number) ?? 0);
+  const [value, setValue] = useState(saved);
+  useEffect(() => {
+    setValue(saved);
+  }, [saved]);
+
+  const handleBlur = () => {
+    const minutes = Number(value);
+    const valid =
+      value.trim() !== "" &&
+      Number.isInteger(minutes) &&
+      minutes >= 0 &&
+      minutes <= MAX_QUIET_PERIOD_MINUTES;
+    if (!valid) {
+      setValue(saved);
+      return;
+    }
+    if (String(minutes) !== saved) onUpdate({ ...config, quiet_period_minutes: minutes });
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="github-pr-quiet-period" className="text-xs">
+        {t("automations:prQuietPeriodLabel")}
+      </Label>
+      <div className="flex items-center gap-2">
+        <Input
+          id="github-pr-quiet-period"
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={MAX_QUIET_PERIOD_MINUTES}
+          step={1}
+          className="w-24"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={handleBlur}
+          aria-describedby="github-pr-quiet-period-help"
+        />
+        <span className="text-xs text-muted-foreground">{t("automations:prQuietPeriodUnit")}</span>
+      </div>
+      <p id="github-pr-quiet-period-help" className="text-xs text-muted-foreground">
+        {t("automations:prQuietPeriodHelp")}
+      </p>
+    </div>
+  );
+}
+
+function ReviewersInput({ config, onUpdate }: FieldProps) {
+  const { t } = useTranslation();
+  const saved = ((config.reviewers as string[]) ?? []).join(", ");
+  const [value, setValue] = useState(saved);
+  useEffect(() => {
+    setValue(saved);
+  }, [saved]);
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="github-pr-reviewers" className="text-xs">
+        {t("automations:prReviewersLabel")}
+      </Label>
+      {/* Example GitHub logins and teams: data, not copy. */}
+      <Input
+        id="github-pr-reviewers"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => onUpdate({ ...config, reviewers: parseCommaList(value) })}
+        aria-describedby="github-pr-reviewers-help"
+        // eslint-disable-next-line i18next/no-literal-string -- example logins, see above
+        placeholder="kandev-bot, acme/reviewers"
+      />
+      <p id="github-pr-reviewers-help" className="text-xs text-muted-foreground">
+        {t("automations:prReviewersHelp")}
+      </p>
+    </div>
+  );
+}
+
 function EventsSection({
   events,
   onToggle,
@@ -127,20 +232,17 @@ function EventsSection({
       <Label className="text-xs">{t("automations:eventsLabel")}</Label>
       <div className="flex flex-wrap gap-3">
         {PR_EVENTS.map((evt) => (
-          <label key={evt.value} className="flex items-center gap-1.5 cursor-pointer">
-            <Checkbox
-              checked={events.includes(evt.value)}
-              onCheckedChange={() => onToggle(evt.value)}
-              className="cursor-pointer"
-            />
-            <span className="text-sm">{t(evt.labelKey)}</span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <IconInfoCircle className="h-3 w-3 text-muted-foreground" />
-              </TooltipTrigger>
-              <TooltipContent className="max-w-[220px]">{t(evt.tooltipKey)}</TooltipContent>
-            </Tooltip>
-          </label>
+          <div key={evt.value} className="flex items-center gap-0.5">
+            <label className={`flex items-center gap-1.5 cursor-pointer ${TOUCH_ROW_CLASS_NAME}`}>
+              <Checkbox
+                checked={events.includes(evt.value)}
+                onCheckedChange={() => onToggle(evt.value)}
+                className="cursor-pointer"
+              />
+              <span className="text-sm">{t(evt.labelKey)}</span>
+            </label>
+            <SettingsInfo label={t(evt.labelKey)}>{t(evt.tooltipKey)}</SettingsInfo>
+          </div>
         ))}
       </div>
     </div>

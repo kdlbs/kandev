@@ -3,9 +3,11 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	taskservice "github.com/kandev/kandev/internal/task/service"
+	"strings"
 	"sync"
 	"time"
+
+	taskservice "github.com/kandev/kandev/internal/task/service"
 
 	"go.uber.org/zap"
 
@@ -102,6 +104,9 @@ func buildObservationFromNormalized(payload *runtime.AgentStreamEventPayload, or
 	if title == "" {
 		title = payload.Data.ToolName
 	}
+	if title == "" && bw.Kind == streams.BackgroundWorkKindMonitor {
+		title = monitorObservationTitle(payload.Data.Normalized)
+	}
 	workID := bw.WorkID
 	if workID == "" {
 		workID = payload.Data.ToolCallID
@@ -124,6 +129,54 @@ func buildObservationFromNormalized(payload *runtime.AgentStreamEventPayload, or
 		obs.Capabilities = *bw.Capabilities
 	}
 	return obs
+}
+
+func monitorObservationTitle(payload *streams.NormalizedPayload) string {
+	if title := monitorObservationInputTitle(payload); title != "" {
+		return title
+	}
+	if title := monitorObservationOutputTitle(payload); title != "" {
+		return title
+	}
+	return streams.MonitorSubkind
+}
+
+func monitorObservationInputTitle(payload *streams.NormalizedPayload) string {
+	generic := payload.Generic()
+	if generic == nil {
+		return ""
+	}
+	args, ok := generic.Input.(map[string]any)
+	if !ok {
+		return ""
+	}
+	rawInput, ok := args["raw_input"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, key := range []string{"description", "command"} {
+		if title, ok := rawInput[key].(string); ok && strings.TrimSpace(title) != "" {
+			return strings.TrimSpace(title)
+		}
+	}
+	return ""
+}
+
+func monitorObservationOutputTitle(payload *streams.NormalizedPayload) string {
+	generic := payload.Generic()
+	if generic == nil {
+		return ""
+	}
+	output, ok := generic.Output.(map[string]any)
+	if !ok {
+		return ""
+	}
+	monitor, ok := output[streams.MonitorViewKey].(map[string]any)
+	if !ok {
+		return ""
+	}
+	command, _ := monitor[streams.MonitorViewCommandKey].(string)
+	return strings.TrimSpace(command)
 }
 
 func (s *Service) recordBackgroundWorkObservationFromToolPayload(ctx context.Context, payload *runtime.AgentStreamEventPayload) {

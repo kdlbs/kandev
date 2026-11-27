@@ -8,12 +8,17 @@ import { SourceRepository } from "./sdk-source.mjs";
 import { ReleaseIO } from "./sdk-release-io.mjs";
 import { assertReleaseContext } from "./sdk-runtime.mjs";
 import {
+  loadPublicationEvidence,
+  loadPublicationCandidate,
   preparePublication,
   publishPublication,
   boundedRegistryValue,
+  readRegistryWithRetry,
+  verifyPublicationRegistry,
 } from "./sdk-publication-state.mjs";
 import { PHASES, SdkDiagnostics, collectSecrets } from "./sdk-diagnostics.mjs";
 import { verifyTools } from "../pluginsdk/pack-candidate.mjs";
+import { isDefiniteUploadRejection } from "./sdk-upload-attempts.mjs";
 const exec = promisify(execFile);
 const BOOTSTRAP_INSTRUCTIONS =
   "Verify the retained receipt signature and archive integrity. Publish that exact archive using the maintainer bootstrap instructions in docs/public/release-process.md, configure trusted publishing, then rerun the Stable backfill. No SDK completion has been recorded.";
@@ -30,8 +35,198 @@ export async function writeReleaseSummary(summary, { env = process.env } = {}) {
   console.log(JSON.stringify(summary));
 }
 
+async function writeUploadDecision(env, upload) {
+  if (env.GITHUB_OUTPUT)
+    await appendFile(
+      env.GITHUB_OUTPUT,
+      `upload=${upload ? "true" : "false"}\n`,
+    );
+}
+
+function uploadWorkflowIdentity(env) {
+  return {
+    workflow_sha: env.SDK_WORKFLOW_SHA ?? env.GITHUB_WORKFLOW_SHA,
+    run_id: env.GITHUB_RUN_ID,
+    run_attempt: env.GITHUB_RUN_ATTEMPT,
+    backfill_tag: env.SDK_BACKFILL_TAG ?? "",
+  };
+}
+
+async function authorizeUpload(io, source, context, env) {
+  const registry = await readRegistryWithRetry(io, source.record.sdk_version);
+  const { candidate } = await loadPublicationEvidence(io, context, registry);
+  if (registry.version) {
+    io.diagnostics?.phase("npm_upload", "skipped", {
+      reason: "version_already_public",
+    });
+    io.diagnostics?.setPublication("confirmed");
+    await writeUploadDecision(env, false);
+    return { status: "already_public", sdk_version: source.record.sdk_version };
+  }
+  const decision = await io.uploadAttempts.authorize(
+    source,
+    candidate,
+    uploadWorkflowIdentity(env),
+  );
+  if (decision.action === "observe") {
+    io.diagnostics?.setUploadAttempt(decision.attempt);
+    io.diagnostics?.setWriteOutcome(decision.attempt.outcome);
+    io.diagnostics?.phase("npm_upload", "skipped", {
+      reason: "resume_recorded_attempt",
+      write_outcome: decision.attempt.outcome,
+    });
+    await writeUploadDecision(env, false);
+    return {
+      status: "observing_prior_upload",
+      sdk_version: source.record.sdk_version,
+    };
+  }
+  if (!registry.packageExists && !context.firstPublishOIDCReady) {
+    if (!candidate.receipt.bootstrap_allowed)
+      throw new Error("absent package is not an approved initial bootstrap");
+    io.diagnostics?.phase("npm_upload", "skipped", {
+      reason: "bootstrap_required",
+    });
+    io.diagnostics?.setPublication("not_attempted");
+    await writeUploadDecision(env, false);
+    return {
+      status: "bootstrap_required",
+      sdk_version: source.record.sdk_version,
+      candidate,
+    };
+  }
+  await io.uploadAttempts.writeIntent(
+    source,
+    candidate,
+    uploadWorkflowIdentity(env),
+  );
+  io.diagnostics?.start("npm_upload");
+  await writeUploadDecision(env, true);
+  return {
+    status: "upload_authorized",
+    sdk_version: source.record.sdk_version,
+  };
+}
+
+async function uploadAuthorizedArchive(io, source, context, env) {
+  const { candidate } = await loadPublicationCandidate(io, context);
+  const workflow = uploadWorkflowIdentity(env);
+  const intentArtifactId = env.SDK_UPLOAD_INTENT_ARTIFACT_ID;
+  let uploadInvoked = false;
+  let resultWriteAttempted = false;
+  const recordOutcome = async (outcome) => {
+    if (resultWriteAttempted) return;
+    resultWriteAttempted = true;
+    await io.uploadAttempts.writeResult(
+      source,
+      candidate,
+      workflow,
+      intentArtifactId,
+      outcome,
+    );
+  };
+  let outcome = "already_public";
+  try {
+    await io.uploadAttempts.verifyRetainedIntent(
+      source,
+      candidate,
+      workflow,
+      intentArtifactId,
+      env.SDK_UPLOAD_INTENT_ARTIFACT_DIGEST,
+    );
+    const registry = await readRegistryWithRetry(io, source.record.sdk_version);
+    verifyPublicationRegistry(registry, candidate, source);
+    if (registry.version) {
+      io.diagnostics?.phase("npm_upload", "skipped", {
+        reason: "version_already_public",
+      });
+    } else {
+      if (!registry.packageExists && !context.firstPublishOIDCReady)
+        throw new Error(
+          candidate.receipt.bootstrap_allowed
+            ? "first SDK package requires approved manual bootstrap"
+            : "absent package is not an approved initial bootstrap",
+        );
+      io.diagnostics?.start("npm_upload");
+      uploadInvoked = true;
+      try {
+        await io.publish(candidate);
+        outcome = "accepted";
+        io.diagnostics?.setWriteOutcome(outcome);
+        io.diagnostics?.phase("npm_upload", "passed", {
+          write_outcome: outcome,
+        });
+      } catch (error) {
+        outcome = isDefiniteUploadRejection(error) ? "rejected" : "uncertain";
+        io.diagnostics?.setWriteOutcome(outcome);
+        io.diagnostics?.phase(
+          "npm_upload",
+          outcome === "rejected" ? "failed" : "pending",
+          { write_outcome: outcome },
+        );
+      }
+    }
+    await recordOutcome(outcome);
+  } catch (error) {
+    if (!uploadInvoked && !resultWriteAttempted) {
+      try {
+        await recordOutcome("never_started");
+      } catch {
+        // The retained intent remains unresolved if its result cannot be saved.
+      }
+    }
+    throw error;
+  }
+  io.diagnostics?.setUploadAttempt({
+    outcome,
+    run_id: workflow.run_id,
+    run_attempt: workflow.run_attempt,
+    observing_prior_write: false,
+  });
+  return {
+    status: "upload_attempt_recorded",
+    sdk_version: source.record.sdk_version,
+    outcome,
+  };
+}
+
+async function completePublication(io, source, context, env) {
+  const registry = await readRegistryWithRetry(io, source.record.sdk_version);
+  const evidence = await loadPublicationEvidence(io, context, registry);
+  const { candidate } = evidence;
+  let uploadAttempt = null;
+  const attempts = await io.uploadAttempts.history(
+    source,
+    candidate,
+    uploadWorkflowIdentity(env),
+    { includeCurrentAttempt: true },
+  );
+  if (attempts.length) {
+    uploadAttempt =
+      attempts.find((attempt) =>
+        ["accepted", "uncertain", "already_public"].includes(attempt.outcome),
+      ) ??
+      attempts.at(-1) ??
+      null;
+    if (
+      uploadAttempt &&
+      ["accepted", "uncertain", "already_public"].includes(
+        uploadAttempt.outcome,
+      )
+    )
+      uploadAttempt.observing_prior_write = true;
+  }
+  return publishPublication(io, {
+    ...context,
+    noFreshUpload: true,
+    initialRegistry: registry,
+    initialEvidence: evidence,
+    uploadAttempt,
+  });
+}
+
 function buildSummary(diagnostics, { result, source, failure }) {
-  const status = failure ? "failed" : result?.status ?? "verified";
+  const status = failure ? "failed" : (result?.status ?? "verified");
   const summary = diagnostics.summary({ status, result, failure });
   if (source) {
     summary.sdk_version = source.record.sdk_version;
@@ -57,6 +252,7 @@ export async function runRelease({
   summaryWriter = writeReleaseSummary,
   verifyToolsImpl = verifyTools,
   execFileImpl = exec,
+  makeReleaseIO = (options) => new ReleaseIO(options),
   diagnosticsLog = console.log,
   diagnosticsError = console.error,
 } = {}) {
@@ -74,9 +270,22 @@ export async function runRelease({
   let packConfig = null;
   let failure = null;
   try {
-    if (!["prepare", "publish", "verify", "tools"].includes(mode))
+    if (
+      ![
+        "prepare",
+        "publish",
+        "authorize",
+        "upload",
+        "complete",
+        "verify",
+        "tools",
+      ].includes(mode)
+    )
       throw new Error("invalid SDK release mode");
-    if (mode === "prepare" || mode === "publish") assertReleaseContext(env);
+    if (
+      ["prepare", "publish", "authorize", "upload", "complete"].includes(mode)
+    )
+      assertReleaseContext(env);
     const fingerprint = env.RELEASE_GPG_FINGERPRINT;
     if (!/^[A-F0-9]{40}$/.test(fingerprint ?? ""))
       throw new Error("approved RELEASE_GPG_FINGERPRINT is required");
@@ -104,7 +313,9 @@ export async function runRelease({
         diagnostics.phase(phase, "skipped", { reason: "tools_mode" });
     } else {
       if (
-        (mode === "prepare" || mode === "publish") &&
+        ["prepare", "publish", "authorize", "upload", "complete"].includes(
+          mode,
+        ) &&
         (await repository.text("rev-parse", "HEAD")) !== source.currentCommit
       )
         throw new Error("checked-out release differs from signed host tag");
@@ -114,7 +325,7 @@ export async function runRelease({
         (await execFileImpl("npm", ["--version"])).stdout.trim(),
       );
       directory = await makeDirectory();
-      const io = new ReleaseIO({
+      const io = makeReleaseIO({
         root,
         directory,
         repository,
@@ -128,8 +339,12 @@ export async function runRelease({
         firstPublishOIDCReady: env.SDK_FIRST_PUBLISH_OIDC_READY === "true",
       };
       if (mode === "prepare") result = await preparePublication(io, context);
-      else if (mode === "publish")
-        result = await publishPublication(io, context);
+      else if (mode === "authorize")
+        result = await authorizeUpload(io, source, context, env);
+      else if (mode === "upload")
+        result = await uploadAuthorizedArchive(io, source, context, env);
+      else if (mode === "publish" || mode === "complete")
+        result = await completePublication(io, source, context, env);
       else {
         diagnostics.start("candidate_verification");
         const tag = await io.readTag(source);

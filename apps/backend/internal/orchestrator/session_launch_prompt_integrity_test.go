@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -343,6 +344,41 @@ func TestLaunchStartCreated_PendingSubmissionReceiptAdmission(t *testing.T) {
 			require.Equal(t, 1, strings.Count(f.launched[0], prompt))
 		})
 	}
+}
+
+func TestInitialPassthroughPromptKeepsInterruptionAdmissionRecorder(t *testing.T) {
+	ctx := context.Background()
+	f := newExplicitLaunchFixture(t, "passthrough-interruption", "", "")
+	session, err := f.repo.GetTaskSession(ctx, f.sessionID)
+	require.NoError(t, err)
+	session.IsPassthrough = true
+	require.NoError(t, f.repo.UpdateTaskSession(ctx, session))
+	marker := addInterruptedSessionMarker(t, f.repo, f.taskID, session)
+	dispatchAccepted := make(chan struct{}, 1)
+	f.agent.startAgentProcessFunc = func(_ context.Context, _ string) error {
+		f.agent.mu.Lock()
+		dispatch := f.agent.initialPromptDispatchCallback
+		f.agent.mu.Unlock()
+		if dispatch == nil {
+			return errors.New("initial prompt dispatch callback was not registered")
+		}
+		dispatch()
+		dispatchAccepted <- struct{}{}
+		return nil
+	}
+
+	_, err = f.svc.LaunchSession(ctx, &LaunchSessionRequest{
+		TaskID: f.taskID, SessionID: f.sessionID, Intent: IntentStartCreated,
+		AgentProfileID: "profile1", Prompt: "continue", InitialCreatePrompt: true,
+	})
+	require.NoError(t, err)
+	select {
+	case <-dispatchAccepted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial prompt acceptance")
+	}
+	requireTaskInterruptionEntries(t, f.repo, f.taskID, nil)
+	require.NotEmpty(t, marker.Token)
 }
 
 // @covers AC-TASKS-INITIAL-TASK-BRIEF-001.16, AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.2, AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.8

@@ -1862,8 +1862,13 @@ class PluginSDKReleaseTests(unittest.TestCase):
         self.assertNotIn("id-token: write", prepare)
         self.assertNotIn("gh auth setup-git", prepare)
         self.assertIn("id-token: write", publish)
+        self.assertIn(
+            "name: Publish and verify public plugin SDK for ${{ needs.prepare.outputs.tag }}",
+            publish,
+        )
         self.assertIn("contents: read", publish)
         self.assertNotIn("RELEASE_GPG_PRIVATE_KEY", publish)
+        self.assertIn("timeout-minutes: 30", publish)
         for name in ("prepare-plugin-sdk", "publish-plugin-sdk"):
             block = job_block(name)
             self.assertIn("runs-on: ubuntu-latest", block)
@@ -1878,6 +1883,72 @@ class PluginSDKReleaseTests(unittest.TestCase):
             self.assertIn("steps.sdk_tools.outputs.npm", block)
             self.assertNotIn("NODE_AUTH_TOKEN", block)
             self.assertNotIn("NPM_TOKEN", block)
+
+    def test_sdk_upload_is_gated_by_retained_intent_and_stable_completion(self):
+        publish = job_block("publish-plugin-sdk")
+        self.assertIn("environment: release", publish)
+        self.assertIn("actions: read", publish)
+        self.assertIn("id-token: write", publish)
+        self.assertIn('SDK_UPLOAD_ATTEMPT_PROTOCOL: "1"', publish)
+        self.assertNotIn("SDK_UPLOAD_STATE_DIR: ${{ runner.temp }}", publish)
+        self.assertIn("SDK_BACKFILL_TAG: ${{ inputs.backfill_tag }}", publish)
+        self.assertNotIn("contents: write", publish)
+        self.assertNotIn("NODE_AUTH_TOKEN", publish)
+        self.assertNotIn("NPM_TOKEN", publish)
+
+        steps = (
+            "Set SDK upload state directory",
+            "Authorize SDK upload or resume registry observation",
+            "Retain SDK upload intent",
+            "Publish exact SDK archive",
+            "Retain SDK upload result",
+            "Complete SDK publication or resume observation",
+        )
+        positions = [publish.index(f"- name: {name}") for name in steps]
+        self.assertEqual(positions, sorted(positions))
+
+        state_directory = job_step_block(
+            "publish-plugin-sdk", "Set SDK upload state directory"
+        )
+        self.assertIn(
+            "SDK_UPLOAD_STATE_DIR=$RUNNER_TEMP/sdk-upload-attempts",
+            state_directory,
+        )
+        self.assertIn('"$GITHUB_ENV"', state_directory)
+
+        intent = job_step_block("publish-plugin-sdk", "Retain SDK upload intent")
+        self.assertIn("actions/upload-artifact@", intent)
+        self.assertIn("steps.sdk_authorize.outputs.upload == 'true'", intent)
+        self.assertIn(
+            "sdk-npm-upload-intent-v${{ steps.sdk_tools.outputs.sdk_version }}",
+            intent,
+        )
+        self.assertIn("retention-days: 90", intent)
+
+        upload = job_step_block("publish-plugin-sdk", "Publish exact SDK archive")
+        self.assertIn("steps.sdk_authorize.outputs.upload == 'true'", upload)
+        self.assertIn("SDK_UPLOAD_INTENT_ARTIFACT_ID", upload)
+        self.assertIn("SDK_UPLOAD_INTENT_ARTIFACT_DIGEST", upload)
+        self.assertIn("--mode upload", upload)
+
+        result = job_step_block("publish-plugin-sdk", "Retain SDK upload result")
+        self.assertIn("always()", result)
+        self.assertIn("steps.sdk_authorize.outputs.upload == 'true'", result)
+        self.assertIn(
+            "sdk-npm-upload-result-v${{ steps.sdk_tools.outputs.sdk_version }}",
+            result,
+        )
+        self.assertIn("retention-days: 90", result)
+
+        completion = job_block("stable-complete")
+        self.assertIn(
+            "publish-plugin-sdk",
+            completion.split("needs:", 1)[1].split("\n", 1)[0],
+        )
+        self.assertIn("needs.publish-plugin-sdk.result == 'success'", completion)
+        self.assertIn("group: release-npm-publication", WORKFLOW)
+        self.assertIn("cancel-in-progress: false", WORKFLOW)
+
     def test_sdk_failure_blocks_completion_and_notices_but_not_sibling_channels(self):
         for name in ("stable-complete", "notify-contributors", "announce-discord", "discord-recovery-notice"):
             self.assertIn("needs.publish-plugin-sdk.result == 'success'", job_block(name))

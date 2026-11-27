@@ -372,12 +372,12 @@ function stubTouchEvent() {
 }
 
 describe("TaskItemWithContextMenu — pointer containment", () => {
-  it("shows a flag-labelled priority submenu with the current value", async () => {
+  it("shows a ranked-list priority submenu with the current value", async () => {
     renderWithDragHandle({ priority: "high" } as Partial<TaskSwitcherItem>);
     await openContextMenu();
 
     const priority = screen.getByTestId("task-context-priority");
-    expect(priority.querySelector("svg")).not.toBeNull();
+    expect(priority.querySelector("svg.tabler-icon-list-numbers")).not.toBeNull();
     fireEvent.pointerMove(priority, { pointerType: "mouse" });
 
     expect(await screen.findByTestId("task-context-priority-current-high")).not.toBeNull();

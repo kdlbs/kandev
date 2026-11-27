@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
 
@@ -245,4 +245,24 @@ describe("useSessionLayoutState fallback sessions", () => {
 
     expect(result.current.effectiveSessionId).toBeNull();
   });
+});
+
+it("acknowledges only the file request owned by the completed consumer", () => {
+  const hook = renderHook(() => useSessionLayoutState());
+  const first = {
+    path: "F.txt",
+    name: "F.txt",
+    content: "F",
+    originalContent: "F",
+    originalHash: "hash-F",
+    isDirty: false,
+  };
+  const second = { ...first, path: "G.txt", name: "G.txt", content: "G" };
+  act(() => hook.result.current.handleOpenFile(first));
+  const acknowledgeFirst = hook.result.current.handleFileOpenHandled;
+  act(() => hook.result.current.handleOpenFile(second));
+  act(() => acknowledgeFirst());
+  expect(hook.result.current.openFileRequest).toBe(second);
+  act(() => hook.result.current.handleFileOpenHandled());
+  expect(hook.result.current.openFileRequest).toBeNull();
 });

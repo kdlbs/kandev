@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -10,6 +11,7 @@ import (
 )
 
 type settledDeliverySessionStateGuardContextKey struct{}
+type settledDeliverySessionStateTryGuardContextKey struct{}
 type settledDeliverySessionStateConvergenceSkipContextKey struct{}
 
 func withSettledDeliverySessionStateGuardHeld(ctx context.Context) context.Context {
@@ -22,6 +24,18 @@ func settledDeliverySessionStateGuardHeld(ctx context.Context) bool {
 	}
 	held, _ := ctx.Value(settledDeliverySessionStateGuardContextKey{}).(bool)
 	return held
+}
+
+func withSettledDeliverySessionStateTryGuard(ctx context.Context) context.Context {
+	return context.WithValue(ctx, settledDeliverySessionStateTryGuardContextKey{}, true)
+}
+
+func settledDeliverySessionStateTryGuard(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	try, _ := ctx.Value(settledDeliverySessionStateTryGuardContextKey{}).(bool)
+	return try
 }
 
 func withSettledDeliverySessionStateConvergenceSkipped(ctx context.Context) context.Context {
@@ -101,9 +115,21 @@ func (s *Service) correctSettledDeliverySessionState(
 		s.deliverySessionStateTestHook()
 	}
 	if !settledDeliverySessionStateGuardHeld(ctx) {
-		guard, err := s.lockCancelInFlightGuardWithContext(ctx, sessionID)
-		if err != nil {
-			return nil, err
+		var guard *lockedCancelInFlightGuard
+		if settledDeliverySessionStateTryGuard(ctx) {
+			mutex, release := s.acquireCancelInFlightGuard(sessionID)
+			if !mutex.TryLock() {
+				release()
+				s.retrySettledDeliverySessionStateAfterBusyGuard(sessionID, terminal)
+				return nil, nil
+			}
+			guard = &lockedCancelInFlightGuard{mutex: mutex, releaseRef: release, locked: true}
+		} else {
+			var err error
+			guard, err = s.lockCancelInFlightGuardWithContext(ctx, sessionID)
+			if err != nil {
+				return nil, err
+			}
 		}
 		defer guard.release()
 	}
@@ -126,6 +152,25 @@ func (s *Service) correctSettledDeliverySessionState(
 	// and the open-turn fence catches a successor claim that completed while
 	// this call waited for the guard. Runtime methods stay outside the guard.
 	return settlements.CorrectSettledAgentDeliverySessionState(ctx, *terminal)
+}
+
+func (s *Service) retrySettledDeliverySessionStateAfterBusyGuard(
+	sessionID string,
+	terminal *models.AgentDeliverySessionStateRequest,
+) {
+	lifecycleCtx := s.recoveryLifecycleContext()
+	if lifecycleCtx == nil || terminal == nil || sessionID == "" {
+		return
+	}
+	terminalSnapshot := *terminal
+	go func() {
+		retryCtx, cancel := context.WithTimeout(lifecycleCtx, 5*time.Second)
+		defer cancel()
+		if err := s.convergeSettledDeliverySessionState(retryCtx, sessionID, &terminalSnapshot); err != nil && retryCtx.Err() == nil {
+			s.logger.Warn("failed to retry settled delivery session state correction",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}()
 }
 
 func deliverySessionStateCandidate(

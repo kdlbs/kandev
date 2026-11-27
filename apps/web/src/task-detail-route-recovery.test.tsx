@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { ApiError } from "@/lib/api/client";
-import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
 import type { AppState } from "@/lib/state/store";
 import type {
   TaskNavigationContext,
@@ -17,6 +16,11 @@ import { sessionId, taskId, workspaceId, workflowId } from "@/lib/types/ids";
 import type { Task, TaskSession } from "@/lib/types/http";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
 import { TaskDetailRoute } from "./task-detail-route";
+import { listTaskSessions } from "@/lib/api/domains/session-api";
+import type * as SessionApi from "@/lib/api/domains/session-api";
+import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
+import { commitWorkflowRecipient, taskRouteSelectionState } from "./task-detail-route.test-helpers";
+import { captureTaskNavigationSelection } from "@/lib/state/task-navigation-selection";
 
 const TASK_ID = taskId("task-recovery");
 const SHELL_TEST_ID = "kanban-task-shell";
@@ -24,6 +28,7 @@ const SHELL_TASK_ID_ATTRIBUTE = "data-task-id";
 const LOAD_ERROR_TEST_ID = "task-load-error-state";
 const PRIMARY_SESSION_ID = sessionId("session-primary");
 const SECONDARY_SESSION_ID = sessionId("session-secondary");
+const SESSION_OBSERVATION_TIME = "2026-11-19T12:00:00Z";
 
 const mocks = vi.hoisted(() => ({
   beginTaskNavigation: vi.fn(),
@@ -46,40 +51,6 @@ const mocks = vi.hoisted(() => ({
     identity: undefined as TaskNavigationIdentity | undefined,
   } as TaskNavigationReadSnapshot,
 }));
-
-vi.mock("@/components/state-hydrator", async () => {
-  const { useLayoutEffect, useRef } = await import("react");
-  const { useAppStoreApi } = await import("@/components/state-provider");
-  return {
-    StateHydrator: ({
-      initialState,
-      sessionId: selectedSessionId,
-      taskSessionHydrationEpochsAtRequestStart,
-      onHydrated,
-    }: {
-      initialState: Partial<AppState>;
-      sessionId?: string;
-      taskSessionHydrationEpochsAtRequestStart?: Readonly<
-        Record<string, TaskSessionHydrationEpoch>
-      >;
-      onHydrated?: () => void;
-    }) => {
-      const store = useAppStoreApi();
-      const onHydratedRef = useRef(onHydrated);
-      onHydratedRef.current = onHydrated;
-      useLayoutEffect(() => {
-        if (Object.keys(initialState).length) {
-          store.getState().hydrate(initialState, {
-            forceMergeSessionId: selectedSessionId,
-            taskSessionHydrationEpochsAtRequestStart,
-          });
-        }
-        onHydratedRef.current?.();
-      }, [initialState, selectedSessionId, store, taskSessionHydrationEpochsAtRequestStart]);
-      return null;
-    },
-  };
-});
 
 vi.mock("@/components/task/task-page-inner", () => ({
   TaskPageInner: () => <div data-testid="real-task-page-inner" />,
@@ -146,6 +117,11 @@ vi.mock("@/lib/state/task-navigation-reads", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/api/domains/session-api", async (original) => ({
+  ...(await original<typeof SessionApi>()),
+  listTaskSessions: vi.fn(),
+}));
+
 function makeTask(): Task {
   return {
     id: TASK_ID,
@@ -198,21 +174,28 @@ function createNavigationHarness(loader: (taskId: string) => Promise<TaskNavigat
   let currentContext: TaskNavigationContext | undefined;
   let currentOwner: object | undefined;
   let currentRouteKey: string | undefined;
-  mocks.beginTaskNavigation.mockImplementation((_store, owner: object, routeKey: string) => {
-    const generation = reads.beginNavigation(owner, routeKey);
-    if (
-      currentContext &&
-      currentOwner === owner &&
-      currentRouteKey === routeKey &&
-      currentContext.generation === generation
-    ) {
+  mocks.beginTaskNavigation.mockImplementation(
+    (store: StoreApi<AppState>, owner: object, routeKey: string) => {
+      const generation = reads.beginNavigation(owner, routeKey);
+      if (
+        currentContext &&
+        currentOwner === owner &&
+        currentRouteKey === routeKey &&
+        currentContext.generation === generation
+      ) {
+        return currentContext;
+      }
+      currentOwner = owner;
+      currentRouteKey = routeKey;
+      currentContext = {
+        ownerToken: {},
+        identity: "test-scope",
+        generation,
+        selectionAtStart: captureTaskNavigationSelection(store),
+      };
       return currentContext;
-    }
-    currentOwner = owner;
-    currentRouteKey = routeKey;
-    currentContext = { ownerToken: {}, identity: "test-scope", generation };
-    return currentContext;
-  });
+    },
+  );
   mocks.readTaskNavigationIdentity.mockImplementation(
     (_store, requestedTaskId: string, options: Record<string, unknown> = {}) => {
       const context = options.context as TaskNavigationContext | undefined;
@@ -282,6 +265,144 @@ beforeEach(() => {
     identity: undefined,
   };
 });
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+it("does not readmit a removed session when soft-navigation enrichment completes", async () => {
+  const identity = makeIdentity();
+  identity.task.archived_at = undefined;
+  identity.task.state = "CREATED";
+  const [removed, survivor] = identity.allSessionsResponse.sessions;
+  Object.assign(removed, {
+    state: "FAILED",
+    started_at: SESSION_OBSERVATION_TIME,
+    updated_at: SESSION_OBSERVATION_TIME,
+  });
+  Object.assign(survivor, {
+    state: "WAITING_FOR_INPUT",
+    started_at: SESSION_OBSERVATION_TIME,
+    updated_at: SESSION_OBSERVATION_TIME,
+  });
+  const enrichment = Promise.withResolvers<FetchedSessionData>();
+  mocks.fetchTaskNavigationEnrichment.mockReturnValue(enrichment.promise);
+  createNavigationHarness(async () => identity);
+  const storeRef: { current: StoreApi<AppState> | null } = { current: null };
+  renderTaskRoute(
+    <TaskDetailRoute taskId={TASK_ID} />,
+    {
+      tasks: {
+        activeTaskId: TASK_ID,
+        activeSessionId: PRIMARY_SESSION_ID,
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
+      },
+    },
+    storeRef,
+  );
+  await waitFor(() => {
+    expect(mocks.fetchTaskNavigationEnrichment).toHaveBeenCalled();
+    expect(storeRef.current?.getState().taskSessions.items[PRIMARY_SESSION_ID]?.id).toBe(
+      PRIMARY_SESSION_ID,
+    );
+  });
+  const store = storeRef.current!;
+  vi.mocked(listTaskSessions).mockResolvedValue({
+    sessions: [{ ...survivor, is_primary: true }],
+    total: 1,
+  });
+  await act(async () => {
+    registerTaskSessionHandlers(store)["session.removed"]!({
+      id: "removed",
+      type: "notification",
+      action: "session.removed",
+      payload: { session_id: PRIMARY_SESSION_ID, task_id: TASK_ID },
+    });
+  });
+  await waitFor(() => expect(store.getState().tasks.activeSessionId).toBe(SECONDARY_SESSION_ID));
+  await act(async () => {
+    enrichment.resolve({
+      ...makeEnrichedData(identity),
+      sessionId: PRIMARY_SESSION_ID,
+      initialState: { taskSessions: { items: { [PRIMARY_SESSION_ID]: removed } } },
+    });
+  });
+  expect(store.getState().taskSessions.items[PRIMARY_SESSION_ID]).toBeUndefined();
+  expect(store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID].map((row) => row.id)).toEqual([
+    SECONDARY_SESSION_ID,
+  ]);
+  expect(store.getState().tasks.activeSessionId).toBe(SECONDARY_SESSION_ID);
+  expect(store.getState().taskSessions.items[SECONDARY_SESSION_ID].last_read_message_id).toBe(
+    survivor.last_read_message_id,
+  );
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.17
+it.each(["survivor", "pin", "workflow", "workflow-ack", "empty"] as const)(
+  "keeps the newer %s owner when initial task identity arrives after removal",
+  async (owner) => {
+    const workflow = owner.startsWith("workflow");
+    const identity = makeIdentity();
+    const [removed, survivor] = identity.allSessionsResponse.sessions;
+    const completed = { ...survivor, id: sessionId("completed"), state: "COMPLETED" as const };
+    const members = {
+      sessions: [
+        completed,
+        { ...survivor, state: "WAITING_FOR_INPUT" as const, is_primary: owner !== "empty" },
+      ],
+      total: 2,
+    };
+    identity.allSessionsResponse = members;
+    const pending = Promise.withResolvers<TaskNavigationIdentity>();
+    createNavigationHarness(() => pending.promise);
+    const storeRef: { current: StoreApi<AppState> | null } = { current: null };
+    renderTaskRoute(
+      <TaskDetailRoute taskId={TASK_ID} />,
+      taskRouteSelectionState(TASK_ID, removed.id, [
+        { ...removed, state: "FAILED" },
+        survivor,
+        completed,
+      ]),
+      storeRef,
+    );
+    await waitFor(() => expect(mocks.readTaskNavigationIdentity).toHaveBeenCalled());
+    const store = storeRef.current!;
+    vi.mocked(listTaskSessions).mockResolvedValue(members);
+    await act(async () => {
+      registerTaskSessionHandlers(store)["session.removed"]!({
+        id: "removed-before-initial-identity",
+        type: "notification",
+        action: "session.removed",
+        payload: { session_id: removed.id, task_id: TASK_ID },
+      });
+    });
+    const target = owner === "empty" ? null : survivor.id;
+    await waitFor(() => expect(store.getState().tasks.activeSessionId).toBe(target));
+    if (owner === "pin") act(() => store.getState().setActiveSession(TASK_ID, completed.id));
+    if (workflow)
+      act(() => {
+        commitWorkflowRecipient(store, TASK_ID, completed.id);
+        if (owner === "workflow-ack")
+          store
+            .getState()
+            .acknowledgeWorkflowSessionFocus(
+              store.getState().workflowSessionFocus.request!.requestId,
+            );
+      });
+    const selections: Array<string | null> = [];
+    const stop = store.subscribe((state) => selections.push(state.tasks.activeSessionId));
+    await act(async () => pending.resolve(identity));
+    await waitFor(() => expect(mocks.fetchTaskNavigationEnrichment).toHaveBeenCalled());
+    stop();
+    const expected = owner === "pin" || workflow ? completed.id : target;
+    expect(store.getState().tasks.activeSessionId).toBe(expected);
+    expect(store.getState().tasks.pinnedSessionId).toBe(owner === "pin" ? completed.id : null);
+    expect(store.getState().taskSessions.items[removed.id]).toBeUndefined();
+    expect(store.getState().taskSessions.items[survivor.id].last_read_message_id).toBe(
+      survivor.last_read_message_id,
+    );
+    expect(selections.every((id) => id === expected)).toBe(true);
+  },
+);
 
 describe("task-detail route recovery", () => {
   it("keeps the selected owned session through real task-page sync and manual recovery", async () => {

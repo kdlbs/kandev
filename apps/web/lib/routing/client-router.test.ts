@@ -1,7 +1,15 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearNavigationBlockerForTests, setNavigationBlocker } from "./navigation-guard";
-import { useParams, usePathname, useRouter, useSearchParams } from "./client-router";
+import {
+  useParams,
+  usePathname,
+  useRouter,
+  useSearchParams,
+  useTaskSessionActivation,
+} from "./client-router";
+
+const CONVERSATION_HREF = "/t/t1?sessionId=b";
 
 const NAV_POSITION_KEY = "__kandevNavigationPosition";
 
@@ -154,4 +162,52 @@ describe("client router adapter", () => {
       expect(go).toHaveBeenCalled();
     });
   });
+});
+
+it.each([false, true])(
+  "admits committed conversation hits with randomUUID unavailable=%s",
+  (insecure) => {
+    setLocation(CONVERSATION_HREF);
+    if (insecure) vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
+    vi.stubGlobal("scrollTo", vi.fn());
+    const { result } = renderHook(() => ({
+      router: useRouter(),
+      activation: useTaskSessionActivation("t1", "b"),
+      unrelated: useTaskSessionActivation("t1", "c"),
+    }));
+    const href = CONVERSATION_HREF;
+    const options = { taskSessionActivation: { taskId: "t1", sessionId: "b" } };
+    act(() => result.current.router.push(href, options));
+    const first = result.current.activation;
+    expect(first).not.toBe("");
+    expect(result.current.unrelated).toBe("");
+    const intents: Array<{ proceed: () => void; cancel: () => void }> = [];
+    setNavigationBlocker((intent) => intents.push(intent));
+    act(() => result.current.router.push(href, options));
+    expect(result.current.activation).toBe(first);
+    act(() => intents.shift()!.cancel());
+    expect(result.current.activation).toBe(first);
+    act(() => result.current.router.push(href, options));
+    act(() => intents.shift()!.proceed());
+    expect(result.current.activation).not.toBe(first);
+    expect(result.current.activation).not.toBe("");
+    expect(window.location.pathname + window.location.search).toBe(href);
+  },
+);
+
+it("keeps a committed conversation activation across same-task URL replaces", () => {
+  setLocation(CONVERSATION_HREF);
+  vi.stubGlobal("scrollTo", vi.fn());
+  const { result } = renderHook(() => ({
+    router: useRouter(),
+    activation: useTaskSessionActivation("t1", "b"),
+  }));
+  const activation = { taskSessionActivation: { taskId: "t1", sessionId: "b" } };
+  act(() => result.current.router.push(CONVERSATION_HREF, activation));
+  const committed = result.current.activation;
+  expect(committed).not.toBe("");
+  act(() => result.current.router.replace(`${CONVERSATION_HREF}&panel=task-graph`));
+  expect(result.current.activation).toBe(committed);
+  act(() => result.current.router.push(CONVERSATION_HREF));
+  expect(result.current.activation).toBe("");
 });

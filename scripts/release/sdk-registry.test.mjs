@@ -45,6 +45,45 @@ test("distinguishes confirmed package absence from absent version and unreadable
     /timeout/,
   );
 });
+
+test("classifies transport failures and transient HTTP statuses before parsing", async () => {
+  const transientResponses = [
+    response(429, "too many requests", "text/html"),
+    response(500, "upstream error", "text/html"),
+    response(503, "unavailable", "text/plain"),
+  ];
+  for (const reply of transientResponses) {
+    await assert.rejects(
+      readPackage("0.1.0", async () => reply),
+      (error) => {
+        assert.equal(error.code, "REGISTRY_READ_FAILURE");
+        assert.equal(error.retryable, true);
+        assert.match(error.message, new RegExp(`HTTP ${reply.status}`));
+        return true;
+      },
+    );
+  }
+
+  await assert.rejects(
+    readPackage("0.1.0", async () => {
+      throw new TypeError("fetch failed: connection reset");
+    }),
+    (error) => {
+      assert.equal(error.code, "REGISTRY_READ_FAILURE");
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    readPackage("0.1.0", async () => response(403, { error: "Forbidden" })),
+    (error) => {
+      assert.equal(error.retryable, false);
+      return true;
+    },
+  );
+});
+
 test("validates selected registry identity and archive integrity metadata", async () => {
   const version = {
     name: "@kdlbs/plugin-sdk",
@@ -81,7 +120,8 @@ test("validates selected registry identity and archive integrity metadata", asyn
 });
 
 test("downloads only matching gzip bytes and leaves the destination untouched on failure", async () => {
-  const { downloadArchive } = await import("./sdk-registry.mjs");  const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
+  const { downloadArchive } = await import("./sdk-registry.mjs");
+  const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { createHash } = await import("node:crypto");
@@ -131,6 +171,50 @@ test("downloads only matching gzip bytes and leaves the destination untouched on
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("classifies transient npm tarball transport and server errors for bounded retry", async () => {
+  const { downloadArchive } = await import("./sdk-registry.mjs");
+  const path = "/tmp/sdk-registry-transient.tgz";
+  for (const status of [429, 503]) {
+    await assert.rejects(
+      downloadArchive(
+        "https://registry.npmjs.org/sdk.tgz",
+        path,
+        "sha512-unused",
+        async () => {
+          const result = new Response("temporary registry error", {
+            status,
+            headers: { "content-type": "text/plain" },
+          });
+          Object.defineProperty(result, "url", {
+            value: "https://registry.npmjs.org/sdk.tgz",
+          });
+          return result;
+        },
+      ),
+      (error) => {
+        assert.equal(error.code, "REGISTRY_READ_FAILURE");
+        assert.equal(error.retryable, true);
+        assert.match(error.message, new RegExp(`HTTP ${status}`));
+        return true;
+      },
+    );
+  }
+  await assert.rejects(
+    downloadArchive(
+      "https://registry.npmjs.org/sdk.tgz",
+      path,
+      "sha512-unused",
+      async () => {
+        throw new Error("socket timeout");
+      },
+    ),
+    (error) => {
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
 });
 
 test("classifies registry transport and response-body failures", async () => {
@@ -207,5 +291,31 @@ test("classifies registry transport and response-body failures", async () => {
     );
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("does not retry authentication statuses when their JSON body is unreadable", async () => {
+  for (const status of [401, 403]) {
+    let bodyReads = 0;
+    const responseWithBrokenBody = {
+      status,
+      ok: false,
+      url: "https://registry.npmjs.org/@kdlbs%2fplugin-sdk",
+      headers: new Headers({ "content-type": "application/json" }),
+      text: async () => {
+        bodyReads += 1;
+        throw new Error("body down");
+      },
+    };
+    await assert.rejects(
+      readPackage("0.1.0", async () => responseWithBrokenBody),
+      (error) => {
+        assert.equal(error.code, "REGISTRY_READ_FAILURE");
+        assert.equal(error.retryable, false);
+        assert.match(error.message, new RegExp(`HTTP ${status}`));
+        return true;
+      },
+    );
+    assert.equal(bodyReads, 0);
   }
 });

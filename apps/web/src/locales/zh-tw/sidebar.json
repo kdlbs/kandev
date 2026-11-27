@@ -1,4 +1,11 @@
 {
+  "addFlag": "新增標記",
+  "changeFlag": "更改標記",
+  "editFlag": "編輯標記",
+  "flag": "標記",
+  "flagNote": "標記備註",
+  "removeFlag": "移除標記",
+  "flagSaveFailed": "無法更新標記。請重試。",
   "pluginGroupingSection": "外掛分組",
   "pluginGroupingUnavailable": "此外掛分組不可用或不完整。請重試、啟用外掛或選擇其他檢視。",
   "pluginGroupingUnavailableLabel": "{{name}}（不可用）",

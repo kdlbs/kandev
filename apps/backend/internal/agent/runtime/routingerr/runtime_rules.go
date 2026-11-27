@@ -109,6 +109,18 @@ var runtimeEnvironmentRules = []runtimeRule{
 		},
 	},
 	{
+		id:         cursorPromptStreamClosedRuleID,
+		providerID: cursorRetriableProviderID,
+		match:      matchCursorPromptStreamClosed,
+		rawMatch:   matchCursorPromptStreamClosed,
+		build: func(string) *Error {
+			return &Error{
+				Code:       CodeAgentTransportLost,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+	{
 		// Cursor emits this control prefix as an assistant message chunk for
 		// transient provider failures. Keep the fingerprints anchored to the
 		// control frame and bounded so user-authored prose cannot turn into an
@@ -210,6 +222,7 @@ const overloadedRuleID = "anthropic.overloaded.529.v1"
 const gatewayServerFailureRuleID = "acp.gateway_server_failure.v1"
 
 const (
+	cursorPromptStreamClosedRuleID         = "cursor.prompt_stream_closed.v1"
 	cursorRetriableResourceExhaustedRuleID = "cursor.retriable_resource_exhausted.v1"
 	cursorRetriableUnavailableRuleID       = "cursor.retriable_unavailable.v1"
 	cursorRetriableConnectionStalledRuleID = "cursor.retriable_connection_stalled.v1"
@@ -230,10 +243,18 @@ const transportLostRuleID = "acp.transport_lost.v1"
 var transportLostRe = regexp.MustCompile(`(?i)peer disconnected|connection closed`)
 
 const (
+	// CursorPromptStreamClosedMessage is the sanitized diagnostic for Cursor's
+	// verified terminal prompt-stream closure response.
+	CursorPromptStreamClosedMessage = "Cursor prompt stream closed: WritableIterable is closed"
+
 	cursorRetriableStreamResetPrefix  = "Error: RetriableError:"
 	cursorRetriableStreamResetMaxTail = 256
 	cursorRetriableProviderID         = "cursor-acp"
 )
+
+func matchCursorPromptStreamClosed(text string) bool {
+	return strings.TrimSpace(text) == CursorPromptStreamClosedMessage
+}
 
 func parseCursorRetriableSuffix(text string) (string, bool) {
 	trimmed := strings.TrimSpace(text)

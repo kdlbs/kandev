@@ -22,6 +22,7 @@ This document adds delivery requirements without changing that contract.
 - **Accepted upload:** The npm publication command exits successfully.
   Public availability remains unconfirmed until a registry read finds the version.
 - **Uncertain upload:** The command fails without proving whether npm accepted its write.
+  A recorded attempt with an unknown outcome is also uncertain.
 - **Observation window:** The time during which the release checks public registry visibility.
 - **Normal Stable release:** A real Stable bump, excluding dry runs, desktop validation, and existing-tag backfills.
 
@@ -33,10 +34,10 @@ This document adds delivery requirements without changing that contract.
 
 #### Acceptance criteria
 
-- **AC-RELEASE-NPM-PUBLICATION-001.1:** After an accepted or uncertain SDK upload, the release shall observe an absent version for five minutes before declaring a visibility timeout.
-  It shall stop earlier when the version appears or a definitive error occurs.
+- **AC-RELEASE-NPM-PUBLICATION-001.1:** After an accepted or uncertain SDK upload, the release shall check public version visibility for up to ten minutes.
+  It shall perform a final check at the deadline and proceed as soon as it verifies the version.
 - **AC-RELEASE-NPM-PUBLICATION-001.2:** After an SDK channel update, the release shall use the same observation window for a stale dist-tag.
-  A matching version that appears after 30 seconds shall remain recoverable within that window.
+  A matching version that appears after 309 seconds shall remain recoverable within that window.
 - **AC-RELEASE-NPM-PUBLICATION-001.3:** Each execution shall attempt the SDK upload at most once.
   An uncertain response shall cause registry reads, without repeating the write.
   The same rule shall apply to a dist-tag update.
@@ -44,6 +45,9 @@ This document adds delivery requirements without changing that contract.
   A failed registry read shall remain an error, rather than evidence of absence.
 - **AC-RELEASE-NPM-PUBLICATION-001.5:** A later execution shall verify and reuse an already published matching version.
   It shall resume unfinished channel promotion and public verification without another upload.
+- **AC-RELEASE-NPM-PUBLICATION-001.6:** During either observation window, the release shall retry transport timeouts, connection failures, HTTP 429, and HTTP 5xx responses.
+  If the final read fails, report a registry read error.
+  A definitive authentication, metadata, or integrity error shall stop verification immediately.
 
 ### REQ-RELEASE-NPM-PUBLICATION-002: Actionable publication diagnostics
 
@@ -62,8 +66,9 @@ This document adds delivery requirements without changing that contract.
 - **AC-RELEASE-NPM-PUBLICATION-002.4:** Command output and summaries shall exclude credentials, bearer and Basic authorization headers, including Proxy-Authorization, signed request URLs, and raw authentication responses.
   Retained output shall have a finite size limit.
 - **AC-RELEASE-NPM-PUBLICATION-002.5:** Recovery guidance shall preserve the existing signed SDK candidate and version.
-  Authentication guidance shall name the package's publisher configuration.
-  Registry-delay guidance shall direct a maintainer to reuse the same release run after checking public visibility.
+  For a registry delay, direct the maintainer to retry the same release.
+  For a rejected upload, identify the publisher configuration and how to retry the signed release after correction.
+  Give a separate recovery reason when the attempt history cannot be established.
 
 ### REQ-RELEASE-NPM-PUBLICATION-003: Early Stable authentication checks
 
@@ -91,6 +96,25 @@ This document adds delivery requirements without changing that contract.
   The result shall not claim to verify the issued token's lifetime.
   GitHub identity-token expiry validation and registry authentication rejection shall remain effective.
 
+### REQ-RELEASE-NPM-PUBLICATION-004: Recoverable SDK upload attempts
+
+**Intent:** A release retry can complete a delayed upload even if the first runner stopped.
+
+#### Acceptance criteria
+
+- **AC-RELEASE-NPM-PUBLICATION-004.1:** Before starting an SDK upload, retain an attempt record that identifies the SDK version, signed archive, and release run.
+  Retain the upload outcome when the command returns.
+  Treat interruption before the outcome is available as uncertain.
+- **AC-RELEASE-NPM-PUBLICATION-004.2:** A rerun or Stable backfill with an accepted or uncertain attempt shall resume registry observation for the recorded version.
+  After it verifies the public archive against the signed receipt, it shall finish channel promotion and both public consumer checks.
+  Each recovery execution shall leave the release incomplete if it cannot verify the version.
+- **AC-RELEASE-NPM-PUBLICATION-004.3:** A fresh upload shall require confirmed public absence and trusted history for that signed candidate.
+  An earlier attempt closes that authorization unless trusted evidence proves that npm rejected it or the upload never started.
+  A new backfill may retry a confirmed rejection after the maintainer corrects the publisher configuration.
+- **AC-RELEASE-NPM-PUBLICATION-004.4:** Retain attempt evidence for at least 30 days.
+  For an absent version, missing, expired, conflicting, or unreadable history shall leave upload authorization unresolved.
+  Published versions from before attempt recording shall qualify for recovery when they match the signed archive and pass public verification.
+
 ## Out of scope
 
 - Changes to SDK versions, contracts, package bytes, provenance policy, or retained evidence.
@@ -103,6 +127,7 @@ This document adds delivery requirements without changing that contract.
 ## Implementation plan
 
 - [npm publication reliability](../../../plans/npm-publication-reliability/plan.md).
+- [SDK registry resilience](../../../plans/sdk-registry-resilience/plan.md).
 - [Preflight response diagnostics repair](../../../plans/npm-preflight-response-diagnostics/plan.md).
 - [Creation metadata compatibility repair](../../../plans/npm-preflight-created-metadata/plan.md).
 - [Exchange response contract repair](../../../plans/npm-preflight-exchange-contract/plan.md).

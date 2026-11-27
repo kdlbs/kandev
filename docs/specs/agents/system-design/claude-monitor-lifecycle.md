@@ -23,27 +23,46 @@ publication. Desktop and phone use that projection for the chip and History.
 
 ## Evidence
 
-Claude ACP v1 `0.107.0` reports Monitor registrations as tool results. The
-installed bridge routes structured task endings through `AsyncTaskRuntime`
-when the client advertises `asyncTasks`. Kandev connects without that capability.
-The separate `terminal_exit` mechanism tracks detached Bash terminals.
-The [async-task decision](../../../decisions/2026-11-01-claude-async-task-lifecycle-capability.md)
+Claude ACP v1 `0.107.0` and `0.109.0` report Monitor registrations as tool
+results. The installed bridge routes structured task endings through
+`AsyncTaskRuntime` when the client advertises `asyncTasks`. Kandev connects
+without that capability. The separate `terminal_exit` mechanism tracks detached
+Bash terminals. The [async-task decision](../../../decisions/2026-11-01-claude-async-task-lifecycle-capability.md)
 records the wire decoding and turn behavior required to revisit that capability.
 
-The adapter can consume an explicit terminal tool update for a known Monitor.
-Require a terminal status, the matching tracked launch tool ID, and the owning
-ACP session. Treat the registration banner as a launch. Accept a matching
-close after handoff using the original binding. Map the provider outcome to
-the existing workload states. A close with an unavailable outcome maps to
-`ended`.
+The adapter can consume two forms of explicit ACP wire evidence on the owning
+session:
+
+1. **Direct Monitor terminal tool update:** a terminal `tool_call_update` for a
+   known Monitor requiring a terminal status, the matching tracked launch tool
+   ID, and the owning ACP session. Treat the registration banner as a launch.
+   Accept a matching close after handoff using the original binding. Map the
+   provider outcome to the existing workload states; a close with an
+   unavailable outcome maps to `ended`.
+2. **Completed `TaskStop` tool update:** when Claude explicitly stops a running
+   Monitor via `TaskStop`, the bridge emits no follow-up update on the original
+   Monitor tool-call ID and Claude writes no native `<task-notification>` for
+   the stopped Monitor. Require the Claude dialect, `_meta.claudeCode.toolName`
+   equal to `TaskStop`, terminal `completed` status, the owning ACP session,
+   and a confirmed `task_id` (from `_meta.claudeCode.toolResponse.task_id` or
+   the completed JSON `rawOutput.task_id`, matching `rawInput.task_id` when
+   present) that resolves to a tracked Monitor in `activeMonitors[sessionID]`.
+   Settle only that tracked Monitor as `interrupted`, emit both its
+   `EventTypeBackgroundWorkUpdated` observation and its terminal Monitor
+   `tool_update`, and record completion so duplicate or late evidence stays
+   idempotent. Failed, non-terminal, foreign-provider, or unmatched `TaskStop`
+   updates leave all tracked Monitors open.
 
 ## Managed ACP v1 completion source
 
 The [Monitor evidence decision](../../../decisions/2026-11-20-claude-monitor-completion-evidence.md)
 proposes reading Claude Code's exact-session task notifications on the executor
-that launched the bridge. Qualify the official bridge `0.107.0` and native
-record version `2.1.323` with a fixture that leaves one Monitor alive after an
-ACP prompt resolves and reports a separate terminal record for its sibling.
+that launched the bridge. Qualify official bridge releases `0.107.0` and
+`0.109.0` and native record versions `2.1.323` and `2.1.328` with captured
+sanitized fixtures that leave one Monitor alive after an ACP prompt resolves
+and report a separate terminal record for its sibling. Keep a managed-default
+regression against `agents.DefaultManagedNPMRuntimeVersion` so bridge upgrades
+cannot silently disable Monitor completion evidence.
 
 The source is the native session's JSONL file under the effective Claude
 configuration root. Bind the canonical launch directory, native session ID,
@@ -82,10 +101,14 @@ continues to follow [ADR 0049](../../../decisions/0049-fine-grained-foreground-i
 Publish every native completion through `EventTypeBackgroundWorkUpdated` and
 the existing typed `streams.WorkloadRunObservation`. Commit one observation
 per accepted transition even when transcript updates are suppressed. Preserve
-workload ID, source call, origin turn, and capabilities. Remove only the
-finished binding from runtime tracking. Terminal state stays monotonic across
-late progress and repeated completion. Session incarnation and execution
-identity fence events from a previous owner.
+workload ID, source call, origin turn, and capabilities. When building the
+initial registration observation from a normalized Monitor tool update that
+carries no `ToolTitle` or `ToolName`, populate `Title` from the Monitor's
+`description` or `command` (falling back to `Monitor`) so the running summary
+identifies the watch before completion. Remove only the finished binding from
+runtime tracking. Terminal state stays monotonic across late progress and
+repeated completion. Session incarnation and execution identity fence events
+from a previous owner.
 
 ## Desktop and phone
 
@@ -107,3 +130,8 @@ handoff. On desktop and phone, reload with both watches live, finish one, and
 confirm its sibling remains in the chip. Finish the last watch and verify
 History and the draft. Exercise duplicate, early, partial, and stale source
 records plus verified owner termination.
+
+The [TaskStop and managed-runtime repair plan](../../../plans/claude-monitor-taskstop-settlement/plan.md)
+adds `TaskStop` wire settlement (including failed, unmatched, and sibling-live
+cases), managed `0.109.0` / `2.1.328` fixture qualification with a
+managed-default version guard, and initial Monitor title projection.

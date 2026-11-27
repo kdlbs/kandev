@@ -1,15 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-  type RefObject,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { IconStar } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
@@ -22,10 +13,6 @@ import { shareableSessionStateClient } from "@/components/task/share/share-butto
 import type { HandoffPreset } from "@/components/task/new-session-dialog";
 import { SessionContextMenuItems, SessionTabDialogs } from "./session-tab-menu";
 import type { TaskSessionState } from "@/lib/types/http";
-import {
-  markSessionTabUserActivationIntent,
-  shouldMarkSessionTabUserActivationIntent,
-} from "./session-tab-activation-intent";
 import { isSessionActive } from "./session-sort";
 import { selectSessionTabTitle } from "./session-tab-title";
 import { TabRenameInput } from "./tab-rename-input";
@@ -33,6 +20,7 @@ import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { SessionTabCloseAction } from "./session-tab-close-action";
 import { clearHiddenSessionPanel, hideSessionPanel } from "./dockview-hidden-session-panels";
 import { useSessionTabDelete } from "./use-session-tab-delete";
+import { useSessionTabUserActivationIntent } from "./use-session-tab-user-activation";
 import { limitSessionName, useSessionRenameCommitter } from "./use-session-rename";
 import {
   countVisibleSessionPanels,
@@ -158,36 +146,6 @@ function useSessionTabActions(
     handleHide,
     visibleSessionCount,
   };
-}
-
-function useSessionTabUserActivationIntent(
-  sessionId: string | undefined,
-  activeSessionId: string | null,
-  isActive: boolean,
-) {
-  const markUserActivationIntent = useCallback(
-    (target: EventTarget | null) => {
-      if (
-        !shouldMarkSessionTabUserActivationIntent({ sessionId, activeSessionId, isActive, target })
-      )
-        return;
-      markSessionTabUserActivationIntent(sessionId);
-    },
-    [activeSessionId, isActive, sessionId],
-  );
-  const handlePointerDownCapture = useCallback(
-    (event: ReactPointerEvent) => {
-      if (event.button === 0) markUserActivationIntent(event.target);
-    },
-    [markUserActivationIntent],
-  );
-  const handleKeyDownCapture = useCallback(
-    (event: ReactKeyboardEvent) => {
-      if (event.key === "Enter" || event.key === " ") markUserActivationIntent(event.target);
-    },
-    [markUserActivationIntent],
-  );
-  return { handlePointerDownCapture, handleKeyDownCapture };
 }
 
 function useDockviewTabActiveState(api: IDockviewPanelHeaderProps["api"]) {
@@ -435,7 +393,6 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
     dialogs.setIsRenaming(false),
   );
   const isActive = useDockviewTabActiveState(api);
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
 
   useSessionTabTitleSync(api, tabTitle);
@@ -453,8 +410,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
     useSessionMenuDelete(openMenuDelete);
   const { handlePointerDownCapture, handleKeyDownCapture } = useSessionTabUserActivationIntent(
     sessionId,
-    activeSessionId,
-    isActive,
+    api,
   );
 
   return (

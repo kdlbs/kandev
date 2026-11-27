@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -1737,10 +1738,11 @@ type taskSessionAgentProfileSnapshotUpdater interface {
 }
 
 func (e *Executor) persistRuntimeModelMetadata(ctx context.Context, sessionID string, session *models.TaskSession, modelID string) {
-	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
-	cfg.Model = modelID
 	writeCtx := context.WithoutCancel(ctx)
-	if err := e.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg); err != nil {
+	_, _, err := repository.UpdateSessionRuntimeConfig(writeCtx, e.repo, session, func(cfg *models.SessionRuntimeConfig) {
+		cfg.Model = modelID
+	})
+	if err != nil {
 		e.logger.Warn("failed to persist runtime model after model switch",
 			zap.String("session_id", sessionID),
 			zap.String("model", modelID),

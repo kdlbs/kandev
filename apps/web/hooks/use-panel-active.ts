@@ -3,6 +3,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type { DockviewPanelApi } from "dockview-react";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 
 /**
  * Tracks whether the dockview panel identified by panelId is the visible tab
@@ -34,6 +35,8 @@ import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
  * calling this hook.
  */
 export function usePanelActive(panelId: string): boolean {
+  const isRestoringLayout = useDockviewStore((state) => state.isRestoringLayout);
+  const dockviewApi = useDockviewStore((state) => state.api);
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
       // Tracks which api our onDidVisibilityChange listener is currently bound
@@ -64,9 +67,10 @@ export function usePanelActive(panelId: string): boolean {
     },
     [panelId],
   );
-  const getSnapshot = useCallback(
-    () => panelPortalManager.get(panelId)?.api?.isVisible ?? false,
-    [panelId],
-  );
-  return useSyncExternalStore(subscribe, getSnapshot, () => false);
+  const getSnapshot = useCallback(() => {
+    const panelApi = panelPortalManager.get(panelId)?.api;
+    return !!panelApi?.isVisible && dockviewApi?.getPanel(panelId)?.api === panelApi;
+  }, [panelId, dockviewApi]);
+  const isVisible = useSyncExternalStore(subscribe, getSnapshot, () => false);
+  return isVisible && !isRestoringLayout;
 }

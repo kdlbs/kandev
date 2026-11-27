@@ -42,6 +42,7 @@ test.describe("Desktop task-row menu grouping", () => {
       "Priority",
       "Edit",
       "Rename",
+      "Add flag",
       "Duplicate",
       "Show in graph",
       "Create Subtask",
@@ -60,7 +61,9 @@ test.describe("Desktop task-row menu grouping", () => {
       caption: "Desktop task-row actions grouped by purpose",
     });
 
-    await menu.getByTestId("task-context-priority").hover();
+    const priorityMenu = menu.getByTestId("task-context-priority");
+    await expect(priorityMenu.locator(".tabler-icon-list-numbers")).toBeVisible();
+    await priorityMenu.hover();
     const lowOption = testPage.getByTestId("task-context-priority-low");
     await expect(lowOption).toBeVisible();
     await lowOption.click();

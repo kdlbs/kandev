@@ -142,6 +142,7 @@ export const defaultUIState: UISliceState = {
     reviewItemIdBySessionId: {},
     isTaskSwitcherOpen: false,
   },
+  tabletSession: { activeTabBySessionId: {} },
   chatInput: { planModeBySessionId: {}, cancellingBySessionId: {} },
   transcriptAutoScroll: {
     enabledBySessionId: {},
@@ -457,6 +458,10 @@ export const createUISlice: SliceCreator<UISlice> = (set, get) => ({
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;
+    }),
+  setTabletSessionTab: (sessionId, tab) =>
+    set((draft) => {
+      draft.tabletSession.activeTabBySessionId[sessionId] = tab;
     }),
   setConnectionStatus: (status, error) =>
     set((draft) => {

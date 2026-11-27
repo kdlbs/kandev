@@ -5,7 +5,7 @@ import { ToastProvider } from "@/components/toast-provider";
 import { TaskRenameDialog } from "../task-rename-dialog";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
 
-const TOAST_CONTAINER = "toast-container";
+const TOAST_MESSAGE = "toast-message";
 const SUBMITTED_TITLE = "Submitted A";
 const NEWER_DRAFT = "  exact newer draft  ";
 
@@ -112,7 +112,7 @@ it.each(["A", "B"] as const)(
     expect(screen.getByRole("textbox")).toBe(input);
     expect(input.value).toBe(NEWER_DRAFT);
     expect(input.selectionStart).toBe(5);
-    expect(screen.getByTestId(TOAST_CONTAINER).textContent).toBe("");
+    expect(screen.queryByTestId(TOAST_MESSAGE)).toBeNull();
     await save();
     expect(pending).toHaveLength(2);
     expect(pending[1]).toMatchObject({
@@ -134,8 +134,9 @@ it.each(["A", "B"] as const)(
     await settle(pending[0], true);
     expect(screen.getByRole("textbox")).toBe(input);
     expect(input.value).toBe("  untouched draft  ");
-    expect(screen.getByTestId(TOAST_CONTAINER).textContent).toContain("Failed to rename task");
-    expect(screen.getByTestId(TOAST_CONTAINER).textContent).toContain("Rename unavailable");
+    const toastMessage = screen.getByTestId(TOAST_MESSAGE);
+    expect(toastMessage.textContent).toContain("Failed to rename task");
+    expect(toastMessage.textContent).toContain("Rename unavailable");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(pending).toHaveLength(1);
@@ -150,9 +151,8 @@ it.each([false, true])(
     await save();
     await settle(pending[0], failure);
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.getByTestId(TOAST_CONTAINER).textContent.includes("Failed to rename task")).toBe(
-      failure,
-    );
+    const toastMessage = screen.queryByTestId(TOAST_MESSAGE);
+    expect(toastMessage?.textContent.includes("Failed to rename task") ?? false).toBe(failure);
   },
 );
 

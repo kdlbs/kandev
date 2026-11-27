@@ -10,11 +10,37 @@ import (
 )
 
 type projection struct {
-	messages  map[messageKey][]wire.ContentBlock
-	tools     map[string]wire.ToolCallUpdate
-	terminals map[string]terminalState
-	children  map[wire.SessionID]string
-	subagents map[wire.SessionID]wire.SubagentUpdate
+	messages       map[messageKey][]wire.ContentBlock
+	tools          map[string]wire.ToolCallUpdate
+	terminals      map[string]terminalState
+	children       map[wire.SessionID]childReference
+	subagents      map[wire.SessionID]subagentProjection
+	backgroundWork map[backgroundWorkKey]backgroundWorkRecord
+}
+
+type promptIdentity struct {
+	generation   uint64
+	submissionID string
+}
+
+func (i promptIdentity) available() bool { return i.generation != 0 }
+
+func promptIdentityFromEvent(event *streams.AgentEvent) promptIdentity {
+	if event == nil || event.PromptGeneration == 0 {
+		return promptIdentity{}
+	}
+	return promptIdentity{generation: event.PromptGeneration, submissionID: event.DeliverySubmissionID}
+}
+
+type childReference struct {
+	toolCallID         string
+	origin             promptIdentity
+	hasLaunchReference bool
+	frozen             bool
+}
+
+type subagentProjection struct {
+	update wire.SubagentUpdate
 }
 
 type messageKey struct {
@@ -54,10 +80,13 @@ func (a *Adapter) projectUpdate(notification wire.UpdateSessionNotification, bat
 	if notification.SessionID == a.session {
 		switch update := notification.Update.Value.(type) {
 		case *wire.StateUpdate:
+			a.projectBackgroundSnapshot(&a.state, a.session, update, batch)
 			a.observeForeground(update, batch)
 			return
 		case *wire.ConfigOptionUpdate:
-			a.projectSettings(update.ConfigOptions, "", nil, batch)
+			a.projectSettings(update.ConfigOptions, "", map[string]any{
+				streams.ConfigOptionsSourceKey: streams.ConfigOptionsSourceProviderUpdate,
+			}, batch)
 			return
 		case *wire.AvailableCommandsUpdate:
 			a.projectCommands(update.AvailableCommands, batch)
@@ -75,7 +104,7 @@ func (a *Adapter) projectUpdate(notification wire.UpdateSessionNotification, bat
 
 func (a *Adapter) projectEntity(state *projection, root wire.SessionID, notification wire.UpdateSessionNotification, batch *eventBatch) {
 	session := notification.SessionID
-	parent := state.children[session]
+	parent := state.children[session].toolCallID
 	if root == "" || (session != root && parent == "") {
 		return
 	}
@@ -109,6 +138,7 @@ func (a *Adapter) projectEntity(state *projection, root wire.SessionID, notifica
 	}
 	if projected {
 		batch.add(event)
+		a.projectBackgroundEntityUpdate(state, session, notification, batch)
 	}
 }
 

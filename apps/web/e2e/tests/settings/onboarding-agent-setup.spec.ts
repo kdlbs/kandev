@@ -11,15 +11,26 @@ test.describe("Onboarding agent setup", () => {
     prCapture,
   }) => {
     await testPage.route("**/api/v1/agents/available", async (route) => {
-      const response = await route.fetch();
-      const payload = await response.json();
-      await route.fulfill({
-        response,
-        json: {
-          ...payload,
-          agents: payload.agents.map((agent: object) => ({ ...agent, available: false })),
-        },
-      });
+      try {
+        const requestHeaders = route.request().headers();
+        const response = await fetch(route.request().url(), {
+          headers: {
+            ...(requestHeaders.accept ? { accept: requestHeaders.accept } : {}),
+            ...(requestHeaders.cookie ? { cookie: requestHeaders.cookie } : {}),
+          },
+        });
+        const payload = (await response.json()) as { agents: object[] };
+        await route.fulfill({
+          status: response.status,
+          contentType: "application/json",
+          json: {
+            ...payload,
+            agents: payload.agents.map((agent: object) => ({ ...agent, available: false })),
+          },
+        });
+      } catch {
+        await route.abort().catch(() => {});
+      }
     });
     await testPage.addInitScript(() => localStorage.removeItem("kandev.onboarding.completed"));
     await testPage.goto("/");
@@ -43,24 +54,35 @@ test.describe("Onboarding agent setup", () => {
   }) => {
     await testPage.setViewportSize({ width: 1280, height: 1200 });
     await testPage.route("**/api/v1/agents/available", async (route) => {
-      const response = await route.fetch();
-      const payload = await response.json();
-      const mock = payload.agents.find((agent: { name: string }) => agent.name === "mock-agent");
-      expect(mock).toBeTruthy();
-      await route.fulfill({
-        response,
-        json: {
-          ...payload,
-          agents: [
-            mock,
-            ...Array.from({ length: 20 }, (_, i) => ({
-              ...mock,
-              name: `catalog-agent-${i}`,
-              display_name: `Catalog agent ${i + 1}`,
-            })),
-          ],
-        },
-      });
+      try {
+        const requestHeaders = route.request().headers();
+        const response = await fetch(route.request().url(), {
+          headers: {
+            ...(requestHeaders.accept ? { accept: requestHeaders.accept } : {}),
+            ...(requestHeaders.cookie ? { cookie: requestHeaders.cookie } : {}),
+          },
+        });
+        const payload = (await response.json()) as { agents: { name: string }[] };
+        const mock = payload.agents.find((agent: { name: string }) => agent.name === "mock-agent");
+        expect(mock).toBeTruthy();
+        await route.fulfill({
+          status: response.status,
+          contentType: "application/json",
+          json: {
+            ...payload,
+            agents: [
+              mock,
+              ...Array.from({ length: 20 }, (_, i) => ({
+                ...mock,
+                name: `catalog-agent-${i}`,
+                display_name: `Catalog agent ${i + 1}`,
+              })),
+            ],
+          },
+        });
+      } catch {
+        await route.abort().catch(() => {});
+      }
     });
     await testPage.addInitScript(() => localStorage.removeItem("kandev.onboarding.completed"));
     await testPage.goto("/");

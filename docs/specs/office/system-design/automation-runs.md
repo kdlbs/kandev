@@ -21,6 +21,7 @@ This design preserves the technical source detail for `REQ-OFFICE-AUTOMATION-RUN
 | --- | --- |
 | `REQ-OFFICE-AUTOMATION-RUNS-001` | [Migrated source detail](#migrated-source-detail), [latest-run indicator](automation-latest-run-indicator.md) |
 | `REQ-OFFICE-AUTOMATION-RUNS-001` (AC .13 through .18) | [Run output capture guidance](automation-run-output.md) |
+| `REQ-OFFICE-AUTOMATION-RUNS-001` (AC .23) | [Run-recorded events](automation-run-recorded-events.md) |
 | `REQ-OFFICE-AUTOMATION-CONTINUITY-003` | [Data model](#data-model), [API surface](#api-surface), [Failure modes](#failure-modes) |
 | `REQ-OFFICE-AUTOMATION-TARGETS-002` | [Data model](#data-model), [API surface](#api-surface), [Failure modes](#failure-modes) |
 

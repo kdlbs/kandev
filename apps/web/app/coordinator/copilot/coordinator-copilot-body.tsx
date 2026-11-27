@@ -6,7 +6,7 @@ import { useAppStore } from "@/components/state-provider";
 import { QuickChatSessionView } from "@/components/quick-chat/quick-chat-session-view";
 import { SessionRecoveryFeedback } from "@/components/task/ensure-session-error";
 import { MessageTaskOriginProvider } from "@/components/task/chat/messages/message-task-origin-context";
-import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
+import { isTerminalSessionState } from "@/lib/ws/handlers/session-selection";
 import { CoordinatorProposalProvider } from "@/components/task/chat/messages/kandev/coordinator-proposal-context";
 import { normalizeCopilotItemId } from "@/lib/coordinator/copilot-id";
 import type { CopilotChip } from "@/hooks/domains/coordinator/copilot-store";

@@ -38,7 +38,7 @@ Users want to schedule an agent to run a prompt on a cron (or on a GitHub PR eve
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.17:** An already-persisted scheduled trigger with no next occurrence shall never be automatically due. Repeated scheduler checks shall create no runs, skipped runs, or automation-triggered events for that trigger and shall leave its config, enabled state, and evaluation cursor unchanged. Other schedulable triggers shall continue to be evaluated independently.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.18:** Schedule validation and automatic due evaluation shall preserve supported five-field expressions, descriptors, intervals, configured timezones (UTC when empty), and daylight-saving behavior. Valid leap-day schedules within the supported search horizon and day-of-month/day-of-week OR expressions such as `0 0 31 2 MON` shall remain eligible. A valid occurrence shall be due at its computed instant and shall not be due before it.
 
-- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.19:** A `github_pr` trigger shall poll for matching open PRs only when its saved event selection contains at least one exact `opened` value, including a mixed selection. Empty, missing, null, or unsupported-only selections shall produce no provider search, automation-triggered event, dedup reservation, admission, or run. The new-trigger default shall remain explicitly `opened`; clearing the selection shall remain cleared. Selecting `opened` shall retain existing enabled, ownership, repository, branch, author, draft, and successful firing/dedup behavior on desktop and phone.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.19:** A `github_pr` trigger shall poll for matching open PRs only when its saved event selection contains at least one exact `opened` value, including a mixed selection, or an exact `new_commits` or `review_requested` value as defined by [GitHub PR follow-up](automations-pr-follow-up.md). Empty, missing, null, or unsupported-only selections shall produce no provider search, automation-triggered event, dedup reservation, admission, or run. The new-trigger default shall remain explicitly `opened`; clearing the selection shall remain cleared. Selecting `opened` shall retain existing enabled, ownership, repository, branch, author, draft, and dedup behavior on desktop and phone; which open pull requests it fires for is defined by [GitHub PR follow-up](automations-pr-follow-up.md) AC-001.10.
 
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.20:** When a saved cron expression or effective timezone changes, automatic execution shall start with the first occurrence strictly after the successful edit. Earlier occurrences of the replacement schedule shall not cause a run. This rule shall also apply to a trigger that never ran.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.21:** When a save leaves the schedule definition unchanged, it shall preserve the next execution and any pending occurrence. JSON formatting, member order, surrounding expression whitespace, and an empty timezone versus UTC shall not replace the schedule. A timezone field ignored by an interval or an explicit expression timezone shall not replace the schedule.
@@ -53,6 +53,62 @@ Users want to schedule an agent to run a prompt on a cron (or on a GitHub PR eve
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.29:** **Turn on schedule** shall change only the enabled state of the scheduled trigger shown in Run detail. After success, Run detail shall show the next-firing status from saved state.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.30:** If the trigger update fails, Run detail shall show an error and allow the user to retry.
 
+### REQ-OFFICE-AUTOMATIONS-SETTINGS-002: Organize the automation editor
+
+**Intent:** Each choice sits above the fields it shows, hides, or changes, so
+selecting an option never reveals a field elsewhere on the page. The editor
+shows each choice first and its detail on demand.
+
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.1:** The editor shall present, in order:
+  the name with the **Enabled** switch; **When**; **Where runs go**; **Repeat
+  runs**; **Instructions**; **Agent**; **If a run fails**; recent runs; and
+  deletion. A section with nothing to show for the selected run destination
+  shall be absent. A new automation shall be created in the state its
+  **Enabled** switch shows.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.2:** **Where runs go** shall hold
+  **Run destination**, then the workflow (required for normal tasks, optional
+  for automation history) or, for managed conversations, the conversation.
+  Choosing a managed conversation shall return **Task for each run** to **New
+  task each run** and clear its per-PR options; a managed conversation shall
+  never save a workflow or a hidden repeat-run choice. **Repeat runs** shall hold **Task for each run** with its per-PR options,
+  then **Max concurrent runs**. **Instructions** shall hold the task title, the
+  instructions, the follow-up instructions, and one placeholder list.
+  **Agent** shall hold the agent and executor profiles, repository access, and
+  the tools. Picking the workflow that is already selected shall keep the
+  chosen steps. Each section shall show as changed when any field inside it,
+  including the tools, differs from the saved automation.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.3:** **Run destination**, **Task for
+  each run**, and **Automatic retries** shall each be one labelled radio group
+  with short option labels side by side on desktop and stacked on
+  phones. One line shall describe the selected option. With a fine pointer,
+  each other option shall describe itself in a tooltip on hover or keyboard
+  focus. The selected option shall differ from the others by fill and outline,
+  not only by text weight, in light and dark themes. Each option shall provide
+  a touch target of at least 44 pixels on phones and coarse pointers. Pressing
+  the selected option shall keep it selected, and the arrow keys shall move
+  the selection.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.4:** The trigger's placeholders shall be
+  listed once for all prompts, behind a collapsed **Show placeholders**
+  disclosure. Prompt editors shall keep offering placeholders as the user
+  types.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.5:** **Tools** in **Agent** shall group
+  MCP access and plugin tools behind a collapsed disclosure whose summary names
+  the enabled tools. It shall open by itself each time the MCP choices fail to
+  load, saved MCP choices conflict, or approved plugin tools need review, and
+  shall still close on request. When the MCP choices fail to load, the summary
+  shall say so.
+  The Configuration package's authority note shall appear in that package's
+  details.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.6:** When **One shared task** is
+  selected, **Max concurrent runs** shall be locked to 1 with a visible
+  reason. **If a run fails** shall hold **Automatic retries**; attempt, delay,
+  backoff, and history settings shall appear only while retries are on.
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-002.7:** When another trigger can start the
+  automation, an empty schedule shall read **No schedule.** without claiming
+  that the automation never runs. The schedule shall always offer **No
+  schedule**; choosing it removes the schedule. A GitHub PR trigger summary
+  shall name its events by their localized labels.
+
 ## List contract exclusions
 
 These criteria govern settings list reads and their visible state. They do not
@@ -63,4 +119,4 @@ their existing contracts.
 
 ## System design
 
-The technical source is split into [part 1](../system-design/automations-settings-01.md), [part 2](../system-design/automations-settings-02.md), and [schedule replacement](../system-design/automations-settings-03.md).
+The technical source is split into [part 1](../system-design/automations-settings-01.md), [part 2](../system-design/automations-settings-02.md), and [schedule replacement](../system-design/automations-settings-03.md), and [editor layout](../system-design/automations-settings-04.md).

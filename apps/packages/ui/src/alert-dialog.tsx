@@ -7,6 +7,19 @@ import { cn } from "./lib/utils";
 import { Button } from "./button";
 import { handleDialogDefaultActionKeyDown } from "./lib/dialog-default-action";
 import { useDialogBodyLockRecovery } from "./lib/dialog-body-lock";
+import { ModalToastOutlet } from "./modal-toast-outlet";
+
+function appendModalToastOutlet(children: React.ReactNode) {
+  const child = React.Children.only(children);
+  if (!React.isValidElement<{ children?: React.ReactNode }>(child)) return child;
+
+  return React.cloneElement(child, {
+    children: [
+      ...React.Children.toArray(child.props.children),
+      <ModalToastOutlet key="modal-toast-outlet" />,
+    ],
+  });
+}
 
 function AlertDialog({
   onOpenChange,
@@ -50,13 +63,16 @@ function AlertDialogOverlay({
 
 function AlertDialogContent({
   className,
+  children,
   size = "default",
   enterConfirms = true,
+  toastOutlet = true,
   overlayClassName,
   onKeyDown,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content> & {
   size?: "default" | "sm" | "lg";
+  toastOutlet?: boolean;
   /** Pressing Enter activates the semantic action button. Default: true. */
   enterConfirms?: boolean;
   overlayClassName?: string;
@@ -65,6 +81,18 @@ function AlertDialogContent({
     onKeyDown?.(event);
     if (enterConfirms) handleDialogDefaultActionKeyDown(event);
   };
+  const content = toastOutlet ? (
+    props.asChild ? (
+      appendModalToastOutlet(children)
+    ) : (
+      <>
+        {children}
+        <ModalToastOutlet />
+      </>
+    )
+  ) : (
+    children
+  );
   return (
     <AlertDialogPortal>
       <AlertDialogOverlay className={overlayClassName} />
@@ -77,7 +105,9 @@ function AlertDialogContent({
         )}
         onKeyDown={handleKeyDown}
         {...props}
-      />
+      >
+        {content}
+      </AlertDialogPrimitive.Content>
     </AlertDialogPortal>
   );
 }

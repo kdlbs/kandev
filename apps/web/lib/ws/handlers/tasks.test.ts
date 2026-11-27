@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "@/lib/state/store";
 import { registerTasksHandlers } from "./tasks";
 import { getSessionRestartStore } from "@/lib/session/session-restart-state";
+import { fetchTaskSession } from "@/lib/api/domains/session-api";
+import type { TaskSession, TaskSessionResponse } from "@/lib/types/http";
+import type * as SessionApi from "@/lib/api/domains/session-api";
 import {
   makeStore,
   makeTask,
@@ -11,6 +14,19 @@ import {
   SESS_DRIFTED,
   SESS_PINNED,
 } from "./tasks.test-helpers";
+
+vi.mock("@/lib/api/domains/session-api", async (original) => ({
+  ...(await original<typeof SessionApi>()),
+  fetchTaskSession: vi.fn(),
+}));
+beforeEach(() => {
+  vi.mocked(fetchTaskSession).mockImplementation(
+    async (id) =>
+      ({
+        session: { id, task_id: "t1", state: "WAITING_FOR_INPUT" } as TaskSession,
+      }) as TaskSessionResponse,
+  );
+});
 
 // Shared setup for the primary-session focus-follow tests: a single task t1
 // whose kanban primary, plus the active/pinned session ids, are the only knobs
@@ -42,7 +58,7 @@ describe("task.updated during restart", () => {
   // @covers AC-TASKS-SESSION-TAB-RESTART-001.2, AC-TASKS-SESSION-TAB-RESTART-001.6
   it.each([true, false])(
     "preserves only the restarting selection (target pending: %s)",
-    (restartingTarget) => {
+    async (restartingTarget) => {
       const setActiveSessionAuto = vi.fn();
       const store = makeFollowStore({
         primarySessionId: "sess-old",
@@ -59,7 +75,8 @@ describe("task.updated during restart", () => {
 
       expect(store.getState().kanban.tasks[0].primarySessionId).toBe("sess-new");
       if (restartingTarget) expect(setActiveSessionAuto).not.toHaveBeenCalled();
-      else expect(setActiveSessionAuto).toHaveBeenCalledWith("t1", "sess-new");
+      else
+        await vi.waitFor(() => expect(setActiveSessionAuto).toHaveBeenCalledWith("t1", "sess-new"));
     },
   );
 });
@@ -72,7 +89,7 @@ describe("task.updated primary-session focus follow", () => {
     setActiveSessionAuto = vi.fn();
   });
 
-  it("follows focus to the new primary when the user is on the previous primary", () => {
+  it("follows focus to the new primary when the user is on the previous primary", async () => {
     store = makeFollowStore({
       primarySessionId: "sess-old",
       activeSessionId: "sess-old",
@@ -83,7 +100,7 @@ describe("task.updated primary-session focus follow", () => {
     const handlers = registerTasksHandlers(store);
     handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
 
-    expect(setActiveSessionAuto).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(setActiveSessionAuto).toHaveBeenCalledTimes(1));
     expect(setActiveSessionAuto).toHaveBeenCalledWith("t1", "sess-new");
   });
 
@@ -136,6 +153,35 @@ describe("task.updated primary-session focus follow", () => {
     const handlers = registerTasksHandlers(store);
     handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-old")));
 
+    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+});
+
+describe("task.updated primary-session focus follow after a failure", () => {
+  it("keeps focus on a failed previous primary so its failure stays on screen", () => {
+    const setActiveSessionAuto = vi.fn();
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      tasks: {
+        activeTaskId: "t1",
+        activeSessionId: "sess-old",
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
+      },
+      taskSessions: {
+        items: { "sess-old": { id: "sess-old", task_id: "t1", state: "FAILED" } },
+      } as unknown as AppState["taskSessions"],
+      setActiveSessionAuto,
+    });
+
+    registerTasksHandlers(store)["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
+
+    expect(store.getState().kanban.tasks[0].primarySessionId).toBe("sess-new");
     expect(setActiveSessionAuto).not.toHaveBeenCalled();
   });
 });
@@ -244,7 +290,7 @@ describe("task.updated primary-session focus follow (stale pin cleanup)", () => 
     setActiveSessionAuto = vi.fn();
   });
 
-  it("clears a terminal orphaned pin when following focus to the new primary", () => {
+  it("clears a terminal orphaned pin when following focus to the new primary", async () => {
     store = makeStore({
       kanban: {
         workflowId: "wf1",
@@ -270,11 +316,11 @@ describe("task.updated primary-session focus follow (stale pin cleanup)", () => 
     const handlers = registerTasksHandlers(store);
     handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
 
-    expect(setActiveSessionAuto).toHaveBeenCalledWith("t1", "sess-new");
+    await vi.waitFor(() => expect(setActiveSessionAuto).toHaveBeenCalledWith("t1", "sess-new"));
     expect(store.getState().tasks.pinnedSessionId).toBeNull();
   });
 
-  it("clears a deleted orphaned pin when following focus to the new primary", () => {
+  it("clears a deleted orphaned pin when following focus to the new primary", async () => {
     store = makeStore({
       kanban: {
         workflowId: "wf1",
@@ -306,7 +352,7 @@ describe("task.updated primary-session focus follow (stale pin cleanup)", () => 
     const handlers = registerTasksHandlers(store);
     handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
 
-    expect(setActiveSessionAuto).toHaveBeenCalledWith("t1", "sess-new");
+    await vi.waitFor(() => expect(setActiveSessionAuto).toHaveBeenCalledWith("t1", "sess-new"));
     expect(store.getState().tasks.pinnedSessionId).toBeNull();
   });
 });

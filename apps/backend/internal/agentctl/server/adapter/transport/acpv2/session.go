@@ -138,6 +138,9 @@ func (a *Adapter) commitAttachment(
 	a.project(func(batch *eventBatch) {
 		previous = a.session
 		a.session = session
+		if resume && previous == session {
+			attach.state.mergeBackgroundWork(a.state.backgroundWork)
+		}
 		a.state = attach.state
 		a.attach = nil
 		status := streams.SessionStatusNew

@@ -54,6 +54,88 @@ func TestResolveLocalRuntimeSelection(t *testing.T) {
 	}
 }
 
+func TestResolveLocalReportsDangerousPermissionFlagSupport(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		help string
+		want bool
+	}{
+		{
+			name: "exact declaration",
+			help: antigravityWorkerHelpFixture + "  --dangerously-skip-permissions  Approve all tool requests\n",
+			want: true,
+		},
+		{
+			name: "similar option does not qualify",
+			help: antigravityWorkerHelpFixture + "  --dangerously-skip-permissions-extra  Similar option\n",
+		},
+		{
+			name: "usage text does not qualify",
+			help: antigravityWorkerHelpFixture + "\nExamples:\n  agy acp --dangerously-skip-permissions\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			opts, _, _ := localResolverFixture(t, true)
+			opts.VersionProbe = func(context.Context, string) (string, error) { return "1.5.15", nil }
+			opts.ACPHelpProbe = func(context.Context, string) (string, error) { return tt.help, nil }
+			selected, err := ResolveLocal(context.Background(), opts)
+			if err != nil {
+				t.Fatalf("ResolveLocal: %v", err)
+			}
+			if selected.SupportsDangerouslySkipPermissions != tt.want {
+				t.Fatalf("SupportsDangerouslySkipPermissions = %t, want %t", selected.SupportsDangerouslySkipPermissions, tt.want)
+			}
+		})
+	}
+}
+
+func TestFilterDangerouslySkipPermissions(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		args      []string
+		permitted bool
+		want      []string
+	}{
+		{
+			name:      "permitted option is retained",
+			args:      []string{"agy", "acp", "--dangerously-skip-permissions", "--", "prompt"},
+			permitted: true,
+			want:      []string{"agy", "acp", "--dangerously-skip-permissions", "--", "prompt"},
+		},
+		{
+			name: "unsupported option is removed before delimiter",
+			args: []string{"agy", "acp", "--dangerously-skip-permissions", "--", "prompt"},
+			want: []string{"agy", "acp", "--", "prompt"},
+		},
+		{
+			name: "similarly named option remains",
+			args: []string{"agy", "acp", "--dangerously-skip-permissions-extra"},
+			want: []string{"agy", "acp", "--dangerously-skip-permissions-extra"},
+		},
+		{
+			name: "skip-looking token consumed as an option value remains",
+			args: []string{"agy", "acp", "--log-file", "--dangerously-skip-permissions", "--dangerously-skip-permissions"},
+			want: []string{"agy", "acp", "--log-file", "--dangerously-skip-permissions"},
+		},
+		{
+			name: "delimiter consumed as an option value does not stop filtering",
+			args: []string{"agy", "acp", "--log-file", "--", "--dangerously-skip-permissions"},
+			want: []string{"agy", "acp", "--log-file", "--"},
+		},
+		{
+			name: "text after delimiter remains",
+			args: []string{"agy", "acp", "--", "--dangerously-skip-permissions"},
+			want: []string{"agy", "acp", "--", "--dangerously-skip-permissions"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := FilterDangerouslySkipPermissions(tt.args, tt.permitted); !slices.Equal(got, tt.want) {
+				t.Fatalf("FilterDangerouslySkipPermissions(%q, %t) = %q, want %q", tt.args, tt.permitted, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRequireWorkerModePreservesOptionValuesAndDelimiter(t *testing.T) {
 	for _, tt := range []struct {
 		name string

@@ -8,6 +8,8 @@ import type { WebSocketClient } from "@/lib/ws/client";
 import { createFile, deleteFile, requestFileContent } from "@/lib/ws/workspace-files";
 import { triggerFileDownload } from "@/lib/utils/file-download";
 import { useToast } from "@/components/toast-provider";
+import { useAppStoreApi } from "@/components/state-provider";
+import { captureTabletFileDeletion } from "@/lib/state/tablet-file-authority";
 
 const ERROR_VARIANT = "error" as const;
 
@@ -45,6 +47,7 @@ export function useFileOperations(
   options?: { dockview?: boolean; adapter?: RefObject<RenameAdapter | null> },
 ) {
   const { toast } = useToast();
+  const store = useAppStoreApi();
   const { t } = useTranslation("task");
   const unknownError = t("common:anUnknownErrorOccurred");
 
@@ -66,14 +69,17 @@ export function useFileOperations(
     async (path: string): Promise<boolean> => {
       const client = getWebSocketClient();
       if (!client || !sessionId) return false;
-      return runFileOp(
+      const confirmed = captureTabletFileDeletion(store, sessionId, path);
+      const success = await runFileOp(
         () => deleteFile(client, sessionId, path),
         t("task:failedToDeleteItem"),
         unknownError,
         toast,
       );
+      if (success) confirmed();
+      return success;
     },
-    [sessionId, t, toast, unknownError],
+    [sessionId, t, toast, unknownError, store],
   );
 
   const handleRenameFile = useFileRename(sessionId, options);

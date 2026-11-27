@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-10-02
-updated: 2026-10-30
+updated: 2026-11-26
 owners:
   - Kandev
 ---
@@ -123,6 +123,21 @@ when conversation restoration and the interrupted work are unambiguous.
   and dispatch count, not the number of actions Cursor chooses to execute.
   Older components without this continuation policy shall retain their prior
   pending-tool behavior.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.10:** A current-prompt Cursor
+  `session/prompt` error returned by the peer shall be recognized as transient
+  transport loss (`agent_transport_lost`) when it has code `-32603`, message
+  exactly `Internal error`, and `data` that is an object containing only the
+  string field `details` equal to `WritableIterable is closed`. Kandev shall
+  present a fixed Kandev-authored Cursor diagnostic naming the stream closure,
+  attach the prompt's continuation evidence, and retain the runtime. Criteria
+  `001.2` and `001.8` then decide continuation. A bare `-32603`, a missing,
+  `null`, or differently shaped `data`, extra fields, another `details` value,
+  another adapter, a local failure, or a stale prompt shall keep manual
+  recovery. A successful result for the same request shall settle normally
+  without continuation, and Kandev shall not infer completion from
+  Cursor-internal logs. Raw `data` shall not cross the
+  [diagnostic boundary](provider-error-recovery.md); this exact envelope is the
+  only exception to provider error criterion `.24`.
 
 ### REQ-PLATFORM-INTERRUPTION-CONTINUATION-002: Bounded recovery ownership
 
@@ -244,3 +259,4 @@ continuing, exhausted, or deliberately unavailable.
 
 - [Pending-tool continuation package](../../../plans/cursor-pending-tool-continuation/plan.md)
 - [Resumed activity feedback package](../../../plans/continuation-resumed-feedback/plan.md)
+- [Cursor prompt-stream loss package](../../../plans/cursor-prompt-stream-closed/plan.md)

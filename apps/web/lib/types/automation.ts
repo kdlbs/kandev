@@ -1,4 +1,18 @@
 import type { BuiltinMCPPackage, BuiltinMCPDescriptor } from "./builtin-mcp";
+import type { BackendMessage } from "./backend-message";
+
+/** Workspace-scoped notice that a run row was recorded. Identifiers only. */
+export type AutomationRunCreatedPayload = {
+  workspace_id: string;
+  automation_id: string;
+  run_id: string;
+  status: string;
+};
+
+export type AutomationBackendMessageMap = {
+  "automation.run.created": BackendMessage<"automation.run.created", AutomationRunCreatedPayload>;
+};
+
 export type AutomationMCPSelection = {
   builtin_packages: BuiltinMCPPackage[];
   definition_ids: string[];
@@ -54,7 +68,18 @@ export type ManagedDeliveryStatus =
   | "uncertain"
   | "unavailable";
 
-export type ContinuationPolicy = "new_task" | "reuse_thread";
+export type ContinuationPolicy = "new_task" | "reuse_thread" | "reuse_per_pr";
+
+/** What happens to a per-PR task when its pull request ends. */
+export type PREndAction = "keep" | "archive" | "delete";
+
+/** reuse_per_pr options; empty or keep for every other policy. */
+export type PRContinuationSettings = {
+  follow_up_prompt?: string;
+  pr_continuation_step_id?: string;
+  pr_merged_action?: PREndAction;
+  pr_closed_action?: PREndAction;
+};
 export type TaskMode = "automation_run" | "normal_task" | "managed_conversation";
 export type RepositoryMode = "workspace_default" | "selected" | "none";
 
@@ -111,7 +136,7 @@ export type AutomationPluginToolOptionsResponse = {
   groups: AutomationPluginToolGroup[];
 };
 
-export type Automation = {
+export type Automation = PRContinuationSettings & {
   mcp_selection?: AutomationMCPSelection | null;
   mcp_selection_revision?: number;
   id: string;
@@ -270,6 +295,9 @@ export type GitHubPRTriggerConfig = {
   authors?: string[];
   labels?: string[];
   exclude_draft?: boolean;
+  quiet_period_minutes?: number;
+  reviewers?: string[];
+  include_existing_prs?: boolean;
 };
 
 export type GitHubPushTriggerConfig = {
@@ -346,7 +374,7 @@ export type TriggerTypeInfo = {
 
 // --- Request/response DTOs ---
 
-export type CreateAutomationRequest = {
+export type CreateAutomationRequest = PRContinuationSettings & {
   mcp_selection?: AutomationMCPSelection;
   workspace_id: string;
   name: string;
@@ -374,7 +402,7 @@ export type CreateAutomationRequest = {
   }>;
 };
 
-export type UpdateAutomationRequest = {
+export type UpdateAutomationRequest = PRContinuationSettings & {
   mcp_selection?: AutomationMCPSelection;
   expected_mcp_selection_revision?: number;
   name?: string;

@@ -1,4 +1,11 @@
 {
+  "addFlag": "フラグを追加",
+  "changeFlag": "フラグを変更",
+  "editFlag": "フラグを編集",
+  "flag": "フラグ",
+  "flagNote": "フラグのメモ",
+  "removeFlag": "フラグを削除",
+  "flagSaveFailed": "フラグを更新できませんでした。もう一度お試しください。",
   "pluginGroupingSection": "プラグインのグループ化",
   "pluginGroupingUnavailable": "このプラグインのグループ化は利用できないか、不完全です。再試行するか、プラグインを有効にするか、別のビューを選択してください。",
   "pluginGroupingUnavailableLabel": "{{name}}（利用不可）",

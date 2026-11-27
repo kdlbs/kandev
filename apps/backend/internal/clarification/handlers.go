@@ -397,7 +397,7 @@ func normalizeAndValidateQuestions(questions []Question, allowFreeTextOnly bool)
 	if len(questions) > 4 {
 		return "questions must contain at most 4 questions"
 	}
-	if err := protocol.ValidateQuestionImages(questions); err != nil {
+	if err := protocol.ValidateQuestionBundleImages(questions); err != nil {
 		return err.Error()
 	}
 	seen := map[string]bool{}

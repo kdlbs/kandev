@@ -14,6 +14,7 @@ import { smokeGo } from "../pluginsdk/consumer-smoke.mjs";
 import { publicationEnvironment } from "./sdk-runtime.mjs";
 import { digest } from "./sdk-artifact.mjs";
 import { collectSecrets, sanitizeOutput } from "./sdk-diagnostics.mjs";
+import { SDKUploadAttempts } from "./sdk-upload-attempts.mjs";
 const exec = promisify(execFile);
 
 function mergeOutput(...values) {
@@ -71,6 +72,13 @@ export class ReleaseIO {
     this.assets = new ReleaseAssets({
       root,
       directory: join(directory, "retained"),
+    });
+    this.uploadAttempts = new SDKUploadAttempts({
+      root,
+      directory: env.SDK_UPLOAD_STATE_DIR ?? join(directory, "upload-attempts"),
+      repository,
+      env,
+      run,
     });
     this.store = new CandidateStore({
       directory: join(directory, "candidate"),
@@ -270,6 +278,7 @@ export class ReleaseIO {
       "--access",
       "public",
       "--ignore-scripts",
+      "--fetch-retries=0",
       "--registry",
       "https://registry.npmjs.org",
       "--tag",
@@ -282,6 +291,7 @@ export class ReleaseIO {
       "add",
       `@kdlbs/plugin-sdk@${version}`,
       "latest",
+      "--fetch-retries=0",
       "--registry",
       "https://registry.npmjs.org",
     ]);

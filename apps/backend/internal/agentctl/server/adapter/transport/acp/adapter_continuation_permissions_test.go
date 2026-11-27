@@ -169,7 +169,7 @@ func TestCursorContinuationEvidenceHandoffCannotOwnLatePermission(t *testing.T) 
 	_, successor := newPromptTurnState(t.Context(), 8, true)
 	_, transferred := a.tryTransferPromptTurn(successor, true)
 	require.True(t, transferred)
-	finish := a.beginContinuationPermission(req.SessionID, req.ToolCallID, req.Options)
+	finish := a.beginContinuationPermission(predecessor, req.SessionID, req.ToolCallID, req.Options)
 	require.NotNil(t, finish)
 	finish(&PermissionResponse{OptionID: "allow"}, nil)
 	a.handleACPUpdate(makeNotification("session-1", acpsdk.SessionUpdate{ToolCall: &acpsdk.SessionUpdateToolCall{

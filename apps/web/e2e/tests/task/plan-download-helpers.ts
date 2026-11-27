@@ -6,7 +6,7 @@ import { planScript } from "../../helpers/seed-session-messages";
 import { SessionPage } from "../../pages/session-page";
 
 const INITIAL = "## Plan\n\nOriginal plan.";
-const EXPECTED = "## Plan\n\nOriginal plan. Café 🌍\n\nNext line 雪";
+export const EXPECTED = "## Plan\n\nOriginal plan. Café 🌍\n\nNext line 雪";
 
 export async function openDownloadPlan(
   page: Page,
@@ -43,7 +43,7 @@ export async function openDownloadPlan(
   await page.keyboard.press("Enter");
   await page.keyboard.insertText("Next line 雪");
   await expect(editor).toContainText("Next line 雪");
-  return panel;
+  return { panel, taskId: task.id };
 }
 
 export async function checkDownload(page: Page, mobile: boolean) {
