@@ -196,6 +196,14 @@ func TestSSHWindowsExecPropagatesExitCodes(t *testing.T) {
 	}
 }
 
+// logPrepareProgress records each preparation step, including a failed prepare
+// script's output, so a Windows-only failure reports the script's own error.
+func logPrepareProgress(t *testing.T) PrepareProgressCallback {
+	return func(step PrepareStep, _, _ int) {
+		t.Logf("prepare step %q status=%v output=%q error=%q", step.Name, step.Status, step.Output, step.Error)
+	}
+}
+
 // @covers AC-EXECUTORS-SSH-WINDOWS-001.8
 func TestSSHWindowsExecDefaultPrepare(t *testing.T) {
 	requireWindowsExecution(t)
@@ -213,7 +221,7 @@ func TestSSHWindowsExecDefaultPrepare(t *testing.T) {
 			MetadataKeySSHShell: shell, "repository_clone_url": originURL,
 			MetadataKeyBaseBranch: "main", MetadataKeyWorktreeBranch: "feature/win-ssh",
 			"repository_setup_script": "Set-Content -LiteralPath (Join-Path (Get-Location) 'setup-ran.txt') -Value ok",
-		}}
+		}, OnProgress: logPrepareProgress(t)}
 		if err := r.runPrepareScript(context.Background(), client, taskDir, req, windows, ""); err != nil {
 			t.Fatalf("[%s] fresh prepare: %v", shell, err)
 		}

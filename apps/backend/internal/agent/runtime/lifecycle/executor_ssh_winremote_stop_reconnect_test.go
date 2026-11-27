@@ -55,13 +55,18 @@ func TestSSHWindowsBackendShutdownPreservesAgentctlAndResumeReconnects(t *testin
 	}
 
 	// Simulate backend restart: a fresh SSHExecutor resumes using persisted metadata.
+	// Production resume requests also carry the executor-config connection keys
+	// that buildLaunchMetadata merges; the persisted instance metadata omits them.
+	resumeMetadata := cloneSSHMetadata(instance1.Metadata)
+	resumeMetadata[MetadataKeySSHIdentitySource] = req.Metadata[MetadataKeySSHIdentitySource]
+	resumeMetadata[MetadataKeySSHIdentityFile] = req.Metadata[MetadataKeySSHIdentityFile]
 	exec2 := harness.newExecutor(t)
 	resumeReq := &ExecutorCreateRequest{
 		InstanceID: "instance-win-resumed",
 		TaskID:     "task-win",
 		SessionID:  "session-win",
 		AuthToken:  "persisted-win-token",
-		Metadata:   cloneSSHMetadata(instance1.Metadata),
+		Metadata:   resumeMetadata,
 	}
 	if err := exec2.ResumeRemoteInstance(context.Background(), resumeReq); err != nil {
 		t.Fatalf("ResumeRemoteInstance on Windows SSH host: %v", err)
