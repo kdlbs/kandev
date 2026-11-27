@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/auth/authn"
 )
 
 // ErrHistoryAutomationNotFound covers both a missing automation filter target
@@ -65,29 +67,30 @@ type HistoryDefinition struct {
 // HistoryRun is one retained run observation. SourceStatus retains the stored
 // run status while Status carries the automation service's read projection.
 type HistoryRun struct {
-	ID                    string
-	WorkspaceID           string
-	AutomationID          string
-	AutomationName        string
-	TriggerID             string
-	TriggerKind           TriggerType
-	TaskID                string
-	SessionID             string
-	TurnID                string
-	ManagedConversationID string
-	SourceStatus          RunStatus
-	Status                RunStatus
-	RetryState            RetryState
-	DeliveryStatus        ManagedDeliveryStatus
-	RetryGroupID          string
-	RetryParentRunID      string
-	AttemptNumber         *int64
-	CreatedAt             time.Time
-	RetryScheduledAt      *time.Time
-	RetryClaimedAt        *time.Time
-	Summary               string
-	ErrorMessage          string
-	ObservedAt            time.Time
+	ID                     string
+	WorkspaceID            string
+	AutomationID           string
+	AutomationName         string
+	ProtectedCreatorUserID string `json:"-"`
+	TriggerID              string
+	TriggerKind            TriggerType
+	TaskID                 string
+	SessionID              string
+	TurnID                 string
+	ManagedConversationID  string
+	SourceStatus           RunStatus
+	Status                 RunStatus
+	RetryState             RetryState
+	DeliveryStatus         ManagedDeliveryStatus
+	RetryGroupID           string
+	RetryParentRunID       string
+	AttemptNumber          *int64
+	CreatedAt              time.Time
+	RetryScheduledAt       *time.Time
+	RetryClaimedAt         *time.Time
+	Summary                string
+	ErrorMessage           string
+	ObservedAt             time.Time
 }
 
 // HistoryDefinitionList reports whether the bounded query had more matching
@@ -142,7 +145,7 @@ func (s *Service) ListHistoryRuns(ctx context.Context, filter HistoryRunFilter) 
 	observedAt := time.Now().UTC()
 	items := make([]HistoryRun, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, historyRunFromRow(row, observedAt))
+		items = append(items, projectHistoryRun(ctx, historyRunFromRow(row, observedAt)))
 	}
 	return &HistoryRunList{Items: items, Overflow: overflow}, nil
 }
@@ -157,7 +160,7 @@ func (s *Service) GetHistoryRun(ctx context.Context, workspaceID, runID string) 
 	if err != nil {
 		return nil, err
 	}
-	item := historyRunFromRow(row, time.Now().UTC())
+	item := projectHistoryRun(ctx, historyRunFromRow(row, time.Now().UTC()))
 	return &item, nil
 }
 
@@ -192,7 +195,8 @@ func historyRunFromRow(row *historyRunRow, observedAt time.Time) HistoryRun {
 	run := row.AutomationRun
 	observation := HistoryRun{
 		ID: run.ID, WorkspaceID: row.WorkspaceID, AutomationID: run.AutomationID,
-		AutomationName: row.AutomationName, TriggerID: run.TriggerID, TriggerKind: run.TriggerType,
+		AutomationName: row.AutomationName, ProtectedCreatorUserID: run.ProtectedCreatorUserID,
+		TriggerID: run.TriggerID, TriggerKind: run.TriggerType,
 		TaskID: run.TaskID, SessionID: run.SessionID, TurnID: run.TurnID,
 		ManagedConversationID: run.ManagedConversationID,
 		SourceStatus:          row.SourceStatus, Status: run.Status,
@@ -208,6 +212,23 @@ func historyRunFromRow(row *historyRunRow, observedAt time.Time) HistoryRun {
 		observation.AttemptNumber = &attempt
 	}
 	return observation
+}
+
+func projectHistoryRun(ctx context.Context, run HistoryRun) HistoryRun {
+	if run.ProtectedCreatorUserID == "" {
+		return run
+	}
+	identity, ok := authn.IdentityFromContext(ctx)
+	if ok && !identity.Synthetic && identity.UserID == run.ProtectedCreatorUserID {
+		return run
+	}
+	run.TaskID = ""
+	run.SessionID = ""
+	run.TurnID = ""
+	run.ManagedConversationID = ""
+	run.Summary = ""
+	run.ErrorMessage = safeCredentialRunError(run.ErrorMessage)
+	return run
 }
 
 func utcTimePtr(value *time.Time) *time.Time {

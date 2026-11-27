@@ -296,6 +296,14 @@ func (s *Service) authorizeTaskScopeActionWorkspace(ctx context.Context, taskID 
 	if err := s.authorizeWorkspaceCollaboration(ctx, task.WorkspaceID, action); err != nil {
 		return "", err
 	}
+	if err := s.authorizeAutomationCredentialRun(ctx, taskID); err != nil {
+		return "", err
+	}
+	if scope == authz.ScopeSessionPrompt || scope == authz.ScopeSessionExec {
+		if err := s.authorizeAutomationCredentialRunUse(ctx, taskID); err != nil {
+			return "", err
+		}
+	}
 	return task.WorkspaceID, nil
 }
 
@@ -629,7 +637,10 @@ func (s *Service) AuthorizeEnvironmentScope(ctx context.Context, taskEnvironment
 			return err
 		}
 	}
-	return s.authorizeTaskScope(ctx, env.TaskID, scope)
+	if err := s.authorizeTaskScope(ctx, env.TaskID, scope); err != nil {
+		return err
+	}
+	return s.authorizeAutomationCredentialRunUse(ctx, env.TaskID)
 }
 
 // AuthorizeTaskEnvironmentAccess checks that both identifiers are visible to

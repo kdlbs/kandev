@@ -188,6 +188,47 @@ func TestExecutorOwnershipAutonomousCreatorAndInitiator(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestAutomationCredentialActorRequiresActiveCreatorAndPromptScope(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := t.Context()
+	executor := &models.Executor{ID: "credential-shared", Name: "Shared", Type: models.ExecutorTypeLocal}
+	require.NoError(t, repo.CreateExecutor(ctx, executor))
+	require.NoError(t, repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{ID: "credential-profile", ExecutorID: executor.ID, Name: "Shared"}))
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "credential-workspace", Name: "Credential workspace", OwnerID: "workspace-owner"}))
+	require.NoError(t, repo.UpsertWorkspaceMember(ctx, &models.WorkspaceMember{
+		WorkspaceID: "credential-workspace", UserID: "creator", Role: string(authz.WorkspaceRoleCollaborator),
+	}))
+	statuses := map[string]string{"creator": "active", "inactive": "inactive", "demoted": "active"}
+	svc.SetExecutorIdentityResolver(func(_ context.Context, userID string) (authn.Identity, bool) {
+		if statuses[userID] != "active" {
+			return authn.Identity{}, false
+		}
+		return authn.Identity{UserID: userID, Role: authn.RoleMember}, true
+	})
+	caller := authn.WithIdentity(ctx, authn.Identity{UserID: "demoted", Role: authn.RoleMember})
+	require.NoError(t, repo.UpsertWorkspaceMember(caller, &models.WorkspaceMember{
+		WorkspaceID: "credential-workspace", UserID: "demoted", Role: string(authz.WorkspaceRoleViewer),
+	}))
+
+	for _, creatorID := range []string{"missing", "inactive"} {
+		t.Run(creatorID, func(t *testing.T) {
+			_, err := svc.PrepareAutonomousExecutor(ctx, creatorID, "credential-profile")
+			require.Error(t, err)
+		})
+	}
+	_, err := svc.PrepareAutomationCredentialActorContext(ctx, "credential-workspace", "demoted", "credential-profile")
+	require.Error(t, err)
+	prepared, err := svc.PrepareAutomationCredentialActorContext(ctx, "credential-workspace", "creator", "credential-profile")
+	require.NoError(t, err)
+	identity, ok := authn.IdentityFromContext(prepared)
+	require.True(t, ok)
+	require.Equal(t, "creator", identity.UserID)
+	// The older shared-executor path must not continue under the scheduler's
+	// unscoped context when restoring the saved creator fails.
+	_, err = svc.PrepareAutonomousExecutor(ctx, "missing", "credential-profile")
+	require.Error(t, err)
+}
+
 func TestExecutorOwnershipWorkflowCreatorIsAuthenticated(t *testing.T) {
 	_, _, repo := createTestService(t)
 	seedExecutorSession(t, repo, "workflow-creator", "")

@@ -150,6 +150,10 @@ A profile stores:
 
 Literal environment values are stored with the profile. Use secret references for credentials. Resolved values and copied credential files normally become accessible to the agent and commands in that environment, including repository setup scripts and the terminal panel's shells. A terminal that is already open keeps the environment it started with; open a new terminal after changing the profile. SSH is narrower: its remote agent process and terminals receive only the credential allowlist documented below, not arbitrary profile variables.
 
+### Automation credential bindings
+
+An automation creator can choose a personal Global secret for a supported secret-backed field on a shared agent or executor profile. The creator makes this choice at the field in the automation editor. The choice is stored on that automation and overrides the profile's secret reference for its runs. It does not change the shared profile or another automation. The resolved value is available to the run's agent and commands, subject to the executor's environment boundary. Portable automation exports omit this choice and import disabled for review. See [Automation credentials](automation-and-mcp.md#automation-credentials).
+
 The MCP editor checks only that the value is a JSON object. Its presets cover stdio, HTTP, and SSE transport allowances, server allowlists, and URL rewrites. Test restrictive policies with the actual MCP servers the agent needs; see [Automation and MCP](automation-and-mcp.md).
 
 Profile edits apply when Kandev provisions a launch, but a Docker container or Sprite resume can reconnect to the already provisioned process, image, environment, credentials, and files. Kubernetes records a separate workload snapshot for each session; changing its profile affects new sessions, while an existing session and any replacement Pod keep that snapshot. Use **Reset Environment** or explicitly destroy the resource when a change must take effect on a fresh environment. Deleting or editing a profile does not tear down an already-running resource.

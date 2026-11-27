@@ -69,6 +69,63 @@ func TestExportRedaction_AC6_WebhookSecretNeverAppearsInOutput(t *testing.T) {
 	}
 }
 
+func TestAutomationCredentialExport(t *testing.T) {
+	svc, _, _, _, _, _ := resolveTestFixture(t)
+	svc.SetExportWorkspaceLookup(&fakeExportWorkspaceLookup{exists: map[string]bool{"ws-1": true}})
+	const personalSecretID = "private-personal-secret-credential-export"
+	const workspaceSecretID = "private-workspace-secret-credential-export"
+	const personalSecretName = "Personal review token"
+	const workspaceSecretName = "Workspace review token"
+
+	a := &Automation{
+		ID: "automation-credential-export", WorkspaceID: "ws-1", Name: "Credential review copy",
+		Enabled: true,
+	}
+	choices := []AutomationCredentialChoice{
+		{
+			AutomationID: a.ID, Kind: CredentialChoicePersonal, ProfileID: "agent-profile",
+			Key: "SERVICE_KEY", SecretID: personalSecretID, SecretName: personalSecretName,
+			CreatorUserID: "creator-1", State: CredentialChoiceSelected,
+		},
+		{
+			AutomationID: a.ID, Kind: CredentialChoiceWorkspace, RepositoryID: "repository-1",
+			Key: "REPO_TOKEN", SecretID: workspaceSecretID, SecretName: workspaceSecretName,
+			CreatorUserID: "creator-1", GrantorUserID: "owner-1", State: CredentialChoiceGranted,
+		},
+	}
+	if err := svc.store.CreateAutomationWithCredentialChoices(context.Background(), a, choices); err != nil {
+		t.Fatalf("CreateAutomationWithCredentialChoices: %v", err)
+	}
+
+	docBody, zipEntries := exportBothForms(t, svc, "ws-1")
+	var doc exportDocument
+	if err := yaml.Unmarshal(docBody, &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal export document: %v", err)
+	}
+	if len(doc.Automations) != 1 {
+		t.Fatalf("export contains %d automations, want 1", len(doc.Automations))
+	}
+	if doc.Automations[0].Enabled {
+		t.Fatal("credential-backed automation export must be disabled")
+	}
+	const wantWarning = "Credential review copy: credential choices are omitted; select credentials again before enabling this automation"
+	if len(doc.Warnings) != 1 || doc.Warnings[0] != wantWarning {
+		t.Fatalf("export warnings = %#v, want [%q]", doc.Warnings, wantWarning)
+	}
+
+	outputs := append([][]byte{docBody}, zipEntries...)
+	for _, output := range outputs {
+		for _, privateValue := range []string{
+			personalSecretID, workspaceSecretID, personalSecretName, workspaceSecretName,
+			"credential_choices", "source_secret_id",
+		} {
+			if bytes.Contains(output, []byte(privateValue)) {
+				t.Errorf("automation export leaked %q: %s", privateValue, output)
+			}
+		}
+	}
+}
+
 // AC-23: every field automationFieldDispositions / automationTriggerFieldDispositions
 // mark `exported: true` must actually reach the DTO at its declared yaml key
 // with the source value, for a fully-populated automation. AC-22 only proves

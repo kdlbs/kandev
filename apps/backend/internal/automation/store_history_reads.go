@@ -27,7 +27,7 @@ type historyRunRow struct {
 // columns so a bounded history query never materializes large excluded
 // payloads before the public snapshot is measured.
 const historyRunColumnsSQL = `
-		ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type,
+		ar.id, ar.automation_id, ar.protected_creator_user_id, ar.trigger_id, ar.trigger_type,
 		ar.task_id, ar.session_id, ar.turn_id,` + runObservedStatusSQL + `,
 		ar.status AS source_status,
 		ar.managed_conversation_id, ar.delivery_status,
@@ -39,7 +39,7 @@ const historyRunColumnsSQL = `
 // without the task projection tables. It keeps the raw stored status as both
 // the source and observed status.
 const historyRunRawColumnsSQL = `
-		ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type,
+		ar.id, ar.automation_id, ar.protected_creator_user_id, ar.trigger_id, ar.trigger_type,
 		ar.task_id, ar.session_id, ar.turn_id, ar.status AS status,
 		ar.status AS source_status,
 		ar.managed_conversation_id, ar.delivery_status,

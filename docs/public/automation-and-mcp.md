@@ -123,6 +123,14 @@ The editor reads top to bottom, and each choice sits above the fields it changes
 
 The form can save an empty agent or executor selection, but launch still needs a usable profile. Scheduled, manual, webhook, and provider-triggered runs can remain repository-free. When a provider event supplies an exact repository through its established contract, Kandev uses that event context. A GitHub pull-request run with configured repository access checks out that PR's head branch and uses its base branch.
 
+### Automation credentials
+
+When an automation is enabled, **Save** checks that its known agent-profile, executor-profile, and repository secret references are readable by its creator. A failed check names the field and source, then keeps the draft in the editor. Turn **Enabled** off to save the draft while you repair access. Kandev checks the current references again before each launch, including scheduled and manual runs.
+
+For a supported secret-backed environment field on a shared agent or executor profile, the automation creator can choose one of their own Global secrets beside that field. This binding applies only to that automation and does not edit the shared profile. The resolved value is available to the agent and commands in the run environment. Portable exports omit personal bindings and import as disabled automations for review.
+
+A Workspace secret already bound to a selected repository needs owner approval before an automation creator can use it. The current workspace owner can grant that exact secret at that repository field on one saved automation, if the owner also owns the secret. The approval applies to that automation's fixed creator; another automation needs its own grant. Revoking approval blocks future starts, retries, prompts, and runtime attachments. A process that already received the value keeps it until it stops. Portable exports omit grants. See [Team Access](team-access.md#what-stays-with-the-owner) and [Executor profiles](executors.md#automation-credential-bindings).
+
 ### What a firing produces
 
 Every firing produces a distinct `AutomationRun` with exact task, session, and turn identity. A hidden destination uses `origin = automation_run`; that origin, not `is_ephemeral`, keeps its persistent task out of Kanban and task lists. A normal-task destination uses a separate visible automation origin, enters the selected workflow at its configured start step, and follows the ordinary task lifecycle. The workflow selector shows the same ordered step preview as New Task; automations do not have a separate step selector. The trigger is the start signal, so the agent starts immediately rather than waiting for a workflow step's `auto_start_agent` action.

@@ -149,7 +149,7 @@ func (s *sqliteStore) Create(ctx context.Context, secret *SecretWithValue) error
 func (s *sqliteStore) Get(ctx context.Context, id string) (*Secret, error) {
 	var row secretRow
 	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
-		SELECT id, name, scope, workspace_id, created_at, updated_at
+		SELECT id, name, user_id, scope, workspace_id, created_at, updated_at
 		FROM secrets WHERE id = ? AND (user_id = '' OR ? = '' OR user_id = ?)`),
 		id, scopeOwner(ctx), scopeOwner(ctx))
 	if err != nil {
@@ -395,6 +395,7 @@ func validateListOptions(opts SecretListOptions) error {
 type secretRow struct {
 	ID          string      `db:"id"`
 	Name        string      `db:"name"`
+	OwnerUserID string      `db:"user_id"`
 	Scope       SecretScope `db:"scope"`
 	WorkspaceID string      `db:"workspace_id"`
 	CreatedAt   time.Time   `db:"created_at"`
@@ -406,6 +407,7 @@ func (r *secretRow) toSecret() *Secret {
 	return &Secret{
 		ID:          r.ID,
 		Name:        r.Name,
+		OwnerUserID: r.OwnerUserID,
 		Scope:       normalizeStoredScope(r.Scope),
 		WorkspaceID: r.WorkspaceID,
 		CreatedAt:   r.CreatedAt,

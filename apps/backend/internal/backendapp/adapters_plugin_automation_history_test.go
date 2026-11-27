@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/plugins"
 )
@@ -28,6 +29,65 @@ func newAutomationHistoryAdapterTest(t *testing.T) (*automation.Service, *sqlx.D
 	}
 	service := automation.NewService(store, nil, nil)
 	return service, database, automationHistoryAdapter{service: service}
+}
+
+func TestPluginAutomationHistoryRedactsProtectedRunForWorkspaceReaders(t *testing.T) {
+	service, database, adapter := newAutomationHistoryAdapterTest(t)
+	ctx := context.Background()
+	definition := &automation.Automation{
+		WorkspaceID: "ws-protected", Name: "credential run", CreatedByUserID: "creator-1",
+		WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true,
+	}
+	if err := service.Store().CreateAutomation(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE task_session_messages (
+		id TEXT PRIMARY KEY, task_id TEXT NOT NULL DEFAULT '', turn_id TEXT NOT NULL DEFAULT '',
+		author_type TEXT NOT NULL DEFAULT 'user', content TEXT NOT NULL DEFAULT '',
+		type TEXT NOT NULL DEFAULT 'message', created_at TIMESTAMP NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	createdAt := time.Date(2026, 11, 27, 10, 0, 0, 0, time.UTC)
+	run := &automation.AutomationRun{
+		AutomationID: definition.ID, ProtectedCreatorUserID: "creator-1",
+		TriggerType: automation.TriggerTypeManual, Status: automation.RunStatusFailed,
+		TaskID: "private-task", SessionID: "private-session", TurnID: "private-turn",
+		ErrorMessage: "private runtime details", TriggerData: json.RawMessage(`{}`),
+	}
+	if err := service.Store().CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE automation_runs SET created_at = ? WHERE id = ?`, createdAt, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO task_session_messages
+		(id, task_id, turn_id, author_type, content, type, created_at)
+		VALUES ('private-message', 'private-task', 'private-turn', 'agent', 'private agent summary', 'message', ?)`, createdAt); err != nil {
+		t.Fatal(err)
+	}
+
+	readers, err := adapter.ListAutomationHistoryRuns(ctx, "ws-protected", "", nil, nil, 10)
+	if err != nil || len(readers.Items) != 1 {
+		t.Fatalf("workspace history = %+v, err=%v", readers, err)
+	}
+	readerRun := readers.Items[0]
+	if readerRun.TaskID != "" || readerRun.SessionID != "" || readerRun.TurnID != "" || readerRun.Summary != "" || readerRun.ErrorExcerpt != "Automation run failed." {
+		t.Fatalf("workspace reader received protected output: %+v", readerRun)
+	}
+	refreshed, err := adapter.GetAutomationHistoryRun(ctx, "ws-protected", run.ID)
+	if err != nil || refreshed.SessionID != "" || refreshed.ErrorExcerpt != "Automation run failed." {
+		t.Fatalf("workspace refresh received protected output: %+v, err=%v", refreshed, err)
+	}
+
+	creatorCtx := authn.WithIdentity(ctx, authn.Identity{UserID: "creator-1", Role: authn.RoleMember})
+	creatorRuns, err := service.ListHistoryRuns(creatorCtx, automation.HistoryRunFilter{WorkspaceID: "ws-protected", Limit: 10})
+	if err != nil || len(creatorRuns.Items) != 1 {
+		t.Fatalf("creator history = %+v, err=%v", creatorRuns, err)
+	}
+	creatorRun := adaptAutomationHistoryRun(creatorRuns.Items[0])
+	if creatorRun.TaskID != "private-task" || creatorRun.SessionID != "private-session" || creatorRun.Summary != "private agent summary" || creatorRun.ErrorExcerpt != "private runtime details" {
+		t.Fatalf("creator history was redacted: %+v", creatorRun)
+	}
 }
 
 func TestPluginAutomationHistoryAdapter(t *testing.T) {

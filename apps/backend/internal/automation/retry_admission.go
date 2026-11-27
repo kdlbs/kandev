@@ -105,8 +105,19 @@ func (s *Store) createRetryAdmission(ctx context.Context, run *AutomationRun, gr
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockRetryAutomation(ctx, tx, run.AutomationID); err != nil {
+	state, err := lockCredentialAutomation(ctx, tx, run.AutomationID)
+	if err != nil {
 		return err
+	}
+	hasCredentialChoices, err := s.HasCredentialChoicesTx(ctx, tx, run.AutomationID)
+	if err != nil {
+		return err
+	}
+	if hasCredentialChoices {
+		if err := credentialMutationActor(ctx, state.CreatorUserID); err != nil {
+			return err
+		}
+		run.ProtectedCreatorUserID = state.CreatorUserID
 	}
 	if err := checkRetryAdmissionCapacity(ctx, tx, run.AutomationID); err != nil {
 		return err
@@ -139,7 +150,7 @@ func (s *Store) createRetryAdmission(ctx context.Context, run *AutomationRun, gr
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO automation_runs (
-			id, automation_id, trigger_id, trigger_type, task_id, status, dedup_key, trigger_data,
+			id, automation_id, protected_creator_user_id, trigger_id, trigger_type, task_id, status, dedup_key, trigger_data,
 			error_message, session_id, turn_id, thread_action, thread_reason, display_title,
 			retry_group_id, retry_parent_run_id, attempt_number, retry_state, retry_scheduled_at,
 			retry_claimed_at, retry_claim_expires_at, retry_claim_token, retry_group_generation,
@@ -148,8 +159,12 @@ func (s *Store) createRetryAdmission(ctx context.Context, run *AutomationRun, gr
 			retry_launch_config_snapshot, retry_launch_config_version, retry_resolved_prompt,
 			retry_resolved_title, retry_resolved_trigger_timestamp, retry_continuation_snapshot,
 			automation_revision, trigger_revision, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		run.ID, run.AutomationID, run.TriggerID, run.TriggerType, run.TaskID, run.Status, run.DedupKey,
+		VALUES (
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		run.ID, run.AutomationID, run.ProtectedCreatorUserID, run.TriggerID, run.TriggerType, run.TaskID, run.Status, run.DedupKey,
 		run.TriggerDataJSON, run.ErrorMessage, run.SessionID, run.TurnID, run.ThreadAction, run.ThreadReason,
 		run.DisplayTitle, run.RetryGroupID, run.RetryParentRunID, run.AttemptNumber, run.RetryState,
 		run.RetryScheduledAt, run.RetryClaimedAt, run.RetryClaimExpiresAt, run.RetryClaimToken,

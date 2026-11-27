@@ -790,6 +790,8 @@ func initAutomationWiring(
 	automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
 	// Per-user workspace scoping for the automation HTTP/WS surface.
 	automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+	taskSvc.SetAutomationCredentialRunAccessChecker(automationComponents.Service.ProtectedAutomationRunAccessForTask)
+	taskSvc.SetAutomationCredentialRunUseChecker(automationComponents.Service.ProtectedAutomationRunUseAccessForTask)
 	// A UI filter is not an authorization boundary: reject a workflow owned
 	// by another workspace even when a request names it directly.
 	automationWorkflowLocator := &automationWorkflowLocatorAdapter{svc: taskSvc, workflows: workflowSvc}

@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -228,7 +229,16 @@ type Service struct {
 	// repoLookup validates repository_ids on create/update — every ID must
 	// resolve to a repository belonging to the automation's workspace. Nil
 	// = validation skipped (not yet wired at startup, or an isolated test).
-	repoLookup RepositoryLookup
+	repoLookup                    RepositoryLookup
+	credentialValidator           CredentialValidator
+	personalCredentialValidator   PersonalCredentialBindingValidator
+	workspaceOwnerLookup          func(context.Context, string) (string, error)
+	workspaceOwnerUpdatedAtLookup func(context.Context, string) (time.Time, error)
+	credentialCreatorNameLookup   func(context.Context, string) (string, error)
+	credentialRepositoryReader    CredentialRepositoryReader
+	credentialSecretStore         CredentialSecretStore
+	credentialOwnerContext        CredentialOwnerContext
+	credentialCreatorAccess       CredentialCreatorAccess
 
 	// taskOriginLookup resolves a task's workspace and whether it is a hidden
 	// automation run. It is used by the merged-PR subscriber and by cleanup so
@@ -664,16 +674,44 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 			return nil, err
 		}
 	}
-	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), a.ExecutorProfileID, a.WorkspaceID); err != nil {
+	a.CreatedByUserID = executoridentity.CreatorUserID(ctx)
+	credentialCtx, err := s.executorActorContext(ctx, a.CreatedByUserID, a.ExecutorProfileID, a.WorkspaceID)
+	if err != nil {
 		return nil, err
 	}
-	a.CreatedByUserID = executoridentity.CreatorUserID(ctx)
+	a.Triggers = make([]AutomationTrigger, 0, len(req.Triggers))
+	for _, trigger := range req.Triggers {
+		a.Triggers = append(a.Triggers, AutomationTrigger{Type: trigger.Type, Enabled: trigger.Enabled})
+	}
+	var credentialChoices []AutomationCredentialChoice
+	if len(req.PersonalCredentialBindings) > 0 {
+		if ownerInstallationID != "" {
+			return nil, ErrCredentialSettingsUnsupported
+		}
+		if err := validateCredentialChoiceSettings(a, a.Triggers); err != nil {
+			return nil, err
+		}
+		credentialChoices, err = s.validatePersonalBindings(credentialCtx, a, req.PersonalCredentialBindings)
+		if err != nil {
+			return nil, err
+		}
+		a.CredentialChoices = make([]CredentialChoiceProjection, 0, len(credentialChoices))
+		for _, choice := range credentialChoices {
+			a.CredentialChoices = append(a.CredentialChoices, CredentialChoiceProjection{
+				Kind: choice.Kind, ProfileID: choice.ProfileID, Key: choice.Key, State: choice.State,
+				SecretID: choice.SecretID, SecretName: choice.SecretName, SourceSecretID: choice.SourceSecretID,
+			})
+		}
+	}
+	if err := s.validateEnabledCredentials(credentialCtx, a, repositoryIDs); err != nil {
+		return nil, err
+	}
 	if ownerInstallationID != "" {
 		if _, err := s.store.CreateManagedSchedule(ctx, a, req.Triggers, operationID, payloadDigest); err != nil {
 			return nil, fmt.Errorf("create managed schedule: %w", err)
 		}
 	} else {
-		if err := s.store.CreateAutomation(ctx, a); err != nil {
+		if err := s.store.CreateAutomationWithCredentialChoices(ctx, a, credentialChoices); err != nil {
 			return nil, fmt.Errorf("create automation: %w", err)
 		}
 		for _, ts := range req.Triggers {
@@ -688,7 +726,7 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 		s.notifyPluginToolCatalogChanged()
 	}
 
-	return s.store.GetAutomation(ctx, a.ID)
+	return s.GetAutomation(ctx, a.ID)
 }
 
 // GetAutomation retrieves an automation by ID.
@@ -696,7 +734,11 @@ func (s *Service) GetAutomation(ctx context.Context, id string) (*Automation, er
 	if err := s.authorizeAutomation(ctx, id); err != nil {
 		return nil, err
 	}
-	return s.store.GetAutomation(ctx, id)
+	a, err := s.store.GetAutomation(ctx, id)
+	if err != nil || a == nil {
+		return a, err
+	}
+	return s.projectCredentialChoices(ctx, a)
 }
 
 // GetAutomationForDispatch reads the schedule for host-owned event delivery.
@@ -711,7 +753,16 @@ func (s *Service) ListAutomations(ctx context.Context, workspaceID string) ([]*A
 	if err := s.authorizeWs(ctx, workspaceID); err != nil {
 		return nil, err
 	}
-	return s.store.ListAutomations(ctx, workspaceID)
+	items, err := s.store.ListAutomations(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if _, err := s.projectCredentialChoices(ctx, item); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
 }
 
 // UpdateAutomation applies partial updates.
@@ -746,7 +797,8 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if req.ExecutorProfileID != nil {
 		profileID = *req.ExecutorProfileID
 	}
-	if _, err := s.executorActorContext(ctx, existing.CreatedByUserID, profileID, existing.WorkspaceID); err != nil {
+	credentialCtx, err := s.executorActorContext(ctx, existing.CreatedByUserID, profileID, existing.WorkspaceID)
+	if err != nil {
 		return nil, err
 	}
 	taskMode := existing.TaskMode
@@ -872,7 +924,63 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	}
 	validated := *storeReq
 	validated.validatedTaskMode = &existing.TaskMode
+	validated.invalidateWorkspaceCredentialChoices = hasWorkspaceCredentialChoices(existing.CredentialChoices) &&
+		workspaceRepositorySelectionChanged(existing.Repositories, repositories)
 	storeReq = &validated
+	candidate := automationCandidate(existing, storeReq)
+	candidate.TaskMode = taskMode
+	candidate.ManagedDestination = managedDestination
+	candidate.ExecutorProfileID = profileID
+	candidate.Repositories = repositories
+	candidate.RepositoryIDs = repositoryIDs
+	candidate.RepositoryMode = repositoryMode
+	if req.WorkflowStepID == nil {
+		candidate.WorkflowStepID = existing.WorkflowStepID
+	}
+	hasCredentialChoices, err := s.hasCredentialChoices(ctx, existing.ID)
+	if err != nil {
+		return nil, err
+	}
+	if hasCredentialChoices && (automationExecutableUpdate(req) || (req.Enabled != nil && *req.Enabled)) {
+		if err := requireCredentialCreator(ctx, existing); err != nil {
+			return nil, err
+		}
+	}
+	if req.PersonalCredentialBindings != nil {
+		if err := requireCredentialCreator(ctx, existing); err != nil {
+			return nil, err
+		}
+		choices, err := s.validatePersonalBindings(credentialCtx, candidate, *req.PersonalCredentialBindings)
+		if err != nil {
+			return nil, err
+		}
+		clone := *storeReq
+		clone.validatedPersonalBindings = choices
+		storeReq = &clone
+		hasCredentialChoices = len(choices) > 0 || hasWorkspaceCredentialChoices(existing.CredentialChoices)
+		candidate.CredentialChoices = make([]CredentialChoiceProjection, 0, len(choices)+len(existing.CredentialChoices))
+		for _, choice := range existing.CredentialChoices {
+			if choice.Kind == CredentialChoiceWorkspace {
+				candidate.CredentialChoices = append(candidate.CredentialChoices, choice)
+			}
+		}
+		for _, choice := range choices {
+			candidate.CredentialChoices = append(candidate.CredentialChoices, CredentialChoiceProjection{
+				Kind: choice.Kind, ProfileID: choice.ProfileID, Key: choice.Key, State: choice.State,
+				SecretID: choice.SecretID, SecretName: choice.SecretName, SourceSecretID: choice.SourceSecretID,
+			})
+		}
+	}
+	if hasCredentialChoices {
+		if err := validateCredentialChoiceSettings(candidate, candidate.Triggers); err != nil {
+			return nil, err
+		}
+	}
+	if candidate.Enabled && (automationExecutableUpdate(req) || req.PersonalCredentialBindings != nil || (req.Enabled != nil && *req.Enabled)) {
+		if err := s.validateEnabledCredentials(credentialCtx, candidate, repositoryIDs); err != nil {
+			return nil, err
+		}
+	}
 	selectionChanged := req.PluginTools != nil || (req.TaskMode != nil && taskMode != existing.TaskMode)
 	notifySelectionChanged := func() {
 		if selectionChanged {
@@ -894,14 +1002,14 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		if err := s.CancelAutomationRetries(ctx, id); err != nil {
 			return nil, err
 		}
-		return saved, nil
+		return s.projectCredentialChoices(ctx, saved)
 	}
 	saved, err := s.store.updateAutomationReturning(ctx, id, storeReq)
 	if err != nil {
 		return nil, err
 	}
 	notifySelectionChanged()
-	return saved, nil
+	return s.projectCredentialChoices(ctx, saved)
 }
 
 // authorizeUpdatedReferences checks the fields of req that name something the
@@ -1307,6 +1415,9 @@ func (s *Service) StopRun(ctx context.Context, automationID, runID string) (*Aut
 	if observed == nil || observed.AutomationID != automationID {
 		return nil, ErrAutomationNotFound
 	}
+	if err := s.authorizeCredentialRunStop(ctx, observed); err != nil {
+		return nil, err
+	}
 	if observed.RetryGroupID != "" {
 		if _, err := s.store.RequestRetryLaunchStop(ctx, runID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -1323,6 +1434,9 @@ func (s *Service) StopRun(ctx context.Context, automationID, runID string) (*Aut
 	if run == nil || run.AutomationID != automationID {
 		return nil, ErrAutomationNotFound
 	}
+	if err := s.authorizeCredentialRunStop(ctx, run); err != nil {
+		return nil, err
+	}
 	boundRun, bindErr := s.retryRunWithOperationBinding(ctx, run)
 	if bindErr != nil {
 		return nil, bindErr
@@ -1334,7 +1448,7 @@ func (s *Service) StopRun(ctx context.Context, automationID, runID string) (*Aut
 		}
 		run.Status = RunStatusCancelled
 		run.RetryState = RetryStateCancelled
-		return run, nil
+		return s.projectCredentialRun(ctx, run), nil
 	}
 	if run.Status != RunStatusTriggered && run.Status != RunStatusTaskCreated {
 		return nil, ErrAutomationNotFound
@@ -1355,13 +1469,38 @@ func (s *Service) StopRun(ctx context.Context, automationID, runID string) (*Aut
 		if getErr == nil && stored != nil && stored.Status != RunStatusTriggered && stored.Status != RunStatusTaskCreated {
 			run.Status = stored.Status
 			run.ErrorMessage = stored.ErrorMessage
-			return run, nil
+			return s.projectCredentialRun(ctx, run), nil
 		}
 		return nil, err
 	}
 	run.Status = RunStatusFailed
 	run.ErrorMessage = "stopped by user"
-	return run, nil
+	return s.projectCredentialRun(ctx, run), nil
+}
+
+func (s *Service) authorizeCredentialRunStop(ctx context.Context, run *AutomationRun) error {
+	if run == nil || run.ProtectedCreatorUserID == "" {
+		return nil
+	}
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic || identity.UserID == run.ProtectedCreatorUserID {
+		return nil
+	}
+	a, err := s.store.GetAutomation(ctx, run.AutomationID)
+	if err != nil {
+		return err
+	}
+	if a == nil || s.workspaceOwnerLookup == nil {
+		return ErrAutomationNotFound
+	}
+	ownerID, err := s.workspaceOwnerLookup(ctx, a.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if ownerID == "" || identity.UserID != ownerID {
+		return ErrAutomationNotFound
+	}
+	return nil
 }
 
 // EnableAutomation sets enabled = true.
@@ -1371,7 +1510,30 @@ func (s *Service) EnableAutomation(ctx context.Context, id string) error {
 	}
 	unlock := s.automationRunLock(id)
 	defer unlock()
+	a, err := s.store.GetAutomation(ctx, id)
+	if err != nil {
+		return err
+	}
+	if a == nil {
+		return ErrAutomationNotFound
+	}
+	if hasChoices, err := s.requireCreatorForCredentialMutation(ctx, a); err != nil {
+		return err
+	} else if hasChoices {
+		if err := validateCredentialChoiceSettings(a, a.Triggers); err != nil {
+			return err
+		}
+	}
+	credentialCtx, err := s.executorActorContext(ctx, a.CreatedByUserID, a.ExecutorProfileID, a.WorkspaceID)
+	if err != nil {
+		return err
+	}
 	enabled := true
+	candidate := *a
+	candidate.Enabled = true
+	if err := s.validateEnabledCredentials(credentialCtx, &candidate, repositoryIDs(a.Repositories)); err != nil {
+		return err
+	}
 	return s.store.UpdateAutomation(ctx, id, &UpdateAutomationRequest{Enabled: &enabled})
 }
 
@@ -1486,12 +1648,28 @@ func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*Auto
 	if err != nil || a == nil {
 		return nil, ErrAutomationNotFound
 	}
+	if hasChoices, err := s.requireCreatorForCredentialMutation(ctx, a); err != nil {
+		return nil, err
+	} else if hasChoices {
+		if req.Type != TriggerTypeScheduled && req.Type != TriggerTypeManual {
+			return nil, ErrCredentialSettingsUnsupported
+		}
+	}
 	kinds := []TriggerType{req.Type}
 	for _, trigger := range a.Triggers {
 		kinds = append(kinds, trigger.Type)
 	}
 	if err := validateTriggerCombination(kinds); err != nil {
 		return nil, err
+	}
+	if a.Enabled && req.Enabled {
+		credentialCtx, err := s.executorActorContext(ctx, a.CreatedByUserID, a.ExecutorProfileID, a.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.validateEnabledCredentials(credentialCtx, a, repositoryIDs(a.Repositories)); err != nil {
+			return nil, err
+		}
 	}
 	t := &AutomationTrigger{
 		AutomationID: req.AutomationID,
@@ -1524,6 +1702,12 @@ func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigg
 	if existing == nil {
 		return fmt.Errorf("trigger not found: %s", id)
 	}
+	unlock := s.automationRunLock(existing.AutomationID)
+	defer unlock()
+	existing, err = s.store.GetTrigger(ctx, id)
+	if err != nil || existing == nil {
+		return fmt.Errorf("trigger not found: %s", id)
+	}
 	if req.Config != nil {
 		if err := validateTriggerConfig(existing.Type, *req.Config); err != nil {
 			return err
@@ -1532,6 +1716,9 @@ func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigg
 	a, err := s.store.GetAutomation(ctx, existing.AutomationID)
 	if err != nil || a == nil {
 		return ErrAutomationNotFound
+	}
+	if err := s.validateCredentialTriggerUpdate(ctx, a, existing, req); err != nil {
+		return err
 	}
 	config := existing.Config
 	enabled := existing.Enabled
@@ -1544,9 +1731,52 @@ func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigg
 	if err = s.validatePluginTrigger(ctx, a.WorkspaceID, existing.Type, config, enabled); err != nil {
 		return err
 	}
-	unlock := s.automationRunLock(existing.AutomationID)
-	defer unlock()
+	if a.Enabled && req.Enabled != nil && *req.Enabled {
+		credentialCtx, err := s.executorActorContext(ctx, a.CreatedByUserID, a.ExecutorProfileID, a.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		if err := s.validateEnabledCredentials(credentialCtx, a, repositoryIDs(a.Repositories)); err != nil {
+			return err
+		}
+	}
 	return s.store.UpdateTrigger(ctx, id, req)
+}
+
+func (s *Service) validateCredentialTriggerUpdate(
+	ctx context.Context,
+	a *Automation,
+	existing *AutomationTrigger,
+	req *UpdateTriggerRequest,
+) error {
+	hasChoices, err := s.requireCreatorForCredentialMutation(ctx, a)
+	if err != nil || !hasChoices {
+		return err
+	}
+	triggers := updatedAutomationTriggers(a.Triggers, existing, req)
+	return validateCredentialChoiceSettings(a, triggers)
+}
+
+func updatedAutomationTriggers(
+	triggers []AutomationTrigger,
+	existing *AutomationTrigger,
+	req *UpdateTriggerRequest,
+) []AutomationTrigger {
+	updated := append([]AutomationTrigger(nil), triggers...)
+	for index := range updated {
+		if updated[index].ID != existing.ID {
+			continue
+		}
+		updated[index].Type = existing.Type
+		updated[index].Config = existing.Config
+		if req.Config != nil {
+			updated[index].Config = *req.Config
+		}
+		if req.Enabled != nil {
+			updated[index].Enabled = *req.Enabled
+		}
+	}
+	return updated
 }
 
 // DeleteTrigger removes a trigger.
@@ -1563,6 +1793,23 @@ func (s *Service) DeleteTrigger(ctx context.Context, id string) error {
 	}
 	unlock := s.automationRunLock(t.AutomationID)
 	defer unlock()
+	a, err := s.store.GetAutomation(ctx, t.AutomationID)
+	if err != nil || a == nil {
+		return ErrAutomationNotFound
+	}
+	if hasChoices, err := s.requireCreatorForCredentialMutation(ctx, a); err != nil {
+		return err
+	} else if hasChoices {
+		remaining := make([]AutomationTrigger, 0, len(a.Triggers)-1)
+		for _, trigger := range a.Triggers {
+			if trigger.ID != id {
+				remaining = append(remaining, trigger)
+			}
+		}
+		if err := validateCredentialChoiceSettings(a, remaining); err != nil {
+			return err
+		}
+	}
 	if err := s.store.enqueueWebhookSecrets(ctx, "trigger_id", id); err != nil {
 		return err
 	}
@@ -1592,14 +1839,19 @@ func (s *Service) ListRuns(ctx context.Context, automationID string, limit int) 
 	if err := s.authorizeAutomation(ctx, automationID); err != nil {
 		return nil, err
 	}
-	return s.store.ListRuns(ctx, automationID, limit)
+	runs, err := s.store.ListRuns(ctx, automationID, limit)
+	return s.projectCredentialRuns(ctx, runs), err
 }
 
 func (s *Service) ListRunPage(ctx context.Context, automationID, cursor string, limit int) (*AutomationRunsPage, error) {
 	if err := s.authorizeAutomation(ctx, automationID); err != nil {
 		return nil, err
 	}
-	return s.store.ListRunPage(ctx, automationID, cursor, limit)
+	page, err := s.store.ListRunPage(ctx, automationID, cursor, limit)
+	if err == nil && page != nil {
+		page.Items = s.projectCredentialRuns(ctx, page.Items)
+	}
+	return page, err
 }
 
 // ListWorkspaceRuns returns recent runs across every automation in the
@@ -1610,7 +1862,16 @@ func (s *Service) ListWorkspaceRuns(ctx context.Context, workspaceID string, lim
 	if err := s.authorizeWs(ctx, workspaceID); err != nil {
 		return nil, err
 	}
-	return s.store.ListWorkspaceRuns(ctx, workspaceID, limit)
+	runs, err := s.store.ListWorkspaceRuns(ctx, workspaceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		if run != nil {
+			run.AutomationRun = *s.projectCredentialRun(ctx, &run.AutomationRun)
+		}
+	}
+	return runs, nil
 }
 
 // ListAutomationSummaries returns one health summary per automation in the
@@ -1620,7 +1881,13 @@ func (s *Service) ListAutomationSummaries(ctx context.Context, workspaceID strin
 	if err := s.authorizeWs(ctx, workspaceID); err != nil {
 		return nil, err
 	}
-	return s.store.ListAutomationSummaries(ctx, workspaceID)
+	summaries, err := s.store.ListAutomationSummaries(ctx, workspaceID)
+	if err == nil {
+		for _, summary := range summaries {
+			s.projectCredentialSummary(ctx, summary)
+		}
+	}
+	return summaries, err
 }
 
 // GetAutomationSummary returns one automation's summary, authorized on the
@@ -1631,7 +1898,26 @@ func (s *Service) GetAutomationSummary(ctx context.Context, automationID string)
 	if err := s.authorizeAutomation(ctx, automationID); err != nil {
 		return nil, err
 	}
-	return s.store.GetAutomationSummary(ctx, automationID)
+	summary, err := s.store.GetAutomationSummary(ctx, automationID)
+	if err == nil {
+		s.projectCredentialSummary(ctx, summary)
+	}
+	return summary, err
+}
+
+func (s *Service) projectCredentialRuns(ctx context.Context, runs []*AutomationRun) []*AutomationRun {
+	for index, run := range runs {
+		runs[index] = s.projectCredentialRun(ctx, run)
+	}
+	return runs
+}
+
+func (s *Service) projectCredentialSummary(ctx context.Context, summary *AutomationSummary) {
+	if summary == nil {
+		return
+	}
+	summary.LastRun = s.projectCredentialRun(ctx, summary.LastRun)
+	summary.PendingRetries.Items = s.projectCredentialRuns(ctx, summary.PendingRetries.Items)
 }
 
 // GetRun returns a single run by ID, or nil if not found.
@@ -1643,7 +1929,85 @@ func (s *Service) GetRun(ctx context.Context, id string) (*AutomationRun, error)
 	if err := s.authorizeAutomation(ctx, run.AutomationID); err != nil {
 		return nil, err
 	}
-	return run, nil
+	return s.projectCredentialRun(ctx, run), nil
+}
+
+// ProtectedAutomationRunAccessForTask is wired into task access checks. The
+// protected creator is stored on each run, so retries and retained history
+// keep the same runtime boundary after the automation changes.
+func (s *Service) ProtectedAutomationRunAccessForTask(ctx context.Context, taskID, userID string) (bool, bool, error) {
+	creatorID, err := s.store.ProtectedCreatorForTask(ctx, taskID)
+	if err != nil || creatorID == "" {
+		return false, false, err
+	}
+	return true, creatorID == userID, nil
+}
+
+func projectCredentialRunOutput(ctx context.Context, run *AutomationRun) *AutomationRun {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if run == nil || run.ProtectedCreatorUserID == "" || !ok || identity.Synthetic || identity.UserID == run.ProtectedCreatorUserID {
+		return run
+	}
+	copy := *run
+	copy.TaskID = ""
+	copy.ManagedConversationID = ""
+	copy.ManagedInputID = ""
+	copy.TriggerData = nil
+	copy.TriggerDataJSON = "{}"
+	copy.ErrorMessage = safeCredentialRunError(copy.ErrorMessage)
+	copy.SessionID = ""
+	copy.TurnID = ""
+	copy.ThreadAction = ""
+	copy.ThreadReason = ""
+	copy.DisplayTitle = ""
+	copy.Summary = ""
+	copy.RepositoryReason = ""
+	copy.DedupKey = ""
+	copy.RetryResolvedPrompt = ""
+	copy.RetryResolvedTitle = ""
+	return &copy
+}
+
+func (s *Service) projectCredentialRun(ctx context.Context, run *AutomationRun) *AutomationRun {
+	projected := projectCredentialRunOutput(ctx, run)
+	if projected == nil {
+		return nil
+	}
+	copy := *projected
+	copy.CanStop = s.canStopCredentialRun(ctx, run)
+	return &copy
+}
+
+func (s *Service) canStopCredentialRun(ctx context.Context, run *AutomationRun) bool {
+	if run == nil || run.ProtectedCreatorUserID == "" {
+		return true
+	}
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok {
+		return false
+	}
+	if identity.Synthetic || identity.UserID == run.ProtectedCreatorUserID {
+		return true
+	}
+	if s.workspaceOwnerLookup == nil {
+		return false
+	}
+	a, err := s.store.GetAutomation(ctx, run.AutomationID)
+	if err != nil || a == nil {
+		return false
+	}
+	ownerID, err := s.workspaceOwnerLookup(ctx, a.WorkspaceID)
+	return err == nil && ownerID != "" && identity.UserID == ownerID
+}
+
+func safeCredentialRunError(message string) string {
+	if strings.HasPrefix(message, ErrCredentialsUnavailable.Error()+": ") {
+		return message
+	}
+	if message == "" {
+		return ""
+	}
+	return "Automation run failed."
 }
 
 type retryRunLockContextKey struct{}
@@ -1822,6 +2186,9 @@ func (s *Service) DeleteRun(ctx context.Context, runID string) error {
 	// remembering to check is one new caller away from not being checked.
 	if err := s.authorizeAutomation(ctx, run.AutomationID); err != nil {
 		return err
+	}
+	if !credentialRunOwnedByCaller(ctx, run) {
+		return taskservice.ErrForbidden
 	}
 	unlock := s.automationRunLock(run.AutomationID)
 	defer unlock()
@@ -2136,6 +2503,7 @@ func (s *Service) fireTriggerWithMatchedTriggers(
 	dedup DedupBinding,
 	matchedTriggerIDs []string,
 ) (FireResult, error) {
+	ctx = withAutomationRunInitiator(ctx)
 	// Admission decisions live in one place so every caller — scheduler,
 	// webhook, and the manual Run button — gets the same answer about whether a
 	// fire actually happened.
@@ -2152,10 +2520,25 @@ func (s *Service) fireTriggerWithMatchedTriggers(
 	if !a.Enabled {
 		return FireResult{Skipped: true, Reason: "automation is disabled"}, nil
 	}
-	var executorErr error
-	ctx, executorErr = s.executorActorContext(ctx, a.CreatedByUserID, a.ExecutorProfileID, a.WorkspaceID)
-	if executorErr != nil {
-		return FireResult{}, executorErr
+	if hasChoices, err := s.store.HasCredentialChoices(ctx, a.ID); err != nil {
+		return FireResult{}, err
+	} else if hasChoices {
+		if err := requireCredentialCreator(ctx, a); err != nil && triggerType == TriggerTypeManual {
+			return FireResult{}, err
+		}
+		if err := validateCredentialChoiceSettings(a, a.Triggers); err != nil {
+			return FireResult{}, err
+		}
+		if triggerType != TriggerTypeManual && triggerType != TriggerTypeScheduled {
+			return FireResult{}, ErrCredentialSettingsUnsupported
+		}
+	}
+	if _, interactive := authn.IdentityFromContext(ctx); interactive {
+		var executorErr error
+		ctx, executorErr = s.executorActorContext(ctx, a.CreatedByUserID, a.ExecutorProfileID, a.WorkspaceID)
+		if executorErr != nil {
+			return FireResult{}, executorErr
+		}
 	}
 	now := time.Now().UTC()
 	// Serialize deduplication, the concurrency admission check, and the run
@@ -2290,6 +2673,11 @@ func (s *Service) admitTriggerLocked(
 		DisplayTitle:  RenderRunDisplayTitleAt(a, triggerType, triggerData, resolvedAt),
 		AttemptNumber: 1,
 		RetryState:    RetryStateNone,
+	}
+	if hasChoices, err := s.store.HasCredentialChoices(ctx, a.ID); err != nil {
+		return nil, "", false, err
+	} else if hasChoices {
+		run.ProtectedCreatorUserID = a.CreatedByUserID
 	}
 	policy, policyErr := NormalizeRetryPolicy(a.RetryPolicy)
 	if policyErr != nil {
@@ -2582,14 +2970,34 @@ func (s *Service) ListRetryHistory(ctx context.Context, automationID, cursor str
 	if err := s.authorizeAutomation(ctx, automationID); err != nil {
 		return nil, err
 	}
-	return s.store.ListRetryHistory(ctx, automationID, cursor, limit)
+	page, err := s.store.ListRetryHistory(ctx, automationID, cursor, limit)
+	s.projectCredentialRetryHistory(ctx, page)
+	return page, err
 }
 
 func (s *Service) ListWorkspaceRetryHistory(ctx context.Context, workspaceID, cursor string, limit int) (*RetryHistoryPage, error) {
 	if err := s.authorizeWs(ctx, workspaceID); err != nil {
 		return nil, err
 	}
-	return s.store.ListWorkspaceRetryHistory(ctx, workspaceID, cursor, limit)
+	page, err := s.store.ListWorkspaceRetryHistory(ctx, workspaceID, cursor, limit)
+	s.projectCredentialRetryHistory(ctx, page)
+	return page, err
+}
+
+func (s *Service) projectCredentialRetryHistory(ctx context.Context, page *RetryHistoryPage) {
+	if page == nil {
+		return
+	}
+	for _, attempt := range page.Items {
+		if attempt != nil {
+			attempt.Attempts = s.projectCredentialRuns(ctx, attempt.Attempts)
+		}
+	}
+}
+
+func credentialRunOwnedByCaller(ctx context.Context, run *AutomationRun) bool {
+	identity, ok := authn.IdentityFromContext(ctx)
+	return run == nil || run.ProtectedCreatorUserID == "" || !ok || identity.Synthetic || identity.UserID == run.ProtectedCreatorUserID
 }
 
 // MarkRunFailedByTaskID transitions a still-pending run (task_created) into

@@ -26,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
 	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/org"
@@ -769,6 +770,9 @@ func startAgentInfrastructure(
 	// CheckEnvironmentAccess / CheckTaskEnvironmentAccess in a route guard.
 	wireLifecycleAccessCheckers(lifecycleMgr, services.Task)
 	wireExecutorAdmission(services.Auth, services.Task, lifecycleMgr)
+	// Automation credential checks use the same profile and repository readers
+	// as lifecycle environment construction.
+	lifecycleMgr.SetExecutorProfileReader(repos.Task)
 	if services.GitHub != nil {
 		services.GitHub.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
 	}
@@ -786,6 +790,49 @@ func startAgentInfrastructure(
 	}
 	if services.Automation != nil {
 		services.Automation.Service.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+		credentialValidator := lifecycleAutomationCredentialValidator{
+			manager: lifecycleMgr, service: services.Automation.Service,
+			prepareCreator: services.Task.PrepareAutomationCredentialActorContext,
+		}
+		services.Automation.Service.SetCredentialValidator(credentialValidator)
+		services.Automation.Service.SetPersonalCredentialBindingValidator(credentialValidator)
+		lifecycleMgr.SetAutomationCredentialBindingReader(lifecycleAutomationCredentialBindingReader{service: services.Automation.Service})
+		credentialSecretStore, _ := userSecretStore.(automation.CredentialSecretStore)
+		services.Automation.Service.SetWorkspaceCredentialGrantDependencies(
+			func(ctx context.Context, workspaceID string) (string, error) {
+				workspace, err := repos.Task.GetWorkspace(ctx, workspaceID)
+				if err != nil || workspace == nil {
+					return "", err
+				}
+				return workspace.OwnerID, nil
+			}, repos.Task, credentialSecretStore,
+			func(ctx context.Context, userID string) (context.Context, error) {
+				return services.Task.ExecutorActorContext(ctx, userID)
+			},
+			func(ctx context.Context, workspaceID, creatorID, profileID string) error {
+				return services.Task.PrepareAutomationCredentialActor(ctx, workspaceID, creatorID, profileID)
+			},
+		)
+		services.Automation.Service.SetWorkspaceCredentialOwnerRevisionLookup(func(ctx context.Context, workspaceID string) (time.Time, error) {
+			workspace, err := repos.Task.GetWorkspace(ctx, workspaceID)
+			if err != nil {
+				return time.Time{}, err
+			}
+			if workspace == nil {
+				return time.Time{}, automation.ErrCredentialChoiceUnavailable
+			}
+			return workspace.UpdatedAt, nil
+		})
+		services.Automation.Service.SetCredentialCreatorNameLookup(func(ctx context.Context, userID string) (string, error) {
+			if services.Auth == nil {
+				return "", nil
+			}
+			name, ok, err := services.Auth.UserDisplayName(ctx, userID)
+			if err != nil || !ok {
+				return "", err
+			}
+			return name, nil
+		})
 	}
 
 	// TODO(task-model-unification Phase 2, ADR 0004): wire agentruntime.New(lifecycleMgr)
@@ -795,7 +842,6 @@ func startAgentInfrastructure(
 	// Lets user shell terminals export the executor profile's env vars, so the
 	// terminal sees the same variables the agent subprocess and the repository
 	// setup script get.
-	lifecycleMgr.SetExecutorProfileReader(repos.Task)
 	lifecycleMgr.SetSessionSettingsSnapshotWriter(repos.Task)
 	if services.Plugins != nil {
 		lifecycleMgr.SetPluginExecutorProfileLoader(services.Task)

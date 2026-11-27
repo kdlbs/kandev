@@ -57,13 +57,15 @@ func assertImpossibleScheduleAddRejected(t *testing.T, svc *Service, cfg json.Ra
 	ctx := context.Background()
 	a, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{WorkspaceID: "calendar-add", Name: "Calendar report"})
 	require.NoError(t, err)
+	expected, err := svc.store.GetAutomation(ctx, a.ID)
+	require.NoError(t, err)
 	_, err = svc.AddTrigger(ctx, &AddTriggerRequest{
 		AutomationID: a.ID, Type: TriggerTypeScheduled, Config: cfg, Enabled: enabled,
 	})
 	require.Error(t, err, "an impossible schedule must not be added")
 	reloaded, err := svc.store.GetAutomation(ctx, a.ID)
 	require.NoError(t, err)
-	require.Equal(t, a, reloaded, "rejected addition must leave the stored automation unchanged")
+	require.Equal(t, expected, reloaded, "rejected addition must leave the stored automation unchanged")
 }
 
 func assertImpossibleScheduleUpdateRejected(t *testing.T, svc *Service, cfg json.RawMessage, enabled bool) {

@@ -37,6 +37,8 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerUpdate, wsUpdateTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerDelete, wsDeleteTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerTypes, wsTriggerTypes(svc))
+	dispatcher.RegisterFunc(ws.ActionAutomationCredentialGrant, wsGrantWorkspaceCredential(svc))
+	dispatcher.RegisterFunc(ws.ActionAutomationCredentialRevoke, wsRevokeWorkspaceCredential(svc))
 	dispatcher.RegisterFunc(ws.ActionAutomationPluginToolOptions, wsPluginToolOptions(svc))
 	dispatcher.RegisterFunc("automation.mcp_options", wsMCPOptions(svc))
 	dispatcher.RegisterFunc(ws.ActionAutomationWebhookRevealSecret, wsRevealWebhookSecret(svc, log))
@@ -108,13 +110,16 @@ func wsCreate(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.
 		if raw, present := payload["mcp_selection"]; present && raw == nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "mcp_selection cannot be null", nil)
 		}
+		if raw, present := payload["personal_credential_bindings"]; present && raw == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "personal_credential_bindings cannot be null", nil)
+		}
 		var req CreateAutomationRequest
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
 		}
 		a, err := svc.CreateAutomation(WithNativePluginToolIntent(ctx), &req)
 		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+			return automationMutationError(msg, err)
 		}
 		// Service.CreateAutomation ends with store.GetAutomation which returns
 		// (nil, nil) if the row vanished between insert and select — guard here
@@ -156,7 +161,7 @@ func wsUpdate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *w
 		}
 		a, err := svc.UpdateAutomation(WithNativePluginToolIntent(ctx), id, &req)
 		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+			return automationMutationError(msg, err)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, a)
 	}
@@ -203,7 +208,7 @@ func wsToggleEnabled(svc *Service, enable bool) func(ctx context.Context, msg *w
 			err = svc.DisableAutomation(ctx, id)
 		}
 		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+			return automationMutationError(msg, err)
 		}
 		a, _ := svc.GetAutomation(ctx, id)
 		return ws.NewResponse(msg.ID, msg.Action, a)
@@ -360,7 +365,7 @@ func wsAddTrigger(svc *Service, log *logger.Logger) func(ctx context.Context, ms
 		}
 		t, err := svc.AddTrigger(ctx, &req)
 		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+			return automationMutationError(msg, err)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, t)
 	}
@@ -378,10 +383,42 @@ func wsUpdateTrigger(svc *Service, log *logger.Logger) func(ctx context.Context,
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
 		}
 		if err := svc.UpdateTrigger(ctx, id, &req); err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+			return automationMutationError(msg, err)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"updated": true})
 	}
+}
+
+func automationMutationError(msg *ws.Message, err error) (*ws.Message, error) {
+	if errors.Is(err, ErrCredentialsUnavailable) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), CredentialValidationDetails(err))
+	}
+	if errors.Is(err, ErrCredentialStorageUnavailable) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, ErrCredentialStorageUnavailable.Error(), map[string]interface{}{
+			"credential_error_code": "automation_credential_storage_unavailable",
+		})
+	}
+	if errors.Is(err, ErrCredentialCreatorRequired) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, ErrCredentialCreatorRequired.Error(), nil)
+	}
+	if errors.Is(err, ErrWorkspaceCredentialGrantDenied) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, ErrWorkspaceCredentialGrantDenied.Error(), nil)
+	}
+	if errors.Is(err, ErrCredentialCreatorUnavailable) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, ErrCredentialCreatorUnavailable.Error(), nil)
+	}
+	if errors.Is(err, ErrCredentialSettingsConflict) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, ErrCredentialSettingsConflict.Error(), nil)
+	}
+	if errors.Is(err, ErrCredentialStorageUnavailable) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, ErrCredentialStorageUnavailable.Error(), map[string]interface{}{
+			"credential_error_code": "automation_credential_storage_unavailable",
+		})
+	}
+	if errors.Is(err, ErrCredentialSettingsUnsupported) || errors.Is(err, ErrCredentialChoiceUnavailable) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 }
 
 func wsDeleteTrigger(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

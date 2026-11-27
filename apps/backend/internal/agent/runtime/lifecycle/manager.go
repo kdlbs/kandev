@@ -314,7 +314,8 @@ type Manager struct {
 	// agentProfileReader resolves the full agent_profiles row (including the
 	// office-enrichment fields added in ADR 0005 Wave A) for the launch-prep
 	// SkillDeployer hook. Nil → skill deploy is skipped.
-	agentProfileReader AgentProfileReader
+	agentProfileReader                AgentProfileReader
+	automationCredentialBindingReader AutomationCredentialBindingReader
 
 	// reachabilityReader resolves an ssh executor's stored reachability
 	// record for the launch-time session.launch.warning producer. Nil →
@@ -1036,6 +1037,10 @@ func (m *Manager) SetSecretStore(store secrets.SecretStore) {
 // step is silently skipped.
 func (m *Manager) SetAgentProfileReader(reader AgentProfileReader) {
 	m.agentProfileReader = reader
+}
+
+func (m *Manager) SetAutomationCredentialBindingReader(reader AutomationCredentialBindingReader) {
+	m.automationCredentialBindingReader = reader
 }
 
 // SetSkillDeployer plugs in a concrete deployer that materialises per-profile

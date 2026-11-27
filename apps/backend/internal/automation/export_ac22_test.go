@@ -52,6 +52,9 @@ var automationFieldDispositions = map[string]fieldDisposition{
 	"MCPSelectionRevision":             {exported: false}, // Local concurrency token.
 	"PluginTools":                      {exported: false}, // approval authority is never portable
 	"PluginToolsJSON":                  {exported: false}, // persisted JSON representation of the approval
+	"CredentialChoices":                {exported: false}, // personal bindings and Workspace grants are local authorization state
+	"CanManageCredentialChoices":       {exported: false}, // viewer-specific authorization projection
+	"CanTriggerNow":                    {exported: false}, // viewer-specific launch capability
 	"AutomationRevision":               {exported: false}, // configuration revision
 	"ContinuationTaskID":               {exported: false}, // runtime pointer to the reused task
 	"PRContinuationSettings":           {exported: true, yamlKey: "follow_up_prompt, pr_merged_action, pr_closed_action, workflow.continuation_step"},

@@ -3,9 +3,35 @@ package automation
 import (
 	"context"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/db"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
+
+type automationRunInitiatorContextKey struct{}
+
+func withAutomationRunInitiator(ctx context.Context) context.Context {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic || identity.UserID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, automationRunInitiatorContextKey{}, identity.UserID)
+}
+
+func credentialMutationActor(ctx context.Context, creatorID string) error {
+	actorID, ok := ctx.Value(automationRunInitiatorContextKey{}).(string)
+	if !ok {
+		identity, found := authn.IdentityFromContext(ctx)
+		if !found || identity.Synthetic {
+			return nil
+		}
+		actorID = identity.UserID
+	}
+	if actorID != creatorID {
+		return ErrCredentialCreatorRequired
+	}
+	return nil
+}
 
 func (s *Store) migrateExecutorCreators() error {
 	migrate := db.NewRequiredMigrateLogger(s.db, nil)

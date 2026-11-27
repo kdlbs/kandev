@@ -192,6 +192,81 @@ type AutomationRepository struct {
 	BaseBranch   string `json:"base_branch" db:"base_branch"`
 }
 
+type CredentialChoiceKind string
+
+const (
+	CredentialChoicePersonal  CredentialChoiceKind = "personal"
+	CredentialChoiceWorkspace CredentialChoiceKind = "workspace"
+)
+
+type CredentialChoiceState string
+
+const (
+	CredentialChoiceSelected CredentialChoiceState = "selected"
+	CredentialChoiceApproval CredentialChoiceState = "approval_needed"
+	CredentialChoiceGranted  CredentialChoiceState = "granted"
+	CredentialChoiceRevoked  CredentialChoiceState = "revoked"
+	CredentialChoiceStale    CredentialChoiceState = "stale"
+)
+
+// AutomationCredentialChoice is the private persisted authority for one
+// automation field. Secret references and authority identities never leave
+// the automation service's public projections.
+type AutomationCredentialChoice struct {
+	AutomationID            string                `json:"-" db:"automation_id"`
+	Kind                    CredentialChoiceKind  `json:"kind" db:"kind"`
+	ProfileID               string                `json:"profile_id,omitempty" db:"profile_id"`
+	RepositoryID            string                `json:"repository_id,omitempty" db:"repository_id"`
+	Key                     string                `json:"key" db:"env_key"`
+	SecretID                string                `json:"-" db:"secret_id"`
+	SourceSecretID          string                `json:"-" db:"source_secret_id"`
+	SourceUpdatedAt         time.Time             `json:"-" db:"source_updated_at"`
+	WorkspaceOwnerUpdatedAt *time.Time            `json:"-" db:"workspace_owner_updated_at"`
+	CreatorUserID           string                `json:"-" db:"creator_user_id"`
+	GrantorUserID           string                `json:"-" db:"grantor_user_id"`
+	State                   CredentialChoiceState `json:"state" db:"state"`
+	Revision                int64                 `json:"-" db:"revision"`
+	SecretName              string                `json:"secret_name,omitempty" db:"secret_name"`
+	CreatedAt               time.Time             `json:"-" db:"created_at"`
+	UpdatedAt               time.Time             `json:"-" db:"updated_at"`
+}
+
+type PersonalCredentialBindingInput struct {
+	ProfileID string `json:"profile_id"`
+	Key       string `json:"key"`
+	SecretID  string `json:"secret_id"`
+}
+
+type WorkspaceCredentialGrantRequest struct {
+	RepositoryID                    string    `json:"repository_id"`
+	Key                             string    `json:"key"`
+	ExpectedAutomationRevision      uint64    `json:"expected_automation_revision"`
+	ExpectedCredentialRevision      int64     `json:"expected_credential_revision"`
+	ExpectedBindingUpdatedAt        time.Time `json:"expected_binding_updated_at"`
+	ExpectedWorkspaceOwnerUpdatedAt time.Time `json:"expected_workspace_owner_updated_at"`
+}
+
+// CredentialChoiceProjection is safe to share with workspace readers.
+type CredentialChoiceProjection struct {
+	Kind                    CredentialChoiceKind  `json:"kind" db:"kind"`
+	ProfileID               string                `json:"profile_id,omitempty" db:"profile_id"`
+	RepositoryID            string                `json:"repository_id,omitempty" db:"repository_id"`
+	Key                     string                `json:"key" db:"env_key"`
+	State                   CredentialChoiceState `json:"state" db:"state"`
+	SecretName              string                `json:"secret_name,omitempty" db:"secret_name"`
+	SecretID                string                `json:"secret_id,omitempty" db:"secret_id"`
+	SourceSecretID          string                `json:"-" db:"source_secret_id"`
+	CreatorUserID           string                `json:"-" db:"creator_user_id"`
+	GrantorUserID           string                `json:"-" db:"grantor_user_id"`
+	SourceUpdatedAt         time.Time             `json:"-" db:"source_updated_at"`
+	Revision                int64                 `json:"revision,omitempty" db:"revision"`
+	CanGrant                bool                  `json:"can_grant,omitempty" db:"-"`
+	CanRevoke               bool                  `json:"can_revoke,omitempty" db:"-"`
+	CreatorName             string                `json:"creator_name,omitempty" db:"-"`
+	BindingUpdatedAt        time.Time             `json:"binding_updated_at,omitempty" db:"-"`
+	WorkspaceOwnerUpdatedAt time.Time             `json:"workspace_owner_updated_at,omitempty" db:"-"`
+}
+
 // ThreadAction describes how a dispatched run reached its task/session.
 type ThreadAction string
 
@@ -235,12 +310,15 @@ type Automation struct {
 	// PluginTools is the exact plugin tool approval saved by the native
 	// automation editor. It is omitted from portable exports and never copied
 	// to tasks, runs, or retry snapshots.
-	PluginTools          []plugintools.Selection `json:"plugin_tools" db:"-"`
-	MCPSelection         *MCPSelection           `json:"mcp_selection" db:"-"`
-	MCPSelectionJSON     string                  `json:"-" db:"mcp_selection"`
-	MCPSelectionRevision int64                   `json:"mcp_selection_revision" db:"mcp_selection_revision"`
-	PluginToolsJSON      string                  `json:"-" db:"plugin_tools"`
-	AutomationRevision   int64                   `json:"-" db:"automation_revision"`
+	PluginTools                []plugintools.Selection      `json:"plugin_tools" db:"-"`
+	CredentialChoices          []CredentialChoiceProjection `json:"credential_choices,omitempty" db:"-"`
+	CanManageCredentialChoices bool                         `json:"can_manage_credential_choices" db:"-"`
+	CanTriggerNow              bool                         `json:"can_trigger_now" db:"-"`
+	MCPSelection               *MCPSelection                `json:"mcp_selection" db:"-"`
+	MCPSelectionJSON           string                       `json:"-" db:"mcp_selection"`
+	MCPSelectionRevision       int64                        `json:"mcp_selection_revision" db:"mcp_selection_revision"`
+	PluginToolsJSON            string                       `json:"-" db:"plugin_tools"`
+	AutomationRevision         int64                        `json:"-" db:"automation_revision"`
 	// ContinuationTaskID is runtime state. It is intentionally omitted from
 	// the public automation JSON because the saved task is not portable
 	// configuration and may be deleted or replaced by the server.
@@ -294,6 +372,8 @@ type AutomationTrigger struct {
 type AutomationRun struct {
 	ID                               string                `json:"id" db:"id"`
 	AutomationID                     string                `json:"automation_id" db:"automation_id"`
+	ProtectedCreatorUserID           string                `json:"-" db:"protected_creator_user_id"`
+	CanStop                          bool                  `json:"can_stop" db:"-"`
 	TriggerID                        string                `json:"trigger_id" db:"trigger_id"`
 	TriggerType                      TriggerType           `json:"trigger_type" db:"trigger_type"`
 	TaskID                           string                `json:"task_id,omitempty" db:"task_id"`
@@ -631,28 +711,29 @@ type TaskOriginLookup interface {
 
 // CreateAutomationRequest is the payload for creating an automation.
 type CreateAutomationRequest struct {
-	MCPSelection       *MCPSelection                   `json:"mcp_selection,omitempty"`
-	ID                 string                          `json:"id,omitempty"`
-	WorkspaceID        string                          `json:"workspace_id"`
-	Name               string                          `json:"name"`
-	Description        string                          `json:"description"`
-	WorkflowID         string                          `json:"workflow_id"`
-	WorkflowStepID     string                          `json:"workflow_step_id"`
-	AgentProfileID     string                          `json:"agent_profile_id"`
-	ExecutorProfileID  string                          `json:"executor_profile_id"`
-	Repositories       []AutomationRepository          `json:"repositories,omitempty"`
-	RepositoryIDs      []string                        `json:"repository_ids"`
-	Prompt             string                          `json:"prompt"`
-	TaskTitleTemplate  string                          `json:"task_title_template"`
-	MaxConcurrentRuns  int                             `json:"max_concurrent_runs"`
-	ContinuationPolicy ContinuationPolicy              `json:"continuation_policy,omitempty"`
-	TaskMode           TaskMode                        `json:"task_mode,omitempty"`
-	ManagedDestination *ManagedConversationDestination `json:"managed_destination,omitempty"`
-	RepositoryMode     RepositoryMode                  `json:"repository_mode,omitempty"`
-	RetryPolicy        RetryPolicy                     `json:"retry_policy"`
-	PluginTools        []plugintools.Selection         `json:"plugin_tools,omitempty"`
-	Triggers           []CreateTriggerSpec             `json:"triggers"`
-	Enabled            *bool                           `json:"enabled,omitempty"`
+	MCPSelection               *MCPSelection                    `json:"mcp_selection,omitempty"`
+	PersonalCredentialBindings []PersonalCredentialBindingInput `json:"personal_credential_bindings,omitempty"`
+	ID                         string                           `json:"id,omitempty"`
+	WorkspaceID                string                           `json:"workspace_id"`
+	Name                       string                           `json:"name"`
+	Description                string                           `json:"description"`
+	WorkflowID                 string                           `json:"workflow_id"`
+	WorkflowStepID             string                           `json:"workflow_step_id"`
+	AgentProfileID             string                           `json:"agent_profile_id"`
+	ExecutorProfileID          string                           `json:"executor_profile_id"`
+	Repositories               []AutomationRepository           `json:"repositories,omitempty"`
+	RepositoryIDs              []string                         `json:"repository_ids"`
+	Prompt                     string                           `json:"prompt"`
+	TaskTitleTemplate          string                           `json:"task_title_template"`
+	MaxConcurrentRuns          int                              `json:"max_concurrent_runs"`
+	ContinuationPolicy         ContinuationPolicy               `json:"continuation_policy,omitempty"`
+	TaskMode                   TaskMode                         `json:"task_mode,omitempty"`
+	ManagedDestination         *ManagedConversationDestination  `json:"managed_destination,omitempty"`
+	RepositoryMode             RepositoryMode                   `json:"repository_mode,omitempty"`
+	RetryPolicy                RetryPolicy                      `json:"retry_policy"`
+	PluginTools                []plugintools.Selection          `json:"plugin_tools,omitempty"`
+	Triggers                   []CreateTriggerSpec              `json:"triggers"`
+	Enabled                    *bool                            `json:"enabled,omitempty"`
 
 	// PRContinuationSettings holds the reuse_per_pr options.
 	PRContinuationSettings
@@ -667,7 +748,9 @@ type CreateTriggerSpec struct {
 
 // UpdateAutomationRequest is the payload for updating an automation.
 type UpdateAutomationRequest struct {
-	validatedTaskMode *TaskMode
+	validatedTaskMode                    *TaskMode
+	validatedPersonalBindings            []AutomationCredentialChoice
+	invalidateWorkspaceCredentialChoices bool
 
 	MCPSelection                 *MCPSelection `json:"mcp_selection,omitempty"`
 	ExpectedMCPSelectionRevision *int64        `json:"expected_mcp_selection_revision,omitempty"`
@@ -700,7 +783,8 @@ type UpdateAutomationRequest struct {
 	// PluginTools has explicit presence: nil preserves the stored selection,
 	// an empty slice clears it, and a non-empty list replaces it. Only a
 	// native configuration save may change it.
-	PluginTools *[]plugintools.Selection `json:"plugin_tools,omitempty"`
+	PluginTools                *[]plugintools.Selection          `json:"plugin_tools,omitempty"`
+	PersonalCredentialBindings *[]PersonalCredentialBindingInput `json:"personal_credential_bindings,omitempty"`
 }
 
 // AddTriggerRequest adds a trigger to an existing automation.

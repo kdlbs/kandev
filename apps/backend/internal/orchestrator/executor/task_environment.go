@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	"github.com/kandev/kandev/internal/secrets"
@@ -13,11 +14,13 @@ import (
 )
 
 type environmentSource struct {
-	key         string
-	literal     string
-	secretID    string
-	origin      string
-	workspaceID string
+	key              string
+	literal          string
+	secretID         string
+	origin           string
+	workspaceID      string
+	repositoryID     string
+	bindingUpdatedAt time.Time
 }
 
 // Keep the historical executor error names as aliases while the lifecycle and
@@ -61,6 +64,7 @@ func (e *Executor) taskEnvironmentSources(
 		for _, binding := range info.Repository.SecretBindings {
 			sources = append(sources, environmentSource{
 				key: binding.Key, secretID: binding.SecretID, origin: origin, workspaceID: workspaceID,
+				repositoryID: info.Repository.ID, bindingUpdatedAt: binding.UpdatedAt,
 			})
 		}
 	}
@@ -89,7 +93,8 @@ func (e *Executor) resolveLaunchEnvironment(
 	for _, source := range sources {
 		req.EnvironmentDefinitions = append(req.EnvironmentDefinitions, runtimeenv.Definition{
 			Key: source.key, Literal: source.literal, SecretID: source.secretID,
-			Origin: source.origin, WorkspaceID: source.workspaceID,
+			Origin: source.origin, WorkspaceID: source.workspaceID, RepositoryID: source.repositoryID,
+			BindingUpdatedAt: source.bindingUpdatedAt,
 		})
 	}
 	// This shape-only preflight keeps repository/repository and profile/repository

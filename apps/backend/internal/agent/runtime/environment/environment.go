@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/gitconfigenv"
 )
@@ -18,11 +19,13 @@ import (
 // Definition describes one environment value without including its plaintext
 // secret value in the definition itself.
 type Definition struct {
-	Key         string
-	Literal     string
-	SecretID    string
-	Origin      string
-	WorkspaceID string
+	Key              string
+	Literal          string
+	SecretID         string
+	Origin           string
+	WorkspaceID      string
+	RepositoryID     string
+	BindingUpdatedAt time.Time
 }
 
 // ConflictError identifies an ambiguous environment key without including

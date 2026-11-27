@@ -15,6 +15,7 @@ import {
   type FormState,
   type CreatedWebhookDetails,
   canonicalPluginTools,
+  personalBindingsForUpdate,
   mcpSelectionForUpdate,
   resolveRepositoryIdsForMode,
   buildCreatePayload,
@@ -25,6 +26,12 @@ import {
 } from "./automation-payload";
 
 import type { RepositorySelection } from "./automation-repository-selection";
+import {
+  automationCredentialErrorSummary,
+  isAutomationCredentialStorageError,
+  parseAutomationCredentialError,
+  type AutomationCredentialError,
+} from "./automation-credential-error";
 
 export type SaveHandlerOpts = {
   isNew: boolean;
@@ -44,12 +51,13 @@ export type SaveHandlerOpts = {
   // a webhook automation, then the user is redirected to the listings page.
   // Null when no webhook trigger was configured on the new automation.
   setCreatedWebhook: React.Dispatch<React.SetStateAction<CreatedWebhookDetails | null>>;
-  onSaved: (form: FormState, triggers: AutomationTrigger[]) => void;
+  onSaved: (form: FormState, triggers: AutomationTrigger[], automation?: Automation) => void;
   // onPluginToolsSaveFailed refreshes the options catalog after a rejected
   // save so a changed policy is visible for explicit reselection without
   // discarding other dirty fields.
   onPluginToolsSaveFailed: () => void;
   onMCPSelectionSaveFailed?: () => void;
+  onCredentialValidationFailed?: (error: AutomationCredentialError | null) => void;
   triggerActions: ReturnType<typeof useAutomationTriggerDrafts>;
   router: ReturnType<typeof useRouter>;
 };
@@ -82,6 +90,28 @@ function reconcilePromotedRepositories(
   };
 }
 
+function reportSaveFailure(error: unknown, opts: SaveHandlerOpts, pluginToolsSubmitted: boolean) {
+  if (pluginToolsSubmitted) opts.onPluginToolsSaveFailed();
+  const credentialError = parseAutomationCredentialError(error);
+  if (credentialError) {
+    opts.onCredentialValidationFailed?.(credentialError);
+    toast.error(t("automations:credentialSaveBlocked"), {
+      description: automationCredentialErrorSummary(credentialError, t),
+    });
+    return;
+  }
+  if (isAutomationCredentialStorageError(error)) {
+    opts.onCredentialValidationFailed?.(null);
+    toast.error(t("automations:credentialStorageUnavailable"));
+    return;
+  }
+  opts.onCredentialValidationFailed?.(null);
+  // The interpolated value is an API/network diagnostic and stays English
+  // by design — see docs/i18n.md ("interpolated value" limit).
+  const message = error instanceof Error ? error.message : String(error);
+  toast.error(t("automations:failedToSaveAutomation", { error: message }));
+}
+
 /**
  * Save the automation and reconcile server revisions without overwriting edits made during the
  * request.
@@ -91,7 +121,6 @@ export function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
     opts;
   const { setSaving, setCurrentId, setForm, setCreatedWebhook, triggerActions, router, onSaved } =
     opts;
-  const { onPluginToolsSaveFailed } = opts;
   return async () => {
     const pluginToolsChanged =
       JSON.stringify(canonicalPluginTools(form.pluginTools)) !==
@@ -131,7 +160,7 @@ export function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           triggerActions.loadTriggers(savedTriggers);
           triggerActions.clearPending();
           setForm((prev) => reconcileSavedMCPSelection(prev, form, a));
-          onSaved(withSavedMCPSelection(formWithPromotedSelections, a), savedTriggers);
+          onSaved(withSavedMCPSelection(formWithPromotedSelections, a), savedTriggers, a);
           setCurrentId(a.id);
           setCreatedWebhook({ url: buildWebhookUrl(a.id), secret: a.webhook_secret });
         } else {
@@ -141,13 +170,12 @@ export function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           );
         }
       } else if (currentId) {
-        const request = buildUpdatePayload(
-          form,
-          repositories,
-          pluginToolsChanged ? form.pluginTools : undefined,
-          mcpSelectionForUpdate(form, savedForm),
-          form.taskMode !== savedForm.taskMode,
-        );
+        const request = buildUpdatePayload(form, repositories, {
+          pluginTools: pluginToolsChanged ? form.pluginTools : undefined,
+          mcpSelection: mcpSelectionForUpdate(form, savedForm),
+          modeChanged: form.taskMode !== savedForm.taskMode,
+          personalCredentialBindings: personalBindingsForUpdate(form, savedForm),
+        });
         const saved = await update(currentId, request).catch((error) => {
           if (request.expected_mcp_selection_revision !== undefined)
             opts.onMCPSelectionSaveFailed?.();
@@ -162,19 +190,13 @@ export function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           ),
         );
         // Automation settings are saved independently of trigger drafts.
-        onSaved(persistedForm, triggerActions.baselineTriggers);
+        onSaved(persistedForm, triggerActions.baselineTriggers, saved);
 
         const persistedTriggers = await triggerActions.persistDrafts();
-        onSaved(persistedForm, persistedTriggers);
+        onSaved(persistedForm, persistedTriggers, saved);
       }
     } catch (err) {
-      if (pluginToolsSubmitted) {
-        onPluginToolsSaveFailed();
-      }
-      // The interpolated value is an API/network diagnostic and stays English
-      // by design — see docs/i18n.md ("interpolated value" limit).
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(t("automations:failedToSaveAutomation", { error: msg }));
+      reportSaveFailure(err, opts, pluginToolsSubmitted);
       throw err;
     } finally {
       setSaving(false);

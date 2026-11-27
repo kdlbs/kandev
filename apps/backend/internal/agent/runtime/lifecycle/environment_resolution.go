@@ -43,6 +43,11 @@ func (m *Manager) resolveStrictEnvironment(
 	appendStandardDefinitions(&definitions, executionID, req)
 	appendAgentRuntimeDefaults(&definitions, agentConfig)
 	appendRequiredCredentialDefinitions(ctx, &definitions, m.credsMgr, agentConfig)
+	credentialDefinitions, credentialErr := m.applyAutomationRunCredentialBindings(ctx, req, definitions)
+	if credentialErr != nil {
+		return nil, fmt.Errorf("resolve automation credential choice: %w", credentialErr)
+	}
+	definitions = credentialDefinitions
 	if req.managedGoCachePath != "" {
 		definitions = append(definitions, runtimeenv.Definition{
 			Key: "GOCACHE", Literal: req.managedGoCachePath, Origin: runtimeenv.OriginManagedRuntime,
@@ -294,6 +299,7 @@ func (m *Manager) repositoryEnvironmentDefinitions(ctx context.Context, taskID, 
 			}
 			definitions = append(definitions, runtimeenv.Definition{
 				Key: binding.Key, SecretID: binding.SecretID, Origin: origin, WorkspaceID: workspaceID,
+				RepositoryID: repository.ID, BindingUpdatedAt: binding.UpdatedAt,
 			})
 		}
 	}

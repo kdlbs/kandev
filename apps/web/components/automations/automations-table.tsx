@@ -81,7 +81,8 @@ function RowActions({
           <Button
             variant="ghost"
             size="icon-sm"
-            className="cursor-pointer"
+            className="max-md:h-11 max-md:min-h-11 max-md:min-w-11 [@media(any-pointer:coarse)]:h-11 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 cursor-pointer"
+            aria-label={t("automations:triggerManually")}
             onClick={() => onTrigger(id)}
           >
             <IconPlayerPlay className="h-3.5 w-3.5" />
@@ -94,7 +95,7 @@ function RowActions({
           <Button
             variant="ghost"
             size="icon-sm"
-            className="cursor-pointer"
+            className="max-md:h-11 max-md:min-h-11 max-md:min-w-11 [@media(any-pointer:coarse)]:h-11 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 cursor-pointer"
             data-testid={`automation-delete-button-${id}`}
             aria-label={t("automations:delete")}
             onClick={() => onDelete(id)}

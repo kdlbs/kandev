@@ -16,6 +16,7 @@ const ACTIVITY = "automation-activity";
 const TRANSCRIPT = "run-transcript";
 const SESSION_ATTR = "data-session-id";
 const RUN_NOW = "automation-run-now";
+const STOP_RUN = "automation-stop-run";
 const NEXT_RUN = "automation-next-run";
 const DETAIL_TOGGLE = "run-detail-toggle";
 const ENABLE_SCHEDULE = "enable-schedule-action";
@@ -96,6 +97,7 @@ const AUTOMATION: Automation = {
   executor_profile_id: "",
   repository_id: "",
   max_concurrent_runs: 1,
+  can_trigger_now: true,
   triggers: [
     {
       id: "trigger-1",
@@ -118,6 +120,7 @@ function run(overrides: Partial<AutomationRun> = {}): AutomationRun {
     task_id: "task-1",
     session_id: "session-1",
     status: "succeeded",
+    can_stop: true,
     dedup_key: "",
     trigger_data: {},
     error_message: "",
@@ -388,7 +391,7 @@ describe("AutomationDetailPage run selection", () => {
 
     render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
 
-    const stop = await screen.findByTestId("automation-stop-run");
+    const stop = await screen.findByTestId(STOP_RUN);
     fireEvent.click(stop);
 
     await waitFor(() =>
@@ -454,10 +457,60 @@ describe("AutomationDetailPage run selection", () => {
     await waitFor(() => expect(mocks.listAutomationRuns).toHaveBeenCalledTimes(2));
   });
 
-  it("keeps Run now inert until the automation it would fire has loaded", () => {
+  it("hides Run now until the automation it would fire has loaded", () => {
     render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
 
-    expect(screen.getByTestId(RUN_NOW).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByTestId(RUN_NOW)).toBeNull();
+  });
+});
+
+describe("AutomationDetailPage projected capabilities", () => {
+  it("hides Run now when the viewer lacks the projected trigger capability", async () => {
+    mocks.getAutomation.mockResolvedValue({ ...AUTOMATION, can_trigger_now: false });
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    await screen.findByTestId(TRANSCRIPT);
+
+    expect(screen.queryByTestId(RUN_NOW)).toBeNull();
+  });
+
+  it("hides Stop when the selected run denies the viewer that capability", async () => {
+    mocks.listAutomationRuns.mockResolvedValue([
+      run({ status: "triggered", can_stop: false } as unknown as Partial<AutomationRun>),
+    ]);
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    await screen.findByTestId(TRANSCRIPT);
+
+    expect(screen.queryByTestId(STOP_RUN)).toBeNull();
+  });
+
+  it("shows Stop when the selected run grants the viewer that capability", async () => {
+    mocks.listAutomationRuns.mockResolvedValue([
+      run({ status: "triggered", can_stop: true } as unknown as Partial<AutomationRun>),
+    ]);
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    await screen.findByTestId(TRANSCRIPT);
+
+    expect(screen.getByTestId(STOP_RUN)).toBeTruthy();
+  });
+
+  it("lets the workspace owner stop a redacted run without opening its transcript", async () => {
+    mocks.listAutomationRuns.mockResolvedValue([
+      run({
+        status: "triggered",
+        task_id: "",
+        session_id: "",
+        can_stop: true,
+      } as unknown as Partial<AutomationRun>),
+    ]);
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    await screen.findByTestId("automation-run-read-restricted");
+
+    expect(screen.getByTestId(STOP_RUN)).toBeTruthy();
+    expect(screen.queryByTestId(TRANSCRIPT)).toBeNull();
   });
 });
 

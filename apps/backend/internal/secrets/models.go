@@ -26,6 +26,7 @@ type SecretListOptions struct {
 // Secret represents stored secret metadata (without the value).
 type Secret struct {
 	ID          string      `json:"id" db:"id"`
+	OwnerUserID string      `json:"-" db:"-"`
 	Name        string      `json:"name" db:"name"`
 	Scope       SecretScope `json:"scope" db:"scope"`
 	WorkspaceID string      `json:"workspace_id,omitempty" db:"workspace_id"`

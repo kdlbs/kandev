@@ -100,6 +100,28 @@ export type AutomationRepository = {
   base_branch: string;
 };
 
+export type AutomationCredentialChoice = {
+  kind: "personal" | "workspace";
+  profile_id?: string;
+  repository_id?: string;
+  key: string;
+  state: "selected" | "approval_needed" | "granted" | "revoked" | "stale";
+  secret_id?: string;
+  secret_name?: string;
+  revision?: number;
+  can_grant?: boolean;
+  can_revoke?: boolean;
+  creator_name?: string;
+  binding_updated_at?: string;
+  workspace_owner_updated_at?: string;
+};
+
+export type PersonalCredentialBindingInput = {
+  profile_id: string;
+  key: string;
+  secret_id: string;
+};
+
 /**
  * Exact plugin tool approval saved for one private automation. The policy
  * version binds it to the installed plugin configuration displayed at save
@@ -140,6 +162,7 @@ export type Automation = PRContinuationSettings & {
   mcp_selection?: AutomationMCPSelection | null;
   mcp_selection_revision?: number;
   id: string;
+  resource_revision?: number;
   workspace_id: string;
   name: string;
   description: string;
@@ -165,6 +188,9 @@ export type Automation = PRContinuationSettings & {
   created_at: string;
   updated_at: string;
   triggers: AutomationTrigger[];
+  credential_choices?: AutomationCredentialChoice[];
+  can_manage_credential_choices?: boolean;
+  can_trigger_now?: boolean;
   /**
    * This automation predates the withdrawal of execution modes and was stored
    * in the `task` mode — the default — so its firings used to put a card on
@@ -229,6 +255,7 @@ export type AutomationRun = {
   dedup_reason?: string;
   /** Why the webhook repository selector produced no binding. Empty when a repository was bound. */
   repository_reason?: string;
+  can_stop?: boolean;
 };
 
 export type AutomationRunsPage = {
@@ -395,6 +422,7 @@ export type CreateAutomationRequest = PRContinuationSettings & {
   repository_mode?: RepositoryMode;
   retry_policy?: RetryPolicy;
   plugin_tools?: AutomationPluginToolSelection[];
+  personal_credential_bindings?: PersonalCredentialBindingInput[];
   triggers?: Array<{
     type: TriggerType;
     config: Record<string, unknown>;
@@ -423,6 +451,7 @@ export type UpdateAutomationRequest = PRContinuationSettings & {
   repository_mode?: RepositoryMode;
   retry_policy?: RetryPolicy;
   plugin_tools?: AutomationPluginToolSelection[];
+  personal_credential_bindings?: PersonalCredentialBindingInput[];
 };
 
 // CreateAutomationResponse mirrors the backend's one-time webhook secret

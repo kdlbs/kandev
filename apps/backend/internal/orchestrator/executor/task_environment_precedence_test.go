@@ -4,10 +4,40 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestTaskEnvironmentSources_PreservesRepositoryBindingRevision(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	updatedAt := time.Date(2026, time.November, 27, 1, 2, 3, 0, time.UTC)
+	repo := &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", Name: "app",
+		SecretBindings: []models.RepositorySecretBinding{{
+			Key: "REPO_TOKEN", SecretID: "workspace-secret", UpdatedAt: updatedAt,
+		}},
+	}
+	info := &repoInfo{RepositoryID: repo.ID, Repository: repo}
+
+	req := &LaunchAgentRequest{
+		WorkspaceID: "workspace-1", ExecutorType: string(models.ExecutorTypeLocal), Env: map[string]string{},
+	}
+	if err := exec.resolveLaunchEnvironment(context.Background(), req, nil, []*repoInfo{info}); err != nil {
+		t.Fatalf("resolveLaunchEnvironment() error = %v", err)
+	}
+
+	for _, definition := range req.EnvironmentDefinitions {
+		if definition.Key == "REPO_TOKEN" {
+			if !definition.BindingUpdatedAt.Equal(updatedAt) {
+				t.Fatalf("binding revision = %v, want %v", definition.BindingUpdatedAt, updatedAt)
+			}
+			return
+		}
+	}
+	t.Fatalf("environment definitions = %#v, missing REPO_TOKEN", req.EnvironmentDefinitions)
+}
 
 // TestTaskEnvironmentSources_SkipsBlankProfileEnvVar pins AC-38b at the
 // orchestrator assembly site: a ProfileEnvVar blank on both Value and

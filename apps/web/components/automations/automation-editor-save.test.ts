@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useSaveHandler, type SaveHandlerOpts } from "./automation-editor-save";
 import type { FormState } from "./automation-payload";
 import type { AutomationMCPSelection } from "@/lib/types/automation";
+import { WebSocketRequestError } from "@/lib/ws/request-error";
 const TRIGGER_WRITE_FAILED = "trigger write failed";
 const mocks = vi.hoisted(() => ({ resolve: vi.fn() }));
 vi.mock("./automation-payload", async (original) => ({
@@ -52,6 +53,7 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
       history_mode: "attempts",
     },
     pluginTools: [],
+    personalCredentialBindings: [],
     ...overrides,
   };
 }
@@ -91,6 +93,7 @@ function saveOptions(): SaveHandlerOpts {
     onSaved: vi.fn(),
     onPluginToolsSaveFailed: vi.fn(),
     onMCPSelectionSaveFailed: vi.fn(),
+    onCredentialValidationFailed: vi.fn(),
     triggerActions: {
       baselineTriggers: [],
       pending: [],
@@ -162,6 +165,29 @@ function renderEditorSave(opts: SaveHandlerOpts) {
 }
 
 describe("partial automation saves", () => {
+  it("keeps the draft and reports a typed credential field error", async () => {
+    const opts = saveOptions();
+    opts.form = { ...opts.form, prompt: "edited prompt" };
+    const error = new WebSocketRequestError("credential unavailable", "VALIDATION_ERROR", {
+      credential_error_code: "automation_credentials_unavailable",
+      field: "SERVICE_KEY",
+      source: "agent profile",
+    });
+    vi.mocked(opts.update).mockRejectedValue(error);
+    const { result } = renderEditorSave(opts);
+
+    await act(async () => {
+      await expect(result.current.save()).rejects.toBe(error);
+    });
+
+    expect(result.current.form.prompt).toBe("edited prompt");
+    expect(opts.onCredentialValidationFailed).toHaveBeenCalledWith({
+      field: "SERVICE_KEY",
+      source: "agent profile",
+      target: "agentProfileId",
+    });
+  });
+
   it("resets to persisted MCP grants and uses their revision after a trigger save fails", async () => {
     const opts = saveOptions();
     vi.mocked(addTrigger).mockRejectedValue(new Error(TRIGGER_WRITE_FAILED));

@@ -6,6 +6,10 @@ import { formatRelativeTime } from "@/lib/utils";
 import type { AutomationRun } from "@/lib/types/automation";
 import { isOpenRun, statusDotClass, statusLabelKey } from "./run-status";
 import { t } from "@/lib/i18n";
+import {
+  automationCredentialErrorSummary,
+  parseAutomationCredentialRunError,
+} from "@/components/automations/automation-credential-error";
 
 /**
  * What the run actually said, in priority order. An error outranks the summary
@@ -13,7 +17,12 @@ import { t } from "@/lib/i18n";
  * before it went wrong, which reads as success if shown on its own.
  */
 export function outcomeText(run: AutomationRun): string {
-  if (run.error_message) return run.error_message;
+  if (run.error_message) {
+    const credentialError = parseAutomationCredentialRunError(run.error_message);
+    return credentialError
+      ? automationCredentialErrorSummary(credentialError, t)
+      : run.error_message;
+  }
   if (run.summary) return run.summary;
   if (isOpenRun(run.status)) return t("automations:runStillRunningNoReport");
   return t("automations:runNoReportRecorded");
