@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/executor"
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
+	p "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -159,6 +160,10 @@ func (r *KubernetesExecutor) attachKubernetesEnvironmentRequest(ctx context.Cont
 		}
 	}
 	for key, value := range record.Metadata {
+		// The shared environment owns Pod inventory, never a session's MCP authority.
+		if key == p.BuiltinBindingMetadataKey {
+			continue
+		}
 		req.Metadata[key] = value
 	}
 	req.Metadata[metadataKubernetesTaskOwned] = true

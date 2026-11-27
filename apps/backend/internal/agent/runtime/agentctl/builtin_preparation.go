@@ -12,6 +12,9 @@ import (
 	p "github.com/kandev/kandev/internal/mcp/profile"
 )
 
+// ErrBuiltinMCPBindingMismatch identifies a helper whose retained authority differs.
+var ErrBuiltinMCPBindingMismatch = errors.New("agentctl confirmed a different built-in MCP binding")
+
 // PrepareBuiltinMCP binds an unused workspace helper before its agent starts.
 // A successful HTTP response must confirm the exact prepared profile.
 func (c *Client) PrepareBuiltinMCP(ctx context.Context, profile p.Context) error {
@@ -68,7 +71,7 @@ func (c *Client) checkBuiltinMCP(ctx context.Context, method string, body io.Rea
 		return err
 	}
 	if actual != expected {
-		return errors.New("agentctl confirmed a different built-in MCP binding")
+		return ErrBuiltinMCPBindingMismatch
 	}
 	return nil
 }

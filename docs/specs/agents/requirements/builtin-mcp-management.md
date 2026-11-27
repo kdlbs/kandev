@@ -114,6 +114,9 @@ Other restricted surfaces retain this document's existing boundaries. The extens
   manifest to injection, registration, dispatch authorization, and generated
   guidance. Existing executions shall retain it through title/capability changes,
   context reset, same-process resume, reconnect, and backend adoption.
+  Recreating a helper for an active execution shall preserve that execution's
+  admitted authority. Shared task resources shall not transfer a binding
+  between sessions. A normal new process start shall resolve current policy.
 - **AC-AGENTS-BUILTIN-MCP-003.3:** Session detail shall distinguish desired
   selection, bound packages, and observed tools for each server. A save during
   launch shall not relabel an older launch as current. Failed starts and delayed

@@ -361,6 +361,12 @@ On resume, Kandev reloads environment definitions from the recorded executor pro
 
 Stop, including force-stop, terminates only the selected session’s agentctl instance and closes its local clients and forwards. Sibling sessions, the Pod, and the workspace remain available. Backend shutdown closes local connections and preserves the remote resources. Agent or main-container restart keeps the Pod volumes; Kandev performs a new nonce handshake and local port-forward. If a Pod disappears, managed or existing PVC storage can support a replacement Pod after identity checks; `emptyDir` cannot.
 
+Reconnecting to the same helper keeps that session's bound built-in MCP tool
+selection, even if the desired selection has changed. Active recovery preserves
+that binding when it recreates the helper. A normal new process start uses its
+prepared selection; sharing the task's Pod or PVC does not copy another session's
+binding. Invalid or mismatched bindings block recovery instead of granting new tools.
+
 A recoverable agent error also preserves the established Pod, workspace, and
 recovery credentials. Use **Resume** to continue that session. If its retained
 credentials or storage are missing, recovery fails rather than silently creating
