@@ -24,7 +24,7 @@ bin/agentctl[.exe]
 remote-helpers.json (Stable standard resources)
 ```
 
-Legacy complete resources without `remote-helpers.json` still require all four
+Legacy complete resources without `remote-helpers.json` still require all five
 cross-platform helper binaries under `bin/` during update/start validation.
 
 Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-desktop-runtime.sh`; do not commit runtime binaries. The tracked `.gitignore` files only keep the resource directory present for Tauri config validation.

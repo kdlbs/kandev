@@ -48,7 +48,7 @@ kandev/
 
 # Stable full CLI bundle
 kandev/
-└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-linux-arm64,agentctl-darwin-amd64,agentctl-darwin-arm64}
+└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-linux-arm64,agentctl-darwin-amd64,agentctl-darwin-arm64,agentctl-windows-amd64.exe}
 
 # Stable npm runtime package (@kdlbs/runtime-{platform})
 @kdlbs/runtime-{platform}/
@@ -57,7 +57,7 @@ kandev/
 
 # Nightly npm runtime package (@kdlbs/runtime-{platform})
 @kdlbs/runtime-{platform}/
-└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-linux-arm64,agentctl-darwin-amd64,agentctl-darwin-arm64}
+└── bin/{kandev,agentctl,agentctl-linux-amd64,agentctl-linux-arm64,agentctl-darwin-amd64,agentctl-darwin-arm64,agentctl-windows-amd64.exe}
 
 # Tauri desktop resource directory
 apps/desktop/src-tauri/resources/kandev/

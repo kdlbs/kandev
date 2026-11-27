@@ -165,6 +165,7 @@ jobs:
       tag: ${{ steps.compute.outputs.tag }}
       ref: ${{ steps.compute.outputs.ref }}
       compact_runtime_contract: ${{ steps.compute.outputs.compact_runtime_contract }}
+      windows_helper: ${{ steps.compute.outputs.windows_helper }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -319,6 +320,12 @@ jobs:
               COMPACT_RUNTIME_CONTRACT=true
             fi
             echo "compact_runtime_contract=$COMPACT_RUNTIME_CONTRACT" >> "$GITHUB_OUTPUT"
+            # A tag cut before the Windows helper shipped republishes its own four helpers.
+            WINDOWS_HELPER=false
+            if git show "${BACKFILL_REF}:scripts/release/remote-helper-assets.mjs" 2>/dev/null | grep -q 'agentctl-windows-amd64.exe'; then
+              WINDOWS_HELPER=true
+            fi
+            echo "windows_helper=$WINDOWS_HELPER" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -375,6 +382,7 @@ jobs:
             echo "ref=refs/tags/$TAG" >> "$GITHUB_OUTPUT"
           fi
           echo "compact_runtime_contract=true" >> "$GITHUB_OUTPUT"
+          echo "windows_helper=true" >> "$GITHUB_OUTPUT"
 
           # Sanity: tag must not already exist
           if git rev-parse "$TAG" >/dev/null 2>&1; then
@@ -1015,6 +1023,7 @@ jobs:
           KANDEV_VERSION: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag }}
           IS_STABLE: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' }}
           COMPACT_RUNTIME_CONTRACT: ${{ needs.nightly-prepare.result == 'success' && 'true' || needs.prepare.outputs.compact_runtime_contract }}
+          WINDOWS_HELPER: ${{ needs.nightly-prepare.result == 'success' && 'true' || needs.prepare.outputs.windows_helper }}
         run: |
           set -euo pipefail
           COMMIT="$(git rev-parse HEAD)"
@@ -1030,11 +1039,18 @@ jobs:
             GOOS=linux GOARCH=arm64 CGO_ENABLED=0 CC= go build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$output_dir/agentctl-linux-arm64" ./cmd/agentctl
             GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 CC= go build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$output_dir/agentctl-darwin-amd64" ./cmd/agentctl
             GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 CC= go build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$output_dir/agentctl-darwin-arm64" ./cmd/agentctl
+            if [ "$WINDOWS_HELPER" = "true" ]; then
+              GOOS=windows GOARCH=amd64 CGO_ENABLED=0 CC= go build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$output_dir/agentctl-windows-amd64.exe" ./cmd/agentctl
+            fi
             cd "$GITHUB_WORKSPACE"
           }
           build_helpers "$FIRST"
           build_helpers "$SECOND"
-          for helper in agentctl-linux-amd64 agentctl-linux-arm64 agentctl-darwin-amd64 agentctl-darwin-arm64; do
+          HELPERS="agentctl-linux-amd64 agentctl-linux-arm64 agentctl-darwin-amd64 agentctl-darwin-arm64"
+          if [ "$WINDOWS_HELPER" = "true" ]; then
+            HELPERS="$HELPERS agentctl-windows-amd64.exe"
+          fi
+          for helper in $HELPERS; do
             cmp "$FIRST/$helper" "$SECOND/$helper"
             test -x "$FIRST/$helper"
           done
@@ -1042,6 +1058,9 @@ jobs:
           file -b "$FIRST/agentctl-linux-arm64" | grep -E 'ELF 64-bit.*(ARM aarch64|aarch64)'
           file -b "$FIRST/agentctl-darwin-amd64" | grep -E 'Mach-O 64-bit.*x86_64'
           file -b "$FIRST/agentctl-darwin-arm64" | grep -E 'Mach-O 64-bit.*arm64'
+          if [ "$WINDOWS_HELPER" = "true" ]; then
+            file -b "$FIRST/agentctl-windows-amd64.exe" | grep -E 'PE32\+ executable.*x86-64'
+          fi
           if [ -f scripts/release/validate-darwin-arm64-helper.mjs ]; then
             node scripts/release/validate-darwin-arm64-helper.mjs "$FIRST/agentctl-darwin-arm64"
           fi
@@ -1168,6 +1187,8 @@ jobs:
           name: canonical-remote-helpers
           path: dist/remote-helper-artifact
       - name: Restore canonical helper executable modes
+        env:
+          WINDOWS_HELPER: ${{ needs.nightly-prepare.result == 'success' && 'true' || needs.prepare.outputs.windows_helper }}
         run: |
           set -euo pipefail
           chmod 0755 \
@@ -1175,6 +1196,9 @@ jobs:
             dist/remote-helper-artifact/bin/agentctl-linux-arm64 \
             dist/remote-helper-artifact/bin/agentctl-darwin-amd64 \
             dist/remote-helper-artifact/bin/agentctl-darwin-arm64
+          if [ "$WINDOWS_HELPER" = "true" ]; then
+            chmod 0755 dist/remote-helper-artifact/bin/agentctl-windows-amd64.exe
+          fi
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: web-bundle
@@ -1317,6 +1341,7 @@ jobs:
         env:
           IS_STABLE: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' }}
           COMPACT_RUNTIME_CONTRACT: ${{ needs.nightly-prepare.result == 'success' && 'true' || needs.prepare.outputs.compact_runtime_contract }}
+          WINDOWS_HELPER: ${{ needs.nightly-prepare.result == 'success' && 'true' || needs.prepare.outputs.windows_helper }}
         run: |
           rm -rf dist/kandev
           mkdir -p dist/kandev/bin
@@ -1327,6 +1352,9 @@ jobs:
           cp dist/remote-helper-artifact/bin/agentctl-linux-arm64 dist/kandev/bin/
           cp dist/remote-helper-artifact/bin/agentctl-darwin-amd64 dist/kandev/bin/
           cp dist/remote-helper-artifact/bin/agentctl-darwin-arm64 dist/kandev/bin/
+          if [ "$WINDOWS_HELPER" = "true" ]; then
+            cp dist/remote-helper-artifact/bin/agentctl-windows-amd64.exe dist/kandev/bin/
+          fi
           if [ "$IS_STABLE" = "true" ] && [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
             cp dist/remote-helper-artifact/manifests/full/remote-helpers.json dist/kandev/remote-helpers.json
             bash scripts/release/package-bundle.sh --bundle-dir dist/kandev --variant full
@@ -2384,6 +2412,8 @@ jobs:
           path: dist/remote-helper-artifact
 
       - name: Restore canonical helper executable modes
+        env:
+          WINDOWS_HELPER: ${{ needs.prepare.outputs.windows_helper }}
         run: |
           set -euo pipefail
           chmod 0755 \
@@ -2391,6 +2421,9 @@ jobs:
             dist/remote-helper-artifact/bin/agentctl-linux-arm64 \
             dist/remote-helper-artifact/bin/agentctl-darwin-amd64 \
             dist/remote-helper-artifact/bin/agentctl-darwin-arm64
+          if [ "$WINDOWS_HELPER" = "true" ]; then
+            chmod 0755 dist/remote-helper-artifact/bin/agentctl-windows-amd64.exe
+          fi
 
       - name: Verify staged release assets
         env:
@@ -2398,6 +2431,7 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
           KANDEV_VERSION: ${{ needs.prepare.outputs.tag }}
           COMPACT_RUNTIME_CONTRACT: ${{ needs.prepare.outputs.compact_runtime_contract }}
+          WINDOWS_HELPER: ${{ needs.prepare.outputs.windows_helper }}
         run: |
           set -euo pipefail
           if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
@@ -2473,7 +2507,11 @@ jobs:
           done
           if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
             cp dist/remote-helper-artifact/assets/*.gz* dist/release-assets/
-            for asset in agentctl-linux-amd64.gz agentctl-linux-arm64.gz agentctl-darwin-amd64.gz agentctl-darwin-arm64.gz; do
+            helper_assets="agentctl-linux-amd64.gz agentctl-linux-arm64.gz agentctl-darwin-amd64.gz agentctl-darwin-arm64.gz"
+            if [ "$WINDOWS_HELPER" = "true" ]; then
+              helper_assets="$helper_assets agentctl-windows-amd64.exe.gz"
+            fi
+            for asset in $helper_assets; do
               sidecar="dist/release-assets/$asset.sha256"
               if [ ! -f "dist/release-assets/$asset" ] || [ ! -f "$sidecar" ]; then
                 echo "Missing required remote helper asset or checksum: $asset" >&2
@@ -3000,6 +3038,7 @@ jobs:
       - name: Record runtime asset sizes
         env:
           COMPACT_RUNTIME_CONTRACT: ${{ needs.prepare.outputs.compact_runtime_contract }}
+          WINDOWS_HELPER: ${{ needs.prepare.outputs.windows_helper }}
         run: |
           set -euo pipefail
           report=dist/release-assets/runtime-size-report.md
@@ -3031,13 +3070,15 @@ jobs:
         if: steps.existing_release.outputs.reuse == 'true'
         env:
           COMPACT_RUNTIME_CONTRACT: ${{ needs.prepare.outputs.compact_runtime_contract }}
+          WINDOWS_HELPER: ${{ needs.prepare.outputs.windows_helper }}
           RUSTUP_TOOLCHAIN: 1.90.0
         run: |
           node scripts/release/existing-release.mjs verify \
             --release-json "$RUNNER_TEMP/existing-publication.json" \
             --assets-dir dist/release-assets \
             --output-dir dist/existing-release-assets \
-            --compact "$COMPACT_RUNTIME_CONTRACT"
+            --compact "$COMPACT_RUNTIME_CONTRACT" \
+            --windows-helper "$WINDOWS_HELPER"
 
       - name: Generate and verify updater manifest
         if: steps.existing_release.outputs.reuse != 'true'

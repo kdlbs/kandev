@@ -284,6 +284,7 @@ test("release-shaped Desktop runtime seeds a verified helper outside the standar
       "agentctl-linux-arm64",
       "agentctl-darwin-amd64",
       "agentctl-darwin-arm64",
+      "agentctl-windows-amd64.exe",
     ]) {
       const path = resolve(sourceBinDir, name);
       await writeFile(path, `#!/bin/sh\n# ${name}\n`);

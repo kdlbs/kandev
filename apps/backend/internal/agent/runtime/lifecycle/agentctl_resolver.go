@@ -28,6 +28,7 @@ const (
 	remoteHelperPruneCooldown    = 15 * time.Second
 	remoteHelperCacheDir         = "remote-helpers"
 	defaultReleaseBaseURL        = "https://github.com/kdlbs/kandev/releases/download"
+	agentctlExecutable           = "agentctl"
 )
 
 // AgentctlResolverOptions bind resolution to the running release and its
@@ -123,7 +124,7 @@ func (r *AgentctlResolver) ResolveRemoteBinary(platform SSHRemotePlatform) (stri
 // overrides retain precedence; manifest bundles never fall back to a native
 // host binary.
 func (r *AgentctlResolver) ResolveRemoteBinaryContext(ctx context.Context, platform SSHRemotePlatform, onProgress PrepareProgressCallback) (string, error) {
-	if err := requireSupportedRemotePlatform(platform); err != nil {
+	if err := requireRemoteHelperPlatform(platform); err != nil {
 		return "", err
 	}
 	for _, envName := range agentctlBinaryEnvNames(platform) {
@@ -173,7 +174,7 @@ func (r *AgentctlResolver) bundleRoot() string {
 }
 
 func (r *AgentctlResolver) expectedRemoteHelperSHA256(platform SSHRemotePlatform) (string, bool, error) {
-	if err := requireSupportedRemotePlatform(platform); err != nil {
+	if err := requireRemoteHelperPlatform(platform); err != nil {
 		return "", false, err
 	}
 	for _, envName := range agentctlBinaryEnvNames(platform) {
@@ -411,7 +412,8 @@ func (r *AgentctlResolver) cachePath(manifest *RemoteHelperManifest, record Remo
 		return "", errors.New("remote helper release version cannot be used as a cache path")
 	}
 	platform := strings.ReplaceAll(record.Platform, "/", "-")
-	return filepath.Join(r.options.HomeDir, "cache", remoteHelperCacheDir, manifest.Version, platform, record.SHA256, "agentctl"), nil
+	goos, _, _ := strings.Cut(record.Platform, "/")
+	return filepath.Join(r.options.HomeDir, "cache", remoteHelperCacheDir, manifest.Version, platform, record.SHA256, agentctlExecutableName(goos)), nil
 }
 
 func (r *AgentctlResolver) pruneCache(pinnedPaths []string, inventoryComplete bool) error {
@@ -641,8 +643,20 @@ func emitRemoteHelperProgress(callback PrepareProgressCallback, platform SSHRemo
 	callback(step, 0, 1)
 }
 
+// agentctlExecutableName is the helper file name a host of goos can execute.
+func agentctlExecutableName(goos string) string {
+	if goos == sshRemoteGOOSWindows {
+		return agentctlExecutable + ".exe"
+	}
+	return agentctlExecutable
+}
+
 func agentctlBinaryName(platform SSHRemotePlatform) string {
-	return fmt.Sprintf("agentctl-%s-%s", platform.GOOS, platform.GOARCH)
+	name := fmt.Sprintf("agentctl-%s-%s", platform.GOOS, platform.GOARCH)
+	if platform.GOOS == sshRemoteGOOSWindows {
+		return name + ".exe"
+	}
+	return name
 }
 
 func agentctlBinaryEnvNames(platform SSHRemotePlatform) []string {
@@ -657,7 +671,8 @@ func agentctlBinaryCandidates(exeDir string, platform SSHRemotePlatform) []strin
 	name := agentctlBinaryName(platform)
 	candidates := []string{filepath.Join(exeDir, name), filepath.Join(exeDir, "..", "build", name), filepath.Join(exeDir, "..", "bin", name)}
 	if platform.GOOS == runtime.GOOS && platform.GOARCH == runtime.GOARCH {
-		candidates = append(candidates, filepath.Join(exeDir, "agentctl"), filepath.Join(exeDir, "..", "build", "agentctl"), filepath.Join(exeDir, "..", "bin", "agentctl"))
+		native := agentctlExecutableName(runtime.GOOS)
+		candidates = append(candidates, filepath.Join(exeDir, native), filepath.Join(exeDir, "..", "build", native), filepath.Join(exeDir, "..", "bin", native))
 	}
 	return candidates
 }

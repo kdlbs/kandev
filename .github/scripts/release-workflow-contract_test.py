@@ -41,6 +41,7 @@ CANONICAL_HELPERS = (
     "agentctl-linux-arm64",
     "agentctl-darwin-amd64",
     "agentctl-darwin-arm64",
+    "agentctl-windows-amd64.exe",
 )
 HELPER_VERSION = "v1.2.3"
 HELPER_COMMIT = "a" * 40
@@ -388,13 +389,16 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             check=False,
         )
 
-    def run_helper_restoration(self, job_name: str, root: Path) -> subprocess.CompletedProcess[str]:
+    def run_helper_restoration(
+        self, job_name: str, root: Path, windows_helper: bool = True
+    ) -> subprocess.CompletedProcess[str]:
         restore = step_run_script(
             job_step_block(job_name, "Restore canonical helper executable modes")
         )
         return subprocess.run(
             ["bash", "-euo", "pipefail", "-c", restore],
             cwd=root,
+            env={**os.environ, "WINDOWS_HELPER": str(windows_helper).lower()},
             capture_output=True,
             text=True,
             check=False,
@@ -467,6 +471,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "linux/arm64/0",
             "darwin/amd64/0",
             "darwin/arm64/0",
+            "windows/amd64/0",
             "linux/amd64/1",
             "linux/arm64/1",
             "darwin/amd64/1",
@@ -728,6 +733,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 "agentctl-linux-arm64.gz",
                 "agentctl-darwin-amd64.gz",
                 "agentctl-darwin-arm64.gz",
+                "agentctl-windows-amd64.exe.gz",
             ):
                 (assets_dir / name).write_bytes(b"data")
                 asset_names.append(name)
@@ -744,6 +750,43 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             for name in asset_names:
                 with self.subTest(asset=name):
                     self.assertIn(f"`{name}`", contents)
+
+    def test_runtime_size_report_omits_windows_helper_for_pre_windows_tags(self) -> None:
+        report_step = step_block("Record runtime asset sizes")
+        self.assertIn("WINDOWS_HELPER: ${{ needs.prepare.outputs.windows_helper }}", report_step)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            assets_dir = Path(temp_dir)
+            for platform in ("linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64"):
+                for suffix in ("", "-full"):
+                    (assets_dir / f"kandev-{platform}{suffix}.tar.gz").write_bytes(b"data")
+            for suffix in ("", "-full"):
+                (assets_dir / f"kandev-windows-x64{suffix}.zip").write_bytes(b"data")
+            for helper in CANONICAL_HELPERS[:-1]:
+                (assets_dir / f"{helper}.gz").write_bytes(b"data")
+
+            output = assets_dir / "runtime-size-report.md"
+            command = ["bash", str(RUNTIME_SIZE_REPORT_SCRIPT_PATH), str(assets_dir), str(output)]
+            legacy = subprocess.run(
+                command,
+                env={**os.environ, "WINDOWS_HELPER": "false"},
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(legacy.returncode, 0, legacy.stderr)
+            contents = output.read_text()
+            self.assertIn("`agentctl-darwin-arm64.gz`", contents)
+            self.assertNotIn("agentctl-windows-amd64.exe.gz", contents)
+
+            current = subprocess.run(
+                command,
+                env={**os.environ, "WINDOWS_HELPER": "true"},
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(current.returncode, 0)
 
     def test_homebrew_formula_requires_the_stable_remote_helper_manifest(self) -> None:
         formula = HOMEBREW_FORMULA_PATH.read_text()
@@ -769,6 +812,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "agentctl-linux-arm64.gz",
             "agentctl-darwin-amd64.gz",
             "agentctl-darwin-arm64.gz",
+            "agentctl-windows-amd64.exe.gz",
         ):
             self.assertIn(name, verify)
         self.assertIn('sidecar="dist/release-assets/$asset.sha256"', verify)
@@ -1613,6 +1657,47 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         publisher = job_block("publish-release")
         self.assertNotIn("- name: Verify existing helper assets", publisher)
         self.assertIn("needs.verify-release-assets.result == 'success'", publisher)
+
+    def test_pre_windows_backfill_publishes_the_tag_helper_set(self) -> None:
+        self.assertIn("windows_helper:", job_block("prepare"))
+        compute = step_block("Compute next version")
+        self.assertIn(
+            'git show "${BACKFILL_REF}:scripts/release/remote-helper-assets.mjs"', compute
+        )
+        self.assertIn('echo "windows_helper=$WINDOWS_HELPER"', compute)
+        self.assertIn('echo "windows_helper=true"', compute)
+
+        gate = 'if [ "$WINDOWS_HELPER" = "true" ]; then'
+        for job_name, step_name, gated in (
+            ("build-remote-helpers", "Build and verify canonical remote helpers", "agentctl-windows-amd64.exe"),
+            ("build-bundles", "Restore canonical helper executable modes", "agentctl-windows-amd64.exe"),
+            ("build-bundles", "Package bundle", "agentctl-windows-amd64.exe"),
+            ("verify-release-assets", "Restore canonical helper executable modes", "agentctl-windows-amd64.exe"),
+            ("verify-release-assets", "Verify staged release assets", "agentctl-windows-amd64.exe.gz"),
+        ):
+            with self.subTest(job=job_name, step=step_name):
+                block = job_step_block(job_name, step_name)
+                self.assertIn("WINDOWS_HELPER: ${{", block)
+                self.assertIn("needs.prepare.outputs.windows_helper", block)
+                for line in block.splitlines():
+                    if gated in line:
+                        self.assertLess(block.index(gate), block.index(line), line)
+        verify = job_step_block("publish-release", "Verify immutable release assets")
+        self.assertIn('--windows-helper "$WINDOWS_HELPER"', verify)
+
+        for job_name in ("build-bundles", "verify-release-assets"):
+            with self.subTest(job=job_name), tempfile.TemporaryDirectory() as temp:
+                bin_dir = Path(temp) / "dist" / "remote-helper-artifact" / "bin"
+                bin_dir.mkdir(parents=True)
+                for helper in CANONICAL_HELPERS[:-1]:
+                    (bin_dir / helper).write_bytes(b"helper")
+                    (bin_dir / helper).chmod(0o644)
+                legacy = self.run_helper_restoration(job_name, Path(temp), windows_helper=False)
+                self.assertEqual(legacy.returncode, 0, legacy.stderr)
+                for helper in CANONICAL_HELPERS[:-1]:
+                    self.assertEqual((bin_dir / helper).stat().st_mode & 0o777, 0o755)
+                current = self.run_helper_restoration(job_name, Path(temp))
+                self.assertNotEqual(current.returncode, 0)
 
     def test_updater_signing_validation_uses_workflow_control_revision(self) -> None:
         build_desktop = job_block("build-desktop")
