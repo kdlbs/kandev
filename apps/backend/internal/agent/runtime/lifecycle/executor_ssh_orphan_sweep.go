@@ -145,10 +145,16 @@ func sweepSSHExecutorOrphans(
 		return report, fmt.Errorf("ssh orphan sweep: list executor profiles: %w", err)
 	}
 
+	// Resolve $HOME for the host's own platform. A POSIX probe on a Windows host
+	// with a Git Bash default shell returns a /c/... path that no task matches.
+	info, err := detectRemoteInfo(ctx, client)
+	if err != nil {
+		return report, fmt.Errorf("ssh orphan sweep: detect remote platform: %w", err)
+	}
 	taskContexts := map[string]*sshOrphanTaskContext{}
 	resolvedRoots := map[string]bool{}
 	for _, root := range sshOrphanWorkdirRoots(config, profiles) {
-		resolvedRoot, err := expandRemoteHome(ctx, client, root)
+		resolvedRoot, err := expandRemoteHomeForPlatform(ctx, client, root, info.Platform)
 		if err != nil {
 			return report, fmt.Errorf("ssh orphan sweep: resolve workdir root: %w", err)
 		}

@@ -372,11 +372,11 @@ func normalizeSSHRemotePlatform(osName, arch string) (SSHRemotePlatform, bool) {
 func normalizeSSHRemoteOS(osName string) string {
 	lower := strings.ToLower(strings.TrimSpace(osName))
 	switch {
-	case lower == "linux":
+	case lower == sshRemoteGOOSLinux:
 		return sshRemoteGOOSLinux
-	case lower == "darwin":
+	case lower == sshRemoteGOOSDarwin:
 		return sshRemoteGOOSDarwin
-	case lower == "windows", lower == "windows_nt",
+	case lower == sshRemoteGOOSWindows, lower == "windows_nt",
 		strings.HasPrefix(lower, "mingw"),
 		strings.HasPrefix(lower, "msys"),
 		strings.HasPrefix(lower, "cygwin"):

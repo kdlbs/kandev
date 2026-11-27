@@ -299,6 +299,8 @@ func TestSSHWindowsOrphanSweepInventoriesAndStopsOrphanedAgentctl(t *testing.T) 
 			return sshFail("expected PowerShell command: " + command)
 		}
 		switch {
+		case strings.Contains(script, "KANDEV_WIN_INFO"):
+			return sshOut("KANDEV_WIN_INFO\tWindows_NT\tAMD64\t10.0.19045\r\n")
 		case strings.Contains(script, "$env:USERPROFILE"):
 			return sshOut(`C:\Users\Kandev User`)
 		case strings.Contains(script, "Get-ChildItem -LiteralPath $root -Directory -Filter 'task-*'"):

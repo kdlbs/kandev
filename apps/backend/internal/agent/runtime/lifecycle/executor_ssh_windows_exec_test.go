@@ -246,7 +246,7 @@ func TestSSHWindowsExecLargeCustomPrepare(t *testing.T) {
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script := "# " + strings.Repeat("x", 64*1024) + "\nSet-Content -LiteralPath (Join-Path (Get-Location) 'large-ran.txt') -Value ok"
+	script := "# " + strings.Repeat("x", 64*1024) + "\nSet-Content -LiteralPath (Join-Path {{workspace.path}} 'large-ran.txt') -Value ok"
 	req := &ExecutorCreateRequest{Metadata: map[string]interface{}{MetadataKeySetupScript: script}}
 	r := NewSSHExecutor(nil, nil, nil, newTestLogger())
 	if err := r.runPrepareScript(context.Background(), client, taskDir, req, SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"}, ""); err != nil {

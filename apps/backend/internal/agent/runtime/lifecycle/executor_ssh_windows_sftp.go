@@ -1,7 +1,9 @@
 package lifecycle
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	mrand "math/rand/v2"
 	"os"
 	"path"
@@ -41,11 +43,16 @@ func sftpReplaceWindowsFile(client *ssh.Client, remotePath string, data []byte) 
 		}
 	}
 	if err := c.Rename(tmp, target); err != nil {
-		if aside != "" {
-			_ = c.Rename(aside, target)
+		if !installedByConcurrentUploader(c, target, data) {
+			if aside != "" {
+				_ = c.Rename(aside, target)
+			}
+			_ = c.Remove(tmp)
+			return fmt.Errorf("sftp: rename %s -> %s: %w", tmp, target, err)
 		}
+		// The target already holds these bytes, so a concurrent upload of the
+		// same helper installed them. Its copy stands; this temporary file is spare.
 		_ = c.Remove(tmp)
-		return fmt.Errorf("sftp: rename %s -> %s: %w", tmp, target, err)
 	}
 	removeStaleWindowsAsideFiles(c, target)
 	// Antivirus software can quarantine a new executable as soon as it lands.
@@ -53,6 +60,19 @@ func sftpReplaceWindowsFile(client *ssh.Client, remotePath string, data []byte) 
 		return fmt.Errorf("sftp: %s is missing after upload", target)
 	}
 	return nil
+}
+
+// installedByConcurrentUploader reports whether target already holds data. It
+// reads the target only after a rename has failed, so the common path never
+// downloads the helper.
+func installedByConcurrentUploader(c *sftp.Client, target string, data []byte) bool {
+	f, err := c.Open(target)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	existing, err := io.ReadAll(f)
+	return err == nil && bytes.Equal(existing, data)
 }
 
 func writeSFTPFile(c *sftp.Client, remotePath string, data []byte) error {

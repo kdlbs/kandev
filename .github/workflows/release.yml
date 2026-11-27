@@ -3038,11 +3038,12 @@ jobs:
       - name: Record runtime asset sizes
         env:
           COMPACT_RUNTIME_CONTRACT: ${{ needs.prepare.outputs.compact_runtime_contract }}
+          WINDOWS_HELPER: ${{ needs.prepare.outputs.windows_helper }}
         run: |
           set -euo pipefail
           report=dist/release-assets/runtime-size-report.md
           if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]; then
-            bash scripts/release/write-runtime-size-report.sh dist/release-assets "$report"
+            bash scripts/release/write-runtime-size-report.sh dist/release-assets "$report" "$WINDOWS_HELPER"
           else
             {
               printf '# Runtime asset sizes\n\n'

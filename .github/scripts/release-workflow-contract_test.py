@@ -751,6 +751,54 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 with self.subTest(asset=name):
                     self.assertIn(f"`{name}`", contents)
 
+    def test_runtime_size_report_backfill_skips_the_windows_helper(self) -> None:
+        # A tag cut before the Windows helper shipped has no helper asset.
+        helpers = (
+            "agentctl-linux-amd64.gz",
+            "agentctl-linux-arm64.gz",
+            "agentctl-darwin-amd64.gz",
+            "agentctl-darwin-arm64.gz",
+        )
+        archives = []
+        for platform in ("linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64"):
+            for suffix in ("", "-full"):
+                archives.append(f"kandev-{platform}{suffix}.tar.gz")
+        archives.extend(("kandev-windows-x64.zip", "kandev-windows-x64-full.zip"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            assets_dir = Path(temp_dir) / "assets"
+            assets_dir.mkdir()
+            for name in (*archives, *helpers):
+                (assets_dir / name).write_bytes(b"data")
+
+            output = assets_dir / "runtime-size-report.md"
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(RUNTIME_SIZE_REPORT_SCRIPT_PATH),
+                    str(assets_dir),
+                    str(output),
+                    "false",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            contents = output.read_text()
+            for name in helpers:
+                with self.subTest(asset=name):
+                    self.assertIn(f"`{name}`", contents)
+            self.assertNotIn("agentctl-windows-amd64.exe.gz", contents)
+
+            # The default still requires the Windows helper.
+            result = subprocess.run(
+                ["bash", str(RUNTIME_SIZE_REPORT_SCRIPT_PATH), str(assets_dir), str(output)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+
     def test_homebrew_formula_requires_the_stable_remote_helper_manifest(self) -> None:
         formula = HOMEBREW_FORMULA_PATH.read_text()
         self.assertIn('require "json"', formula)
