@@ -106,10 +106,10 @@ SSH executor platform acceptance. This work order is PR A in full.
 make -C apps/backend build-agentctl-windows-amd64
 file apps/backend/bin/agentctl-windows-amd64.exe
 ! git grep -n -i 'windows-arm64' -- .github Dockerfile Makefile apps/backend/Makefile apps/backend/internal/launcher scripts apps/desktop apps/web/e2e
-cd apps/backend && go test -trimpath -tags fts5 -count=1 -run 'RemoteHelper|AgentctlResolver|RequiredAgentctlRemoteHelpers|ValidateRuntimeBundle|SSHResolver|RequireSupportedRemotePlatform' ./internal/agent/runtime/lifecycle ./internal/launcher ./internal/backendapp
+(cd apps/backend && go test -trimpath -tags fts5 -count=1 -run 'RemoteHelper|AgentctlResolver|RequiredAgentctlRemoteHelpers|ValidateRuntimeBundle|SSHResolver|RequireSupportedRemotePlatform' ./internal/agent/runtime/lifecycle ./internal/launcher ./internal/backendapp)
 python3 .github/scripts/e2e-tests-workflow-contract_test.py
 python3 .github/scripts/release-workflow-contract_test.py
-node --test scripts/release/remote-helper-assets.test.mjs scripts/release/publish-npm.test.mjs apps/desktop/e2e/desktop-launch-smoke.test.mjs
+node --test scripts/release/remote-helper-assets.test.mjs scripts/release/publish-npm.test.mjs scripts/release/existing-release.test.mjs apps/desktop/e2e/desktop-launch-smoke.test.mjs
 bash scripts/release/runtime-bundle.test.sh
 bash scripts/release-desktop.test.sh
 bash scripts/check-make-shells
@@ -161,3 +161,13 @@ Changes beyond the fork:
 | `cargo test` | Not run, because `cargo` is absent. CI covers it |
 | `list-docs.py validate`, `lint-spec-files.py --all` | Passed |
 | `lint-go-changed` | 0 issues, after adding the `agentctlExecutable` constant for `goconst` |
+
+PR review (2026-11-27) found that a backfill of the latest pre-Windows Stable
+tag would fail. The workflow built the Windows helper, the tag's helper script
+rejected it, and the workflow-revision verifier required five manifest records.
+`prepare` now sets `windows_helper` from the tag's helper table, and the
+helper build, packaging, staged asset checks, and immutable release
+verification follow it. `test_pre_windows_backfill_publishes_the_tag_helper_set`
+and the pre-Windows case in `existing-release.test.mjs` failed before the fix.
+The `v0.104.0` helper script rejects a Windows input and accepts the four-helper
+set.

@@ -18,6 +18,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import {
+  PRE_WINDOWS_REMOTE_HELPERS,
   REMOTE_HELPERS,
   parseManifest,
   verifyRemoteHelperBundle,
@@ -249,11 +250,19 @@ async function verifySizeReport(directory, assets, compact) {
   if (seen.size !== required.size)
     throw new Error("runtime size report is missing required rows");
 }
-async function verifyRuntimeManifest(manifest, name, directory, tag, commit) {
+async function verifyRuntimeManifest(
+  manifest,
+  name,
+  directory,
+  tag,
+  commit,
+  helpers,
+) {
   const records = parseManifest(
     manifest,
     /-full\.(?:tar\.gz|zip)$/.test(name) ? "full" : "standard",
     { version: tag, commit },
+    helpers,
   );
   for (const record of records.values()) {
     const bytes = gunzipSync(await readFile(join(directory, record.asset)), {
@@ -270,6 +279,7 @@ async function verifyRuntimeArchives({
   directory,
   assets,
   compact,
+  helpers,
   tag,
   commit,
   run,
@@ -353,12 +363,20 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
           compact && !/-full\.(?:tar\.gz|zip)$/.test(name)
             ? "standard"
             : "full",
+        helpers,
       });
       if (compact) {
         const manifest = JSON.parse(
           await readFile(join(bundleDir, "remote-helpers.json"), "utf8"),
         );
-        await verifyRuntimeManifest(manifest, name, directory, tag, commit);
+        await verifyRuntimeManifest(
+          manifest,
+          name,
+          directory,
+          tag,
+          commit,
+          helpers,
+        );
       }
     } finally {
       await rm(temporary, { recursive: true, force: true });
@@ -372,6 +390,7 @@ export async function verifyPublishedAssets({
   tag,
   commit,
   compact,
+  helpers = REMOTE_HELPERS,
   root = process.cwd(),
   run = execute,
   fetcher = fetch,
@@ -399,6 +418,7 @@ export async function verifyPublishedAssets({
     directory: outputDir,
     assets,
     compact,
+    helpers,
     tag,
     commit,
     run,
@@ -456,6 +476,7 @@ async function main() {
         "assets-dir",
         "output-dir",
         "compact",
+        "windows-helper",
       ].map((name) => [name, { type: "string" }]),
     ),
   });
@@ -475,7 +496,11 @@ async function main() {
     const { release, tag, commit, reuse } = JSON.parse(
       await readFile(values["release-json"], "utf8"),
     );
-    if (!reuse || !["true", "false"].includes(values.compact))
+    if (
+      !reuse ||
+      !["true", "false"].includes(values.compact) ||
+      !["true", "false"].includes(values["windows-helper"])
+    )
       throw new Error("invalid immutable release verification context");
     console.log(
       JSON.stringify(
@@ -484,6 +509,10 @@ async function main() {
           tag,
           commit,
           compact: values.compact === "true",
+          helpers:
+            values["windows-helper"] === "true"
+              ? REMOTE_HELPERS
+              : PRE_WINDOWS_REMOTE_HELPERS,
           expectedDir: values["assets-dir"],
           outputDir: values["output-dir"],
         }),

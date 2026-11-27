@@ -34,6 +34,11 @@ export const REMOTE_HELPERS = [
   },
 ];
 
+/** The helper set of releases cut before the Windows helper shipped. */
+export const PRE_WINDOWS_REMOTE_HELPERS = REMOTE_HELPERS.filter(
+  ({ platform }) => platform !== "windows/amd64",
+);
+
 const MANIFEST_NAME = "remote-helpers.json";
 const IDENTITY_NAME = "identity.json";
 const MAX_HELPER_BYTES = 256 * 1024 * 1024;
@@ -207,7 +212,12 @@ export function buildRemoteHelperArtifact({
   }
 }
 
-export function parseManifest(manifest, expectedVariant, expectedIdentity) {
+export function parseManifest(
+  manifest,
+  expectedVariant,
+  expectedIdentity,
+  helpers = REMOTE_HELPERS,
+) {
   assertExactKeys(
     manifest,
     ["schema_version", "version", "commit", "variant", "helpers"],
@@ -229,10 +239,10 @@ export function parseManifest(manifest, expectedVariant, expectedIdentity) {
     fail(`remote helper manifest variant must be ${expectedVariant}`);
   if (
     !Array.isArray(manifest.helpers) ||
-    manifest.helpers.length !== REMOTE_HELPERS.length
+    manifest.helpers.length !== helpers.length
   ) {
     fail(
-      `remote helper manifest must contain exactly ${REMOTE_HELPERS.length} platform records`,
+      `remote helper manifest must contain exactly ${helpers.length} platform records`,
     );
   }
   const records = new Map();
@@ -242,7 +252,7 @@ export function parseManifest(manifest, expectedVariant, expectedIdentity) {
       ["platform", "asset", "sha256", "size_bytes"],
       "remote helper record",
     );
-    const helper = REMOTE_HELPERS.find(
+    const helper = helpers.find(
       (candidate) => candidate.platform === record.platform,
     );
     if (!helper)
@@ -273,7 +283,7 @@ export function parseManifest(manifest, expectedVariant, expectedIdentity) {
     }
     records.set(record.platform, record);
   }
-  if (records.size !== REMOTE_HELPERS.length)
+  if (records.size !== helpers.length)
     fail("remote helper manifest omits a supported platform");
   return records;
 }
@@ -382,7 +392,11 @@ function runtimeBinaryNames(binDir) {
 }
 
 /** Validate standard/full bundle contents; full also accepts legacy no-manifest layouts. */
-export function verifyRemoteHelperBundle({ bundleDir, variant }) {
+export function verifyRemoteHelperBundle({
+  bundleDir,
+  variant,
+  helpers = REMOTE_HELPERS,
+}) {
   if (variant !== "standard" && variant !== "full")
     fail(`invalid runtime bundle variant ${JSON.stringify(variant)}`);
   const binDir = path.join(bundleDir, "bin");
@@ -395,13 +409,13 @@ export function verifyRemoteHelperBundle({ bundleDir, variant }) {
   if (variant === "standard" && !hasManifest)
     fail("standard runtime manifest is required");
 
-  const helperNames = new Set(REMOTE_HELPERS.map(({ name }) => name));
+  const helperNames = new Set(helpers.map(({ name }) => name));
   const bundledHelpers = actual.filter((name) => helperNames.has(name));
   if (variant === "standard" && bundledHelpers.length > 0) {
     fail(`standard runtime unexpectedly contains ${bundledHelpers[0]}`);
   }
   if (variant === "full") {
-    for (const helper of REMOTE_HELPERS) {
+    for (const helper of helpers) {
       if (!actual.includes(helper.name))
         fail(`full runtime is missing remote helper ${helper.name}`);
     }
@@ -409,7 +423,7 @@ export function verifyRemoteHelperBundle({ bundleDir, variant }) {
   const expected =
     variant === "standard"
       ? [launcher, nativeAgentctl]
-      : [launcher, nativeAgentctl, ...REMOTE_HELPERS.map(({ name }) => name)];
+      : [launcher, nativeAgentctl, ...helpers.map(({ name }) => name)];
   expected.sort();
   const unexpected = actual.find((name) => !expected.includes(name));
   if (unexpected)
@@ -420,9 +434,9 @@ export function verifyRemoteHelperBundle({ bundleDir, variant }) {
 
   if (!hasManifest) return true;
   const manifest = readJson(manifestPath, "remote helper manifest");
-  const records = parseManifest(manifest, variant);
+  const records = parseManifest(manifest, variant, undefined, helpers);
   if (variant === "full") {
-    for (const helper of REMOTE_HELPERS) {
+    for (const helper of helpers) {
       const record = records.get(helper.platform);
       const bytes = fs.readFileSync(path.join(binDir, helper.name));
       if (

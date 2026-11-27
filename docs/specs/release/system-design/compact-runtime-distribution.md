@@ -71,6 +71,13 @@ The Windows helper exists for SSH executor Windows hosts. Its requirement is
 [REQ-EXECUTORS-SSH-WINDOWS-002](../../executors/requirements/ssh-windows-remote.md).
 No `windows/arm64` helper is built.
 
+A backfill of a tag cut before the Windows helper shipped republishes that
+tag's four helpers. `prepare` sets `windows_helper` from the tag's own
+`scripts/release/remote-helper-assets.mjs`. The helper build, bundle packaging,
+staged asset checks, and `existing-release.mjs verify --windows-helper` follow
+it. Every new Stable and Nightly release sets it to `true` and requires all five
+helpers.
+
 One required `build-remote-helpers` job in `.github/workflows/release.yml`
 builds the five CGO-disabled Linux, macOS, and Windows (`windows/amd64`) helpers for the exact release ref for
 both Stable and Nightly. It uses the full commit SHA, the commit timestamp
