@@ -189,7 +189,7 @@ func (e *AgentExecution) bufferOrDropContextResetEvent(event agentctl.AgentEvent
 	if !e.contextResetInFlight {
 		return false
 	}
-	if isContextResetRetiredWatchProjection(event) {
+	if isContextResetRetiredWorkProjection(event) {
 		e.contextResetEvents = append(e.contextResetEvents, event)
 	} else if isContextResetSetupEvent(event) && e.contextResetSetupEventCount < maxContextResetSetupEvents {
 		e.contextResetEvents = append(e.contextResetEvents, event)
@@ -198,10 +198,10 @@ func (e *AgentExecution) bufferOrDropContextResetEvent(event agentctl.AgentEvent
 	return true
 }
 
-func isContextResetRetiredWatchProjection(event agentctl.AgentEvent) bool {
+func isContextResetRetiredWorkProjection(event agentctl.AgentEvent) bool {
 	work := event.BackgroundWork
 	return event.Type == streams.EventTypeBackgroundWorkUpdated && event.SessionID != "" &&
-		work != nil && work.Kind == streams.WorkloadKindMonitor && work.State == streams.RunStateUnknown &&
+		work != nil && (work.Kind == streams.WorkloadKindMonitor || work.Kind == streams.WorkloadKindSubagent) && work.State == streams.RunStateUnknown &&
 		work.WorkID != "" && work.RunID != "" && work.SourceCallID != ""
 }
 

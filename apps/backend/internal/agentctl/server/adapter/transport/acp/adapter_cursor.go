@@ -71,13 +71,33 @@ func (a *Adapter) storeCursorTaskMetaLocked(sessionID string, meta cursorTaskMet
 // session that never matched a subagent tool_call during the turn. The entries
 // are keyed by wire tool-call ID, which Cursor can reuse across turns, so an
 // unmatched entry left behind would attach to an unrelated subagent later.
-func (a *Adapter) sweepCursorTaskMetaOnPromptEnd(sessionID string) {
+func (a *Adapter) sweepCursorTaskMetaOnPromptEnd(sessionID string, generation uint64) {
 	if sessionID == "" {
 		return
 	}
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.clearCursorTaskMetaLocked(sessionID)
-	a.mu.Unlock()
+	if a.sessionID != sessionID {
+		return
+	}
+
+	for key := range a.cursorChildLaunches {
+		if key.generation == generation {
+			delete(a.cursorChildLaunches, key)
+		}
+	}
+	for id, child := range a.cursorChildren {
+		if child.generation <= generation && child.reported != streams.RunStateRunning {
+			if child.reported != "" {
+				if a.retiredCursorChildren == nil {
+					a.retiredCursorChildren = make(map[string]struct{})
+				}
+				a.retiredCursorChildren[id] = struct{}{}
+			}
+			delete(a.cursorChildren, id)
+		}
+	}
 }
 
 func (a *Adapter) clearCursorTaskMetaLocked(sessionID string) {

@@ -33,6 +33,7 @@ const (
 // callback, releasing the waiter once everything queued ahead has completed.
 type notifWork struct {
 	notif            acp.SessionNotification
+	cursorChild      *cursorChildFrame
 	native           *decodedCopilotNativeEvent
 	sync             chan struct{}
 	afterBarrier     func()
@@ -165,6 +166,10 @@ func (a *Adapter) runUpdateWorker() {
 				close(item.sync)
 				continue
 			}
+			if item.cursorChild != nil {
+				a.observeCursorChild(*item.cursorChild, item.promptGeneration)
+				continue
+			}
 			if item.native != nil {
 				a.handleCopilotNativeWork(*item.native)
 				continue
@@ -185,6 +190,9 @@ func (a *Adapter) handleACPUpdate(
 	promptGeneration uint64,
 ) {
 	sessionID := string(n.SessionId)
+	if a.agentID == cursorAgentID && a.ignoreCursorChildSession(sessionID) {
+		return
+	}
 	startupWarning, isStartupWarning := codexMCPStartupWarningEvent(a.agentID, sessionID, n.Update.ToolCall)
 	a.mu.Lock()
 	if isStartupWarning && a.sessionCreationPending && !a.closed {
@@ -247,6 +255,9 @@ func (a *Adapter) handleACPUpdate(
 		}
 	}
 
+	if !isLoading && a.agentID == cursorAgentID {
+		a.observeCursorBackgroundLaunch(sessionID, n.Update.ToolCallUpdate, promptGeneration)
+	}
 	if startupWarning == nil {
 		a.observeContinuationSafety(n, promptGeneration)
 		a.observeCapacityContinuation(n, promptGeneration)

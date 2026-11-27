@@ -268,7 +268,12 @@ type Adapter struct {
 	// on turn end / reset (clearCursorTaskMetaLocked), so it never outlives the
 	// turn that produced it.
 	cursorTaskMetaBySession map[string]map[string]cursorTaskMeta
-	cursorShellWatches      map[string]cursorShellWatch
+	// Dispatch bindings last one prompt. Retired child IDs suppress replay until
+	// the native session changes or the adapter closes.
+	retiredCursorChildren map[string]struct{}
+	cursorChildLaunches   map[cursorLaunchKey]cursorLaunch
+	cursorChildren        map[string]cursorChild
+	cursorShellWatches    map[string]cursorShellWatch
 	// toolCallParents preserves nested tool lineage while a handed-off
 	// predecessor continues streaming beside its human successor.
 	toolCallParents map[string]string
@@ -700,8 +705,12 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		connectionOptions = append(connectionOptions,
 			acp.WithAllowedExtensionNotifications(copilotSessionEventMethod))
 	}
+	var sessionClient acp.Client = a.acpClient
+	if a.agentID == cursorAgentID {
+		sessionClient = cursorSessionClient{Client: a.acpClient, adapter: a}
+	}
 	a.acpConn = acpclient.NewClientSideConnectionWithLogger(
-		a.acpClient,
+		sessionClient,
 		a.stdin,
 		a.stdout,
 		slog.Default().With("component", "acp-conn"),
@@ -1022,6 +1031,9 @@ func (a *Adapter) Close() error {
 	}
 	a.closed = true
 	clear(a.cursorShellWatches)
+	clear(a.cursorChildren)
+	clear(a.cursorChildLaunches)
+	clear(a.retiredCursorChildren)
 	a.clearCopilotInterruptionLocked()
 	if a.closedCh != nil {
 		close(a.closedCh)

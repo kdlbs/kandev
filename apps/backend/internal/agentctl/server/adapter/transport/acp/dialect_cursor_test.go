@@ -244,7 +244,7 @@ func TestCursorTaskUnmatchedMetaClearedAtPromptEnd(t *testing.T) {
 		t.Fatalf("pending cursor/task entries = %d, want 1 before prompt end", pending)
 	}
 
-	a.sweepCursorTaskMetaOnPromptEnd("session-1")
+	a.sweepCursorTaskMetaOnPromptEnd("session-1", 1)
 	if pending := len(a.cursorTaskMetaBySession["session-1"]); pending != 0 {
 		t.Fatalf("pending cursor/task entries = %d, want 0 after prompt end", pending)
 	}

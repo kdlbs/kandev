@@ -97,6 +97,11 @@ func TestContextResetAcceptsRetiredWatchProjectionForCommittedSession(t *testing
 			State: streams.RunStateUnknown, SourceCallID: "watch-call",
 		},
 	}
+	child := retired
+	child.BackgroundWork = &streams.WorkloadRunObservation{
+		Kind: streams.WorkloadKindSubagent, WorkID: "child", RunID: "child", State: streams.RunStateUnknown, SourceCallID: "launch",
+	}
+	require.True(t, execution.bufferOrDropContextResetEvent(child))
 	stale := retired
 	stale.SessionID = "old-session"
 	stale.BackgroundWork = &streams.WorkloadRunObservation{
@@ -107,7 +112,7 @@ func TestContextResetAcceptsRetiredWatchProjectionForCommittedSession(t *testing
 	require.True(t, execution.bufferOrDropContextResetEvent(stale))
 
 	accepted := execution.drainContextResetEvents("new-session")
-	require.Equal(t, []agentctl.AgentEvent{retired}, accepted,
+	require.Equal(t, []agentctl.AgentEvent{child, retired}, accepted,
 		"the reset commit accepts the retirement update and excludes stale old-session events")
 	execution.finishContextReset("new-session")
 }
