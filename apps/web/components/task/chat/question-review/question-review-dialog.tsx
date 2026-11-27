@@ -12,6 +12,7 @@ import { createReviewCarry } from "@/lib/question-review/review-carry";
 import { IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@kandev/ui/dialog";
+import { ModalToastOutlet } from "@kandev/ui/modal-toast-outlet";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@kandev/ui/resizable";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -101,7 +102,7 @@ export function QuestionReviewDialog(props: Props) {
   ) : null;
   const form = (
     <div
-      className={cn("min-h-0 overflow-y-auto overscroll-contain", phone && "pb-2")}
+      className={cn("min-h-0 overflow-y-auto overscroll-contain", phone && "flex-1 pb-2")}
       data-testid="question-review-form"
     >
       {props.form}
@@ -110,6 +111,7 @@ export function QuestionReviewDialog(props: Props) {
   return (
     <Dialog open onOpenChange={(open) => !open && review.closeReview()}>
       <DialogContent
+        toastOutlet={false}
         showCloseButton={false}
         enterConfirms={false}
         data-testid="question-review-dialog"
@@ -144,6 +146,7 @@ export function QuestionReviewDialog(props: Props) {
                 className="relative flex min-h-0 flex-1 flex-col outline-none"
               >
                 <ReviewHeader {...props} />
+                <ModalToastOutlet className="px-4 pb-2 max-md:px-3 [@media(max-height:500px)]:max-h-[min(11rem,16dvh)]" />
                 {phone ? (
                   <PhoneBody
                     stage={stage}
@@ -177,8 +180,10 @@ function PhoneBody(
 ) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-[min(55dvh,32rem)] shrink-0 flex-col px-3 pb-2">{props.stage}</div>
-      <div className="flex min-h-0 flex-1 flex-col border-t border-border">{props.form}</div>
+      <div className="flex h-[min(55dvh,32rem)] min-h-0 shrink flex-col px-3 pb-2">
+        {props.stage}
+      </div>
+      <div className="flex min-h-20 flex-1 flex-col border-t border-border">{props.form}</div>
       <div
         ref={props.barRef}
         className={cn(

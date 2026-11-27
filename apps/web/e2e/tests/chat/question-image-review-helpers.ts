@@ -5,6 +5,8 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { installRuntimeUpdateFixture } from "../settings/agent-runtime-update-helpers";
 
 type Rgb = [number, number, number];
 
@@ -190,6 +192,37 @@ export async function openReviewQuestions(page: Page, api: ApiClient, seed: Seed
   return { task, session };
 }
 
+export async function showReviewUpdateToasts(
+  page: Page,
+  runtime: Awaited<ReturnType<typeof installRuntimeUpdateFixture>>,
+) {
+  await runtime.emit("system.update_available", {
+    occurrence_id: "release-review-v99.0.1",
+    version: "v99.0.1",
+    title: "Kandev update available",
+    body: "Kandev v99.0.1 is available. Review the release notes for updates, fixes, improvements, and supported version changes.",
+  });
+  const releaseToast = page.getByTestId("toast-message").filter({ hasText: "v99.0.1" });
+  await expect(releaseToast).toHaveCount(1);
+
+  await runtime.emit("system.update_available", {
+    occurrence_id: "runtime-review-claude-0.64.0",
+    agent_name: "claude-acp",
+    runtime_id: "npm:@agentclientprotocol/claude-agent-acp",
+    display_name: "Claude",
+    version: "0.64.0",
+    previous_version: "0.62.0",
+    runtime_update_status: "available",
+    title: "Claude runtime update available",
+    body: "Claude runtime 0.64.0 is available. Review compatibility and installation notes before applying this agent update.",
+  });
+  const runtimeToast = page.getByTestId("toast-message").filter({ hasText: "0.64.0" });
+  await expect(runtimeToast).toHaveCount(1);
+  await expect(page.getByTestId("toast-message")).toHaveCount(2);
+  await Promise.all([waitForFiniteAnimations(releaseToast), waitForFiniteAnimations(runtimeToast)]);
+  return { releaseToast, runtimeToast };
+}
+
 /** Records the image IDs requested through the authorized question-image route. */
 export function recordImageRequests(page: Page) {
   const ids: string[] = [];
@@ -206,6 +239,25 @@ export async function expectNoHorizontalOverflow(page: Page) {
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     ),
   ).toBe(true);
+}
+
+export async function expectToastsAvoidControls(toasts: Locator[], controls: Locator[]) {
+  const toastBoxes = await Promise.all(toasts.map((toast) => toast.boundingBox()));
+  const controlBoxes = await Promise.all(controls.map((control) => control.boundingBox()));
+  for (const [toastIndex, toastBox] of toastBoxes.entries()) {
+    if (!toastBox) throw new Error(`Toast ${toastIndex + 1} has no rendered bounds`);
+    for (const [controlIndex, controlBox] of controlBoxes.entries()) {
+      if (!controlBox) throw new Error(`Review control ${controlIndex + 1} has no rendered bounds`);
+      const overlaps =
+        toastBox.x < controlBox.x + controlBox.width &&
+        toastBox.x + toastBox.width > controlBox.x &&
+        toastBox.y < controlBox.y + controlBox.height &&
+        toastBox.y + toastBox.height > controlBox.y;
+      expect(overlaps, `toast ${toastIndex + 1} overlaps review control ${controlIndex + 1}`).toBe(
+        false,
+      );
+    }
+  }
 }
 
 /** The compact panel's first two thumbnails sit on one row. */

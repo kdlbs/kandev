@@ -46,7 +46,9 @@ test.describe("GitLab watch controls", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "desktop review watch settings");
 
     await table.getByRole("button", { name: "Check now" }).click();
-    await expect(testPage.getByText(/Found 1 matching merge request/)).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: /Found 1 matching merge request/ }),
+    ).toBeVisible();
     const taskTitle = `[${GITLAB_PROJECT}!91] Watch exact-once MR`;
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -57,7 +59,7 @@ test.describe("GitLab watch controls", () => {
     await settings.goto(seedData.workspaceId);
     await table.getByRole("button", { name: "Check now" }).click();
     await expect(
-      testPage.getByText("No new merge requests matched", { exact: true }),
+      testPage.getByTestId("toast-message").filter({ hasText: "No new merge requests matched" }),
     ).toBeVisible();
     await kanban.goto();
     await expect(kanban.taskCardByTitle(taskTitle)).toHaveCount(1);
@@ -82,7 +84,11 @@ test.describe("GitLab watch controls", () => {
     );
     await testPage.getByTestId("reset-watch-dialog-confirm").click();
     // Singular form: the toast is an i18next `_one`/`_other` plural, not "task(s)".
-    await expect(testPage.getByText(/Review watch reset; 1 task deleted/)).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").filter({
+        hasText: /Review watch reset; 1 task deleted/,
+      }),
+    ).toBeVisible();
     await kanban.goto();
     await expect(kanban.taskCardByTitle(taskTitle)).toHaveCount(1, {
       timeout: 20_000,
@@ -142,7 +148,9 @@ test.describe("GitLab watch controls", () => {
     const table = card.getByTestId("gitlab-watch-desktop-table");
     await assertLocatorWithinViewportX(card, "desktop issue watches");
     await table.getByRole("button", { name: "Check now" }).click();
-    await expect(testPage.getByText(/Found 1 matching issue/)).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: /Found 1 matching issue/ }),
+    ).toBeVisible();
     const taskTitle = `[${GITLAB_PROJECT}#92] Watch exact-once issue`;
     const kanban = new KanbanPage(testPage);
     await kanban.goto();

@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   choosePhoneMode,
   expectNoHorizontalOverflow,
+  expectToastsAvoidControls,
   expectThumbnailsShareRow,
   expectTouchTargets,
   expectWithinViewport,
@@ -11,8 +12,10 @@ import {
   reviewImages,
   reviewScript,
   seedReviewImages,
+  showReviewUpdateToasts,
   touchDrag,
 } from "./question-image-review-helpers";
+import { installRuntimeUpdateFixture } from "../settings/agent-runtime-update-helpers";
 
 test.afterEach(({ seedData }) => removeReviewImages(seedData.repositoryPath));
 
@@ -113,6 +116,123 @@ test("phone review uses a top row, the image, the form, and a thumb-zone bar", a
   await dialog.getByTestId("question-review-submit").tap();
   await expect(dialog).toHaveCount(0);
   await expect(session.chat).toContainText("Review questions complete.", { timeout: 30_000 });
+});
+
+// @covers AC-UI-TOAST-INTERACTION-001.1 through AC-UI-TOAST-INTERACTION-001.4
+test("update toasts keep review actions clear", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  test.setTimeout(180_000);
+  const runtime = await installRuntimeUpdateFixture(testPage);
+  await testPage.setViewportSize({ width: 667, height: 390 });
+  seedReviewImages(seedData.repositoryPath);
+  const { session } = await openReviewQuestions(testPage, apiClient, seedData, reviewScript());
+  const open = session.clarificationOverlay().getByTestId("question-review-open");
+  await open.focus();
+  await testPage.keyboard.press("Enter");
+
+  const dialog = testPage.getByTestId("question-review-dialog");
+  await expect(dialog).toBeVisible();
+  await testPage.clock.install();
+  await testPage.clock.pauseAt(await testPage.evaluate(() => Date.now() + 250));
+  const { releaseToast, runtimeToast } = await showReviewUpdateToasts(testPage, runtime);
+  const submit = dialog.getByTestId("question-review-submit");
+  const close = dialog.getByTestId("question-review-close");
+  const viewport = testPage.viewportSize()!;
+  const outlet = dialog.getByTestId("modal-toast-outlet");
+  await expect(outlet.getByTestId("toast-message")).toHaveCount(2);
+  const scrollRegion = outlet;
+  const scrollBox = await scrollRegion.boundingBox();
+  expect(scrollBox).not.toBeNull();
+  expect(scrollBox!.height).toBeLessThanOrEqual(Math.min(176, viewport.height * 0.22) + 1);
+  const scrollExtent = await scrollRegion.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(scrollExtent.scrollHeight).toBeGreaterThan(scrollExtent.clientHeight);
+  await expectToastsAvoidControls([releaseToast, runtimeToast], [submit, close]);
+  await expectNoHorizontalOverflow(testPage);
+  const formBox = await dialog.getByTestId("question-review-form").boundingBox();
+  const bottomBarBox = await dialog.getByTestId("question-review-bottom-bar").boundingBox();
+  expect(formBox).not.toBeNull();
+  expect(bottomBarBox).not.toBeNull();
+  expect(formBox!.height).toBeGreaterThan(0);
+  expect(bottomBarBox!.y).toBeGreaterThanOrEqual(0);
+  await expect(
+    dialog
+      .getByTestId("clarification-question-card")
+      .getByText("Is the new header spacing acceptable?"),
+  ).toBeInViewport();
+  expect(bottomBarBox!.y + bottomBarBox!.height).toBeLessThanOrEqual(viewport.height);
+  const bottomBarButtons = dialog.getByTestId("question-review-bottom-bar").getByRole("button");
+  for (let index = 0; index < (await bottomBarButtons.count()); index++) {
+    const button = bottomBarButtons.nth(index);
+    if (!(await button.isVisible())) continue;
+    const box = await button.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+  }
+  await prCapture.screenshot("phone-update-toasts-review", {
+    caption: "Phone review keeps its form and bottom actions visible below two update notices.",
+  });
+
+  expect(await scrollRegion.evaluate((element) => getComputedStyle(element).overflowY)).toBe(
+    "auto",
+  );
+  for (const toast of [releaseToast, runtimeToast]) {
+    const dismiss = toast.getByRole("button", { name: "Dismiss notification" });
+    await dismiss.scrollIntoViewIfNeeded();
+    const box = await dismiss.boundingBox();
+    const outletBox = await scrollRegion.boundingBox();
+    expect(box).not.toBeNull();
+    expect(outletBox).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.x).toBeGreaterThanOrEqual(outletBox!.x);
+    expect(box!.y).toBeGreaterThanOrEqual(outletBox!.y);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(outletBox!.x + outletBox!.width);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(outletBox!.y + outletBox!.height);
+    expect(
+      await dismiss.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const target = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        return target === element || element.contains(target);
+      }),
+    ).toBe(true);
+  }
+
+  const more = await openPhoneMore(testPage, dialog);
+  await expect(more.getByTestId("toast-message")).toHaveCount(2);
+  await testPage.keyboard.press("Escape");
+  await expect(more).toHaveCount(0);
+  await expect(dialog.getByTestId("toast-message")).toHaveCount(2);
+
+  await releaseToast.getByRole("button", { name: "Dismiss notification" }).tap();
+  await expect(releaseToast).toHaveCount(0);
+  await expect(runtimeToast).toBeVisible();
+  await expect(dialog).toBeVisible();
+
+  const firstQuestion = dialog.getByTestId("clarification-question-card");
+  await firstQuestion.getByTestId("clarification-option").first().tap();
+  await dialog.getByTestId("clarification-next").tap();
+  const secondQuestion = dialog.getByTestId("clarification-question-card");
+  await secondQuestion.getByTestId("clarification-option").first().tap();
+  await dialog.getByTestId("question-review-submit").tap();
+  await expect(dialog).toHaveCount(0);
+  await expect(session.chat).toContainText("Review questions complete.");
+  await expect(runtimeToast).toBeVisible();
+  await runtimeToast.getByRole("button", { name: "Dismiss notification" }).tap();
+  await expect(runtimeToast).toHaveCount(0);
+  await expectNoHorizontalOverflow(testPage);
 });
 
 test("phone wipe pins its line and scrubs the images; Side by side fits", async ({

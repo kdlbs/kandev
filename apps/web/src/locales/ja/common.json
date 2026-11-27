@@ -160,6 +160,7 @@
   "discardLocalChangesAtPathDescription": "このタスクを開始すると、{{repoPath}} にあるローカルクローンの未コミット変更は完全に破棄されます。続行する前に、残したいものを必ずバックアップしてください。",
   "discardLocalChangesDescription": "このタスクを開始すると、ローカルクローンの未コミット変更は完全に破棄されます。続行する前に、残したいものを必ずバックアップしてください。",
   "discoveringAgents": "エージェントを検出中...",
+  "dismissNotification": "通知を閉じる",
   "doNotShowThisAgain": "今後表示しない",
   "edit": "編集",
   "editTask": "タスクを編集",

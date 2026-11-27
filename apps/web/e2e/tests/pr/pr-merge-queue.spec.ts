@@ -54,7 +54,9 @@ test("adds an eligible GitHub PR to its merge queue", async ({ testPage, apiClie
   const responseBody = await response.json();
   expect(response.ok(), JSON.stringify(responseBody)).toBe(true);
   expect(responseBody).toMatchObject({ status: "queued" });
-  await expect(testPage.getByText("PR added to merge queue", { exact: true })).toBeVisible();
+  await expect(
+    testPage.getByTestId("toast-message").getByText("PR added to merge queue", { exact: true }),
+  ).toBeVisible();
   await expect(detail.getByTestId("pr-merge-button")).toHaveCount(0);
 });
 

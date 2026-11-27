@@ -64,8 +64,10 @@ export async function checkImmediateArchive(options: {
     await press(page.getByTestId("archive-task-confirm"));
     await expect.poll(() => pending !== null).toBe(true);
     await expect(progressToast()).toBeVisible();
-    await expect(progressToast().locator("svg")).toHaveClass(/animate-spin/);
-    await expect(page.getByTestId("toast-container")).toHaveAttribute("aria-live", "polite");
+    await expect(progressToast().locator("svg.animate-spin")).toHaveCount(1);
+    const announcer = page.getByTestId("toast-announcer");
+    await expect(announcer).toHaveAttribute("aria-live", "polite");
+    await expect(announcer).toContainText("Archiving in progress");
     await expect(progressToast()).toBeInViewport();
     await expect(page.getByText("Kandev update available", { exact: true })).toBeHidden();
     await expect

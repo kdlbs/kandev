@@ -184,7 +184,9 @@ test.describe("GitHub review watch reset", () => {
     await expect(dialog).toBeHidden({ timeout: 10_000 });
 
     // Success toast surfaces the deletion count.
-    await expect(testPage.getByText(/deleted 1 task/i)).toBeVisible({ timeout: 10_000 });
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: /deleted 1 task/i }),
+    ).toBeVisible({ timeout: 10_000 });
 
     // The matching PR is recreated after the reset clears the old task.
     await expect

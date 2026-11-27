@@ -138,7 +138,9 @@ test.describe("Mobile system temporary folders", () => {
     expect(toggleBox!.height).toBeGreaterThanOrEqual(44);
     await toggleTarget.tap({ position: { x: 2, y: 2 } });
     await testPage.getByRole("button", { name: "Save changes" }).tap();
-    await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").getByText("Storage policy saved", { exact: true }),
+    ).toBeVisible();
     await testPage.reload();
     await expect(testPage.getByTestId("storage-temporary-artifacts-enabled")).toHaveAttribute(
       "aria-checked",

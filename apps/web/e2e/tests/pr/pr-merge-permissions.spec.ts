@@ -100,6 +100,8 @@ test("checks unknown permissions before offering a direct merge", async ({
   const merge = detail.getByTestId("pr-merge-button");
   await expect(merge).toBeEnabled();
   await merge.click();
-  await expect(testPage.getByText("PR merged", { exact: true })).toBeVisible();
+  await expect(
+    testPage.getByTestId("toast-message").getByText("PR merged", { exact: true }),
+  ).toBeVisible();
   expect(await apiClient.mockGitHubGetMergeAttempts()).toHaveLength(1);
 });
